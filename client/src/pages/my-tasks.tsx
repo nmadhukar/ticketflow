@@ -3,7 +3,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
 import { isUnauthorizedError } from "@/lib/authUtils";
-import { Sidebar } from "@/components/sidebar";
 import Header from "@/components/header";
 import TaskModal from "@/components/task-modal";
 import { Button } from "@/components/ui/button";
@@ -180,9 +179,7 @@ export default function MyTasks() {
 
 
   return (
-    <div className="min-h-screen flex bg-slate-50">
-      <Sidebar />
-      
+    <>
       <div className="flex-1 flex flex-col">
         <Header 
           title="My Tasks" 
@@ -432,6 +429,6 @@ export default function MyTasks() {
         }}
         task={editingTask}
       />
-    </div>
+    </>
   );
 }

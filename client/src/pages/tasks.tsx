@@ -4,7 +4,6 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { apiRequest } from "@/lib/queryClient";
-import { Sidebar } from "@/components/sidebar";
 import Header from "@/components/header";
 import TaskModal from "@/components/task-modal";
 import { Button } from "@/components/ui/button";
@@ -211,9 +210,7 @@ export default function Tasks() {
   };
 
   return (
-    <div className="min-h-screen flex bg-background">
-      <Sidebar />
-      
+    <>
       <div className="flex-1 flex flex-col">
         <Header 
           title="All Tasks" 
@@ -479,6 +476,6 @@ export default function Tasks() {
         }}
         task={editingTask}
       />
-    </div>
+    </>
   );
 }
