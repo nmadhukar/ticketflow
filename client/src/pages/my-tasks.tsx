@@ -177,154 +177,7 @@ export default function MyTasks() {
     return diffInDays <= 3 && diffInDays >= 0;
   };
 
-  // Organize tasks by status for better UX
-  const organizedTasks = {
-    inProgress: filteredTasks?.filter((t: any) => t.status === "in_progress") || [],
-    open: filteredTasks?.filter((t: any) => t.status === "open") || [],
-    resolved: filteredTasks?.filter((t: any) => t.status === "resolved") || [],
-    closed: filteredTasks?.filter((t: any) => t.status === "closed") || [],
-    onHold: filteredTasks?.filter((t: any) => t.status === "on_hold") || []
-  };
 
-  const getStatusSection = (status: string, tasks: any[], title: string, icon: any, color: string) => {
-    if (tasks.length === 0) return null;
-
-    return (
-      <div className="space-y-3">
-        <div className="flex items-center gap-2 px-1">
-          {icon}
-          <h3 className="font-medium text-slate-900">{title}</h3>
-          <Badge variant="outline" className={`${color} text-xs`}>
-            {tasks.length}
-          </Badge>
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-          {tasks.map((task: any) => (
-            <TaskCard key={task.id} task={task} onEdit={handleEditTask} />
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  const TaskCard = ({ task, onEdit }: { task: any; onEdit: (task: any) => void }) => (
-    <Card className="group hover:shadow-md transition-all duration-200 border-0 shadow-sm hover:shadow-lg relative">
-      {task.priority === "high" && (
-        <div className="absolute top-0 left-0 w-1 h-full bg-red-500 rounded-l-lg"></div>
-      )}
-      {isOverdue(task.dueDate) && (
-        <div className="absolute top-2 right-2">
-          <Badge className="bg-red-100 text-red-700 border-red-200 text-xs">
-            Overdue
-          </Badge>
-        </div>
-      )}
-      {isDueSoon(task.dueDate) && !isOverdue(task.dueDate) && (
-        <div className="absolute top-2 right-2">
-          <Badge className="bg-orange-100 text-orange-700 border-orange-200 text-xs">
-            Due Soon
-          </Badge>
-        </div>
-      )}
-      
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-2">
-              <Badge variant="outline" className="text-xs font-mono bg-slate-50 text-slate-600">
-                {task.ticketNumber}
-              </Badge>
-              <Badge className={`${getPriorityColor(task.priority)} border text-xs`}>
-                <span className="flex items-center gap-1">
-                  {getPriorityIcon(task.priority)}
-                  {task.priority?.toUpperCase()}
-                </span>
-              </Badge>
-            </div>
-            <h3 className="font-semibold text-slate-900 text-base leading-tight line-clamp-2 group-hover:text-blue-600 transition-colors">
-              {task.title}
-            </h3>
-            {task.description && (
-              <p className="text-sm text-slate-600 mt-2 line-clamp-2">
-                {task.description}
-              </p>
-            )}
-          </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                <MoreVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => onEdit(task)}>
-                <Edit3 className="h-4 w-4 mr-2" />
-                Edit Task
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <div className="space-y-3">
-          {/* Status and Category */}
-          <div className="flex flex-wrap gap-2">
-            <Badge className={`${getStatusColor(task.status)} border text-xs`}>
-              {task.status?.replace('_', ' ').toUpperCase()}
-            </Badge>
-            <Badge className={`${getCategoryColor(task.category)} border text-xs`}>
-              <span className="flex items-center gap-1">
-                {getCategoryIcon(task.category)}
-                {task.category?.toUpperCase()}
-              </span>
-            </Badge>
-          </div>
-
-          {/* Meta Information */}
-          <div className="space-y-2 text-xs text-slate-600">
-            {task.dueDate && (
-              <div className={`flex items-center gap-2 ${isOverdue(task.dueDate) ? 'text-red-600' : isDueSoon(task.dueDate) ? 'text-orange-600' : ''}`}>
-                <Calendar className="h-3 w-3" />
-                <span>Due {formatDate(task.dueDate)}</span>
-              </div>
-            )}
-            <div className="flex items-center gap-2">
-              <Clock className="h-3 w-3" />
-              <span>Created {getTimeAgo(task.createdAt)}</span>
-            </div>
-            {task.updatedAt !== task.createdAt && (
-              <div className="flex items-center gap-2">
-                <TrendingUp className="h-3 w-3" />
-                <span>Updated {getTimeAgo(task.updatedAt)}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex gap-2 pt-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onEdit(task)}
-              className="flex-1 h-8 text-xs"
-            >
-              <Edit3 className="h-3 w-3 mr-1" />
-              Edit
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onEdit(task)}
-              className="flex-1 h-8 text-xs"
-            >
-              <Eye className="h-3 w-3 mr-1" />
-              View
-            </Button>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
 
   return (
     <div className="min-h-screen flex bg-slate-50">
@@ -430,70 +283,117 @@ export default function MyTasks() {
             </CardContent>
           </Card>
 
-          {/* Tasks Organized by Status */}
-          <div className="space-y-8">
-            {tasksLoading ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {[...Array(6)].map((_, i) => (
-                  <Card key={i} className="animate-pulse">
-                    <CardContent className="p-6">
-                      <div className="space-y-3">
-                        <div className="h-4 bg-slate-200 rounded w-3/4"></div>
-                        <div className="h-3 bg-slate-200 rounded w-1/2"></div>
-                        <div className="flex gap-2">
-                          <div className="h-6 bg-slate-200 rounded w-16"></div>
-                          <div className="h-6 bg-slate-200 rounded w-16"></div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            ) : filteredTasks?.length > 0 ? (
-              <>
-                {getStatusSection(
-                  "in_progress", 
-                  organizedTasks.inProgress, 
-                  "In Progress", 
-                  <Clock className="h-5 w-5 text-yellow-600" />,
-                  "bg-yellow-50 text-yellow-700 border-yellow-200"
-                )}
-                
-                {getStatusSection(
-                  "open", 
-                  organizedTasks.open, 
-                  "Open Tasks", 
-                  <CircleDot className="h-5 w-5 text-blue-600" />,
-                  "bg-blue-50 text-blue-700 border-blue-200"
-                )}
-                
-                {getStatusSection(
-                  "on_hold", 
-                  organizedTasks.onHold, 
-                  "On Hold", 
-                  <AlertTriangle className="h-5 w-5 text-orange-600" />,
-                  "bg-orange-50 text-orange-700 border-orange-200"
-                )}
-                
-                {getStatusSection(
-                  "resolved", 
-                  organizedTasks.resolved, 
-                  "Resolved", 
-                  <CheckCircle className="h-5 w-5 text-green-600" />,
-                  "bg-green-50 text-green-700 border-green-200"
-                )}
-                
-                {getStatusSection(
-                  "closed", 
-                  organizedTasks.closed, 
-                  "Closed", 
-                  <CheckCircle className="h-5 w-5 text-slate-600" />,
-                  "bg-slate-50 text-slate-700 border-slate-200"
-                )}
-              </>
-            ) : (
-              <Card className="border-dashed border-2 border-slate-200">
-                <CardContent className="text-center py-12">
+          {/* Tasks Table */}
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-0">
+              {tasksLoading ? (
+                <div className="animate-pulse p-6">
+                  <div className="space-y-3">
+                    {[...Array(5)].map((_, i) => (
+                      <div key={i} className="h-12 bg-slate-100 rounded"></div>
+                    ))}
+                  </div>
+                </div>
+              ) : filteredTasks?.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="text-left p-4 font-medium text-slate-900">Ticket</th>
+                        <th className="text-left p-4 font-medium text-slate-900">Title</th>
+                        <th className="text-left p-4 font-medium text-slate-900">Priority</th>
+                        <th className="text-left p-4 font-medium text-slate-900">Status</th>
+                        <th className="text-left p-4 font-medium text-slate-900">Category</th>
+                        <th className="text-left p-4 font-medium text-slate-900">Due Date</th>
+                        <th className="text-left p-4 font-medium text-slate-900">Created</th>
+                        <th className="text-left p-4 font-medium text-slate-900">Updated</th>
+                        <th className="text-center p-4 font-medium text-slate-900">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredTasks.map((task: any) => (
+                        <tr key={task.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-4">
+                            <Badge variant="outline" className="font-mono text-xs">
+                              {task.ticketNumber}
+                            </Badge>
+                          </td>
+                          <td className="p-4">
+                            <div>
+                              <p className="font-medium text-slate-900 line-clamp-1">{task.title}</p>
+                              {task.description && (
+                                <p className="text-sm text-slate-600 line-clamp-1 mt-1">{task.description}</p>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <Badge className={`${getPriorityColor(task.priority)} border`}>
+                              <span className="flex items-center gap-1">
+                                {getPriorityIcon(task.priority)}
+                                {task.priority?.toUpperCase()}
+                              </span>
+                            </Badge>
+                          </td>
+                          <td className="p-4">
+                            <Badge className={`${getStatusColor(task.status)} border`}>
+                              {task.status?.replace('_', ' ').toUpperCase()}
+                            </Badge>
+                          </td>
+                          <td className="p-4">
+                            <Badge className={`${getCategoryColor(task.category)} border`}>
+                              <span className="flex items-center gap-1">
+                                {getCategoryIcon(task.category)}
+                                {task.category?.toUpperCase()}
+                              </span>
+                            </Badge>
+                          </td>
+                          <td className="p-4">
+                            {task.dueDate ? (
+                              <div className={`text-sm flex items-center gap-1 ${isOverdue(task.dueDate) ? 'text-red-600 font-medium' : isDueSoon(task.dueDate) ? 'text-orange-600 font-medium' : 'text-slate-600'}`}>
+                                {isOverdue(task.dueDate) && <AlertTriangle className="h-3 w-3" />}
+                                {formatDate(task.dueDate)}
+                              </div>
+                            ) : (
+                              <span className="text-sm text-slate-400">No due date</span>
+                            )}
+                          </td>
+                          <td className="p-4">
+                            <div className="text-sm text-slate-600">
+                              {getTimeAgo(task.createdAt)}
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <div className="text-sm text-slate-600">
+                              {getTimeAgo(task.updatedAt)}
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <div className="flex items-center justify-center gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleEditTask(task)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleEditTask(task)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Edit3 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-12">
                   <div className="max-w-md mx-auto">
                     <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
                       <Star className="h-8 w-8 text-slate-400" />
@@ -517,10 +417,10 @@ export default function MyTasks() {
                       </Button>
                     )}
                   </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </main>
       </div>
 

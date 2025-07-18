@@ -483,6 +483,53 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                             </Select>
                           </div>
                         </div>
+
+                        {/* Status field - only shown when editing existing task */}
+                        {task && (
+                          <div>
+                            <Label htmlFor="status" className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                              <CircleDot className="h-4 w-4" />
+                              Status
+                            </Label>
+                            <Select value={formData.status} onValueChange={(value) => handleInputChange("status", value)}>
+                              <SelectTrigger className="mt-2">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="open">
+                                  <div className="flex items-center gap-2">
+                                    <CircleDot className="h-4 w-4 text-blue-500" />
+                                    Open
+                                  </div>
+                                </SelectItem>
+                                <SelectItem value="in_progress">
+                                  <div className="flex items-center gap-2">
+                                    <Clock className="h-4 w-4 text-yellow-500" />
+                                    In Progress
+                                  </div>
+                                </SelectItem>
+                                <SelectItem value="resolved">
+                                  <div className="flex items-center gap-2">
+                                    <CheckCircle className="h-4 w-4 text-green-500" />
+                                    Resolved
+                                  </div>
+                                </SelectItem>
+                                <SelectItem value="closed">
+                                  <div className="flex items-center gap-2">
+                                    <CheckCircle className="h-4 w-4 text-slate-500" />
+                                    Closed
+                                  </div>
+                                </SelectItem>
+                                <SelectItem value="on_hold">
+                                  <div className="flex items-center gap-2">
+                                    <AlertTriangle className="h-4 w-4 text-orange-500" />
+                                    On Hold
+                                  </div>
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
 

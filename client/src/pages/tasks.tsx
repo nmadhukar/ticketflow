@@ -204,6 +204,11 @@ export default function Tasks() {
     return formatDate(dateString);
   };
 
+  const isOverdue = (dueDate: string) => {
+    if (!dueDate) return false;
+    return new Date(dueDate) < new Date();
+  };
+
   return (
     <div className="min-h-screen flex bg-slate-50">
       <Sidebar />
@@ -308,141 +313,134 @@ export default function Tasks() {
             </CardContent>
           </Card>
 
-          {/* Tasks Grid */}
-          <div className="space-y-4">
-            {tasksLoading ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {[...Array(6)].map((_, i) => (
-                  <Card key={i} className="animate-pulse">
-                    <CardContent className="p-6">
-                      <div className="space-y-3">
-                        <div className="h-4 bg-slate-200 rounded w-3/4"></div>
-                        <div className="h-3 bg-slate-200 rounded w-1/2"></div>
-                        <div className="flex gap-2">
-                          <div className="h-6 bg-slate-200 rounded w-16"></div>
-                          <div className="h-6 bg-slate-200 rounded w-16"></div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            ) : filteredTasks?.length > 0 ? (
-              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-                {filteredTasks.map((task: any) => (
-                  <Card key={task.id} className="group hover:shadow-md transition-all duration-200 border-0 shadow-sm hover:shadow-lg">
-                    <CardHeader className="pb-3">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Badge variant="outline" className="text-xs font-mono bg-slate-50 text-slate-600">
+          {/* Tasks Table */}
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-0">
+              {tasksLoading ? (
+                <div className="animate-pulse p-6">
+                  <div className="space-y-3">
+                    {[...Array(5)].map((_, i) => (
+                      <div key={i} className="h-12 bg-slate-100 rounded"></div>
+                    ))}
+                  </div>
+                </div>
+              ) : filteredTasks?.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-slate-50 border-b">
+                      <tr>
+                        <th className="text-left p-4 font-medium text-slate-900">Ticket</th>
+                        <th className="text-left p-4 font-medium text-slate-900">Title</th>
+                        <th className="text-left p-4 font-medium text-slate-900">Priority</th>
+                        <th className="text-left p-4 font-medium text-slate-900">Status</th>
+                        <th className="text-left p-4 font-medium text-slate-900">Category</th>
+                        <th className="text-left p-4 font-medium text-slate-900">Assigned To</th>
+                        <th className="text-left p-4 font-medium text-slate-900">Due Date</th>
+                        <th className="text-left p-4 font-medium text-slate-900">Created</th>
+                        <th className="text-center p-4 font-medium text-slate-900">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredTasks.map((task: any) => (
+                        <tr key={task.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-4">
+                            <Badge variant="outline" className="font-mono text-xs">
                               {task.ticketNumber}
                             </Badge>
-                            <Badge className={`${getPriorityColor(task.priority)} border text-xs`}>
+                          </td>
+                          <td className="p-4">
+                            <div>
+                              <p className="font-medium text-slate-900 line-clamp-1">{task.title}</p>
+                              {task.description && (
+                                <p className="text-sm text-slate-600 line-clamp-1 mt-1">{task.description}</p>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <Badge className={`${getPriorityColor(task.priority)} border`}>
                               <span className="flex items-center gap-1">
                                 {getPriorityIcon(task.priority)}
                                 {task.priority?.toUpperCase()}
                               </span>
                             </Badge>
-                          </div>
-                          <h3 className="font-semibold text-slate-900 text-base leading-tight line-clamp-2 group-hover:text-blue-600 transition-colors">
-                            {task.title}
-                          </h3>
-                          {task.description && (
-                            <p className="text-sm text-slate-600 mt-2 line-clamp-2">
-                              {task.description}
-                            </p>
-                          )}
-                        </div>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleEditTask(task)}>
-                              <Edit3 className="h-4 w-4 mr-2" />
-                              Edit Task
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleDeleteTask(task.id)} className="text-red-600">
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Delete Task
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="pt-0">
-                      <div className="space-y-3">
-                        {/* Status and Category */}
-                        <div className="flex flex-wrap gap-2">
-                          <Badge className={`${getStatusColor(task.status)} border text-xs`}>
-                            {task.status?.replace('_', ' ').toUpperCase()}
-                          </Badge>
-                          <Badge className={`${getCategoryColor(task.category)} border text-xs`}>
-                            <span className="flex items-center gap-1">
-                              {getCategoryIcon(task.category)}
-                              {task.category?.toUpperCase()}
-                            </span>
-                          </Badge>
-                        </div>
-
-                        {/* Assignment & Dates */}
-                        <div className="space-y-2 text-xs text-slate-600">
-                          {task.assigneeId && (
-                            <div className="flex items-center gap-2">
-                              <User className="h-3 w-3" />
-                              <span>Assigned to {task.assigneeName || task.assigneeId}</span>
+                          </td>
+                          <td className="p-4">
+                            <Badge className={`${getStatusColor(task.status)} border`}>
+                              {task.status?.replace('_', ' ').toUpperCase()}
+                            </Badge>
+                          </td>
+                          <td className="p-4">
+                            <Badge className={`${getCategoryColor(task.category)} border`}>
+                              <span className="flex items-center gap-1">
+                                {getCategoryIcon(task.category)}
+                                {task.category?.toUpperCase()}
+                              </span>
+                            </Badge>
+                          </td>
+                          <td className="p-4">
+                            {task.assigneeId ? (
+                              <div className="flex items-center gap-2 text-sm text-slate-600">
+                                {task.assigneeType === "team" ? (
+                                  <Users className="h-4 w-4" />
+                                ) : (
+                                  <User className="h-4 w-4" />
+                                )}
+                                <span>{task.assigneeName || task.assigneeId}</span>
+                              </div>
+                            ) : (
+                              <span className="text-sm text-slate-400">Unassigned</span>
+                            )}
+                          </td>
+                          <td className="p-4">
+                            {task.dueDate ? (
+                              <div className={`text-sm ${isOverdue(task.dueDate) ? 'text-red-600 font-medium' : 'text-slate-600'}`}>
+                                {formatDate(task.dueDate)}
+                              </div>
+                            ) : (
+                              <span className="text-sm text-slate-400">No due date</span>
+                            )}
+                          </td>
+                          <td className="p-4">
+                            <div className="text-sm text-slate-600">
+                              {getTimeAgo(task.createdAt)}
                             </div>
-                          )}
-                          {task.assigneeType === "team" && task.assigneeTeamId && (
-                            <div className="flex items-center gap-2">
-                              <Users className="h-3 w-3" />
-                              <span>Assigned to team</span>
+                          </td>
+                          <td className="p-4">
+                            <div className="flex items-center justify-center gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleEditTask(task)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                    <MoreVertical className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => handleEditTask(task)}>
+                                    <Edit3 className="h-4 w-4 mr-2" />
+                                    Edit Task
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleDeleteTask(task.id)} className="text-red-600">
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete Task
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             </div>
-                          )}
-                          {task.dueDate && (
-                            <div className="flex items-center gap-2">
-                              <Calendar className="h-3 w-3" />
-                              <span>Due {formatDate(task.dueDate)}</span>
-                            </div>
-                          )}
-                          <div className="flex items-center gap-2">
-                            <Clock className="h-3 w-3" />
-                            <span>Created {getTimeAgo(task.createdAt)}</span>
-                          </div>
-                        </div>
-
-                        {/* Action Buttons */}
-                        <div className="flex gap-2 pt-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleEditTask(task)}
-                            className="flex-1 h-8 text-xs"
-                          >
-                            <Edit3 className="h-3 w-3 mr-1" />
-                            Edit
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleEditTask(task)}
-                            className="flex-1 h-8 text-xs"
-                          >
-                            <Eye className="h-3 w-3 mr-1" />
-                            View
-                          </Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            ) : (
-              <Card className="border-dashed border-2 border-slate-200">
-                <CardContent className="text-center py-12">
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-12">
                   <div className="max-w-md mx-auto">
                     <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
                       <FileText className="h-8 w-8 text-slate-400" />
@@ -466,10 +464,10 @@ export default function Tasks() {
                       </Button>
                     )}
                   </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </main>
       </div>
 

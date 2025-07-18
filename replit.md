@@ -7,6 +7,7 @@ This is a comprehensive ticketing system called TicketFlow designed for small bu
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.
+UI Preferences: Table listing format strongly preferred over card-based layouts for all ticket/task views.
 
 ## Recent Changes
 
@@ -17,11 +18,11 @@ Preferred communication style: Simple, everyday language.
 - Integrated contextual icons and improved visual hierarchy
 - Added smart form validation with helpful error messages
 - Implemented guided workflow for task creation and editing
-- Completely redesigned All Tasks and My Tasks listing pages with modern card-based layout
-- Added enhanced filtering system with visual search and filter controls
-- Implemented status-based organization for My Tasks page with due date tracking
-- Added hover effects, skeleton loading states, and improved visual feedback
-- Enhanced task cards with priority indicators, category icons, and contextual badges
+- Converted task listing pages from card to table layout based on user preference
+- Enhanced TaskModal with in-ticket editing capabilities for status, assignment, and due dates
+- Added comprehensive status update functionality within ticket view
+- Maintained enhanced filtering system with visual search and filter controls
+- Added overdue and due soon indicators in table views
 
 ## System Architecture
 
