@@ -77,35 +77,37 @@ export default function Dashboard() {
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case "high": return "bg-red-500";
+      case "urgent": return "bg-destructive";
+      case "high": return "bg-orange-500";
       case "medium": return "bg-yellow-500";
       case "low": return "bg-green-500";
-      default: return "bg-slate-300";
+      default: return "bg-muted";
     }
   };
 
   const getCategoryColor = (category: string) => {
     switch (category) {
-      case "bug": return "bg-red-100 text-red-800";
-      case "feature": return "bg-blue-100 text-blue-800";
-      case "support": return "bg-purple-100 text-purple-800";
-      case "enhancement": return "bg-green-100 text-green-800";
-      default: return "bg-slate-100 text-slate-800";
+      case "bug": return "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400";
+      case "feature": return "bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400";
+      case "support": return "bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-400";
+      case "enhancement": return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
+      default: return "bg-muted text-muted-foreground";
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "open": return "bg-blue-100 text-blue-800";
-      case "in_progress": return "bg-yellow-100 text-yellow-800";
-      case "resolved": return "bg-green-100 text-green-800";
-      case "closed": return "bg-slate-100 text-slate-800";
-      default: return "bg-slate-100 text-slate-800";
+      case "open": return "status-badge-open";
+      case "in_progress": return "status-badge-in-progress";
+      case "resolved": return "status-badge-resolved";
+      case "closed": return "status-badge-closed";
+      case "on_hold": return "status-badge-on-hold";
+      default: return "bg-muted text-muted-foreground";
     }
   };
 
   return (
-    <div className="min-h-screen flex bg-slate-50">
+    <div className="min-h-screen flex bg-background">
       <Sidebar />
       
       <div className="flex-1 flex flex-col">
@@ -168,28 +170,28 @@ export default function Dashboard() {
                     <div className="text-center py-8">Loading tasks...</div>
                   ) : recentTasks && recentTasks.length > 0 ? (
                     recentTasks.slice(0, 5).map((task: any) => (
-                      <div key={task.id} className="flex items-center space-x-4 p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer" onClick={() => setLocation("/tasks")}>
+                      <div key={task.id} className="flex items-center space-x-4 p-4 bg-muted/30 rounded-lg hover:bg-muted/50 transition-all shadow-business hover:shadow-business-hover cursor-pointer" onClick={() => setLocation("/tasks")}>
                         <div className={`w-3 h-3 rounded-full ${getPriorityColor(task.priority)}`} />
                         <div className="flex-1">
-                          <h4 className="font-medium text-slate-800">{task.title}</h4>
-                          <p className="text-sm text-slate-600">{task.description}</p>
+                          <h4 className="font-medium">{task.title}</h4>
+                          <p className="text-sm text-muted-foreground">{task.description}</p>
                           <div className="flex items-center space-x-4 mt-2">
                             <Badge className={getCategoryColor(task.category)}>
                               {task.category}
                             </Badge>
                             {task.assigneeId && (
-                              <span className="text-sm text-slate-500">
+                              <span className="text-sm text-muted-foreground">
                                 Assigned to: {task.assigneeId}
                               </span>
                             )}
                             {task.dueDate && (
-                              <span className="text-sm text-slate-500">
+                              <span className="text-sm text-muted-foreground">
                                 Due: {new Date(task.dueDate).toLocaleDateString()}
                               </span>
                             )}
                           </div>
                         </div>
-                        <Badge className={getStatusColor(task.status)}>
+                        <Badge className={`${getStatusColor(task.status)} px-2 py-1 text-xs font-medium rounded`}>
                           {task.status.replace('_', ' ')}
                         </Badge>
                       </div>
@@ -201,7 +203,7 @@ export default function Dashboard() {
                   )}
                   
                   <div className="pt-6 border-t">
-                    <Button variant="ghost" className="w-full text-blue-600 hover:text-blue-700" onClick={() => setLocation("/tasks")}>
+                    <Button variant="ghost" className="w-full text-primary hover:text-primary/80" onClick={() => setLocation("/tasks")}>
                       View All Tasks
                     </Button>
                   </div>

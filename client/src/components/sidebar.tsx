@@ -45,11 +45,11 @@ export function Sidebar({ className }: SidebarProps) {
 
   return (
     <div className={cn("flex h-full w-64 flex-col border-r bg-background", className)}>
-      <div className="flex h-16 items-center px-6 border-b">
+      <div className="flex h-16 items-center px-6 border-b gradient-business-subtle">
         <Link href="/">
           <div className="flex items-center gap-2 font-semibold text-lg cursor-pointer">
-            <TicketIcon className="h-6 w-6" />
-            <span>TicketFlow</span>
+            <TicketIcon className="h-6 w-6 text-primary" />
+            <span className="text-foreground">TicketFlow</span>
           </div>
         </Link>
       </div>

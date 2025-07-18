@@ -15,11 +15,11 @@ interface HeaderProps {
 
 export default function Header({ title, subtitle, action }: HeaderProps) {
   return (
-    <header className="bg-white shadow-sm border-b border-slate-200 p-6">
+    <header className="bg-card shadow-business border-b border-border p-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">{title}</h2>
-          {subtitle && <p className="text-slate-600">{subtitle}</p>}
+          <h2 className="text-2xl font-bold">{title}</h2>
+          {subtitle && <p className="text-muted-foreground">{subtitle}</p>}
         </div>
         <div className="flex items-center space-x-4">
           {/* Language Selector */}
