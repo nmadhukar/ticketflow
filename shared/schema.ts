@@ -61,6 +61,7 @@ export const tasks = pgTable("tasks", {
   category: varchar("category", { length: 50 }).notNull(), // bug, feature, support, enhancement
   status: varchar("status", { length: 50 }).notNull().default("open"), // open, in_progress, resolved, closed
   priority: varchar("priority", { length: 20 }).notNull().default("medium"), // low, medium, high
+  notes: text("notes"), // Progress notes and updates
   assigneeId: varchar("assignee_id").references(() => users.id),
   assigneeType: varchar("assignee_type", { length: 20 }).default("user"), // user, team
   assigneeTeamId: integer("assignee_team_id").references(() => teams.id),
