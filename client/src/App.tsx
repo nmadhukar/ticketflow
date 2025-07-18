@@ -12,6 +12,8 @@ import MyTasks from "@/pages/my-tasks";
 import Teams from "@/pages/teams";
 import TeamDetail from "@/pages/team-detail";
 import AdminPanel from "@/pages/admin";
+import Settings from "@/pages/settings";
+import Notifications from "@/pages/notifications";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -28,6 +30,8 @@ function Router() {
           <Route path="/teams" component={Teams} />
           <Route path="/teams/:id" component={TeamDetail} />
           <Route path="/admin" component={AdminPanel} />
+          <Route path="/settings" component={Settings} />
+          <Route path="/notifications" component={Notifications} />
         </>
       )}
       <Route component={NotFound} />
