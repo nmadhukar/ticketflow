@@ -87,8 +87,11 @@ export default function AdminPanel() {
     mutationFn: async ({ userId, teamId, role }: { userId: string; teamId: number; role: string }) => {
       return await apiRequest("POST", `/api/admin/users/${userId}/assign-team`, { teamId, role });
     },
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/teams", variables.teamId, "members"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/teams", variables.teamId] });
       toast({
         title: "Success",
         description: "User assigned to team",
