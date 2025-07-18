@@ -12,7 +12,13 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Users, Plus, UserPlus, Settings, Crown, Calendar } from "lucide-react";
+import { ArrowLeft, Users, Plus, UserPlus, Settings, Crown, Calendar, Shield, MoreVertical } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -106,6 +112,37 @@ export default function TeamDetail() {
       toast({
         title: "Error",
         description: "Failed to add member to team",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateMemberRoleMutation = useMutation({
+    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
+      return await apiRequest("PATCH", `/api/teams/${id}/members/${userId}`, { role });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/teams", id, "members"] });
+      toast({
+        title: "Success",
+        description: "Member role updated",
+      });
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: "Failed to update member role",
         variant: "destructive",
       });
     },
@@ -300,6 +337,36 @@ export default function TeamDetail() {
                             <span className="text-xs text-slate-500">
                               Joined {new Date(member.joinedAt).toLocaleDateString()}
                             </span>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                {member.role === "admin" ? (
+                                  <DropdownMenuItem
+                                    onClick={() => updateMemberRoleMutation.mutate({ 
+                                      userId: member.userId, 
+                                      role: "member" 
+                                    })}
+                                  >
+                                    <Shield className="mr-2 h-4 w-4" />
+                                    Remove Admin
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <DropdownMenuItem
+                                    onClick={() => updateMemberRoleMutation.mutate({ 
+                                      userId: member.userId, 
+                                      role: "admin" 
+                                    })}
+                                  >
+                                    <Crown className="mr-2 h-4 w-4" />
+                                    Make Admin
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </div>
                       ))}

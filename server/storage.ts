@@ -66,6 +66,31 @@ export interface IStorage {
   
   // Activity
   getRecentActivity(limit?: number): Promise<TaskHistory[]>;
+  
+  // Admin operations
+  getAdminStats(): Promise<{
+    totalUsers: number;
+    activeUsers: number;
+    totalTeams: number;
+    openTickets: number;
+    urgentTickets: number;
+    avgResolutionTime: number | null;
+  }>;
+  updateUserProfile(userId: string, updates: {
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+    role?: string;
+    department?: string;
+    phone?: string;
+    isActive?: boolean;
+  }): Promise<User>;
+  toggleUserStatus(userId: string): Promise<User>;
+  assignUserToTeam(userId: string, teamId: number, role?: string): Promise<TeamMember>;
+  removeUserFromTeam(userId: string, teamId: number): Promise<void>;
+  updateTeamMemberRole(userId: string, teamId: number, role: string): Promise<TeamMember>;
+  getDepartments(): Promise<string[]>;
+  resetUserPassword(userId: string): Promise<{ tempPassword: string }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -479,6 +504,23 @@ export class DatabaseStorage implements IStorage {
         eq(teamMembers.userId, userId),
         eq(teamMembers.teamId, teamId)
       ));
+  }
+
+  async updateTeamMemberRole(userId: string, teamId: number, role: string): Promise<TeamMember> {
+    const [updatedMember] = await db
+      .update(teamMembers)
+      .set({ role })
+      .where(and(
+        eq(teamMembers.userId, userId),
+        eq(teamMembers.teamId, teamId)
+      ))
+      .returning();
+    
+    if (!updatedMember) {
+      throw new Error("Team member not found");
+    }
+    
+    return updatedMember;
   }
 
   async getDepartments(): Promise<string[]> {

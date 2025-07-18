@@ -240,6 +240,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Update team member role
+  app.patch("/api/teams/:teamId/members/:userId", isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(req.user.claims.sub);
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      const { teamId, userId } = req.params;
+      const { role } = req.body;
+      
+      const updatedMember = await storage.updateTeamMemberRole(userId, parseInt(teamId), role);
+      res.json(updatedMember);
+    } catch (error) {
+      console.error("Error updating team member role:", error);
+      res.status(500).json({ message: "Failed to update team member role" });
+    }
+  });
+
   // Admin routes
   app.get("/api/admin/users", isAuthenticated, async (req: any, res) => {
     try {

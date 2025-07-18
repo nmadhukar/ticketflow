@@ -26,6 +26,9 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - Separated status editing into its own visual section when editing existing tickets
 - Maintained enhanced filtering system with visual search and filter controls
 - Added overdue and due soon indicators in table views
+- Fixed Select component errors for unassigned tickets by changing empty strings to "unassigned" values
+- Added team member role management - admins can now promote/demote team members to team admin role
+- Implemented dropdown menu in team detail page for easy role changes with visual indicators
 
 ## System Architecture
 
