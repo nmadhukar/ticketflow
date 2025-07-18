@@ -789,34 +789,29 @@ export default function AdminPanel() {
                     }
                     
                     try {
-                      // Simulate test connection
                       toast({
                         title: "Testing SSO Connection",
                         description: "Checking Microsoft 365 configuration...",
                       });
                       
-                      // Wait a moment to simulate API call
-                      await new Promise(resolve => setTimeout(resolve, 1500));
+                      const response = await apiRequest("POST", "/api/sso/test", {});
                       
-                      // For now, we'll validate the format
-                      const isValidGuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-                      
-                      if (ssoConfig.clientId && (isValidGuid.test(ssoConfig.clientId) || ssoConfig.clientId.length > 10)) {
+                      if (response.success) {
                         toast({
                           title: "Connection Test Successful",
-                          description: "Microsoft 365 SSO configuration appears valid",
+                          description: response.message,
                         });
                       } else {
                         toast({
                           title: "Connection Test Failed",
-                          description: "Invalid client ID format. Please check your Azure AD configuration",
+                          description: response.message || "Unable to verify SSO configuration",
                           variant: "destructive",
                         });
                       }
-                    } catch (error) {
+                    } catch (error: any) {
                       toast({
                         title: "Connection Test Failed",
-                        description: "Unable to verify SSO configuration",
+                        description: error.message || "Unable to verify SSO configuration",
                         variant: "destructive",
                       });
                     }

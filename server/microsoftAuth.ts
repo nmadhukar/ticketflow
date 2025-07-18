@@ -81,7 +81,7 @@ export async function setupMicrosoftAuth(app: Express) {
     validateIssuer: true,
     passReqToCallback: false,
     scope: ["profile", "email", "offline_access", "User.Read"],
-    loggingLevel: "error",
+    loggingLevel: "info", // Changed to info for better debugging
     nonceLifetime: 240,
     nonceMaxAmount: 5,
     useCookieInsteadOfSession: false,

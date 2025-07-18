@@ -942,6 +942,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to check SSO status" });
     }
   });
+  
+  // Test SSO Configuration (admin only)
+  app.post("/api/sso/test", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const config = await storage.getSsoConfiguration();
+      if (!config?.clientId || !config?.clientSecret || !config?.tenantId) {
+        return res.status(400).json({ message: "SSO not configured" });
+      }
+      
+      // Test the configuration by trying to fetch the OpenID configuration
+      const metadataUrl = `https://login.microsoftonline.com/${config.tenantId}/v2.0/.well-known/openid-configuration`;
+      
+      try {
+        const response = await fetch(metadataUrl);
+        if (!response.ok) {
+          return res.status(400).json({ 
+            message: "Invalid tenant ID or Azure AD configuration", 
+            details: `Failed to fetch metadata from ${metadataUrl}` 
+          });
+        }
+        
+        const metadata = await response.json();
+        res.json({ 
+          success: true, 
+          message: "SSO configuration is valid",
+          issuer: metadata.issuer 
+        });
+      } catch (fetchError) {
+        console.error("Error testing SSO config:", fetchError);
+        res.status(400).json({ 
+          message: "Failed to connect to Azure AD", 
+          details: fetchError.message 
+        });
+      }
+    } catch (error) {
+      console.error("Error testing SSO configuration:", error);
+      res.status(500).json({ message: "Failed to test SSO configuration" });
+    }
+  });
 
   app.post("/api/sso/config", isAuthenticated, async (req: any, res) => {
     try {
