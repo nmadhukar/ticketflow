@@ -41,6 +41,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     category: "",
     priority: "medium",
     status: "open",
+    notes: "",
     assigneeId: "",
     assigneeType: "user",
     assigneeTeamId: "",
@@ -66,6 +67,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         category: task.category || "",
         priority: task.priority || "medium",
         status: task.status || "open",
+        notes: task.notes || "",
         assigneeId: task.assigneeId || "",
         assigneeType: task.assigneeType || "user",
         assigneeTeamId: task.assigneeTeamId?.toString() || "",
@@ -78,6 +80,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         category: "",
         priority: "medium",
         status: "open",
+        notes: "",
         assigneeId: "",
         assigneeType: "user",
         assigneeTeamId: "",
@@ -274,6 +277,19 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                     <SelectItem value="closed">Closed</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+            
+            {task && (
+              <div>
+                <Label htmlFor="notes">Notes</Label>
+                <Textarea
+                  id="notes"
+                  placeholder="Add notes about progress, updates, or comments..."
+                  value={formData.notes}
+                  onChange={(e) => handleInputChange("notes", e.target.value)}
+                  rows={4}
+                />
               </div>
             )}
             
