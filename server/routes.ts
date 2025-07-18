@@ -541,6 +541,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Logo upload endpoint
+  app.post("/api/company-settings/logo", isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(req.user.claims.sub);
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Only admins can update company logo" });
+      }
+      
+      const { fileName, fileType, fileData } = req.body;
+      
+      // Validate file type
+      if (!['image/jpeg', 'image/jpg', 'image/png'].includes(fileType)) {
+        return res.status(400).json({ message: "Invalid file type. Only JPG and PNG are allowed." });
+      }
+      
+      // Convert base64 to data URL
+      const logoUrl = `data:${fileType};base64,${fileData}`;
+      
+      const userId = req.user.claims.sub;
+      const settings = await storage.updateCompanySettings({ logoUrl }, userId);
+      res.json(settings);
+    } catch (error) {
+      console.error("Error uploading logo:", error);
+      res.status(500).json({ message: "Failed to upload logo" });
+    }
+  });
+
   // API key routes
   app.get("/api/api-keys", isAuthenticated, async (req: any, res) => {
     try {

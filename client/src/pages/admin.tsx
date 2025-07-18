@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle, Home } from "lucide-react";
+import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle, Home, Palette, Upload } from "lucide-react";
 import { useLocation, Link } from "wouter";
 
 export default function AdminPanel() {
@@ -22,6 +22,7 @@ export default function AdminPanel() {
   const queryClient = useQueryClient();
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [isEditUserOpen, setIsEditUserOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Check if user is admin
   if (user?.role !== "admin") {
@@ -46,6 +47,11 @@ export default function AdminPanel() {
 
   const { data: departments } = useQuery({
     queryKey: ["/api/admin/departments"],
+    retry: false,
+  });
+
+  const { data: companySettings } = useQuery({
+    queryKey: ["/api/company-settings"],
     retry: false,
   });
 
@@ -120,6 +126,71 @@ export default function AdminPanel() {
     if (selectedUser) {
       updateUserMutation.mutate(selectedUser);
     }
+  };
+
+  const updateCompanySettingsMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return await apiRequest("PATCH", "/api/company-settings", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/company-settings"] });
+      toast({
+        title: "Success",
+        description: "Company settings updated successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update company settings",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const uploadLogoMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return await apiRequest("POST", "/api/company-settings/logo", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/company-settings"] });
+      toast({
+        title: "Success",
+        description: "Logo uploaded successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to upload logo",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleLogoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!['image/jpeg', 'image/jpg', 'image/png'].includes(file.type)) {
+      toast({
+        title: "Error",
+        description: "Please upload a JPG or PNG image",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64String = reader.result?.toString().split(',')[1];
+      uploadLogoMutation.mutate({
+        fileName: file.name,
+        fileType: file.type,
+        fileData: base64String,
+      });
+    };
+    reader.readAsDataURL(file);
   };
 
   return (
@@ -197,6 +268,7 @@ export default function AdminPanel() {
           <TabsTrigger value="users">User Management</TabsTrigger>
           <TabsTrigger value="teams">Team Management</TabsTrigger>
           <TabsTrigger value="settings">System Settings</TabsTrigger>
+          <TabsTrigger value="branding">Company Branding</TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="space-y-4">
@@ -364,6 +436,75 @@ export default function AdminPanel() {
                 </p>
               </div>
               <Button className="mt-4">Save Settings</Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="branding" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Company Branding</CardTitle>
+              <CardDescription>
+                Manage your company logo and branding settings
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Company Name</Label>
+                  <Input 
+                    value={companySettings?.companyName || ""}
+                    onChange={(e) => updateCompanySettingsMutation.mutate({ companyName: e.target.value })}
+                  />
+                </div>
+                
+                <div className="space-y-4">
+                  <Label>Company Logo</Label>
+                  <div className="flex items-center gap-4">
+                    {companySettings?.logoUrl ? (
+                      <div className="relative w-48 h-24 border rounded-lg overflow-hidden bg-gray-50">
+                        <img 
+                          src={companySettings.logoUrl} 
+                          alt="Company Logo" 
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+                    ) : (
+                      <div className="w-48 h-24 border-2 border-dashed rounded-lg flex items-center justify-center bg-gray-50">
+                        <Palette className="h-8 w-8 text-gray-400" />
+                      </div>
+                    )}
+                    <div className="flex flex-col gap-2">
+                      <Button 
+                        variant="outline" 
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploadLogoMutation.isPending}
+                        className="flex items-center gap-2"
+                      >
+                        <Upload className="h-4 w-4" />
+                        Upload Logo
+                      </Button>
+                      <p className="text-sm text-muted-foreground">
+                        JPG or PNG, max 5MB
+                      </p>
+                    </div>
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/jpg,image/png"
+                    onChange={handleLogoUpload}
+                    className="hidden"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Logo Usage</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Your logo will appear in the navigation bar and on customer-facing documents.
+                  </p>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

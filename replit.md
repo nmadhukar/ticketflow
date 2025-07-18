@@ -29,6 +29,9 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - Fixed Select component errors for unassigned tickets by changing empty strings to "unassigned" values
 - Added team member role management - admins can now promote/demote team members to team admin role
 - Implemented dropdown menu in team detail page for easy role changes with visual indicators
+- Added Company Branding tab in admin panel with logo upload functionality
+- Implemented JPG/PNG logo upload with file validation and Base64 storage
+- Created visual logo preview with upload interface in admin settings
 
 ## System Architecture
 
