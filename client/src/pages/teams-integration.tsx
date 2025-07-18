@@ -13,6 +13,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, AlertCircle, CheckCircle2, Users, Key, TestTube, ExternalLink } from "lucide-react";
+import { Link } from "wouter";
 
 const notificationTypes = [
   { id: "ticket_created", label: "New Ticket Created" },
