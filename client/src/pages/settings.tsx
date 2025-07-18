@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Layout } from "@/components/layout";
+
 import { User, Bell, Shield, Palette, Globe, Key, Building, Plus, Copy, Eye, EyeOff, Trash2, Mail, FileText, Send } from "lucide-react";
 import { useState, useEffect } from "react";
 import {
@@ -342,16 +342,15 @@ export default function Settings() {
   });
 
   return (
-    <Layout>
-      <div className="container mx-auto p-6 max-w-4xl">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold">Settings</h1>
-          <p className="text-muted-foreground">
-            Manage your account settings and preferences
-          </p>
-        </div>
+    <div className="container mx-auto p-6 max-w-4xl">
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold">Settings</h1>
+        <p className="text-muted-foreground">
+          Manage your account settings and preferences
+        </p>
+      </div>
 
-        <Tabs defaultValue="profile" className="space-y-6">
+      <Tabs defaultValue="profile" className="space-y-6">
           <TabsList className={`grid w-full ${user?.role === 'admin' ? 'grid-cols-8' : 'grid-cols-5'}`}>
             <TabsTrigger value="profile" className="flex items-center gap-2">
               <User className="h-4 w-4" />
@@ -1241,10 +1240,8 @@ export default function Settings() {
             </TabsContent>
           )}
         </Tabs>
-      </div>
       
-      {/* Test Email Dialog */}
-      <Dialog open={showTestEmailDialog} onOpenChange={setShowTestEmailDialog}>
+        <Dialog open={showTestEmailDialog} onOpenChange={setShowTestEmailDialog}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Send Test Email</DialogTitle>
@@ -1283,6 +1280,6 @@ export default function Settings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Layout>
+    </div>
   );
 }
