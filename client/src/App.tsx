@@ -4,6 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/useAuth";
+import { Layout } from "@/components/layout";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
@@ -25,16 +26,18 @@ function Router() {
       {isLoading || !isAuthenticated ? (
         <Route path="/" component={Landing} />
       ) : (
-        <>
-          <Route path="/" component={Dashboard} />
-          <Route path="/tasks" component={Tasks} />
-          <Route path="/my-tasks" component={MyTasks} />
-          <Route path="/teams" component={Teams} />
-          <Route path="/teams/:id" component={TeamDetail} />
-          <Route path="/admin" component={AdminPanel} />
-          <Route path="/settings" component={Settings} />
-          <Route path="/notifications" component={Notifications} />
-        </>
+        <Layout>
+          <Switch>
+            <Route path="/" component={Dashboard} />
+            <Route path="/tasks" component={Tasks} />
+            <Route path="/my-tasks" component={MyTasks} />
+            <Route path="/teams" component={Teams} />
+            <Route path="/teams/:id" component={TeamDetail} />
+            <Route path="/admin" component={AdminPanel} />
+            <Route path="/settings" component={Settings} />
+            <Route path="/notifications" component={Notifications} />
+          </Switch>
+        </Layout>
       )}
       <Route path="/login" component={LoginPage} />
       <Route path="/api-docs" component={ApiDocs} />

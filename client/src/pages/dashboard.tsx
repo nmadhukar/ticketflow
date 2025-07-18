@@ -4,7 +4,6 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { useLocation } from "wouter";
-import { Sidebar } from "@/components/sidebar";
 import Header from "@/components/header";
 import StatsCard from "@/components/stats-card";
 import TaskCard from "@/components/task-card";
@@ -25,7 +24,7 @@ import {
   UserCheck
 } from "lucide-react";
 
-import { Layout } from "@/components/layout";
+
 
 export default function Dashboard() {
   const { toast } = useToast();
@@ -107,13 +106,10 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen flex bg-background">
-      <Sidebar />
+    <div className="flex-1 flex flex-col">
+      <Header title="Dashboard" subtitle="Welcome back! Here's your task overview." />
       
-      <div className="flex-1 flex flex-col">
-        <Header title="Dashboard" subtitle="Welcome back! Here's your task overview." />
-        
-        <main className="flex-1 p-6 overflow-y-auto">
+      <main className="flex-1 p-6 overflow-y-auto">
           {/* Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             <StatsCard
@@ -281,6 +277,5 @@ export default function Dashboard() {
           </div>
         </main>
       </div>
-    </div>
   );
 }
