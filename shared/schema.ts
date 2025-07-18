@@ -376,6 +376,7 @@ export const userInvitations = pgTable("user_invitations", {
   lastName: varchar("last_name"),
   role: varchar("role", { length: 50 }).notNull().default("user"),
   department: varchar("department", { length: 100 }),
+  departmentId: integer("department_id").references(() => departments.id),
   invitedBy: varchar("invited_by").references(() => users.id).notNull(),
   invitationToken: varchar("invitation_token").unique().notNull(),
   status: varchar("status", { length: 20 }).notNull().default("pending"), // pending, accepted, expired

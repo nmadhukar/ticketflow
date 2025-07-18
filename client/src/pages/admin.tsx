@@ -319,6 +319,7 @@ export default function AdminPanel() {
                     <TableHead>Department</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Approval</TableHead>
+                    <TableHead>Created</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -350,6 +351,9 @@ export default function AdminPanel() {
                             {user.isApproved ? "Approved" : "Pending"}
                           </Badge>
                         )}
+                      </TableCell>
+                      <TableCell>
+                        {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-"}
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-2">
