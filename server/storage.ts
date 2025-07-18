@@ -382,17 +382,23 @@ export class DatabaseStorage implements IStorage {
     phone?: string;
     isActive?: boolean;
   }): Promise<User> {
-    // Filter out undefined values and ensure proper date handling
-    const cleanUpdates = Object.fromEntries(
-      Object.entries(updates).filter(([_, value]) => value !== undefined)
-    );
+    // Filter out undefined values and convert boolean properly
+    const cleanUpdates: any = {};
+    
+    if (updates.firstName !== undefined) cleanUpdates.firstName = updates.firstName;
+    if (updates.lastName !== undefined) cleanUpdates.lastName = updates.lastName;
+    if (updates.email !== undefined) cleanUpdates.email = updates.email;
+    if (updates.role !== undefined) cleanUpdates.role = updates.role;
+    if (updates.department !== undefined) cleanUpdates.department = updates.department;
+    if (updates.phone !== undefined) cleanUpdates.phone = updates.phone;
+    if (updates.isActive !== undefined) cleanUpdates.isActive = updates.isActive;
+    
+    // Always update the timestamp
+    cleanUpdates.updatedAt = new Date();
     
     const [updatedUser] = await db
       .update(users)
-      .set({
-        ...cleanUpdates,
-        updatedAt: new Date(),
-      })
+      .set(cleanUpdates)
       .where(eq(users.id, userId))
       .returning();
     

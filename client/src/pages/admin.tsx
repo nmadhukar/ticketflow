@@ -12,8 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle } from "lucide-react";
-import { useLocation } from "wouter";
+import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle, Home } from "lucide-react";
+import { useLocation, Link } from "wouter";
 
 export default function AdminPanel() {
   const { user } = useAuth();
@@ -121,12 +121,20 @@ export default function AdminPanel() {
 
   return (
     <div className="container mx-auto p-6">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold flex items-center gap-2">
-          <Shield className="h-8 w-8" />
-          Admin Panel
-        </h1>
-        <p className="text-muted-foreground">Manage users, teams, and system settings</p>
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-2">
+            <Shield className="h-8 w-8" />
+            Admin Panel
+          </h1>
+          <p className="text-muted-foreground">Manage users, teams, and system settings</p>
+        </div>
+        <Link href="/">
+          <Button variant="outline" className="flex items-center gap-2">
+            <Home className="h-4 w-4" />
+            Back to Dashboard
+          </Button>
+        </Link>
       </div>
 
       {/* System Overview Cards */}
