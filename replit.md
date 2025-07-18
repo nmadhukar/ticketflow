@@ -71,6 +71,9 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - Fixed dashboard "Open" button bug - removed button and made ticket titles clickable instead
 - Standardized terminology throughout application from "tasks" to "tickets" for consistency
 - Made ticket titles clickable in all listing pages (dashboard, all tickets, my tickets)
+- Made recent activity items clickable in dashboard - clicking opens the corresponding ticket
+- Added last updated date and person information to ticket modal header
+- Enhanced backend queries to include lastUpdatedBy field for all tickets
 
 ## System Architecture
 

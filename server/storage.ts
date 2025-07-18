@@ -267,6 +267,14 @@ export class DatabaseStorage implements IStorage {
           WHEN ${tasks.assigneeType} = 'team' THEN team.name
           ELSE COALESCE(assignee.first_name || ' ' || assignee.last_name, assignee.email)
         END`,
+        lastUpdatedBy: sql<string>`(
+          SELECT COALESCE(u.first_name || ' ' || u.last_name, u.email)
+          FROM ${taskHistory} th
+          LEFT JOIN ${users} u ON u.id = th.user_id
+          WHERE th.task_id = ${tasks.id}
+          ORDER BY th.created_at DESC
+          LIMIT 1
+        )`,
       })
       .from(tasks)
       .leftJoin(sql`${users} as creator`, sql`creator.id = ${tasks.createdBy}`)
@@ -364,10 +372,27 @@ export class DatabaseStorage implements IStorage {
         }
       }
       
+      // Get last updated by info
+      let lastUpdatedBy = null;
+      const [lastUpdate] = await db
+        .select({
+          userName: sql<string>`COALESCE(${users.firstName} || ' ' || ${users.lastName}, ${users.email})`,
+        })
+        .from(taskHistory)
+        .leftJoin(users, eq(taskHistory.userId, users.id))
+        .where(eq(taskHistory.taskId, task.id))
+        .orderBy(desc(taskHistory.createdAt))
+        .limit(1);
+      
+      if (lastUpdate) {
+        lastUpdatedBy = lastUpdate.userName;
+      }
+      
       enhancedTasks.push({
         ...task,
         creatorName,
-        assigneeName
+        assigneeName,
+        lastUpdatedBy
       });
     }
     
@@ -790,12 +815,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Activity
-  async getRecentActivity(limit = 10): Promise<TaskHistory[]> {
-    return await db
-      .select()
+  async getRecentActivity(limit = 10): Promise<any[]> {
+    const history = await db
+      .select({
+        id: taskHistory.id,
+        taskId: taskHistory.taskId,
+        userId: taskHistory.userId,
+        action: taskHistory.action,
+        field: taskHistory.field,
+        oldValue: taskHistory.oldValue,
+        newValue: taskHistory.newValue,
+        createdAt: taskHistory.createdAt,
+        taskTitle: tasks.title,
+        userName: sql<string>`COALESCE(${users.firstName} || ' ' || ${users.lastName}, ${users.email}, 'Unknown')`,
+      })
       .from(taskHistory)
+      .leftJoin(tasks, eq(taskHistory.taskId, tasks.id))
+      .leftJoin(users, eq(taskHistory.userId, users.id))
       .orderBy(desc(taskHistory.createdAt))
       .limit(limit);
+    
+    return history;
   }
 
   async resetUserPassword(userId: string): Promise<{ tempPassword: string }> {

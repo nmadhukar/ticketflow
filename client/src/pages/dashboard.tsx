@@ -344,7 +344,18 @@ export default function Dashboard() {
                     <div className="text-center py-4">Loading activity...</div>
                   ) : activity && activity.length > 0 ? (
                     activity.slice(0, 5).map((item: any) => (
-                      <div key={item.id} className="flex space-x-3">
+                      <div 
+                        key={item.id} 
+                        className="flex space-x-3 cursor-pointer hover:bg-muted/30 p-2 rounded-md transition-colors"
+                        onClick={() => {
+                          // Find the task in recentTasks based on taskId
+                          const task = recentTasks?.find((t: any) => t.id === item.taskId);
+                          if (task) {
+                            setSelectedTask(task);
+                            setIsTaskModalOpen(true);
+                          }
+                        }}
+                      >
                         <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
                           {item.action === 'created' && <Plus className="h-4 w-4 text-blue-600" />}
                           {item.action === 'completed' && <CheckCircle className="h-4 w-4 text-green-600" />}
@@ -353,8 +364,13 @@ export default function Dashboard() {
                         </div>
                         <div className="flex-1">
                           <p className="text-sm text-slate-800">
-                            <span className="font-medium">{item.userId}</span> {item.action} a ticket
+                            <span className="font-medium">{item.userName || item.userId}</span> {item.action} a ticket
                           </p>
+                          {item.taskTitle && (
+                            <p className="text-xs text-muted-foreground font-medium hover:text-primary">
+                              {item.taskTitle}
+                            </p>
+                          )}
                           <p className="text-xs text-slate-500">
                             {new Date(item.createdAt).toLocaleDateString()}
                           </p>

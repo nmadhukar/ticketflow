@@ -415,12 +415,21 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                     {task ? (
                       <div className="space-y-1">
                         <p>Update the task details and track progress.</p>
-                        {task.creatorName && (
-                          <p className="text-xs flex items-center gap-1">
-                            <User className="h-3 w-3" />
-                            Created by {task.creatorName} on {new Date(task.createdAt).toLocaleDateString()}
-                          </p>
-                        )}
+                        <div className="flex flex-col gap-1 text-xs">
+                          {task.creatorName && (
+                            <p className="flex items-center gap-1">
+                              <User className="h-3 w-3" />
+                              Created by {task.creatorName} on {new Date(task.createdAt).toLocaleDateString()}
+                            </p>
+                          )}
+                          {task.updatedAt && (
+                            <p className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              Last updated {task.lastUpdatedBy ? `by ${task.lastUpdatedBy} ` : ''}
+                              on {new Date(task.updatedAt).toLocaleDateString()} at {new Date(task.updatedAt).toLocaleTimeString()}
+                            </p>
+                          )}
+                        </div>
                       </div>
                     ) : "Fill in the details to create a new task for your team."}
                   </DialogDescription>
