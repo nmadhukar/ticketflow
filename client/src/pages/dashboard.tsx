@@ -23,6 +23,7 @@ import {
   MessageCircle,
   UserCheck
 } from "lucide-react";
+import TaskModal from "@/components/task-modal";
 
 
 
@@ -32,6 +33,8 @@ export default function Dashboard() {
   const [, setLocation] = useLocation();
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<string | null>(null);
+  const [selectedTask, setSelectedTask] = useState<any>(null);
+  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
 
   // Redirect to home if not authenticated
   useEffect(() => {
@@ -121,10 +124,11 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="flex-1 flex flex-col">
-      <Header title="Dashboard" subtitle="Welcome back! Here's your task overview." />
-      
-      <main className="flex-1 p-6 overflow-y-auto">
+    <>
+      <div className="flex-1 flex flex-col">
+        <Header title="Dashboard" subtitle="Welcome back! Here's your ticket overview." />
+        
+        <main className="flex-1 p-6 overflow-y-auto">
           {/* Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             <div 
@@ -135,7 +139,7 @@ export default function Dashboard() {
               className="cursor-pointer transform transition-transform hover:scale-105"
             >
               <StatsCard
-                title="Total Tasks"
+                title="Total Tickets"
                 value={stats?.total || 0}
                 icon={<BarChart3 className="text-blue-600" />}
                 loading={statsLoading}
@@ -197,7 +201,7 @@ export default function Dashboard() {
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <CardTitle>Recent Tasks</CardTitle>
+                      <CardTitle>Recent Tickets</CardTitle>
                       {(statusFilter || priorityFilter) && (
                         <div className="flex items-center gap-2">
                           {statusFilter && (
@@ -227,7 +231,7 @@ export default function Dashboard() {
                     <div className="flex items-center space-x-3">
                       <div className="relative">
                         <Input
-                          placeholder="Search tasks..."
+                          placeholder="Search tickets..."
                           className="w-64 pl-10"
                         />
                         <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
@@ -241,10 +245,10 @@ export default function Dashboard() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {tasksLoading ? (
-                    <div className="text-center py-8">Loading tasks...</div>
+                    <div className="text-center py-8">Loading tickets...</div>
                   ) : filteredTasks && filteredTasks.length > 0 ? (
                     filteredTasks.slice(0, 5).map((task: any) => (
-                      <div key={task.id} className="flex items-center space-x-4 p-4 bg-muted/30 rounded-lg hover:bg-muted/50 transition-all shadow-business hover:shadow-business-hover cursor-pointer" onClick={() => setLocation("/tasks")}>
+                      <div key={task.id} className="flex items-center space-x-4 p-4 bg-muted/30 rounded-lg hover:bg-muted/50 transition-all shadow-business hover:shadow-business-hover">
                         <div className={`w-3 h-3 rounded-full ${getPriorityColor(task.priority)}`} />
                         <div className="flex-1">
                           <h4 className="font-medium">{task.title}</h4>
@@ -270,20 +274,32 @@ export default function Dashboard() {
                             )}
                           </div>
                         </div>
-                        <Badge className={`${getStatusColor(task.status)} px-2 py-1 text-xs font-medium rounded`}>
-                          {task.status.replace('_', ' ')}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge className={`${getStatusColor(task.status)} px-2 py-1 text-xs font-medium rounded`}>
+                            {task.status.replace('_', ' ')}
+                          </Badge>
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={() => {
+                              setSelectedTask(task);
+                              setIsTaskModalOpen(true);
+                            }}
+                          >
+                            Open
+                          </Button>
+                        </div>
                       </div>
                     ))
                   ) : (
                     <div className="text-center py-8 text-slate-500">
-                      {(statusFilter || priorityFilter) ? "No tasks match the selected filters" : "No tasks found. Create your first task to get started!"}
+                      {(statusFilter || priorityFilter) ? "No tickets match the selected filters" : "No tickets found. Create your first ticket to get started!"}
                     </div>
                   )}
                   
                   <div className="pt-6 border-t">
                     <Button variant="ghost" className="w-full text-primary hover:text-primary/80" onClick={() => setLocation("/tasks")}>
-                      View All Tasks
+                      View All Tickets
                     </Button>
                   </div>
                 </CardContent>
@@ -341,7 +357,7 @@ export default function Dashboard() {
                         </div>
                         <div className="flex-1">
                           <p className="text-sm text-slate-800">
-                            <span className="font-medium">{item.userId}</span> {item.action} a task
+                            <span className="font-medium">{item.userId}</span> {item.action} a ticket
                           </p>
                           <p className="text-xs text-slate-500">
                             {new Date(item.createdAt).toLocaleDateString()}
@@ -360,5 +376,23 @@ export default function Dashboard() {
           </div>
         </main>
       </div>
+      
+      
+      {/* Ticket Modal */}
+      {selectedTask && (
+        <TaskModal
+          task={selectedTask}
+          isOpen={isTaskModalOpen}
+          onClose={() => {
+            setIsTaskModalOpen(false);
+            setSelectedTask(null);
+          }}
+          onUpdate={() => {
+            // Refetch tasks when updated
+            window.location.reload();
+          }}
+        />
+      )}
+    </>
   );
 }
