@@ -174,7 +174,7 @@ export default function AdminPanel() {
           <CardContent>
             <div className="text-2xl font-bold">{systemStats?.openTickets || 0}</div>
             <p className="text-xs text-muted-foreground">
-              {systemStats?.urgentTickets || 0} urgent
+              {systemStats?.urgentTickets || 0} high priority
             </p>
           </CardContent>
         </Card>

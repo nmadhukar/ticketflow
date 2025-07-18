@@ -359,7 +359,7 @@ export class DatabaseStorage implements IStorage {
       .from(tasks)
       .where(and(
         eq(tasks.status, "open"),
-        eq(tasks.priority, "urgent")
+        eq(tasks.priority, "high")
       ));
 
     // Calculate average resolution time (in hours)
