@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle, Home, Palette, Upload, BookOpen, FileText, Trash2, Edit, Search, Building, UserPlus, AlertCircle, HelpCircle } from "lucide-react";
+import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle, Home, Palette, Upload, BookOpen, FileText, Trash2, Edit, Search, Building, UserPlus, AlertCircle } from "lucide-react";
 import { useLocation, Link } from "wouter";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import HelpDocumentManager from "@/components/HelpDocumentManager";
@@ -752,12 +752,6 @@ export default function AdminPanel() {
                     <p><strong>Grant type:</strong> Authorization code</p>
                     <p><strong>Supported account types:</strong> Accounts in any organizational directory</p>
                   </div>
-                  <Link href="/admin/sso-setup">
-                    <Button variant="link" className="p-0 h-auto mt-3 text-primary hover:underline">
-                      <HelpCircle className="mr-1 h-4 w-4" />
-                      View detailed setup guide
-                    </Button>
-                  </Link>
                 </AlertDescription>
               </Alert>
 

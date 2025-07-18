@@ -15,9 +15,6 @@ interface MicrosoftProfile extends IProfile {
 }
 
 export async function setupMicrosoftAuth(app: Express) {
-  // Trust proxy for correct redirect URL generation
-  app.set('trust proxy', 1);
-  
   // Use the same session configuration as Replit auth
   if (!app.get("microsoftAuthConfigured")) {
     app.use(getSession());
@@ -154,10 +151,8 @@ export async function setupMicrosoftAuth(app: Express) {
   // Microsoft login route
   app.get("/api/auth/microsoft", (req, res, next) => {
     console.log("Microsoft login initiated");
-    console.log("Request headers:", req.headers);
     console.log("Request host:", req.get('host'));
     console.log("Request protocol:", req.protocol);
-    console.log("X-Forwarded-Proto:", req.get('x-forwarded-proto'));
     console.log("Full URL:", `${req.protocol}://${req.get('host')}${req.originalUrl}`);
     
     try {
@@ -175,17 +170,7 @@ export async function setupMicrosoftAuth(app: Express) {
   const handleCallback = (req: any, res: any, next: any) => {
     console.log("Microsoft callback received");
     console.log("Callback method:", req.method);
-    console.log("Callback query:", req.query);
     console.log("Callback body:", req.body);
-    console.log("Callback headers:", req.headers);
-    
-    // Check for error in query params
-    if (req.query.error) {
-      console.error("Microsoft auth error:", req.query.error);
-      console.error("Error description:", req.query.error_description);
-      const errorDesc = encodeURIComponent(req.query.error_description || '');
-      return res.redirect(`/auth?error=microsoft_${req.query.error}&error_description=${errorDesc}`);
-    }
     
     passport.authenticate("azuread-openidconnect", {
       failureRedirect: "/auth?error=microsoft_auth_failed",

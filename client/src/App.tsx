@@ -24,7 +24,6 @@ import AdminGuides from "@/pages/admin-guides";
 import Departments from "@/pages/departments";
 import Invitations from "@/pages/invitations";
 import TeamsIntegration from "@/pages/teams-integration";
-import SsoSetupGuide from "@/pages/sso-setup-guide";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -82,11 +81,6 @@ function Router() {
               <Route path="/admin/invitations">
                 <ProtectedRoute allowedRoles={["admin"]}>
                   <Invitations />
-                </ProtectedRoute>
-              </Route>
-              <Route path="/admin/sso-setup">
-                <ProtectedRoute allowedRoles={["admin"]}>
-                  <SsoSetupGuide />
                 </ProtectedRoute>
               </Route>
               <Route component={NotFound} />

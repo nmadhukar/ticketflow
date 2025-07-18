@@ -57,15 +57,9 @@ export default function AuthPage() {
   // Check for error in URL params
   const urlParams = new URLSearchParams(window.location.search);
   const error = urlParams.get('error');
-  const errorDescription = urlParams.get('error_description');
   
   // Show error message based on error type
-  const getErrorMessage = (error: string | null, description: string | null) => {
-    // Check for specific Microsoft error codes
-    if (description?.includes('AADSTS700016')) {
-      return 'Microsoft 365 SSO is not properly configured. Please contact your administrator to complete the Azure AD setup.';
-    }
-    
+  const getErrorMessage = (error: string | null) => {
     switch (error) {
       case 'microsoft_auth_failed':
         return 'Microsoft authentication failed. Please check your credentials and try again.';
@@ -76,11 +70,11 @@ export default function AuthPage() {
       case 'login_failed':
         return 'Login failed. Please try again.';
       default:
-        return description || null;
+        return null;
     }
   };
   
-  const errorMessage = getErrorMessage(error, errorDescription);
+  const errorMessage = getErrorMessage(error);
   const [resetToken, setResetToken] = useState<string>("");
 
   // Login form

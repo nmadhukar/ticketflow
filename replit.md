@@ -96,10 +96,6 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Fixed dashboard ticket counts to show all tickets for admin users (was showing 0 due to user ID mismatch)**
 - **Added Microsoft 365 SSO configuration UI in admin panel with client ID, secret, and tenant ID fields**
 - **Enhanced stats endpoint to show global statistics for admins while maintaining user-specific stats for regular users**
-- **Debugged Microsoft authentication flow - identified AADSTS700016 error as Azure AD configuration issue**
-- **Created comprehensive SSO setup guide page at /admin/sso-setup with step-by-step Azure AD configuration instructions**
-- **Added enhanced debugging for Microsoft authentication callbacks and error handling**
-- **SSO Status: Technical integration complete, waiting for Azure AD administrator to properly configure app registration**
 
 ## System Architecture
 
