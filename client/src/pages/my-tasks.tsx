@@ -3,7 +3,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
 import { isUnauthorizedError } from "@/lib/authUtils";
-import Sidebar from "@/components/sidebar";
+import { Sidebar } from "@/components/sidebar";
 import Header from "@/components/header";
 import TaskModal from "@/components/task-modal";
 import { Button } from "@/components/ui/button";

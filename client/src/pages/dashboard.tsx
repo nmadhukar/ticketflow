@@ -4,7 +4,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { useLocation } from "wouter";
-import Sidebar from "@/components/sidebar";
+import { Sidebar } from "@/components/sidebar";
 import Header from "@/components/header";
 import StatsCard from "@/components/stats-card";
 import TaskCard from "@/components/task-card";
@@ -24,6 +24,8 @@ import {
   MessageCircle,
   UserCheck
 } from "lucide-react";
+
+import { Layout } from "@/components/layout";
 
 export default function Dashboard() {
   const { toast } = useToast();

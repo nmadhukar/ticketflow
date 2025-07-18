@@ -10,6 +10,7 @@ import Dashboard from "@/pages/dashboard";
 import Tasks from "@/pages/tasks";
 import MyTasks from "@/pages/my-tasks";
 import Teams from "@/pages/teams";
+import AdminPanel from "@/pages/admin";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -24,6 +25,7 @@ function Router() {
           <Route path="/tasks" component={Tasks} />
           <Route path="/my-tasks" component={MyTasks} />
           <Route path="/teams" component={Teams} />
+          <Route path="/admin" component={AdminPanel} />
         </>
       )}
       <Route component={NotFound} />

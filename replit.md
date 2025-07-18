@@ -2,7 +2,7 @@
 
 ## Overview
 
-This is a full-stack task management application called TaskFlow built with a modern tech stack. It features a React frontend with shadcn/ui components, an Express.js backend, and PostgreSQL database using Drizzle ORM. The application supports team collaboration, task management, and user authentication through Replit's OpenID Connect system.
+This is a comprehensive ticketing system called TicketFlow designed for small business use. Built with a modern tech stack featuring React frontend with shadcn/ui components, Express.js backend, and PostgreSQL database using Drizzle ORM. The application provides professional task management with full audit trails, role-based access control, team management, and administrative features. Authentication is handled through Replit's OpenID Connect system.
 
 ## User Preferences
 
@@ -42,12 +42,19 @@ Preferred communication style: Simple, everyday language.
 - **User Management**: Automatic user creation/updates on login
 
 ### Database Schema
-- **Users**: Profile information synced from Replit
-- **Tasks**: Core task management with status, priority, categories
-- **Teams**: Team organization with membership management
-- **Task Comments**: Discussion threads on tasks
-- **Task History**: Audit trail for task changes
-- **Sessions**: Authentication session persistence
+- **Users**: Profile information synced from Replit with role-based permissions (admin, manager, user)
+- **Tasks**: Comprehensive ticket management with:
+  - Unique ticket numbers (TKT-YYYY-XXXX format)
+  - Multiple statuses (open, in_progress, resolved, closed, on_hold)
+  - Priority levels (low, medium, high, urgent)
+  - Severity levels (minor, normal, major, critical)
+  - Categories (bug, feature, support, enhancement, incident, request)
+  - Time tracking (estimated vs actual hours)
+  - Tags for better organization
+- **Teams**: Team organization with membership management and role assignments
+- **Task Comments**: Full conversation history with user attribution and timestamps
+- **Task History**: Complete audit trail tracking all changes with before/after values
+- **Sessions**: Authentication session persistence with PostgreSQL storage
 
 ### API Design
 - **RESTful endpoints**: `/api/tasks`, `/api/teams`, `/api/auth`

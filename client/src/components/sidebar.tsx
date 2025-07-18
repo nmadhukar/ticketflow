@@ -1,117 +1,166 @@
 import { Link, useLocation } from "wouter";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { 
-  Home, 
-  List, 
-  UserCheck, 
-  Users, 
-  BarChart3, 
-  CheckCircle, 
-  MoreVertical,
+  LayoutDashboard,
+  CheckSquare,
+  Users,
+  Shield,
   LogOut,
-  Settings
+  TicketIcon,
+  UserCircle,
+  FolderOpen,
+  Settings,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
-export default function Sidebar() {
+interface SidebarProps {
+  className?: string;
+}
+
+export function Sidebar({ className }: SidebarProps) {
   const [location] = useLocation();
   const { user } = useAuth();
 
   const navigation = [
-    { name: "Dashboard", href: "/", icon: Home },
-    { name: "All Tasks", href: "/tasks", icon: List },
-    { name: "My Tasks", href: "/my-tasks", icon: UserCheck },
+    { name: "Dashboard", href: "/", icon: LayoutDashboard },
+    { name: "All Tickets", href: "/tasks", icon: FolderOpen },
+    { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
     { name: "Teams", href: "/teams", icon: Users },
-    { name: "Reports", href: "/reports", icon: BarChart3 },
   ];
 
-  const isActive = (href: string) => {
-    if (href === "/" && location === "/") return true;
-    if (href !== "/" && location.startsWith(href)) return true;
-    return false;
-  };
+  const adminNavigation = [
+    { name: "Admin Panel", href: "/admin", icon: Shield },
+  ];
+
+  const bottomNavigation = [
+    { name: "Settings", href: "/settings", icon: Settings },
+  ];
 
   return (
-    <div className="w-64 bg-white shadow-lg flex flex-col">
-      {/* Logo and Brand */}
-      <div className="p-6 border-b border-slate-200">
-        <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-            <CheckCircle className="text-white w-5 h-5" />
+    <div className={cn("flex h-full w-64 flex-col border-r bg-background", className)}>
+      <div className="flex h-16 items-center px-6 border-b">
+        <Link href="/">
+          <div className="flex items-center gap-2 font-semibold text-lg cursor-pointer">
+            <TicketIcon className="h-6 w-6" />
+            <span>TicketFlow</span>
           </div>
-          <div>
-            <h1 className="text-xl font-bold text-slate-800">TaskFlow</h1>
-            <p className="text-xs text-slate-500">Community Platform</p>
-          </div>
-        </div>
+        </Link>
       </div>
-
-      {/* Navigation */}
-      <nav className="flex-1 p-4 space-y-2">
-        {navigation.map((item) => {
-          const Icon = item.icon;
-          const active = isActive(item.href);
+      
+      <div className="flex-1 overflow-y-auto py-4">
+        <nav className="space-y-1 px-3">
+          {navigation.map((item) => {
+            const isActive = location === item.href;
+            return (
+              <Link key={item.name} href={item.href}>
+                <div
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                    isActive
+                      ? "bg-primary text-primary-foreground"
+                      : "hover:bg-accent hover:text-accent-foreground"
+                  )}
+                >
+                  <item.icon className="h-4 w-4" />
+                  {item.name}
+                </div>
+              </Link>
+            );
+          })}
           
-          return (
-            <Link key={item.name} href={item.href}>
-              <div
-                className={`flex items-center space-x-3 px-3 py-2 rounded-lg transition-colors cursor-pointer ${
-                  active
-                    ? "bg-blue-600 text-white"
-                    : "text-slate-600 hover:bg-slate-100"
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{item.name}</span>
+          {user?.role === "admin" && (
+            <>
+              <Separator className="my-4" />
+              <div className="px-3 pb-2">
+                <h3 className="mb-1 text-xs font-semibold text-muted-foreground uppercase">
+                  Administration
+                </h3>
               </div>
-            </Link>
-          );
-        })}
-      </nav>
-
-      {/* User Profile */}
-      <div className="p-4 border-t border-slate-200">
-        <div className="flex items-center space-x-3">
-          <Avatar>
-            <AvatarImage src={user?.profileImageUrl || ""} />
-            <AvatarFallback>
-              {user?.firstName?.charAt(0) || user?.email?.charAt(0) || "U"}
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex-1">
-            <p className="text-sm font-medium text-slate-800">
-              {user?.firstName && user?.lastName 
-                ? `${user.firstName} ${user.lastName}`
-                : user?.email || "User"
-              }
+              {adminNavigation.map((item) => {
+                const isActive = location === item.href;
+                return (
+                  <Link key={item.name} href={item.href}>
+                    <div
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                        isActive
+                          ? "bg-primary text-primary-foreground"
+                          : "hover:bg-accent hover:text-accent-foreground"
+                      )}
+                    >
+                      <item.icon className="h-4 w-4" />
+                      {item.name}
+                    </div>
+                  </Link>
+                );
+              })}
+            </>
+          )}
+        </nav>
+      </div>
+      
+      <div className="border-t p-4">
+        <div className="flex items-center gap-3 px-2 mb-4">
+          {user?.profileImageUrl ? (
+            <img
+              src={user.profileImageUrl}
+              alt={user.firstName || "User"}
+              className="h-8 w-8 rounded-full object-cover"
+            />
+          ) : (
+            <UserCircle className="h-8 w-8 text-muted-foreground" />
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium truncate">
+              {user?.firstName} {user?.lastName}
             </p>
-            <p className="text-xs text-slate-500">Member</p>
+            <p className="text-xs text-muted-foreground truncate">
+              {user?.email}
+            </p>
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm">
-                <MoreVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem>
-                <Settings className="h-4 w-4 mr-2" />
-                Settings
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => window.location.href = "/api/logout"}>
-                <LogOut className="h-4 w-4 mr-2" />
-                Sign Out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
+        
+        <nav className="space-y-1">
+          {bottomNavigation.map((item) => {
+            const isActive = location === item.href;
+            return (
+              <Link key={item.name} href={item.href}>
+                <div
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                    isActive
+                      ? "bg-primary text-primary-foreground"
+                      : "hover:bg-accent hover:text-accent-foreground"
+                  )}
+                >
+                  <item.icon className="h-4 w-4" />
+                  {item.name}
+                </div>
+              </Link>
+            );
+          })}
+          
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                className="w-full justify-start"
+                onClick={() => window.location.href = "/api/logout"}
+              >
+                <LogOut className="mr-3 h-4 w-4" />
+                Sign Out
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Sign out of your account</TooltipContent>
+          </Tooltip>
+        </nav>
       </div>
     </div>
   );

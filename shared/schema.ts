@@ -31,6 +31,10 @@ export const users = pgTable("users", {
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
+  role: varchar("role", { length: 50 }).notNull().default("user"), // user, admin, manager
+  department: varchar("department", { length: 100 }),
+  phone: varchar("phone", { length: 50 }),
+  isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -56,17 +60,24 @@ export const teamMembers = pgTable("team_members", {
 // Tasks table
 export const tasks = pgTable("tasks", {
   id: serial("id").primaryKey(),
+  ticketNumber: varchar("ticket_number", { length: 20 }).unique().notNull(), // e.g., TKT-2024-0001
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description"),
-  category: varchar("category", { length: 50 }).notNull(), // bug, feature, support, enhancement
-  status: varchar("status", { length: 50 }).notNull().default("open"), // open, in_progress, resolved, closed
-  priority: varchar("priority", { length: 20 }).notNull().default("medium"), // low, medium, high
+  category: varchar("category", { length: 50 }).notNull(), // bug, feature, support, enhancement, incident, request
+  status: varchar("status", { length: 50 }).notNull().default("open"), // open, in_progress, resolved, closed, on_hold
+  priority: varchar("priority", { length: 20 }).notNull().default("medium"), // low, medium, high, urgent
+  severity: varchar("severity", { length: 20 }).default("normal"), // minor, normal, major, critical
   notes: text("notes"), // Progress notes and updates
   assigneeId: varchar("assignee_id").references(() => users.id),
   assigneeType: varchar("assignee_type", { length: 20 }).default("user"), // user, team
   assigneeTeamId: integer("assignee_team_id").references(() => teams.id),
   createdBy: varchar("created_by").references(() => users.id).notNull(),
   dueDate: timestamp("due_date"),
+  resolvedAt: timestamp("resolved_at"),
+  closedAt: timestamp("closed_at"),
+  estimatedHours: integer("estimated_hours"),
+  actualHours: integer("actual_hours"),
+  tags: text("tags").array(), // Array of tags for better categorization
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

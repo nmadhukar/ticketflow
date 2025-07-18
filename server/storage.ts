@@ -18,7 +18,7 @@ import {
   type TaskHistory,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, or, like, count, sql } from "drizzle-orm";
+import { eq, desc, and, or, like, count, sql, isNotNull } from "drizzle-orm";
 
 export interface IStorage {
   // User operations (mandatory for Replit Auth)
@@ -316,6 +316,96 @@ export class DatabaseStorage implements IStorage {
       createdAt: comment.createdAt,
       userName: comment.userName || comment.userEmail || comment.userId,
     }));
+  }
+
+  // Admin operations
+  async getAdminStats(): Promise<{
+    totalUsers: number;
+    activeUsers: number;
+    totalTeams: number;
+    openTickets: number;
+    urgentTickets: number;
+    avgResolutionTime: number | null;
+  }> {
+    const [userCount] = await db.select({ count: count() }).from(users);
+    const [activeUserCount] = await db
+      .select({ count: count() })
+      .from(users)
+      .where(eq(users.isActive, true));
+    
+    const [teamCount] = await db.select({ count: count() }).from(teams);
+    
+    const [openTicketCount] = await db
+      .select({ count: count() })
+      .from(tasks)
+      .where(eq(tasks.status, "open"));
+    
+    const [urgentTicketCount] = await db
+      .select({ count: count() })
+      .from(tasks)
+      .where(and(
+        eq(tasks.status, "open"),
+        eq(tasks.priority, "urgent")
+      ));
+
+    // Calculate average resolution time (in hours)
+    const resolvedTasks = await db
+      .select({
+        resolutionTime: sql<number>`EXTRACT(EPOCH FROM (${tasks.resolvedAt} - ${tasks.createdAt})) / 3600`
+      })
+      .from(tasks)
+      .where(and(
+        isNotNull(tasks.resolvedAt),
+        sql`${tasks.resolvedAt} IS NOT NULL`
+      ));
+
+    const avgResolutionTime = resolvedTasks.length > 0
+      ? resolvedTasks.reduce((acc, task) => acc + task.resolutionTime, 0) / resolvedTasks.length
+      : null;
+
+    return {
+      totalUsers: userCount.count,
+      activeUsers: activeUserCount.count,
+      totalTeams: teamCount.count,
+      openTickets: openTicketCount.count,
+      urgentTickets: urgentTicketCount.count,
+      avgResolutionTime: avgResolutionTime ? Math.round(avgResolutionTime) : null,
+    };
+  }
+
+  async updateUserRole(userId: string, updates: {
+    role?: string;
+    department?: string;
+    phone?: string;
+  }): Promise<User> {
+    const [updatedUser] = await db
+      .update(users)
+      .set({
+        ...updates,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+      .returning();
+    
+    return updatedUser;
+  }
+
+  async toggleUserStatus(userId: string): Promise<User> {
+    const [currentUser] = await db
+      .select({ isActive: users.isActive })
+      .from(users)
+      .where(eq(users.id, userId));
+    
+    const [updatedUser] = await db
+      .update(users)
+      .set({
+        isActive: !currentUser.isActive,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+      .returning();
+    
+    return updatedUser;
   }
 
   // Statistics
