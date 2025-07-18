@@ -416,7 +416,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                       <div className="space-y-1">
                         <p>Update the task details and track progress.</p>
                         <div className="flex flex-col gap-1 text-xs">
-                          {task.creatorName && (
+                          {task.creatorName && task.createdAt && (
                             <p className="flex items-center gap-1">
                               <User className="h-3 w-3" />
                               Created by {task.creatorName} on {new Date(task.createdAt).toLocaleDateString()}
