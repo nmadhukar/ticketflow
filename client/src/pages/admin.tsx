@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle, Home, Palette, Upload, BookOpen, FileText, Trash2, Edit, Search } from "lucide-react";
+import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle, Home, Palette, Upload, BookOpen, FileText, Trash2, Edit, Search, Building, UserPlus } from "lucide-react";
 import { useLocation, Link } from "wouter";
 import HelpDocumentManager from "@/components/HelpDocumentManager";
 
@@ -537,6 +537,68 @@ export default function AdminPanel() {
             <CardContent>
               <div className="space-y-6">
                 <HelpDocumentManager />
+                
+                <div className="border-t pt-6">
+                  <h3 className="text-lg font-semibold mb-4">Admin Tools</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Card className="border-2">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Building className="h-4 w-4" />
+                          Department Management
+                        </CardTitle>
+                        <CardDescription className="text-sm">
+                          Create and manage organizational departments
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <Link to="/admin/departments">
+                          <Button variant="outline" className="w-full">
+                            Manage Departments
+                          </Button>
+                        </Link>
+                      </CardContent>
+                    </Card>
+                    
+                    <Card className="border-2">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <UserPlus className="h-4 w-4" />
+                          User Invitations
+                        </CardTitle>
+                        <CardDescription className="text-sm">
+                          Invite new users to join your organization
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <Link to="/admin/invitations">
+                          <Button variant="outline" className="w-full">
+                            Manage Invitations
+                          </Button>
+                        </Link>
+                      </CardContent>
+                    </Card>
+                    
+                    <Card className="border-2">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <BookOpen className="h-4 w-4" />
+                          User Guide Management
+                        </CardTitle>
+                        <CardDescription className="text-sm">
+                          Create and organize user guides and tutorials
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <Link to="/admin/guides">
+                          <Button variant="outline" className="w-full">
+                            Manage User Guides
+                          </Button>
+                        </Link>
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>

@@ -14,6 +14,8 @@ import {
   aiChatMessages,
   userGuides,
   userGuideCategories,
+  departments,
+  userInvitations,
   type User,
   type UpsertUser,
   type Task,
@@ -43,6 +45,10 @@ import {
   type InsertUserGuide,
   type UserGuideCategory,
   type InsertUserGuideCategory,
+  type Department,
+  type InsertDepartment,
+  type UserInvitation,
+  type InsertUserInvitation,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, like, count, sql, isNotNull } from "drizzle-orm";
@@ -171,6 +177,20 @@ export interface IStorage {
   updateUserGuideCategory(id: number, category: Partial<InsertUserGuideCategory>): Promise<UserGuideCategory>;
   deleteUserGuideCategory(id: number): Promise<void>;
   getUserGuideCategories(): Promise<UserGuideCategory[]>;
+  
+  // Department operations
+  createDepartment(department: InsertDepartment): Promise<Department>;
+  updateDepartment(id: number, department: Partial<InsertDepartment>): Promise<Department>;
+  deleteDepartment(id: number): Promise<void>;
+  getAllDepartments(): Promise<Department[]>;
+  getDepartmentById(id: number): Promise<Department | undefined>;
+  
+  // User Invitation operations
+  createUserInvitation(invitation: InsertUserInvitation): Promise<UserInvitation>;
+  getUserInvitations(filters?: { status?: string }): Promise<UserInvitation[]>;
+  getUserInvitationByToken(token: string): Promise<UserInvitation | undefined>;
+  markInvitationAccepted(id: number): Promise<UserInvitation>;
+  deleteExpiredInvitations(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1150,6 +1170,91 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(userGuideCategories)
       .orderBy(userGuideCategories.displayOrder, userGuideCategories.name);
+  }
+
+  // Department operations
+  async createDepartment(department: InsertDepartment): Promise<Department> {
+    const [created] = await db.insert(departments).values(department).returning();
+    return created;
+  }
+
+  async updateDepartment(id: number, department: Partial<InsertDepartment>): Promise<Department> {
+    const [updated] = await db
+      .update(departments)
+      .set({
+        ...department,
+        updatedAt: new Date(),
+      })
+      .where(eq(departments.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteDepartment(id: number): Promise<void> {
+    await db.delete(departments).where(eq(departments.id, id));
+  }
+
+  async getAllDepartments(): Promise<Department[]> {
+    return await db.select().from(departments).where(eq(departments.isActive, true)).orderBy(departments.name);
+  }
+
+  async getDepartmentById(id: number): Promise<Department | undefined> {
+    const [dept] = await db.select().from(departments).where(eq(departments.id, id));
+    return dept;
+  }
+
+  // User Invitation operations
+  async createUserInvitation(invitation: InsertUserInvitation): Promise<UserInvitation> {
+    const token = Math.random().toString(36).substring(2) + Date.now().toString(36);
+    const [created] = await db
+      .insert(userInvitations)
+      .values({
+        ...invitation,
+        invitationToken: token,
+      })
+      .returning();
+    return created;
+  }
+
+  async getUserInvitations(filters?: { status?: string }): Promise<UserInvitation[]> {
+    let query = db.select().from(userInvitations);
+    
+    if (filters?.status) {
+      query = query.where(eq(userInvitations.status, filters.status)) as any;
+    }
+    
+    return await query.orderBy(desc(userInvitations.createdAt));
+  }
+
+  async getUserInvitationByToken(token: string): Promise<UserInvitation | undefined> {
+    const [invitation] = await db
+      .select()
+      .from(userInvitations)
+      .where(eq(userInvitations.invitationToken, token));
+    return invitation;
+  }
+
+  async markInvitationAccepted(id: number): Promise<UserInvitation> {
+    const [updated] = await db
+      .update(userInvitations)
+      .set({
+        status: 'accepted',
+        acceptedAt: new Date(),
+      })
+      .where(eq(userInvitations.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteExpiredInvitations(): Promise<void> {
+    await db
+      .delete(userInvitations)
+      .where(
+        and(
+          eq(userInvitations.status, 'pending'),
+          sql`${userInvitations.expiresAt} < NOW()`
+        )
+      );
   }
 }
 

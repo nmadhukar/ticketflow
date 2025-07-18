@@ -60,6 +60,14 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - Updated task modal to display "Created by [user] on [date]" in the header section
 - Modified tasks listing pages to show creator name and creation date in the tables
 - Added creator information to dashboard recent tasks display for better visibility
+- Implemented department management system with full CRUD operations accessible from admin panel
+- Created departments database table with manager assignment and active/inactive status tracking
+- Built admin interface for creating, editing, and deleting departments with visual card-based layout
+- Added user invitation system allowing admins to invite new users via email with role and department assignment
+- Created user_invitations table with token-based invitation tracking and expiration handling
+- Integrated SendGrid email sending for invitation emails with customizable templates
+- Added invitation management interface showing pending, accepted, and expired invitations
+- Updated admin panel with links to new department and invitation management pages
 
 ## System Architecture
 

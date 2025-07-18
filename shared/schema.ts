@@ -39,6 +39,16 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Departments table
+export const departments = pgTable("departments", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull().unique(),
+  description: text("description"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Teams table
 export const teams = pgTable("teams", {
   id: serial("id").primaryKey(),
@@ -345,6 +355,22 @@ export const aiChatMessages = pgTable("ai_chat_messages", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// User invitations table
+export const userInvitations = pgTable("user_invitations", {
+  id: serial("id").primaryKey(),
+  email: varchar("email").notNull(),
+  firstName: varchar("first_name"),
+  lastName: varchar("last_name"),
+  role: varchar("role", { length: 50 }).notNull().default("user"),
+  department: varchar("department", { length: 100 }),
+  invitedBy: varchar("invited_by").references(() => users.id).notNull(),
+  invitationToken: varchar("invitation_token").unique().notNull(),
+  status: varchar("status", { length: 20 }).notNull().default("pending"), // pending, accepted, expired
+  expiresAt: timestamp("expires_at").notNull(),
+  acceptedAt: timestamp("accepted_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export type HelpDocument = typeof helpDocuments.$inferSelect;
 export type InsertHelpDocument = typeof helpDocuments.$inferInsert;
 export type AiChatMessage = typeof aiChatMessages.$inferSelect;
@@ -414,3 +440,26 @@ export type UserGuide = typeof userGuides.$inferSelect;
 export type InsertUserGuide = z.infer<typeof insertUserGuideSchema>;
 export type UserGuideCategory = typeof userGuideCategories.$inferSelect;
 export type InsertUserGuideCategory = z.infer<typeof insertUserGuideCategorySchema>;
+
+// Department schemas and types
+export const insertDepartmentSchema = createInsertSchema(departments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type Department = typeof departments.$inferSelect;
+export type InsertDepartment = z.infer<typeof insertDepartmentSchema>;
+
+// User invitation schemas and types
+export const insertUserInvitationSchema = createInsertSchema(userInvitations).omit({
+  id: true,
+  invitationToken: true,
+  acceptedAt: true,
+  createdAt: true,
+}).extend({
+  expiresAt: z.string().datetime(),
+});
+
+export type UserInvitation = typeof userInvitations.$inferSelect;
+export type InsertUserInvitation = z.infer<typeof insertUserInvitationSchema>;

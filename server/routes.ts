@@ -1422,6 +1422,196 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Department routes (admin only)
+  app.get('/api/departments', isAuthenticated, async (req, res) => {
+    try {
+      const departments = await storage.getAllDepartments();
+      res.json(departments);
+    } catch (error) {
+      console.error("Error fetching departments:", error);
+      res.status(500).json({ message: "Failed to fetch departments" });
+    }
+  });
+
+  app.post('/api/admin/departments', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const department = await storage.createDepartment(req.body);
+      res.json(department);
+    } catch (error) {
+      console.error("Error creating department:", error);
+      res.status(500).json({ message: "Failed to create department" });
+    }
+  });
+
+  app.put('/api/admin/departments/:id', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      const department = await storage.updateDepartment(id, req.body);
+      res.json(department);
+    } catch (error) {
+      console.error("Error updating department:", error);
+      res.status(500).json({ message: "Failed to update department" });
+    }
+  });
+
+  app.delete('/api/admin/departments/:id', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      await storage.deleteDepartment(id);
+      res.json({ message: "Department deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting department:", error);
+      res.status(500).json({ message: "Failed to delete department" });
+    }
+  });
+
+  // User invitation routes (admin only)
+  app.get('/api/admin/invitations', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const { status } = req.query;
+      const invitations = await storage.getUserInvitations({ status: status as string });
+      res.json(invitations);
+    } catch (error) {
+      console.error("Error fetching invitations:", error);
+      res.status(500).json({ message: "Failed to fetch invitations" });
+    }
+  });
+
+  app.post('/api/admin/invitations', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const invitation = await storage.createUserInvitation({
+        ...req.body,
+        invitedBy: userId,
+      });
+
+      // Send invitation email using SendGrid if SMTP is configured
+      const smtpSettings = await storage.getSmtpSettings();
+      if (smtpSettings && process.env.SENDGRID_API_KEY) {
+        const { sendEmail } = await import('./sendgrid');
+        const inviteUrl = `${req.protocol}://${req.get('host')}/invite/${invitation.invitationToken}`;
+        
+        await sendEmail(process.env.SENDGRID_API_KEY, {
+          to: invitation.email,
+          from: smtpSettings.fromEmail,
+          subject: 'You have been invited to TicketFlow',
+          html: `
+            <h2>Welcome to TicketFlow!</h2>
+            <p>You have been invited to join TicketFlow as a ${invitation.role}.</p>
+            <p>Click the link below to accept your invitation and set up your account:</p>
+            <p><a href="${inviteUrl}">Accept Invitation</a></p>
+            <p>This invitation will expire on ${new Date(invitation.expiresAt).toLocaleDateString()}.</p>
+            <p>If you have any questions, please contact your administrator.</p>
+          `,
+          text: `Welcome to TicketFlow! You have been invited to join as a ${invitation.role}. Visit ${inviteUrl} to accept your invitation.`,
+        });
+      }
+
+      res.json(invitation);
+    } catch (error) {
+      console.error("Error creating invitation:", error);
+      res.status(500).json({ message: "Failed to create invitation" });
+    }
+  });
+
+  // Public route to accept invitation
+  app.get('/api/invitations/:token', async (req, res) => {
+    try {
+      const invitation = await storage.getUserInvitationByToken(req.params.token);
+      
+      if (!invitation) {
+        return res.status(404).json({ message: "Invalid invitation token" });
+      }
+
+      if (invitation.status === 'accepted') {
+        return res.status(400).json({ message: "Invitation has already been accepted" });
+      }
+
+      if (new Date(invitation.expiresAt) < new Date()) {
+        return res.status(400).json({ message: "Invitation has expired" });
+      }
+
+      res.json({
+        email: invitation.email,
+        role: invitation.role,
+        departmentId: invitation.departmentId,
+      });
+    } catch (error) {
+      console.error("Error validating invitation:", error);
+      res.status(500).json({ message: "Failed to validate invitation" });
+    }
+  });
+
+  app.post('/api/invitations/:token/accept', async (req, res) => {
+    try {
+      const invitation = await storage.getUserInvitationByToken(req.params.token);
+      
+      if (!invitation) {
+        return res.status(404).json({ message: "Invalid invitation token" });
+      }
+
+      if (invitation.status === 'accepted') {
+        return res.status(400).json({ message: "Invitation has already been accepted" });
+      }
+
+      if (new Date(invitation.expiresAt) < new Date()) {
+        return res.status(400).json({ message: "Invitation has expired" });
+      }
+
+      // Mark invitation as accepted
+      await storage.markInvitationAccepted(invitation.id);
+
+      // Redirect to login page
+      res.json({ message: "Invitation accepted. Please log in to continue." });
+    } catch (error) {
+      console.error("Error accepting invitation:", error);
+      res.status(500).json({ message: "Failed to accept invitation" });
+    }
+  });
+
+  // Clean up expired invitations periodically
+  setInterval(async () => {
+    try {
+      await storage.deleteExpiredInvitations();
+    } catch (error) {
+      console.error("Error cleaning up expired invitations:", error);
+    }
+  }, 24 * 60 * 60 * 1000); // Run once per day
+
   const httpServer = createServer(app);
   return httpServer;
 }
