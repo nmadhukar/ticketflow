@@ -4,7 +4,6 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { apiRequest } from "@/lib/queryClient";
-import { Sidebar } from "@/components/sidebar";
 import Header from "@/components/header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -116,10 +115,7 @@ export default function Teams() {
   };
 
   return (
-    <div className="min-h-screen flex bg-background">
-      <Sidebar />
-      
-      <div className="flex-1 flex flex-col">
+    <div className="flex-1 flex flex-col">
         <Header 
           title="Teams" 
           subtitle="Manage your teams and collaborate effectively"
@@ -299,6 +295,5 @@ export default function Teams() {
           </div>
         </main>
       </div>
-    </div>
   );
 }
