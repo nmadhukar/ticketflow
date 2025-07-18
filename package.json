@@ -11,8 +11,10 @@
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
+    "@azure/msal-node": "^3.6.3",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
     "@neondatabase/serverless": "^0.10.4",
     "@radix-ui/react-accordion": "^1.2.4",
     "@radix-ui/react-alert-dialog": "^1.1.7",
@@ -62,6 +64,7 @@
     "next-themes": "^0.4.6",
     "openid-client": "^6.6.2",
     "passport": "^0.7.0",
+    "passport-azure-ad": "^4.3.5",
     "passport-local": "^1.0.0",
     "react": "^18.3.1",
     "react-day-picker": "^8.10.1",

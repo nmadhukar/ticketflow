@@ -23,6 +23,7 @@ import UserGuides from "@/pages/user-guides";
 import AdminGuides from "@/pages/admin-guides";
 import Departments from "@/pages/departments";
 import Invitations from "@/pages/invitations";
+import TeamsIntegration from "@/pages/teams-integration";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -70,6 +71,7 @@ function Router() {
               <Route path="/settings" component={Settings} />
               <Route path="/notifications" component={Notifications} />
               <Route path="/guides" component={UserGuides} />
+              <Route path="/teams-integration" component={TeamsIntegration} />
               <Route path="/admin/guides" component={AdminGuides} />
               <Route path="/admin/departments">
                 <ProtectedRoute allowedRoles={["admin"]}>

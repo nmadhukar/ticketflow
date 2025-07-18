@@ -16,6 +16,7 @@ import {
   userGuideCategories,
   departments,
   userInvitations,
+  teamsIntegrationSettings,
   type User,
   type UpsertUser,
   type Task,
@@ -49,6 +50,8 @@ import {
   type InsertDepartment,
   type UserInvitation,
   type InsertUserInvitation,
+  type TeamsIntegrationSettings,
+  type InsertTeamsIntegrationSettings,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, like, count, sql, isNotNull } from "drizzle-orm";
@@ -191,6 +194,11 @@ export interface IStorage {
   getUserInvitationByToken(token: string): Promise<UserInvitation | undefined>;
   markInvitationAccepted(id: number): Promise<UserInvitation>;
   deleteExpiredInvitations(): Promise<void>;
+  
+  // Teams Integration operations
+  getTeamsIntegrationSettings(userId: string): Promise<TeamsIntegrationSettings | undefined>;
+  upsertTeamsIntegrationSettings(settings: InsertTeamsIntegrationSettings): Promise<TeamsIntegrationSettings>;
+  deleteTeamsIntegrationSettings(userId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1295,6 +1303,36 @@ export class DatabaseStorage implements IStorage {
           sql`${userInvitations.expiresAt} < NOW()`
         )
       );
+  }
+  
+  // Teams Integration operations
+  async getTeamsIntegrationSettings(userId: string): Promise<TeamsIntegrationSettings | undefined> {
+    const [settings] = await db
+      .select()
+      .from(teamsIntegrationSettings)
+      .where(eq(teamsIntegrationSettings.userId, userId));
+    return settings;
+  }
+
+  async upsertTeamsIntegrationSettings(settings: InsertTeamsIntegrationSettings): Promise<TeamsIntegrationSettings> {
+    const [result] = await db
+      .insert(teamsIntegrationSettings)
+      .values(settings)
+      .onConflictDoUpdate({
+        target: teamsIntegrationSettings.userId,
+        set: {
+          ...settings,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return result;
+  }
+
+  async deleteTeamsIntegrationSettings(userId: string): Promise<void> {
+    await db
+      .delete(teamsIntegrationSettings)
+      .where(eq(teamsIntegrationSettings.userId, userId));
   }
 }
 

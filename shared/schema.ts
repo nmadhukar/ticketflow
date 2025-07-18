@@ -371,6 +371,21 @@ export const userInvitations = pgTable("user_invitations", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Microsoft Teams integration settings
+export const teamsIntegrationSettings = pgTable("teams_integration_settings", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id).notNull().unique(),
+  enabled: boolean("enabled").default(false),
+  teamId: varchar("team_id"),
+  teamName: varchar("team_name"),
+  channelId: varchar("channel_id"),
+  channelName: varchar("channel_name"),
+  webhookUrl: text("webhook_url"),
+  notificationTypes: text("notification_types").array().default([]), // ticket_created, ticket_updated, ticket_assigned, etc.
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export type HelpDocument = typeof helpDocuments.$inferSelect;
 export type InsertHelpDocument = typeof helpDocuments.$inferInsert;
 export type AiChatMessage = typeof aiChatMessages.$inferSelect;
@@ -463,3 +478,13 @@ export const insertUserInvitationSchema = createInsertSchema(userInvitations).om
 
 export type UserInvitation = typeof userInvitations.$inferSelect;
 export type InsertUserInvitation = z.infer<typeof insertUserInvitationSchema>;
+
+// Teams integration schemas and types
+export const insertTeamsIntegrationSettingsSchema = createInsertSchema(teamsIntegrationSettings).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type TeamsIntegrationSettings = typeof teamsIntegrationSettings.$inferSelect;
+export type InsertTeamsIntegrationSettings = z.infer<typeof insertTeamsIntegrationSettingsSchema>;

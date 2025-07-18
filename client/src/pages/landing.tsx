@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CheckCircle, Users, Clock, BarChart3 } from "lucide-react";
+import { CheckCircle, Users, Clock, BarChart3, Building2 } from "lucide-react";
 
 export default function Landing() {
   const features = [
@@ -73,9 +73,11 @@ export default function Landing() {
             <Button 
               size="lg" 
               variant="outline"
+              onClick={() => window.location.href = "/api/auth/microsoft"}
               className="text-lg px-8 py-3"
             >
-              Learn More
+              <Building2 className="mr-2 h-5 w-5" />
+              Sign in with Microsoft 365
             </Button>
           </div>
         </div>

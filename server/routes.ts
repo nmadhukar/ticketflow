@@ -2,6 +2,8 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
+import { setupMicrosoftAuth, isMicrosoftUser } from "./microsoftAuth";
+import { teamsIntegration } from "./microsoftTeams";
 import { sendTestEmail } from "./sendgrid";
 import { 
   insertTaskSchema, 
@@ -16,6 +18,7 @@ import { z } from "zod";
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
   await setupAuth(app);
+  await setupMicrosoftAuth(app);
 
   // Auth routes
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
@@ -125,6 +128,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         createdBy: userId,
       });
       const task = await storage.createTask(taskData);
+      
+      // Send Teams notification for new task
+      try {
+        const user = await storage.getUser(userId);
+        const allUsers = await storage.getAllUsers();
+        const notificationPromises = allUsers.map(async (notifyUser) => {
+          const settings = await storage.getTeamsIntegrationSettings(notifyUser.id);
+          if (settings?.enabled && settings.notificationTypes?.includes('ticket_created')) {
+            const actionUrl = `${req.protocol}://${req.get('host')}/my-tasks`;
+            const message = `New ticket created by ${user?.email || 'a user'}`;
+            
+            if (settings.webhookUrl) {
+              await teamsIntegration.sendWebhookNotification(
+                settings.webhookUrl,
+                task,
+                message,
+                actionUrl
+              );
+            }
+          }
+        });
+        await Promise.allSettled(notificationPromises);
+      } catch (error) {
+        console.error("Error sending Teams notifications:", error);
+      }
+      
       res.status(201).json(task);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -154,6 +183,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const updates = insertTaskSchema.partial().parse(req.body);
       const updatedTask = await storage.updateTask(taskId, updates, userId);
+      
+      // Send Teams notification for task update
+      try {
+        const user = await storage.getUser(userId);
+        const allUsers = await storage.getAllUsers();
+        const notificationPromises = allUsers.map(async (notifyUser) => {
+          const settings = await storage.getTeamsIntegrationSettings(notifyUser.id);
+          if (settings?.enabled && 
+              (settings.notificationTypes?.includes('ticket_updated') ||
+               (updates.assigneeId && settings.notificationTypes?.includes('ticket_assigned')))) {
+            const actionUrl = `${req.protocol}://${req.get('host')}/my-tasks`;
+            let message = `Ticket updated by ${user?.email || 'a user'}`;
+            
+            if (updates.assigneeId && updates.assigneeId === notifyUser.id) {
+              message = `Ticket assigned to you by ${user?.email || 'a user'}`;
+            }
+            
+            if (settings.webhookUrl) {
+              await teamsIntegration.sendWebhookNotification(
+                settings.webhookUrl,
+                updatedTask,
+                message,
+                actionUrl
+              );
+            }
+          }
+        });
+        await Promise.allSettled(notificationPromises);
+      } catch (error) {
+        console.error("Error sending Teams notifications:", error);
+      }
+      
       res.json(updatedTask);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -1611,6 +1672,112 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Error cleaning up expired invitations:", error);
     }
   }, 24 * 60 * 60 * 1000); // Run once per day
+
+  // Teams Integration routes
+  app.get('/api/teams-integration/settings', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const settings = await storage.getTeamsIntegrationSettings(userId);
+      res.json(settings || { enabled: false });
+    } catch (error) {
+      console.error("Error fetching Teams settings:", error);
+      res.status(500).json({ message: "Failed to fetch Teams settings" });
+    }
+  });
+
+  app.post('/api/teams-integration/settings', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const settings = await storage.upsertTeamsIntegrationSettings({
+        ...req.body,
+        userId,
+      });
+      res.json(settings);
+    } catch (error) {
+      console.error("Error updating Teams settings:", error);
+      res.status(500).json({ message: "Failed to update Teams settings" });
+    }
+  });
+
+  app.delete('/api/teams-integration/settings', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      await storage.deleteTeamsIntegrationSettings(userId);
+      res.json({ message: "Teams integration disabled" });
+    } catch (error) {
+      console.error("Error disabling Teams integration:", error);
+      res.status(500).json({ message: "Failed to disable Teams integration" });
+    }
+  });
+
+  // Get user's teams and channels
+  app.get('/api/teams-integration/teams', isAuthenticated, async (req: any, res) => {
+    try {
+      if (!req.user.access_token) {
+        return res.status(401).json({ message: "Microsoft authentication required" });
+      }
+
+      const teams = await teamsIntegration.listTeamsAndChannels(req.user.access_token);
+      res.json(teams);
+    } catch (error) {
+      console.error("Error fetching teams:", error);
+      res.status(500).json({ message: "Failed to fetch teams" });
+    }
+  });
+
+  // Send test notification
+  app.post('/api/teams-integration/test', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const settings = await storage.getTeamsIntegrationSettings(userId);
+      
+      if (!settings || !settings.enabled) {
+        return res.status(400).json({ message: "Teams integration not configured" });
+      }
+
+      const testTask = {
+        id: 0,
+        ticketNumber: "TKT-TEST",
+        title: "Test Notification",
+        description: "This is a test notification from TicketFlow",
+        status: "open",
+        priority: "medium",
+        category: "support",
+        createdBy: userId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as Task;
+
+      const actionUrl = `${req.protocol}://${req.get('host')}/`;
+      let success = false;
+
+      if (settings.webhookUrl) {
+        success = await teamsIntegration.sendWebhookNotification(
+          settings.webhookUrl,
+          testTask,
+          "Test notification from TicketFlow",
+          actionUrl
+        );
+      } else if (settings.teamId && settings.channelId) {
+        success = await teamsIntegration.sendChannelNotification(
+          settings.teamId,
+          settings.channelId,
+          testTask,
+          "Test notification from TicketFlow",
+          actionUrl
+        );
+      }
+
+      if (success) {
+        res.json({ message: "Test notification sent successfully" });
+      } else {
+        res.status(500).json({ message: "Failed to send test notification" });
+      }
+    } catch (error) {
+      console.error("Error sending test notification:", error);
+      res.status(500).json({ message: "Failed to send test notification" });
+    }
+  });
 
   const httpServer = createServer(app);
   return httpServer;

@@ -77,6 +77,11 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - Fixed notifications page 404 flash issue by reorganizing route order in App.tsx
 - Fixed blank screen issue when clicking notification links by using wouter navigation instead of window.location
 - Made notification items clickable to navigate to relevant content
+- Added Microsoft Teams integration with automatic notifications for ticket creation, updates, and assignments
+- Created Teams integration settings page allowing users to configure webhook URLs and notification preferences
+- Implemented test notification functionality to verify webhook configuration
+- Added Teams integration link to sidebar navigation for easy access
+- Updated landing page to show Microsoft 365 sign-in option alongside Replit authentication
 
 ## System Architecture
 
