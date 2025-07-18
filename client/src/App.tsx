@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/useAuth";
 import { Layout } from "@/components/layout";
+import { AiChatBot } from "@/components/AiChatBot";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
@@ -22,27 +23,31 @@ function Router() {
   const { isAuthenticated, isLoading } = useAuth();
 
   return (
-    <Switch>
-      {isLoading || !isAuthenticated ? (
-        <Route path="/" component={Landing} />
-      ) : (
-        <Layout>
-          <Switch>
-            <Route path="/" component={Dashboard} />
-            <Route path="/tasks" component={Tasks} />
-            <Route path="/my-tasks" component={MyTasks} />
-            <Route path="/teams" component={Teams} />
-            <Route path="/teams/:id" component={TeamDetail} />
-            <Route path="/admin" component={AdminPanel} />
-            <Route path="/settings" component={Settings} />
-            <Route path="/notifications" component={Notifications} />
-          </Switch>
-        </Layout>
-      )}
-      <Route path="/login" component={LoginPage} />
-      <Route path="/api-docs" component={ApiDocs} />
-      <Route component={NotFound} />
-    </Switch>
+    <>
+      <Switch>
+        {isLoading || !isAuthenticated ? (
+          <Route path="/" component={Landing} />
+        ) : (
+          <Layout>
+            <Switch>
+              <Route path="/" component={Dashboard} />
+              <Route path="/tasks" component={Tasks} />
+              <Route path="/my-tasks" component={MyTasks} />
+              <Route path="/teams" component={Teams} />
+              <Route path="/teams/:id" component={TeamDetail} />
+              <Route path="/admin" component={AdminPanel} />
+              <Route path="/settings" component={Settings} />
+              <Route path="/notifications" component={Notifications} />
+            </Switch>
+          </Layout>
+        )}
+        <Route path="/login" component={LoginPage} />
+        <Route path="/api-docs" component={ApiDocs} />
+        <Route component={NotFound} />
+      </Switch>
+      {/* Show AI Chat Bot for authenticated users */}
+      {!isLoading && isAuthenticated && <AiChatBot />}
+    </>
   );
 }
 

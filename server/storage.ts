@@ -11,6 +11,7 @@ import {
   smtpSettings,
   emailTemplates,
   helpDocuments,
+  aiChatMessages,
   type User,
   type UpsertUser,
   type Task,
@@ -34,6 +35,8 @@ import {
   type InsertEmailTemplate,
   type HelpDocument,
   type InsertHelpDocument,
+  type AiChatMessage,
+  type InsertAiChatMessage,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, like, count, sql, isNotNull } from "drizzle-orm";
@@ -143,6 +146,11 @@ export interface IStorage {
   deleteHelpDocument(id: number): Promise<void>;
   incrementViewCount(id: number): Promise<void>;
   searchHelpDocuments(query: string): Promise<HelpDocument[]>;
+  
+  // AI Chat operations
+  createChatMessage(message: InsertAiChatMessage): Promise<AiChatMessage>;
+  getChatMessages(userId: string, sessionId: string): Promise<AiChatMessage[]>;
+  getChatSessions(userId: string): Promise<{ sessionId: string; lastMessage: string; createdAt: Date }[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -915,6 +923,55 @@ export class DatabaseStorage implements IStorage {
         )
       )
       .orderBy(desc(helpDocuments.viewCount));
+  }
+
+  // AI Chat operations
+  async createChatMessage(message: InsertAiChatMessage): Promise<AiChatMessage> {
+    const [created] = await db.insert(aiChatMessages).values(message).returning();
+    return created;
+  }
+
+  async getChatMessages(userId: string, sessionId: string): Promise<AiChatMessage[]> {
+    return await db
+      .select()
+      .from(aiChatMessages)
+      .where(
+        and(
+          eq(aiChatMessages.userId, userId),
+          eq(aiChatMessages.sessionId, sessionId)
+        )
+      )
+      .orderBy(aiChatMessages.createdAt);
+  }
+
+  async getChatSessions(userId: string): Promise<{ sessionId: string; lastMessage: string; createdAt: Date }[]> {
+    const sessions = await db
+      .selectDistinct({
+        sessionId: aiChatMessages.sessionId,
+        content: aiChatMessages.content,
+        createdAt: aiChatMessages.createdAt,
+      })
+      .from(aiChatMessages)
+      .where(eq(aiChatMessages.userId, userId))
+      .orderBy(desc(aiChatMessages.createdAt));
+
+    // Group by session and get the last message
+    const sessionMap = new Map<string, { sessionId: string; lastMessage: string; createdAt: Date }>();
+    
+    for (const session of sessions) {
+      if (session.createdAt) {
+        const existing = sessionMap.get(session.sessionId);
+        if (!existing || session.createdAt > existing.createdAt) {
+          sessionMap.set(session.sessionId, {
+            sessionId: session.sessionId,
+            lastMessage: session.content.substring(0, 100) + (session.content.length > 100 ? '...' : ''),
+            createdAt: session.createdAt,
+          });
+        }
+      }
+    }
+
+    return Array.from(sessionMap.values()).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
 }
 

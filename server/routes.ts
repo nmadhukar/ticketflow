@@ -909,6 +909,96 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // AI Chat routes
+  app.post('/api/chat', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const { sessionId, message } = req.body;
+      
+      if (!sessionId || !message) {
+        return res.status(400).json({ message: "Session ID and message are required" });
+      }
+
+      // Save user message
+      await storage.createChatMessage({
+        userId,
+        sessionId,
+        role: 'user',
+        content: message,
+      });
+
+      // Get help documents to search through
+      const helpDocs = await storage.searchHelpDocuments(message);
+      
+      // Simple AI response logic - search for relevant help documents
+      let response = "I'm here to help! ";
+      const relevantDocIds: number[] = [];
+      
+      if (helpDocs.length > 0) {
+        response += "Based on your question, here's what I found:\n\n";
+        
+        // Take top 3 most relevant documents
+        const topDocs = helpDocs.slice(0, 3);
+        
+        for (const doc of topDocs) {
+          relevantDocIds.push(doc.id);
+          response += `**${doc.title}**\n`;
+          
+          // Extract relevant portion of content
+          const contentPreview = doc.content.substring(0, 500) + (doc.content.length > 500 ? '...' : '');
+          response += `${contentPreview}\n\n`;
+        }
+        
+        response += "Would you like me to provide more details about any of these topics?";
+      } else {
+        response += "I couldn't find specific help documentation related to your question. Could you please provide more details or try rephrasing your question?";
+      }
+
+      // Save AI response
+      const aiMessage = await storage.createChatMessage({
+        userId,
+        sessionId,
+        role: 'assistant',
+        content: response,
+        relatedDocumentIds: relevantDocIds.length > 0 ? relevantDocIds : undefined,
+      });
+
+      res.json({
+        message: aiMessage,
+        relatedDocuments: helpDocs.slice(0, 3),
+      });
+    } catch (error) {
+      console.error("Error in chat:", error);
+      res.status(500).json({ message: "Failed to process chat message" });
+    }
+  });
+
+  // Get chat history
+  app.get('/api/chat/:sessionId', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const { sessionId } = req.params;
+      
+      const messages = await storage.getChatMessages(userId, sessionId);
+      res.json(messages);
+    } catch (error) {
+      console.error("Error fetching chat history:", error);
+      res.status(500).json({ message: "Failed to fetch chat history" });
+    }
+  });
+
+  // Get chat sessions
+  app.get('/api/chat-sessions', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const sessions = await storage.getChatSessions(userId);
+      res.json(sessions);
+    } catch (error) {
+      console.error("Error fetching chat sessions:", error);
+      res.status(500).json({ message: "Failed to fetch chat sessions" });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

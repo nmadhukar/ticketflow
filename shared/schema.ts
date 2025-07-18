@@ -334,8 +334,21 @@ export const helpDocuments = pgTable("help_documents", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// AI Chat messages table
+export const aiChatMessages = pgTable("ai_chat_messages", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  sessionId: varchar("session_id").notNull(), // Group messages by chat session
+  role: varchar("role", { length: 20 }).notNull(), // 'user' or 'assistant'
+  content: text("content").notNull(),
+  relatedDocumentIds: integer("related_document_ids").array(), // IDs of help documents referenced
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export type HelpDocument = typeof helpDocuments.$inferSelect;
 export type InsertHelpDocument = typeof helpDocuments.$inferInsert;
+export type AiChatMessage = typeof aiChatMessages.$inferSelect;
+export type InsertAiChatMessage = typeof aiChatMessages.$inferInsert;
 export type Task = typeof tasks.$inferSelect;
 export type InsertTask = z.infer<typeof insertTaskSchema>;
 export type Team = typeof teams.$inferSelect;
