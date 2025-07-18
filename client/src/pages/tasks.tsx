@@ -28,9 +28,9 @@ export default function Tasks() {
   const [editingTask, setEditingTask] = useState(null);
   const [filters, setFilters] = useState({
     search: "",
-    status: "",
-    category: "",
-    priority: "",
+    status: "all",
+    category: "all",
+    priority: "all",
   });
 
   // Redirect if not authenticated
@@ -134,9 +134,9 @@ export default function Tasks() {
         !task.description?.toLowerCase().includes(filters.search.toLowerCase())) {
       return false;
     }
-    if (filters.status && task.status !== filters.status) return false;
-    if (filters.category && task.category !== filters.category) return false;
-    if (filters.priority && task.priority !== filters.priority) return false;
+    if (filters.status && filters.status !== "all" && task.status !== filters.status) return false;
+    if (filters.category && filters.category !== "all" && task.category !== filters.category) return false;
+    if (filters.priority && filters.priority !== "all" && task.priority !== filters.priority) return false;
     return true;
   });
 
@@ -181,7 +181,7 @@ export default function Tasks() {
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Status</SelectItem>
+                  <SelectItem value="all">All Status</SelectItem>
                   <SelectItem value="open">Open</SelectItem>
                   <SelectItem value="in_progress">In Progress</SelectItem>
                   <SelectItem value="resolved">Resolved</SelectItem>
@@ -194,7 +194,7 @@ export default function Tasks() {
                   <SelectValue placeholder="Category" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Categories</SelectItem>
+                  <SelectItem value="all">All Categories</SelectItem>
                   <SelectItem value="bug">Bug</SelectItem>
                   <SelectItem value="feature">Feature</SelectItem>
                   <SelectItem value="support">Support</SelectItem>
@@ -207,7 +207,7 @@ export default function Tasks() {
                   <SelectValue placeholder="Priority" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Priorities</SelectItem>
+                  <SelectItem value="all">All Priorities</SelectItem>
                   <SelectItem value="low">Low</SelectItem>
                   <SelectItem value="medium">Medium</SelectItem>
                   <SelectItem value="high">High</SelectItem>

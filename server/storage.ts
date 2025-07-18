@@ -147,21 +147,22 @@ export class DatabaseStorage implements IStorage {
       );
     }
     
+    let finalQuery = query;
     if (conditions.length > 0) {
-      query = query.where(and(...conditions));
+      finalQuery = query.where(and(...conditions));
     }
     
-    query = query.orderBy(desc(tasks.createdAt));
+    finalQuery = finalQuery.orderBy(desc(tasks.createdAt));
     
     if (filters.limit) {
-      query = query.limit(filters.limit);
+      finalQuery = finalQuery.limit(filters.limit);
     }
     
     if (filters.offset) {
-      query = query.offset(filters.offset);
+      finalQuery = finalQuery.offset(filters.offset);
     }
     
-    return await query;
+    return await finalQuery;
   }
 
   async updateTask(id: number, updates: Partial<InsertTask>, userId: string): Promise<Task> {
@@ -307,30 +308,40 @@ export class DatabaseStorage implements IStorage {
     if (userId) {
       baseQuery = baseQuery.where(
         or(eq(tasks.assigneeId, userId), eq(tasks.createdBy, userId))
-      );
+      ) as any;
     }
     
     const [totalResult] = await baseQuery;
     const total = totalResult.count;
     
-    const statuses = await db
+    let statusQuery = db
       .select({
         status: tasks.status,
         count: count(),
       })
       .from(tasks)
-      .where(userId ? or(eq(tasks.assigneeId, userId), eq(tasks.createdBy, userId)) : sql`1=1`)
       .groupBy(tasks.status);
     
-    const [highPriorityResult] = await db
+    if (userId) {
+      statusQuery = statusQuery.where(
+        or(eq(tasks.assigneeId, userId), eq(tasks.createdBy, userId))
+      ) as any;
+    }
+    
+    const statuses = await statusQuery;
+    
+    let highPriorityQuery = db
       .select({ count: count() })
       .from(tasks)
-      .where(
-        and(
-          eq(tasks.priority, "high"),
-          userId ? or(eq(tasks.assigneeId, userId), eq(tasks.createdBy, userId)) : sql`1=1`
-        )
-      );
+      .where(eq(tasks.priority, "high"));
+    
+    if (userId) {
+      highPriorityQuery = highPriorityQuery.where(
+        or(eq(tasks.assigneeId, userId), eq(tasks.createdBy, userId))
+      ) as any;
+    }
+    
+    const [highPriorityResult] = await highPriorityQuery;
     
     const statusCounts = statuses.reduce((acc, { status, count }) => {
       acc[status] = count;
