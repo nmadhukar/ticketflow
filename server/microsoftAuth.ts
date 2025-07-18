@@ -24,8 +24,24 @@ export async function setupMicrosoftAuth(app: Express) {
   }
 
   // Check if Microsoft auth is configured
-  if (!process.env.MICROSOFT_CLIENT_ID || !process.env.MICROSOFT_CLIENT_SECRET || !process.env.MICROSOFT_TENANT_ID) {
+  const isMicrosoftConfigured = process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET && process.env.MICROSOFT_TENANT_ID;
+  
+  if (!isMicrosoftConfigured) {
     console.log("Microsoft authentication not configured. Set MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, and MICROSOFT_TENANT_ID to enable.");
+    
+    // Register routes that return configuration error
+    app.get("/api/auth/microsoft", (req, res) => {
+      res.status(503).json({ 
+        message: "Microsoft authentication is not configured. Please contact your administrator to set up Microsoft 365 SSO." 
+      });
+    });
+    
+    app.post("/api/auth/microsoft/callback", (req, res) => {
+      res.status(503).json({ 
+        message: "Microsoft authentication is not configured." 
+      });
+    });
+    
     return;
   }
 

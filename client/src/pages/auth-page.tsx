@@ -442,7 +442,28 @@ export default function AuthPage() {
               <Button
                 variant="outline"
                 className="w-full"
-                onClick={() => window.location.href = "/api/auth/microsoft"}
+                onClick={async () => {
+                  try {
+                    const response = await fetch("/api/auth/microsoft");
+                    if (!response.ok) {
+                      const error = await response.json();
+                      toast({
+                        title: "Microsoft Sign-In Unavailable",
+                        description: error.message || "Microsoft authentication is not configured.",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
+                    // If successful, the response will redirect
+                    window.location.href = "/api/auth/microsoft";
+                  } catch (error) {
+                    toast({
+                      title: "Error",
+                      description: "Failed to connect to Microsoft authentication.",
+                      variant: "destructive",
+                    });
+                  }
+                }}
               >
                 <Building2 className="mr-2 h-4 w-4" />
                 Microsoft 365
