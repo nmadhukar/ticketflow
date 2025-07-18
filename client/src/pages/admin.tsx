@@ -225,7 +225,7 @@ export default function AdminPanel() {
                       <TableCell>{user.email}</TableCell>
                       <TableCell>
                         <Badge variant={user.role === "admin" ? "destructive" : "default"}>
-                          {user.role}
+                          System {user.role}
                         </Badge>
                       </TableCell>
                       <TableCell>{user.department || "-"}</TableCell>
@@ -310,9 +310,11 @@ export default function AdminPanel() {
                       <TableCell>{team.memberCount || 0} members</TableCell>
                       <TableCell>{team.createdBy}</TableCell>
                       <TableCell>
-                        <Button size="sm" variant="outline">
-                          Manage
-                        </Button>
+                        <Link href={`/teams/${team.id}`}>
+                          <Button size="sm" variant="outline">
+                            Manage
+                          </Button>
+                        </Link>
                       </TableCell>
                     </TableRow>
                   ))}

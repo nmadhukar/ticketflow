@@ -295,7 +295,7 @@ export default function TeamDetail() {
                               className={member.role === "admin" ? "bg-purple-100 text-purple-700" : ""}
                             >
                               {member.role === "admin" && <Crown className="h-3 w-3 mr-1" />}
-                              {member.role}
+                              Team {member.role}
                             </Badge>
                             <span className="text-xs text-slate-500">
                               Joined {new Date(member.joinedAt).toLocaleDateString()}

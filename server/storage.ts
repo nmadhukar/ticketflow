@@ -235,8 +235,22 @@ export class DatabaseStorage implements IStorage {
     return team;
   }
 
-  async getTeams(): Promise<Team[]> {
-    return await db.select().from(teams).orderBy(desc(teams.createdAt));
+  async getTeams(): Promise<(Team & { memberCount: number })[]> {
+    const teamsWithMembers = await db
+      .select({
+        id: teams.id,
+        name: teams.name,
+        description: teams.description,
+        createdAt: teams.createdAt,
+        createdBy: teams.createdBy,
+        memberCount: count(teamMembers.id),
+      })
+      .from(teams)
+      .leftJoin(teamMembers, eq(teams.id, teamMembers.teamId))
+      .groupBy(teams.id, teams.name, teams.description, teams.createdAt, teams.createdBy)
+      .orderBy(desc(teams.createdAt));
+    
+    return teamsWithMembers;
   }
 
   async getUserTeams(userId: string): Promise<Team[]> {
