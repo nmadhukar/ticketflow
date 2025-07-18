@@ -1197,7 +1197,7 @@ export default function Settings() {
                             placeholder="HTML email template"
                           />
                           <p className="text-xs text-muted-foreground">
-                            Available variables: {{ticketNumber}}, {{title}}, {{assignedTo}}, {{status}}, {{priority}}
+                            Available variables: {'{{ticketNumber}}'}, {'{{title}}'}, {'{{assignedTo}}'}, {'{{status}}'}, {'{{priority}}'}
                           </p>
                         </div>
 
