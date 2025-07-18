@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Layout } from "@/components/layout";
-import { User, Bell, Shield, Palette, Globe, Key, Building, Plus, Copy, Eye, EyeOff, Trash2 } from "lucide-react";
+import { User, Bell, Shield, Palette, Globe, Key, Building, Plus, Copy, Eye, EyeOff, Trash2, Mail, FileText } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -42,6 +42,21 @@ export default function Settings() {
   const [newApiKeyName, setNewApiKeyName] = useState("");
   const [showApiKey, setShowApiKey] = useState<string | null>(null);
   const [apiKeyVisibility, setApiKeyVisibility] = useState<Record<number, boolean>>({});
+  
+  // SMTP settings state
+  const [smtpSettings, setSmtpSettings] = useState({
+    host: "",
+    port: 587,
+    username: "",
+    password: "",
+    fromEmail: "",
+    fromName: "TicketFlow",
+    encryption: "tls",
+  });
+  
+  // Email template state
+  const [selectedTemplate, setSelectedTemplate] = useState<string>("");
+  const [templateData, setTemplateData] = useState<any>(null);
 
   // Fetch company settings
   const { data: companySettings } = useQuery({
@@ -53,6 +68,18 @@ export default function Settings() {
   const { data: apiKeys } = useQuery({
     queryKey: ["/api/api-keys"],
   });
+  
+  // Fetch SMTP settings
+  const { data: fetchedSmtpSettings } = useQuery({
+    queryKey: ["/api/smtp/settings"],
+    enabled: user?.role === 'admin',
+  });
+  
+  // Fetch email templates
+  const { data: emailTemplates } = useQuery({
+    queryKey: ["/api/email/templates"],
+    enabled: user?.role === 'admin',
+  });
 
   useEffect(() => {
     if (companySettings) {
@@ -61,6 +88,20 @@ export default function Settings() {
       setPrimaryColor(companySettings.primaryColor || "#3b82f6");
     }
   }, [companySettings]);
+  
+  useEffect(() => {
+    if (fetchedSmtpSettings) {
+      setSmtpSettings({
+        host: fetchedSmtpSettings.host || "",
+        port: fetchedSmtpSettings.port || 587,
+        username: fetchedSmtpSettings.username || "",
+        password: fetchedSmtpSettings.password || "",
+        fromEmail: fetchedSmtpSettings.fromEmail || "",
+        fromName: fetchedSmtpSettings.fromName || "TicketFlow",
+        encryption: fetchedSmtpSettings.encryption || "tls",
+      });
+    }
+  }, [fetchedSmtpSettings]);
 
   // Update company settings mutation
   const updateCompanySettingsMutation = useMutation({
@@ -179,6 +220,72 @@ export default function Settings() {
     }
     createApiKeyMutation.mutate({ name: newApiKeyName.trim() });
   };
+  
+  // SMTP settings mutation
+  const updateSmtpSettingsMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return await apiRequest("POST", "/api/smtp/settings", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/smtp/settings"] });
+      toast({
+        title: "Success",
+        description: "SMTP settings updated successfully",
+      });
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: "Failed to update SMTP settings",
+        variant: "destructive",
+      });
+    },
+  });
+  
+  // Email template mutation
+  const updateEmailTemplateMutation = useMutation({
+    mutationFn: async ({ name, template }: { name: string; template: any }) => {
+      return await apiRequest("PUT", `/api/email/templates/${name}`, template);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/email/templates"] });
+      toast({
+        title: "Success",
+        description: "Email template updated successfully",
+      });
+      setSelectedTemplate("");
+      setTemplateData(null);
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: "Failed to update email template",
+        variant: "destructive",
+      });
+    },
+  });
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -199,7 +306,7 @@ export default function Settings() {
         </div>
 
         <Tabs defaultValue="profile" className="space-y-6">
-          <TabsList className={`grid w-full ${user?.role === 'admin' ? 'grid-cols-6' : 'grid-cols-5'}`}>
+          <TabsList className={`grid w-full ${user?.role === 'admin' ? 'grid-cols-8' : 'grid-cols-5'}`}>
             <TabsTrigger value="profile" className="flex items-center gap-2">
               <User className="h-4 w-4" />
               Profile
@@ -221,10 +328,20 @@ export default function Settings() {
               API Keys
             </TabsTrigger>
             {user?.role === 'admin' && (
-              <TabsTrigger value="company" className="flex items-center gap-2">
-                <Building className="h-4 w-4" />
-                Company
-              </TabsTrigger>
+              <>
+                <TabsTrigger value="company" className="flex items-center gap-2">
+                  <Building className="h-4 w-4" />
+                  Company
+                </TabsTrigger>
+                <TabsTrigger value="smtp" className="flex items-center gap-2">
+                  <Mail className="h-4 w-4" />
+                  Email
+                </TabsTrigger>
+                <TabsTrigger value="templates" className="flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Templates
+                </TabsTrigger>
+              </>
             )}
           </TabsList>
 
@@ -818,6 +935,256 @@ export default function Settings() {
                   >
                     {updateCompanySettingsMutation.isPending ? "Saving..." : "Save Branding"}
                   </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
+
+          {user?.role === 'admin' && (
+            <TabsContent value="smtp" className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Email Configuration</CardTitle>
+                  <CardDescription>
+                    Configure SMTP settings for sending emails from the system
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* SMTP Host */}
+                    <div className="space-y-2">
+                      <Label htmlFor="smtpHost">SMTP Host</Label>
+                      <Input
+                        id="smtpHost"
+                        placeholder="smtp.gmail.com"
+                        value={smtpSettings.host}
+                        onChange={(e) => setSmtpSettings({...smtpSettings, host: e.target.value})}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Your email provider's SMTP server address
+                      </p>
+                    </div>
+
+                    {/* SMTP Port */}
+                    <div className="space-y-2">
+                      <Label htmlFor="smtpPort">SMTP Port</Label>
+                      <Input
+                        id="smtpPort"
+                        type="number"
+                        placeholder="587"
+                        value={smtpSettings.port}
+                        onChange={(e) => setSmtpSettings({...smtpSettings, port: parseInt(e.target.value) || 587})}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Common ports: 587 (TLS), 465 (SSL), 25 (Plain)
+                      </p>
+                    </div>
+
+                    {/* Username */}
+                    <div className="space-y-2">
+                      <Label htmlFor="smtpUsername">Username</Label>
+                      <Input
+                        id="smtpUsername"
+                        placeholder="your-email@example.com"
+                        value={smtpSettings.username}
+                        onChange={(e) => setSmtpSettings({...smtpSettings, username: e.target.value})}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Usually your full email address
+                      </p>
+                    </div>
+
+                    {/* Password */}
+                    <div className="space-y-2">
+                      <Label htmlFor="smtpPassword">Password</Label>
+                      <Input
+                        id="smtpPassword"
+                        type="password"
+                        placeholder="••••••••"
+                        value={smtpSettings.password}
+                        onChange={(e) => setSmtpSettings({...smtpSettings, password: e.target.value})}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        App-specific password may be required
+                      </p>
+                    </div>
+
+                    {/* From Email */}
+                    <div className="space-y-2">
+                      <Label htmlFor="fromEmail">From Email</Label>
+                      <Input
+                        id="fromEmail"
+                        type="email"
+                        placeholder="noreply@example.com"
+                        value={smtpSettings.fromEmail}
+                        onChange={(e) => setSmtpSettings({...smtpSettings, fromEmail: e.target.value})}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Email address that will appear as sender
+                      </p>
+                    </div>
+
+                    {/* From Name */}
+                    <div className="space-y-2">
+                      <Label htmlFor="fromName">From Name</Label>
+                      <Input
+                        id="fromName"
+                        placeholder="TicketFlow"
+                        value={smtpSettings.fromName}
+                        onChange={(e) => setSmtpSettings({...smtpSettings, fromName: e.target.value})}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Display name for the sender
+                      </p>
+                    </div>
+
+                    {/* Encryption */}
+                    <div className="space-y-2">
+                      <Label htmlFor="encryption">Encryption</Label>
+                      <Select
+                        value={smtpSettings.encryption}
+                        onValueChange={(value) => setSmtpSettings({...smtpSettings, encryption: value})}
+                      >
+                        <SelectTrigger id="encryption">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="tls">TLS (Recommended)</SelectItem>
+                          <SelectItem value="ssl">SSL</SelectItem>
+                          <SelectItem value="none">None</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Security protocol for email transmission
+                      </p>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {/* Test Email */}
+                  <div className="rounded-lg bg-muted p-4">
+                    <h4 className="text-sm font-medium mb-2">Test Configuration</h4>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      Send a test email to verify your SMTP settings are working correctly.
+                    </p>
+                    <Button variant="outline" size="sm">
+                      Send Test Email
+                    </Button>
+                  </div>
+
+                  <Button 
+                    onClick={() => updateSmtpSettingsMutation.mutate(smtpSettings)}
+                    disabled={updateSmtpSettingsMutation.isPending}
+                    className="w-full md:w-auto"
+                  >
+                    {updateSmtpSettingsMutation.isPending ? "Saving..." : "Save Email Settings"}
+                  </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
+
+          {user?.role === 'admin' && (
+            <TabsContent value="templates" className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Email Templates</CardTitle>
+                  <CardDescription>
+                    Customize email templates sent by the system
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {/* Template Selection */}
+                  <div className="space-y-2">
+                    <Label htmlFor="templateSelect">Select Template</Label>
+                    <Select
+                      value={selectedTemplate}
+                      onValueChange={(value) => {
+                        setSelectedTemplate(value);
+                        const template = emailTemplates?.find((t: any) => t.name === value);
+                        if (template) {
+                          setTemplateData(template);
+                        }
+                      }}
+                    >
+                      <SelectTrigger id="templateSelect">
+                        <SelectValue placeholder="Choose a template to edit" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ticket_created">Ticket Created</SelectItem>
+                        <SelectItem value="ticket_assigned">Ticket Assigned</SelectItem>
+                        <SelectItem value="ticket_updated">Ticket Updated</SelectItem>
+                        <SelectItem value="ticket_resolved">Ticket Resolved</SelectItem>
+                        <SelectItem value="ticket_comment">New Comment</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {templateData && (
+                    <>
+                      <Separator />
+                      
+                      {/* Template Editor */}
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="subject">Email Subject</Label>
+                          <Input
+                            id="subject"
+                            value={templateData.subject || ""}
+                            onChange={(e) => setTemplateData({...templateData, subject: e.target.value})}
+                            placeholder="Email subject line"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="htmlBody">HTML Body</Label>
+                          <textarea
+                            id="htmlBody"
+                            className="w-full min-h-[200px] p-3 border rounded-md font-mono text-sm"
+                            value={templateData.htmlBody || ""}
+                            onChange={(e) => setTemplateData({...templateData, htmlBody: e.target.value})}
+                            placeholder="HTML email template"
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Available variables: {{ticketNumber}}, {{title}}, {{assignedTo}}, {{status}}, {{priority}}
+                          </p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="textBody">Plain Text Body</Label>
+                          <textarea
+                            id="textBody"
+                            className="w-full min-h-[150px] p-3 border rounded-md font-mono text-sm"
+                            value={templateData.textBody || ""}
+                            onChange={(e) => setTemplateData({...templateData, textBody: e.target.value})}
+                            placeholder="Plain text email template"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <Button 
+                          onClick={() => updateEmailTemplateMutation.mutate({ 
+                            name: selectedTemplate, 
+                            template: templateData 
+                          })}
+                          disabled={updateEmailTemplateMutation.isPending}
+                        >
+                          {updateEmailTemplateMutation.isPending ? "Saving..." : "Save Template"}
+                        </Button>
+                        <Button 
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedTemplate("");
+                            setTemplateData(null);
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>

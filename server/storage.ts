@@ -8,6 +8,8 @@ import {
   taskAttachments,
   companySettings,
   apiKeys,
+  smtpSettings,
+  emailTemplates,
   type User,
   type UpsertUser,
   type Task,
@@ -25,6 +27,10 @@ import {
   type InsertCompanySettings,
   type ApiKey,
   type InsertApiKey,
+  type SmtpSettings,
+  type InsertSmtpSettings,
+  type EmailTemplate,
+  type InsertEmailTemplate,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, like, count, sql, isNotNull } from "drizzle-orm";
@@ -116,6 +122,15 @@ export interface IStorage {
   getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined>;
   updateApiKeyLastUsed(id: number): Promise<void>;
   revokeApiKey(id: number): Promise<void>;
+  
+  // SMTP settings operations
+  getSmtpSettings(): Promise<SmtpSettings | undefined>;
+  updateSmtpSettings(settings: InsertSmtpSettings, userId: string): Promise<SmtpSettings>;
+  
+  // Email template operations
+  getEmailTemplates(): Promise<EmailTemplate[]>;
+  getEmailTemplate(name: string): Promise<EmailTemplate | undefined>;
+  updateEmailTemplate(name: string, template: Partial<InsertEmailTemplate>, userId: string): Promise<EmailTemplate>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -765,6 +780,74 @@ export class DatabaseStorage implements IStorage {
       .update(apiKeys)
       .set({ isActive: false })
       .where(eq(apiKeys.id, id));
+  }
+
+  // SMTP settings operations
+  async getSmtpSettings(): Promise<SmtpSettings | undefined> {
+    const [settings] = await db.select().from(smtpSettings).where(eq(smtpSettings.isActive, true));
+    return settings;
+  }
+
+  async updateSmtpSettings(settings: InsertSmtpSettings, userId: string): Promise<SmtpSettings> {
+    const existingSettings = await this.getSmtpSettings();
+    
+    if (existingSettings) {
+      const [updated] = await db.update(smtpSettings)
+        .set({
+          ...settings,
+          updatedBy: userId,
+          updatedAt: new Date(),
+        })
+        .where(eq(smtpSettings.id, existingSettings.id))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db.insert(smtpSettings)
+        .values({
+          ...settings,
+          updatedBy: userId,
+        })
+        .returning();
+      return created;
+    }
+  }
+
+  // Email template operations
+  async getEmailTemplates(): Promise<EmailTemplate[]> {
+    return await db.select().from(emailTemplates).orderBy(emailTemplates.name);
+  }
+
+  async getEmailTemplate(name: string): Promise<EmailTemplate | undefined> {
+    const [template] = await db.select().from(emailTemplates).where(eq(emailTemplates.name, name));
+    return template;
+  }
+
+  async updateEmailTemplate(name: string, template: Partial<InsertEmailTemplate>, userId: string): Promise<EmailTemplate> {
+    const existingTemplate = await this.getEmailTemplate(name);
+    
+    if (existingTemplate) {
+      const [updated] = await db.update(emailTemplates)
+        .set({
+          ...template,
+          updatedBy: userId,
+          updatedAt: new Date(),
+        })
+        .where(eq(emailTemplates.name, name))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db.insert(emailTemplates)
+        .values({
+          name,
+          subject: template.subject || 'Default Subject',
+          body: template.body || 'Default Body',
+          variables: template.variables || [],
+          isActive: template.isActive ?? true,
+          updatedBy: userId,
+        })
+        .returning();
+      return created;
+    }
   }
 }
 

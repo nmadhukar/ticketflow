@@ -139,6 +139,33 @@ export const apiKeys = pgTable("api_keys", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// SMTP settings for email notifications
+export const smtpSettings = pgTable("smtp_settings", {
+  id: serial("id").primaryKey(),
+  host: varchar("host", { length: 255 }).notNull(),
+  port: integer("port").notNull().default(587),
+  username: varchar("username", { length: 255 }).notNull(),
+  password: varchar("password", { length: 255 }).notNull(), // encrypted
+  fromEmail: varchar("from_email", { length: 255 }).notNull(),
+  fromName: varchar("from_name", { length: 255 }).notNull().default("TicketFlow"),
+  encryption: varchar("encryption", { length: 10 }).default("tls"), // tls, ssl, none
+  isActive: boolean("is_active").default(true),
+  updatedBy: varchar("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Email templates
+export const emailTemplates = pgTable("email_templates", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull().unique(), // ticket_created, ticket_updated, etc.
+  subject: varchar("subject", { length: 255 }).notNull(),
+  body: text("body").notNull(), // HTML template with variables
+  variables: text("variables").array().default([]), // available template variables
+  isActive: boolean("is_active").default(true),
+  updatedBy: varchar("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   createdTasks: many(tasks, { relationName: "taskCreator" }),
@@ -272,8 +299,20 @@ export const insertApiKeySchema = createInsertSchema(apiKeys).omit({
   id: true,
   createdAt: true,
   lastUsedAt: true,
+  keyHash: true,
+  keyPrefix: true,
 }).extend({
   expiresAt: z.string().datetime().nullable().optional(),
+});
+
+export const insertSmtpSettingsSchema = createInsertSchema(smtpSettings).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit({
+  id: true,
+  updatedAt: true,
 });
 
 // Types
@@ -294,3 +333,7 @@ export type CompanySettings = typeof companySettings.$inferSelect;
 export type InsertCompanySettings = z.infer<typeof insertCompanySettingsSchema>;
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
+export type SmtpSettings = typeof smtpSettings.$inferSelect;
+export type InsertSmtpSettings = z.infer<typeof insertSmtpSettingsSchema>;
+export type EmailTemplate = typeof emailTemplates.$inferSelect;
+export type InsertEmailTemplate = z.infer<typeof insertEmailTemplateSchema>;

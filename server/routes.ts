@@ -600,6 +600,118 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // SMTP settings routes (admin only)
+  app.get("/api/smtp/settings", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const settings = await storage.getSmtpSettings();
+      res.json(settings || null);
+    } catch (error) {
+      console.error("Error fetching SMTP settings:", error);
+      res.status(500).json({ message: "Failed to fetch SMTP settings" });
+    }
+  });
+
+  app.post("/api/smtp/settings", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const settings = await storage.updateSmtpSettings(req.body, userId);
+      res.json(settings);
+    } catch (error) {
+      console.error("Error updating SMTP settings:", error);
+      res.status(500).json({ message: "Failed to update SMTP settings" });
+    }
+  });
+
+  // Email template routes (admin only)
+  app.get("/api/email/templates", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const templates = await storage.getEmailTemplates();
+      res.json(templates);
+    } catch (error) {
+      console.error("Error fetching email templates:", error);
+      res.status(500).json({ message: "Failed to fetch email templates" });
+    }
+  });
+
+  app.get("/api/email/templates/:name", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const template = await storage.getEmailTemplate(req.params.name);
+      if (template) {
+        res.json(template);
+      } else {
+        res.status(404).json({ message: "Template not found" });
+      }
+    } catch (error) {
+      console.error("Error fetching email template:", error);
+      res.status(500).json({ message: "Failed to fetch email template" });
+    }
+  });
+
+  app.put("/api/email/templates/:name", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const template = await storage.updateEmailTemplate(req.params.name, req.body, userId);
+      res.json(template);
+    } catch (error) {
+      console.error("Error updating email template:", error);
+      res.status(500).json({ message: "Failed to update email template" });
+    }
+  });
+
+  // Send test email (admin only)
+  app.post("/api/email/test", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      // This will be implemented when we integrate SendGrid
+      const { to, templateName } = req.body;
+      
+      // For now, just return success
+      res.json({ message: "Test email functionality will be available after SendGrid integration" });
+    } catch (error) {
+      console.error("Error sending test email:", error);
+      res.status(500).json({ message: "Failed to send test email" });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

@@ -14,6 +14,7 @@ import TeamDetail from "@/pages/team-detail";
 import AdminPanel from "@/pages/admin";
 import Settings from "@/pages/settings";
 import Notifications from "@/pages/notifications";
+import ApiDocs from "@/pages/api-docs";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -34,6 +35,7 @@ function Router() {
           <Route path="/notifications" component={Notifications} />
         </>
       )}
+      <Route path="/api-docs" component={ApiDocs} />
       <Route component={NotFound} />
     </Switch>
   );
