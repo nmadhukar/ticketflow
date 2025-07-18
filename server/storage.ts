@@ -219,8 +219,40 @@ export class DatabaseStorage implements IStorage {
     return createdTask;
   }
 
-  async getTask(id: number): Promise<Task | undefined> {
-    const [task] = await db.select().from(tasks).where(eq(tasks.id, id));
+  async getTask(id: number): Promise<any | undefined> {
+    const [task] = await db
+      .select({
+        id: tasks.id,
+        ticketNumber: tasks.ticketNumber,
+        title: tasks.title,
+        description: tasks.description,
+        category: tasks.category,
+        status: tasks.status,
+        priority: tasks.priority,
+        severity: tasks.severity,
+        assigneeId: tasks.assigneeId,
+        assigneeType: tasks.assigneeType,
+        createdBy: tasks.createdBy,
+        notes: tasks.notes,
+        dueDate: tasks.dueDate,
+        resolvedAt: tasks.resolvedAt,
+        closedAt: tasks.closedAt,
+        estimatedHours: tasks.estimatedHours,
+        actualHours: tasks.actualHours,
+        tags: tasks.tags,
+        createdAt: tasks.createdAt,
+        updatedAt: tasks.updatedAt,
+        creatorName: sql<string>`COALESCE(creator.first_name || ' ' || creator.last_name, creator.email, 'Unknown')`,
+        assigneeName: sql<string>`CASE 
+          WHEN ${tasks.assigneeType} = 'team' THEN team.name
+          ELSE COALESCE(assignee.first_name || ' ' || assignee.last_name, assignee.email)
+        END`,
+      })
+      .from(tasks)
+      .leftJoin(sql`${users} as creator`, sql`creator.id = ${tasks.createdBy}`)
+      .leftJoin(sql`${users} as assignee`, sql`assignee.id = ${tasks.assigneeId} AND ${tasks.assigneeType} = 'user'`)
+      .leftJoin(teams, sql`${teams.id}::varchar = ${tasks.assigneeId} AND ${tasks.assigneeType} = 'team'`)
+      .where(eq(tasks.id, id));
     return task;
   }
 
@@ -232,7 +264,7 @@ export class DatabaseStorage implements IStorage {
     search?: string;
     limit?: number;
     offset?: number;
-  } = {}): Promise<Task[]> {
+  } = {}): Promise<any[]> {
     const conditions = [];
     
     if (filters.status) {
@@ -260,7 +292,39 @@ export class DatabaseStorage implements IStorage {
       );
     }
     
-    let query = db.select().from(tasks);
+    let query = db
+      .select({
+        id: tasks.id,
+        ticketNumber: tasks.ticketNumber,
+        title: tasks.title,
+        description: tasks.description,
+        category: tasks.category,
+        status: tasks.status,
+        priority: tasks.priority,
+        severity: tasks.severity,
+        assigneeId: tasks.assigneeId,
+        assigneeType: tasks.assigneeType,
+        createdBy: tasks.createdBy,
+        notes: tasks.notes,
+        dueDate: tasks.dueDate,
+        resolvedAt: tasks.resolvedAt,
+        closedAt: tasks.closedAt,
+        estimatedHours: tasks.estimatedHours,
+        actualHours: tasks.actualHours,
+        tags: tasks.tags,
+        createdAt: tasks.createdAt,
+        updatedAt: tasks.updatedAt,
+        creatorName: sql<string>`COALESCE(creator.first_name || ' ' || creator.last_name, creator.email, 'Unknown')`,
+        assigneeName: sql<string>`CASE 
+          WHEN ${tasks.assigneeType} = 'team' THEN team.name
+          ELSE COALESCE(assignee.first_name || ' ' || assignee.last_name, assignee.email)
+        END`,
+      })
+      .from(tasks)
+      .leftJoin(users, sql`${users.id} = ${tasks.createdBy}`)
+      .leftJoin(sql`${users} as assignee`, sql`assignee.id = ${tasks.assigneeId} AND ${tasks.assigneeType} = 'user'`)
+      .leftJoin(teams, sql`${teams.id}::varchar = ${tasks.assigneeId} AND ${tasks.assigneeType} = 'team'`)
+      .leftJoin(sql`${users} as creator`, sql`creator.id = ${tasks.createdBy}`);
     
     if (conditions.length > 0) {
       query = query.where(and(...conditions));

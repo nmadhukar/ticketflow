@@ -51,6 +51,15 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - Implemented visual indicators for active filters with badges and clear button
 - Stats cards show active state with ring highlight when filtering is applied
 - Fixed duplicate sidebar issues in Settings and Teams pages by removing redundant Layout wrappers
+- Created comprehensive user guide management system with database tables for guides and categories
+- Built admin interface for managing Scribehow guides, HTML content, and video embeds organized by categories
+- Implemented user-facing guide interface with search and category filtering capabilities
+- Added User Guides to sidebar navigation and integrated guide management link in admin Help Documentation section
+- Fixed task attachment date display issue (was showing "invalid" because code referenced uploadedAt instead of createdAt field)
+- Enhanced task tracking to show creator information throughout the system with proper database joins
+- Updated task modal to display "Created by [user] on [date]" in the header section
+- Modified tasks listing pages to show creator name and creation date in the tables
+- Added creator information to dashboard recent tasks display for better visibility
 
 ## System Architecture
 

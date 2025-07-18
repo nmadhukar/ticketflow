@@ -412,7 +412,17 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                     {task ? `Edit Task ${task.ticketNumber || ''}` : "Create New Task"}
                   </DialogTitle>
                   <DialogDescription className="text-slate-600 mt-1">
-                    {task ? "Update the task details and track progress." : "Fill in the details to create a new task for your team."}
+                    {task ? (
+                      <div className="space-y-1">
+                        <p>Update the task details and track progress.</p>
+                        {task.creatorName && (
+                          <p className="text-xs flex items-center gap-1">
+                            <User className="h-3 w-3" />
+                            Created by {task.creatorName} on {new Date(task.createdAt).toLocaleDateString()}
+                          </p>
+                        )}
+                      </div>
+                    ) : "Fill in the details to create a new task for your team."}
                   </DialogDescription>
                 </div>
                 {task && (
@@ -898,7 +908,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                       <p className="text-xs text-slate-500">
                                         {(attachment.fileSize / 1024).toFixed(2)} KB • 
                                         Uploaded by {attachment.userName} on{' '}
-                                        {new Date(attachment.uploadedAt).toLocaleDateString()}
+                                        {new Date(attachment.createdAt).toLocaleDateString()}
                                       </p>
                                     </div>
                                   </div>

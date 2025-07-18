@@ -255,7 +255,12 @@ export default function Dashboard() {
                             </Badge>
                             {task.assigneeId && (
                               <span className="text-sm text-muted-foreground">
-                                Assigned to: {task.assigneeId}
+                                Assigned to: {task.assigneeName || task.assigneeId}
+                              </span>
+                            )}
+                            {task.creatorName && (
+                              <span className="text-sm text-muted-foreground">
+                                Created by: {task.creatorName}
                               </span>
                             )}
                             {task.dueDate && (

@@ -356,7 +356,8 @@ export default function MyTasks() {
                           </td>
                           <td className="p-4">
                             <div className="text-sm text-slate-600">
-                              {getTimeAgo(task.createdAt)}
+                              <div>{task.creatorName || 'Unknown'}</div>
+                              <div className="text-xs">{getTimeAgo(task.createdAt)}</div>
                             </div>
                           </td>
                           <td className="p-4">
