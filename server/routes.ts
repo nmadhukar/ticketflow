@@ -291,6 +291,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/admin/users/:userId/assign-team", isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(req.user.claims.sub);
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      const { userId } = req.params;
+      const { teamId, role } = req.body;
+      
+      const teamMember = await storage.assignUserToTeam(userId, teamId, role);
+      res.json(teamMember);
+    } catch (error) {
+      console.error("Error assigning user to team:", error);
+      res.status(500).json({ message: "Failed to assign user to team" });
+    }
+  });
+
+  app.delete("/api/admin/users/:userId/remove-team/:teamId", isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(req.user.claims.sub);
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      const { userId, teamId } = req.params;
+      await storage.removeUserFromTeam(userId, parseInt(teamId));
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error removing user from team:", error);
+      res.status(500).json({ message: "Failed to remove user from team" });
+    }
+  });
+
+  app.get("/api/admin/departments", isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(req.user.claims.sub);
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      const departments = await storage.getDepartments();
+      res.json(departments);
+    } catch (error) {
+      console.error("Error fetching departments:", error);
+      res.status(500).json({ message: "Failed to fetch departments" });
+    }
+  });
+
   // Statistics
   app.get("/api/stats", isAuthenticated, async (req: any, res) => {
     try {

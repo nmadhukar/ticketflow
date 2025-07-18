@@ -44,6 +44,11 @@ export default function AdminPanel() {
     retry: false,
   });
 
+  const { data: departments } = useQuery({
+    queryKey: ["/api/admin/departments"],
+    retry: false,
+  });
+
   const updateUserMutation = useMutation({
     mutationFn: async (userData: any) => {
       return await apiRequest("PATCH", `/api/admin/users/${userData.id}`, userData);
@@ -74,6 +79,19 @@ export default function AdminPanel() {
       toast({
         title: "Success",
         description: "User status updated",
+      });
+    },
+  });
+
+  const assignTeamMutation = useMutation({
+    mutationFn: async ({ userId, teamId, role }: { userId: string; teamId: number; role: string }) => {
+      return await apiRequest("POST", `/api/admin/users/${userId}/assign-team`, { teamId, role });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      toast({
+        title: "Success",
+        description: "User assigned to team",
       });
     },
   });
@@ -205,6 +223,29 @@ export default function AdminPanel() {
                           >
                             Edit
                           </Button>
+                          <Select
+                            onValueChange={(teamId) => {
+                              if (teamId && teamId !== "none") {
+                                assignTeamMutation.mutate({
+                                  userId: user.id,
+                                  teamId: parseInt(teamId),
+                                  role: "member"
+                                });
+                              }
+                            }}
+                          >
+                            <SelectTrigger className="w-[120px]">
+                              <SelectValue placeholder="Assign Team" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">No Team</SelectItem>
+                              {teams?.map((team: any) => (
+                                <SelectItem key={team.id} value={team.id.toString()}>
+                                  {team.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                           <Button
                             size="sm"
                             variant="outline"
@@ -332,10 +373,21 @@ export default function AdminPanel() {
               </div>
               <div className="space-y-2">
                 <Label>Department</Label>
-                <Input
+                <Select
                   value={selectedUser.department || ""}
-                  onChange={(e) => setSelectedUser({ ...selectedUser, department: e.target.value })}
-                />
+                  onValueChange={(value) => setSelectedUser({ ...selectedUser, department: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select department" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {departments?.map((dept: string) => (
+                      <SelectItem key={dept} value={dept}>
+                        {dept}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label>Phone</Label>

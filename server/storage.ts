@@ -408,6 +408,61 @@ export class DatabaseStorage implements IStorage {
     return updatedUser;
   }
 
+  async assignUserToTeam(userId: string, teamId: number, role: string = "member"): Promise<TeamMember> {
+    const [teamMember] = await db
+      .insert(teamMembers)
+      .values({
+        teamId,
+        userId,
+        role,
+      })
+      .onConflictDoUpdate({
+        target: [teamMembers.teamId, teamMembers.userId],
+        set: {
+          role,
+        },
+      })
+      .returning();
+    
+    return teamMember;
+  }
+
+  async removeUserFromTeam(userId: string, teamId: number): Promise<void> {
+    await db
+      .delete(teamMembers)
+      .where(and(
+        eq(teamMembers.userId, userId),
+        eq(teamMembers.teamId, teamId)
+      ));
+  }
+
+  async getDepartments(): Promise<string[]> {
+    const departments = await db
+      .selectDistinct({ department: users.department })
+      .from(users)
+      .where(isNotNull(users.department));
+    
+    const validDepartments = departments
+      .map(d => d.department)
+      .filter((dept): dept is string => dept !== null && dept !== undefined)
+      .sort();
+    
+    // If no departments exist, return some common ones
+    if (validDepartments.length === 0) {
+      return [
+        "Engineering", 
+        "Product", 
+        "Sales", 
+        "Marketing", 
+        "Support", 
+        "HR", 
+        "Finance"
+      ];
+    }
+    
+    return validDepartments;
+  }
+
   // Statistics
   async getTaskStats(userId?: string): Promise<{
     total: number;
