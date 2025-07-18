@@ -1,3 +1,12 @@
+/**
+ * TicketFlow API Routes
+ * 
+ * This module defines all REST API endpoints for the TicketFlow application.
+ * Routes are organized by feature area and protected by authentication middleware.
+ * 
+ * @module routes
+ */
+
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
@@ -15,6 +24,12 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 
+/**
+ * Registers all application routes and returns HTTP server instance
+ * 
+ * @param app - Express application instance
+ * @returns HTTP server with WebSocket support
+ */
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
   await setupAuth(app);

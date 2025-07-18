@@ -168,6 +168,18 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 3. Task assignment supports both individual users and teams
 4. Comments and history provide collaboration features
 
+## Documentation
+
+### Available Documentation
+The project includes comprehensive technical documentation in the `docs/` directory:
+
+1. **[Database Schema Documentation](docs/database-schema.md)** - Complete database structure with all tables, relationships, and indexes
+2. **[Database Schema Diagram](docs/database-schema-diagram.md)** - Visual ERD representation of the database
+3. **[System Architecture](docs/system-architecture.md)** - High-level system design with component diagrams
+4. **[Technical Design Document](docs/technical-design-document.md)** - Detailed technical implementation guide
+5. **[Technical Requirements Document](docs/technical-requirements-document.md)** - Complete functional and non-functional requirements
+6. **[Code Review Report](docs/code-review-report.md)** - Comprehensive code quality analysis and recommendations
+
 ## External Dependencies
 
 ### Core Dependencies

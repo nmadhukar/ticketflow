@@ -56,10 +56,36 @@ import {
 import { db } from "./db";
 import { eq, desc, and, or, like, count, sql, isNotNull } from "drizzle-orm";
 
+/**
+ * Storage Interface for TicketFlow
+ * 
+ * This interface defines all database operations for the application.
+ * Implementations should handle database transactions, error handling,
+ * and maintain data integrity across all operations.
+ * 
+ * @interface IStorage
+ */
 export interface IStorage {
   // User operations (mandatory for Replit Auth)
+  
+  /**
+   * Retrieves a user by their unique identifier
+   * @param id - User ID (from authentication provider)
+   * @returns User object or undefined if not found
+   */
   getUser(id: string): Promise<User | undefined>;
+  
+  /**
+   * Creates or updates a user record
+   * @param user - User data to insert or update
+   * @returns Updated user object
+   */
   upsertUser(user: UpsertUser): Promise<User>;
+  
+  /**
+   * Retrieves all users in the system
+   * @returns Array of all users
+   */
   getAllUsers(): Promise<User[]>;
   
   // Task operations
