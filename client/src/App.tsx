@@ -18,7 +18,7 @@ import AdminPanel from "@/pages/admin";
 import Settings from "@/pages/settings";
 import Notifications from "@/pages/notifications";
 import ApiDocs from "@/pages/api-docs";
-import LoginPage from "@/pages/login-page";
+import AuthPage from "@/pages/auth-page";
 import UserGuides from "@/pages/user-guides";
 import AdminGuides from "@/pages/admin-guides";
 import Departments from "@/pages/departments";
@@ -35,7 +35,7 @@ function Router() {
   return (
     <>
       <Switch>
-        <Route path="/login" component={LoginPage} />
+        <Route path="/auth" component={AuthPage} />
         <Route path="/api-docs" component={ApiDocs} />
         
         {!isAuthenticated ? (

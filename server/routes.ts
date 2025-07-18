@@ -10,7 +10,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { setupAuth, isAuthenticated } from "./replitAuth";
+import { setupAuth, isAuthenticated } from "./auth";
 import { setupMicrosoftAuth, isMicrosoftUser } from "./microsoftAuth";
 import { teamsIntegration } from "./microsoftTeams";
 import { sendTestEmail } from "./sendgrid";
@@ -35,17 +35,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   await setupAuth(app);
   await setupMicrosoftAuth(app);
 
-  // Auth routes
-  app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
-      res.json(user);
-    } catch (error) {
-      console.error("Error fetching user:", error);
-      res.status(500).json({ message: "Failed to fetch user" });
-    }
-  });
+  // Auth routes are now handled in auth.ts
 
   // Users route
   app.get('/api/users', isAuthenticated, async (req, res) => {
@@ -58,10 +48,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Helper to get user ID from request
+  const getUserId = (req: any): string => {
+    return req.user?.id || req.user?.claims?.sub;
+  };
+
   // Task routes
   app.get("/api/tasks", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const user = await storage.getUser(userId);
       
       const { status, category, assigneeId, search, limit, offset } = req.query;
@@ -91,7 +86,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/tasks/my", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const { status, category, search, limit, offset } = req.query;
       const tasks = await storage.getTasks({
         assigneeId: userId,
@@ -115,7 +110,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid task ID" });
       }
       
-      const userId = req.user.claims.sub;
+      const userId = getUserId(req);
       const user = await storage.getUser(userId);
       const task = await storage.getTask(taskId);
       

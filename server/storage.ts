@@ -88,6 +88,48 @@ export interface IStorage {
    */
   getAllUsers(): Promise<User[]>;
   
+  /**
+   * Creates a new user
+   * @param user - User data to insert
+   * @returns Created user object
+   */
+  createUser(user: InsertUser): Promise<User>;
+  
+  /**
+   * Retrieves a user by email
+   * @param email - User email address
+   * @returns User object or undefined if not found
+   */
+  getUserByEmail(email: string): Promise<User | undefined>;
+  
+  /**
+   * Sets password reset token for a user
+   * @param userId - User ID
+   * @param token - Reset token
+   * @param expires - Token expiration date
+   */
+  setPasswordResetToken(userId: string, token: string, expires: Date): Promise<void>;
+  
+  /**
+   * Retrieves a user by password reset token
+   * @param token - Reset token
+   * @returns User object or undefined if not found or token expired
+   */
+  getUserByResetToken(token: string): Promise<User | undefined>;
+  
+  /**
+   * Updates user password
+   * @param userId - User ID
+   * @param hashedPassword - New hashed password
+   */
+  updateUserPassword(userId: string, hashedPassword: string): Promise<void>;
+  
+  /**
+   * Clears password reset token for a user
+   * @param userId - User ID
+   */
+  clearPasswordResetToken(userId: string): Promise<void>;
+  
   // Task operations
   createTask(task: InsertTask): Promise<Task>;
   getTask(id: number): Promise<Task | undefined>;
@@ -251,6 +293,61 @@ export class DatabaseStorage implements IStorage {
 
   async getAllUsers(): Promise<User[]> {
     return await db.select().from(users);
+  }
+
+  async createUser(user: InsertUser): Promise<User> {
+    const [createdUser] = await db.insert(users).values(user).returning();
+    return createdUser;
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user;
+  }
+
+  async setPasswordResetToken(userId: string, token: string, expires: Date): Promise<void> {
+    await db
+      .update(users)
+      .set({
+        passwordResetToken: token,
+        passwordResetExpires: expires,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+  }
+
+  async getUserByResetToken(token: string): Promise<User | undefined> {
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(
+        and(
+          eq(users.passwordResetToken, token),
+          sql`${users.passwordResetExpires} > NOW()`
+        )
+      );
+    return user;
+  }
+
+  async updateUserPassword(userId: string, hashedPassword: string): Promise<void> {
+    await db
+      .update(users)
+      .set({
+        password: hashedPassword,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+  }
+
+  async clearPasswordResetToken(userId: string): Promise<void> {
+    await db
+      .update(users)
+      .set({
+        passwordResetToken: null,
+        passwordResetExpires: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
   }
 
   // Task operations
