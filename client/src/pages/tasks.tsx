@@ -10,9 +10,28 @@ import TaskModal from "@/components/task-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search, Filter, MoreVertical } from "lucide-react";
+import { 
+  Plus, 
+  Search, 
+  Filter, 
+  MoreVertical, 
+  Calendar, 
+  User, 
+  Clock, 
+  AlertTriangle,
+  CheckCircle,
+  CircleDot,
+  Tag,
+  Users,
+  FileText,
+  Eye,
+  Edit3,
+  Trash2,
+  Target,
+  Zap
+} from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,6 +45,7 @@ export default function Tasks() {
   const queryClient = useQueryClient();
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
+  const [viewMode, setViewMode] = useState("cards"); // cards or table
   const [filters, setFilters] = useState({
     search: "",
     status: "all",
@@ -89,32 +109,56 @@ export default function Tasks() {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   }
 
-  const getPriorityColor = (priority: string) => {
+  const getPriorityIcon = (priority: string) => {
     switch (priority) {
-      case "high": return "bg-red-500";
-      case "medium": return "bg-yellow-500";
-      case "low": return "bg-green-500";
-      default: return "bg-slate-300";
+      case "high": return <AlertTriangle className="h-4 w-4 text-red-500" />;
+      case "medium": return <CircleDot className="h-4 w-4 text-yellow-500" />;
+      case "low": return <CheckCircle className="h-4 w-4 text-green-500" />;
+      default: return <CircleDot className="h-4 w-4 text-slate-400" />;
+    }
+  };
+
+  const getCategoryIcon = (category: string) => {
+    switch (category) {
+      case "bug": return <AlertTriangle className="h-4 w-4 text-red-500" />;
+      case "feature": return <Zap className="h-4 w-4 text-blue-500" />;
+      case "support": return <User className="h-4 w-4 text-purple-500" />;
+      case "enhancement": return <Target className="h-4 w-4 text-green-500" />;
+      case "incident": return <AlertTriangle className="h-4 w-4 text-orange-500" />;
+      case "request": return <FileText className="h-4 w-4 text-blue-500" />;
+      default: return <Tag className="h-4 w-4 text-slate-400" />;
     }
   };
 
   const getCategoryColor = (category: string) => {
     switch (category) {
-      case "bug": return "bg-red-100 text-red-800";
-      case "feature": return "bg-blue-100 text-blue-800";
-      case "support": return "bg-purple-100 text-purple-800";
-      case "enhancement": return "bg-green-100 text-green-800";
-      default: return "bg-slate-100 text-slate-800";
+      case "bug": return "bg-red-50 text-red-700 border-red-200";
+      case "feature": return "bg-blue-50 text-blue-700 border-blue-200";
+      case "support": return "bg-purple-50 text-purple-700 border-purple-200";
+      case "enhancement": return "bg-green-50 text-green-700 border-green-200";
+      case "incident": return "bg-orange-50 text-orange-700 border-orange-200";
+      case "request": return "bg-slate-50 text-slate-700 border-slate-200";
+      default: return "bg-slate-50 text-slate-700 border-slate-200";
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "open": return "bg-blue-100 text-blue-800";
-      case "in_progress": return "bg-yellow-100 text-yellow-800";
-      case "resolved": return "bg-green-100 text-green-800";
-      case "closed": return "bg-slate-100 text-slate-800";
-      default: return "bg-slate-100 text-slate-800";
+      case "open": return "bg-blue-50 text-blue-700 border-blue-200";
+      case "in_progress": return "bg-yellow-50 text-yellow-700 border-yellow-200";
+      case "resolved": return "bg-green-50 text-green-700 border-green-200";
+      case "closed": return "bg-slate-50 text-slate-700 border-slate-200";
+      case "on_hold": return "bg-orange-50 text-orange-700 border-orange-200";
+      default: return "bg-slate-50 text-slate-700 border-slate-200";
+    }
+  };
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case "high": return "bg-red-50 text-red-700 border-red-200";
+      case "medium": return "bg-yellow-50 text-yellow-700 border-yellow-200";
+      case "low": return "bg-green-50 text-green-700 border-green-200";
+      default: return "bg-slate-50 text-slate-700 border-slate-200";
     }
   };
 
@@ -131,7 +175,8 @@ export default function Tasks() {
 
   const filteredTasks = tasks?.filter((task: any) => {
     if (filters.search && !task.title.toLowerCase().includes(filters.search.toLowerCase()) && 
-        !task.description?.toLowerCase().includes(filters.search.toLowerCase())) {
+        !task.description?.toLowerCase().includes(filters.search.toLowerCase()) &&
+        !task.ticketNumber?.toLowerCase().includes(filters.search.toLowerCase())) {
       return false;
     }
     if (filters.status && filters.status !== "all" && task.status !== filters.status) return false;
@@ -139,6 +184,25 @@ export default function Tasks() {
     if (filters.priority && filters.priority !== "all" && task.priority !== filters.priority) return false;
     return true;
   });
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  };
+
+  const getTimeAgo = (dateString: string) => {
+    const now = new Date();
+    const date = new Date(dateString);
+    const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
+    
+    if (diffInHours < 1) return "Just now";
+    if (diffInHours < 24) return `${diffInHours}h ago`;
+    if (diffInHours < 168) return `${Math.floor(diffInHours / 24)}d ago`;
+    return formatDate(dateString);
+  };
 
   return (
     <div className="min-h-screen flex bg-slate-50">
@@ -163,146 +227,247 @@ export default function Tasks() {
         />
         
         <main className="flex-1 p-6 overflow-y-auto">
-          {/* Filters */}
-          <div className="mb-6 space-y-4">
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="relative flex-1">
-                <Input
-                  placeholder="Search tasks..."
-                  value={filters.search}
-                  onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
-                  className="pl-10"
-                />
-                <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
-              </div>
-              
-              <Select value={filters.status} onValueChange={(value) => setFilters(prev => ({ ...prev, status: value }))}>
-                <SelectTrigger className="w-full sm:w-40">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="open">Open</SelectItem>
-                  <SelectItem value="in_progress">In Progress</SelectItem>
-                  <SelectItem value="resolved">Resolved</SelectItem>
-                  <SelectItem value="closed">Closed</SelectItem>
-                </SelectContent>
-              </Select>
-              
-              <Select value={filters.category} onValueChange={(value) => setFilters(prev => ({ ...prev, category: value }))}>
-                <SelectTrigger className="w-full sm:w-40">
-                  <SelectValue placeholder="Category" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Categories</SelectItem>
-                  <SelectItem value="bug">Bug</SelectItem>
-                  <SelectItem value="feature">Feature</SelectItem>
-                  <SelectItem value="support">Support</SelectItem>
-                  <SelectItem value="enhancement">Enhancement</SelectItem>
-                </SelectContent>
-              </Select>
-              
-              <Select value={filters.priority} onValueChange={(value) => setFilters(prev => ({ ...prev, priority: value }))}>
-                <SelectTrigger className="w-full sm:w-40">
-                  <SelectValue placeholder="Priority" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Priorities</SelectItem>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          {/* Enhanced Filters Bar */}
+          <Card className="mb-6 border-0 shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex flex-col lg:flex-row gap-4">
+                {/* Search */}
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                  <Input
+                    placeholder="Search by title, description, or ticket number..."
+                    value={filters.search}
+                    onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
+                    className="pl-10 h-10"
+                  />
+                </div>
+                
+                {/* Filter Controls */}
+                <div className="flex gap-3">
+                  <Select value={filters.status} onValueChange={(value) => setFilters(prev => ({ ...prev, status: value }))}>
+                    <SelectTrigger className="w-[140px] h-10">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Status</SelectItem>
+                      <SelectItem value="open">Open</SelectItem>
+                      <SelectItem value="in_progress">In Progress</SelectItem>
+                      <SelectItem value="resolved">Resolved</SelectItem>
+                      <SelectItem value="closed">Closed</SelectItem>
+                      <SelectItem value="on_hold">On Hold</SelectItem>
+                    </SelectContent>
+                  </Select>
 
-          {/* Tasks Grid */}
-          <div className="space-y-4">
-            {tasksLoading ? (
-              <div className="text-center py-12">Loading tasks...</div>
-            ) : filteredTasks && filteredTasks.length > 0 ? (
-              filteredTasks.map((task: any) => (
-                <Card key={task.id} className="hover:shadow-md transition-shadow">
-                  <CardContent className="p-6">
-                    <div className="flex items-start space-x-4">
-                      <div className={`w-3 h-3 rounded-full mt-2 ${getPriorityColor(task.priority)}`} />
-                      
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-slate-800 mb-2">{task.title}</h3>
-                        <p className="text-slate-600 mb-4">{task.description}</p>
-                        
-                        <div className="flex flex-wrap items-center gap-3 mb-4">
-                          <Badge className={getCategoryColor(task.category)}>
-                            {task.category}
-                          </Badge>
-                          <Badge className={getStatusColor(task.status)}>
-                            {task.status.replace('_', ' ')}
-                          </Badge>
-                          <Badge variant="outline">
-                            {task.priority} priority
-                          </Badge>
-                          {task.assigneeId && (
-                            <span className="text-sm text-slate-500">
-                              Assigned to: {task.assigneeId}
-                            </span>
-                          )}
-                          {task.dueDate && (
-                            <span className="text-sm text-slate-500">
-                              Due: {new Date(task.dueDate).toLocaleDateString()}
-                            </span>
-                          )}
-                        </div>
-                        
-                        <div className="text-xs text-slate-400">
-                          Created {new Date(task.createdAt).toLocaleDateString()} by {task.createdBy}
-                        </div>
-                      </div>
-                      
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm">
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleEditTask(task)}>
-                            Edit Task
-                          </DropdownMenuItem>
-                          <DropdownMenuItem 
-                            onClick={() => handleDeleteTask(task.id)}
-                            className="text-red-600"
-                          >
-                            Delete Task
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
-            ) : (
-              <div className="text-center py-12">
-                <div className="max-w-md mx-auto">
-                  <h3 className="text-lg font-medium text-slate-900 mb-2">No tasks found</h3>
-                  <p className="text-slate-500 mb-6">
-                    {filters.search || filters.status || filters.category || filters.priority
-                      ? "Try adjusting your filters to see more tasks."
-                      : "Get started by creating your first task."}
-                  </p>
-                  {!filters.search && (filters.status === "all" || !filters.status) && (filters.category === "all" || !filters.category) && (filters.priority === "all" || !filters.priority) && (
-                    <Button 
-                      onClick={() => {
-                        setEditingTask(null);
-                        setIsTaskModalOpen(true);
-                      }}
-                      className="bg-blue-600 hover:bg-blue-700"
+                  <Select value={filters.category} onValueChange={(value) => setFilters(prev => ({ ...prev, category: value }))}>
+                    <SelectTrigger className="w-[140px] h-10">
+                      <SelectValue placeholder="Category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Categories</SelectItem>
+                      <SelectItem value="bug">Bug</SelectItem>
+                      <SelectItem value="feature">Feature</SelectItem>
+                      <SelectItem value="support">Support</SelectItem>
+                      <SelectItem value="enhancement">Enhancement</SelectItem>
+                      <SelectItem value="incident">Incident</SelectItem>
+                      <SelectItem value="request">Request</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <Select value={filters.priority} onValueChange={(value) => setFilters(prev => ({ ...prev, priority: value }))}>
+                    <SelectTrigger className="w-[140px] h-10">
+                      <SelectValue placeholder="Priority" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Priorities</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="low">Low</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Active Filters & Stats */}
+              <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-slate-600">
+                    {filteredTasks?.length || 0} of {tasks?.length || 0} tasks
+                  </span>
+                  {(filters.search || filters.status !== "all" || filters.category !== "all" || filters.priority !== "all") && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setFilters({ search: "", status: "all", category: "all", priority: "all" })}
+                      className="h-7 px-2 text-slate-500 hover:text-slate-700"
                     >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Create First Task
+                      Clear filters
                     </Button>
                   )}
                 </div>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Tasks Grid */}
+          <div className="space-y-4">
+            {tasksLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[...Array(6)].map((_, i) => (
+                  <Card key={i} className="animate-pulse">
+                    <CardContent className="p-6">
+                      <div className="space-y-3">
+                        <div className="h-4 bg-slate-200 rounded w-3/4"></div>
+                        <div className="h-3 bg-slate-200 rounded w-1/2"></div>
+                        <div className="flex gap-2">
+                          <div className="h-6 bg-slate-200 rounded w-16"></div>
+                          <div className="h-6 bg-slate-200 rounded w-16"></div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : filteredTasks?.length > 0 ? (
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                {filteredTasks.map((task: any) => (
+                  <Card key={task.id} className="group hover:shadow-md transition-all duration-200 border-0 shadow-sm hover:shadow-lg">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2">
+                            <Badge variant="outline" className="text-xs font-mono bg-slate-50 text-slate-600">
+                              {task.ticketNumber}
+                            </Badge>
+                            <Badge className={`${getPriorityColor(task.priority)} border text-xs`}>
+                              <span className="flex items-center gap-1">
+                                {getPriorityIcon(task.priority)}
+                                {task.priority?.toUpperCase()}
+                              </span>
+                            </Badge>
+                          </div>
+                          <h3 className="font-semibold text-slate-900 text-base leading-tight line-clamp-2 group-hover:text-blue-600 transition-colors">
+                            {task.title}
+                          </h3>
+                          {task.description && (
+                            <p className="text-sm text-slate-600 mt-2 line-clamp-2">
+                              {task.description}
+                            </p>
+                          )}
+                        </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => handleEditTask(task)}>
+                              <Edit3 className="h-4 w-4 mr-2" />
+                              Edit Task
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleDeleteTask(task.id)} className="text-red-600">
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete Task
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                      <div className="space-y-3">
+                        {/* Status and Category */}
+                        <div className="flex flex-wrap gap-2">
+                          <Badge className={`${getStatusColor(task.status)} border text-xs`}>
+                            {task.status?.replace('_', ' ').toUpperCase()}
+                          </Badge>
+                          <Badge className={`${getCategoryColor(task.category)} border text-xs`}>
+                            <span className="flex items-center gap-1">
+                              {getCategoryIcon(task.category)}
+                              {task.category?.toUpperCase()}
+                            </span>
+                          </Badge>
+                        </div>
+
+                        {/* Assignment & Dates */}
+                        <div className="space-y-2 text-xs text-slate-600">
+                          {task.assigneeId && (
+                            <div className="flex items-center gap-2">
+                              <User className="h-3 w-3" />
+                              <span>Assigned to {task.assigneeName || task.assigneeId}</span>
+                            </div>
+                          )}
+                          {task.assigneeType === "team" && task.assigneeTeamId && (
+                            <div className="flex items-center gap-2">
+                              <Users className="h-3 w-3" />
+                              <span>Assigned to team</span>
+                            </div>
+                          )}
+                          {task.dueDate && (
+                            <div className="flex items-center gap-2">
+                              <Calendar className="h-3 w-3" />
+                              <span>Due {formatDate(task.dueDate)}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-3 w-3" />
+                            <span>Created {getTimeAgo(task.createdAt)}</span>
+                          </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex gap-2 pt-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleEditTask(task)}
+                            className="flex-1 h-8 text-xs"
+                          >
+                            <Edit3 className="h-3 w-3 mr-1" />
+                            Edit
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleEditTask(task)}
+                            className="flex-1 h-8 text-xs"
+                          >
+                            <Eye className="h-3 w-3 mr-1" />
+                            View
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <Card className="border-dashed border-2 border-slate-200">
+                <CardContent className="text-center py-12">
+                  <div className="max-w-md mx-auto">
+                    <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <FileText className="h-8 w-8 text-slate-400" />
+                    </div>
+                    <h3 className="text-lg font-medium text-slate-900 mb-2">No tasks found</h3>
+                    <p className="text-slate-500 mb-6">
+                      {filters.search || filters.status !== "all" || filters.category !== "all" || filters.priority !== "all"
+                        ? "Try adjusting your filters to see more tasks."
+                        : "Get started by creating your first task."}
+                    </p>
+                    {!filters.search && filters.status === "all" && filters.category === "all" && filters.priority === "all" && (
+                      <Button 
+                        onClick={() => {
+                          setEditingTask(null);
+                          setIsTaskModalOpen(true);
+                        }}
+                        className="bg-blue-600 hover:bg-blue-700"
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Create First Task
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
             )}
           </div>
         </main>
