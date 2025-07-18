@@ -52,7 +52,7 @@ export interface IStorage {
   
   // Comment operations
   addTaskComment(comment: InsertTaskComment): Promise<TaskComment>;
-  getTaskComments(taskId: number): Promise<(TaskComment & { user: User })[]>;
+  getTaskComments(taskId: number): Promise<(TaskComment & { userName?: string })[]>;
   
   // Statistics
   getTaskStats(userId?: string): Promise<{
@@ -292,7 +292,7 @@ export class DatabaseStorage implements IStorage {
     return createdComment;
   }
 
-  async getTaskComments(taskId: number): Promise<(TaskComment & { user: User })[]> {
+  async getTaskComments(taskId: number): Promise<(TaskComment & { userName?: string })[]> {
     const comments = await db
       .select({
         id: taskComments.id,
@@ -300,14 +300,22 @@ export class DatabaseStorage implements IStorage {
         userId: taskComments.userId,
         content: taskComments.content,
         createdAt: taskComments.createdAt,
-        user: users,
+        userName: users.firstName,
+        userEmail: users.email,
       })
       .from(taskComments)
-      .innerJoin(users, eq(taskComments.userId, users.id))
+      .leftJoin(users, eq(taskComments.userId, users.id))
       .where(eq(taskComments.taskId, taskId))
       .orderBy(desc(taskComments.createdAt));
-    
-    return comments;
+
+    return comments.map(comment => ({
+      id: comment.id,
+      taskId: comment.taskId,
+      userId: comment.userId,
+      content: comment.content,
+      createdAt: comment.createdAt,
+      userName: comment.userName || comment.userEmail || comment.userId,
+    }));
   }
 
   // Statistics
@@ -382,6 +390,8 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(taskHistory.createdAt))
       .limit(limit);
   }
+
+
 }
 
 export const storage = new DatabaseStorage();

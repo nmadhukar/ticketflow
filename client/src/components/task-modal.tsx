@@ -59,6 +59,12 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     enabled: isOpen,
   });
 
+  const { data: taskComments } = useQuery({
+    queryKey: ["/api/tasks", task?.id, "comments"],
+    enabled: !!task?.id && isOpen,
+    retry: false,
+  });
+
   useEffect(() => {
     if (task) {
       setFormData({
@@ -131,7 +137,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tasks/my"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
-      onClose();
+      if (!formData.notes.trim()) {
+        onClose();
+      }
       toast({
         title: "Success",
         description: "Task updated successfully",
@@ -152,6 +160,40 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       toast({
         title: "Error",
         description: "Failed to update task",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const addCommentMutation = useMutation({
+    mutationFn: async (commentData: any) => {
+      return await apiRequest("POST", `/api/tasks/${task.id}/comments`, commentData);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tasks", task.id, "comments"] });
+      // Clear the notes field after successful comment addition
+      setFormData(prev => ({ ...prev, notes: "" }));
+      onClose();
+      toast({
+        title: "Success",
+        description: "Progress note added successfully",
+      });
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: "Failed to add progress note",
         variant: "destructive",
       });
     },
@@ -184,7 +226,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       category: formData.category,
       priority: formData.priority,
       status: formData.status,
-      notes: formData.notes.trim(),
+      // Don't include notes in the task data - they are handled separately
       assigneeId: formData.assigneeType === "user" ? formData.assigneeId || null : null,
       assigneeTeamId: formData.assigneeType === "team" ? parseInt(formData.assigneeTeamId) || null : null,
       assigneeType: formData.assigneeType,
@@ -193,6 +235,13 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
 
     if (task) {
       updateTaskMutation.mutate(taskData);
+      // Add comment if notes were provided
+      if (formData.notes.trim()) {
+        addCommentMutation.mutate({
+          taskId: task.id,
+          content: formData.notes.trim(),
+        });
+      }
     } else {
       createTaskMutation.mutate(taskData);
     }
@@ -284,16 +333,39 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
             
             {task && (
               <div className="col-span-full">
-                <Label htmlFor="notes">Progress Notes & Updates</Label>
+                <Label htmlFor="notes">Add Progress Note</Label>
                 <Textarea
                   id="notes"
-                  placeholder="Add notes about progress, updates, or comments on this task..."
+                  placeholder="Add a new progress note, update, or comment..."
                   value={formData.notes}
                   onChange={(e) => handleInputChange("notes", e.target.value)}
-                  rows={4}
+                  rows={3}
                   className="mt-1"
                 />
-                <p className="text-xs text-gray-500 mt-1">Use this field to track work progress, blockers, or updates on the task.</p>
+                <p className="text-xs text-gray-500 mt-1">This will be added as a new note entry with your name and timestamp.</p>
+                
+                {taskComments && taskComments.length > 0 && (
+                  <div className="mt-4">
+                    <Label>Previous Notes & Updates</Label>
+                    <div className="mt-2 max-h-48 overflow-y-auto border rounded-lg p-3 bg-gray-50 dark:bg-gray-900 space-y-3">
+                      {taskComments.map((comment: any) => (
+                        <div key={comment.id} className="border-b border-gray-200 dark:border-gray-700 pb-2 last:border-b-0">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                              {comment.userName || comment.userId}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              {new Date(comment.createdAt).toLocaleString()}
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                            {comment.content}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             

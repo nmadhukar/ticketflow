@@ -260,6 +260,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get task comments
+  app.get("/api/tasks/:id/comments", isAuthenticated, async (req, res) => {
+    try {
+      const taskId = parseInt(req.params.id);
+      const comments = await storage.getTaskComments(taskId);
+      res.json(comments);
+    } catch (error) {
+      console.error("Error fetching task comments:", error);
+      res.status(500).json({ message: "Failed to fetch comments" });
+    }
+  });
+
+  // Add task comment
+  app.post("/api/tasks/:id/comments", isAuthenticated, async (req: any, res) => {
+    try {
+      const taskId = parseInt(req.params.id);
+      const userId = req.user.claims.sub;
+      const { content } = req.body;
+
+      if (!content || !content.trim()) {
+        return res.status(400).json({ message: "Comment content is required" });
+      }
+
+      const comment = await storage.addTaskComment({
+        taskId,
+        userId,
+        content: content.trim(),
+      });
+
+      res.status(201).json(comment);
+    } catch (error) {
+      console.error("Error creating task comment:", error);
+      res.status(500).json({ message: "Failed to create comment" });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
