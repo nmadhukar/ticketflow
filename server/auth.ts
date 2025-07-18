@@ -26,7 +26,7 @@ const scryptAsync = promisify(scrypt);
 /**
  * Hash a password using scrypt
  */
-async function hashPassword(password: string): Promise<string> {
+export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16).toString("hex");
   const buf = (await scryptAsync(password, salt, 64)) as Buffer;
   return `${buf.toString("hex")}.${salt}`;
@@ -170,6 +170,13 @@ export function setupAuth(app: Express) {
         return res.status(400).json({ message: "Email already registered" });
       }
 
+      // Check if this email has a pending invitation
+      const invitations = await storage.getUserInvitations({ status: 'pending' });
+      const invitation = invitations.find(inv => 
+        inv.email === validatedData.email && 
+        new Date(inv.expiresAt) > new Date()
+      );
+
       // Hash password
       const hashedPassword = await hashPassword(validatedData.password);
 
@@ -180,22 +187,33 @@ export function setupAuth(app: Express) {
         firstName: validatedData.firstName,
         lastName: validatedData.lastName,
         password: hashedPassword,
-        role: "customer", // All registrations are customer role
+        role: invitation ? invitation.role : "customer", // Use invitation role if exists
         isActive: true,
-        isApproved: false, // Requires admin approval
+        isApproved: invitation ? true : false, // Auto-approve if invited
+        departmentId: invitation?.departmentId || undefined,
       };
 
       const user = await storage.createUser(newUser);
 
-      // Don't log in automatically - user needs approval
+      // Mark invitation as accepted if exists
+      if (invitation) {
+        await storage.markInvitationAccepted(invitation.id);
+      }
+
+      // Don't log in automatically unless auto-approved
+      const message = invitation 
+        ? "Registration successful! You can now log in with your credentials."
+        : "Registration successful! Your account is pending admin approval. You will be notified once approved.";
+
       res.status(201).json({
-        message: "Registration successful! Your account is pending admin approval. You will be notified once approved.",
+        message,
         user: {
           id: user.id,
           email: user.email,
           firstName: user.firstName,
           lastName: user.lastName,
           role: user.role,
+          isApproved: user.isApproved,
         }
       });
     } catch (error) {
