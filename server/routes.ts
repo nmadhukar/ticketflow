@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
+import { sendTestEmail } from "./sendgrid";
 import { 
   insertTaskSchema, 
   insertTeamSchema, 
@@ -709,6 +710,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error sending test email:", error);
       res.status(500).json({ message: "Failed to send test email" });
+    }
+  });
+
+  // Test SMTP configuration
+  app.post('/api/smtp/test', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const { testEmail } = req.body;
+      
+      if (!testEmail) {
+        return res.status(400).json({ message: "Test email address is required" });
+      }
+
+      // Get current SMTP settings
+      const smtpSettings = await storage.getSmtpSettings();
+      
+      if (!smtpSettings) {
+        return res.status(400).json({ message: "SMTP settings not configured" });
+      }
+
+      // Test sending email
+      const success = await sendTestEmail(
+        smtpSettings.host,
+        smtpSettings.port,
+        smtpSettings.username,
+        smtpSettings.password || '',
+        smtpSettings.encryption,
+        smtpSettings.fromEmail,
+        smtpSettings.fromName,
+        testEmail
+      );
+
+      if (success) {
+        res.json({ message: "Test email sent successfully" });
+      } else {
+        res.status(500).json({ message: "Failed to send test email. Please check your SendGrid API key." });
+      }
+    } catch (error) {
+      console.error("SMTP test error:", error);
+      res.status(500).json({ message: "Failed to test SMTP configuration" });
     }
   });
 

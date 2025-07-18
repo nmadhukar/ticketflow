@@ -9,8 +9,17 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Layout } from "@/components/layout";
-import { User, Bell, Shield, Palette, Globe, Key, Building, Plus, Copy, Eye, EyeOff, Trash2, Mail, FileText } from "lucide-react";
+import { User, Bell, Shield, Palette, Globe, Key, Building, Plus, Copy, Eye, EyeOff, Trash2, Mail, FileText, Send } from "lucide-react";
 import { useState, useEffect } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -57,6 +66,10 @@ export default function Settings() {
   // Email template state
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
   const [templateData, setTemplateData] = useState<any>(null);
+  
+  // Test email state
+  const [showTestEmailDialog, setShowTestEmailDialog] = useState(false);
+  const [testEmailAddress, setTestEmailAddress] = useState("");
 
   // Fetch company settings
   const { data: companySettings } = useQuery({
@@ -294,6 +307,39 @@ export default function Settings() {
       description: "API key copied to clipboard",
     });
   };
+  
+  // Test email mutation
+  const testEmailMutation = useMutation({
+    mutationFn: async (testEmail: string) => {
+      return await apiRequest("POST", "/api/smtp/test", { testEmail });
+    },
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "Test email sent successfully! Check your inbox.",
+      });
+      setShowTestEmailDialog(false);
+      setTestEmailAddress("");
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: "Failed to send test email. Please check your SMTP settings.",
+        variant: "destructive",
+      });
+    },
+  });
 
   return (
     <Layout>
@@ -1068,7 +1114,12 @@ export default function Settings() {
                     <p className="text-sm text-muted-foreground mb-3">
                       Send a test email to verify your SMTP settings are working correctly.
                     </p>
-                    <Button variant="outline" size="sm">
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => setShowTestEmailDialog(true)}
+                    >
+                      <Send className="h-4 w-4 mr-2" />
                       Send Test Email
                     </Button>
                   </div>
@@ -1191,6 +1242,47 @@ export default function Settings() {
           )}
         </Tabs>
       </div>
+      
+      {/* Test Email Dialog */}
+      <Dialog open={showTestEmailDialog} onOpenChange={setShowTestEmailDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Send Test Email</DialogTitle>
+            <DialogDescription>
+              Enter an email address to send a test email and verify your SMTP settings.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="testEmail">Email Address</Label>
+              <Input
+                id="testEmail"
+                type="email"
+                placeholder="test@example.com"
+                value={testEmailAddress}
+                onChange={(e) => setTestEmailAddress(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowTestEmailDialog(false);
+                setTestEmailAddress("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => testEmailMutation.mutate(testEmailAddress)}
+              disabled={!testEmailAddress || testEmailMutation.isPending}
+            >
+              {testEmailMutation.isPending ? "Sending..." : "Send Test Email"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
