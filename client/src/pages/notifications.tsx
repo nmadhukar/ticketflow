@@ -197,11 +197,19 @@ export default function Notifications() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2">
                           <div 
-                            className={notification.actionUrl ? "cursor-pointer" : ""}
+                            className={notification.actionUrl ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}
                             onClick={() => {
                               if (notification.actionUrl) {
                                 markAsRead(notification.id);
-                                navigate("/");
+                                const path = notification.actionUrl;
+                                // For mock notifications, navigate to appropriate pages
+                                if (path.includes('/tasks/')) {
+                                  navigate("/my-tasks");
+                                } else if (path.includes('/teams/')) {
+                                  navigate("/teams");
+                                } else {
+                                  navigate("/");
+                                }
                               }
                             }}
                           >
@@ -273,9 +281,21 @@ export default function Notifications() {
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => {
-                                  // Since these are mock notifications with hardcoded URLs,
-                                  // we'll navigate to the dashboard instead
-                                  navigate("/");
+                                  // Extract the path from the actionUrl
+                                  const path = notification.actionUrl;
+                                  if (path) {
+                                    // For mock notifications, we'll navigate to appropriate pages
+                                    if (path.includes('/tasks/')) {
+                                      // Navigate to my tasks page since individual task routes aren't implemented
+                                      navigate("/my-tasks");
+                                    } else if (path.includes('/teams/')) {
+                                      // Navigate to teams page
+                                      navigate("/teams");
+                                    } else {
+                                      // Default to dashboard
+                                      navigate("/");
+                                    }
+                                  }
                                 }}
                               >
                                 View
