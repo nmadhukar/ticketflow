@@ -87,6 +87,7 @@ export async function setupMicrosoftAuth(app: Express) {
     useCookieInsteadOfSession: false,
     cookieSameSite: true,
     clockSkew: 300, // Allow 5 minutes clock skew
+    audience: clientId, // Add audience to match client ID
   };
 
   const verify = async (
@@ -150,6 +151,10 @@ export async function setupMicrosoftAuth(app: Express) {
   // Microsoft login route
   app.get("/api/auth/microsoft", (req, res, next) => {
     console.log("Microsoft login initiated");
+    console.log("Request host:", req.get('host'));
+    console.log("Request protocol:", req.protocol);
+    console.log("Full URL:", `${req.protocol}://${req.get('host')}${req.originalUrl}`);
+    
     try {
       passport.authenticate("azuread-openidconnect", {
         failureRedirect: "/auth?error=microsoft_auth_failed",
@@ -161,9 +166,12 @@ export async function setupMicrosoftAuth(app: Express) {
     }
   });
 
-  // Microsoft callback route
-  app.post("/api/auth/microsoft/callback", (req, res, next) => {
+  // Microsoft callback route - handle both GET and POST
+  const handleCallback = (req: any, res: any, next: any) => {
     console.log("Microsoft callback received");
+    console.log("Callback method:", req.method);
+    console.log("Callback body:", req.body);
+    
     passport.authenticate("azuread-openidconnect", {
       failureRedirect: "/auth?error=microsoft_auth_failed",
       failureMessage: true,
@@ -176,7 +184,7 @@ export async function setupMicrosoftAuth(app: Express) {
         console.error("Microsoft auth: No user returned");
         return res.redirect("/auth?error=microsoft_no_user");
       }
-      req.logIn(user, (loginErr) => {
+      req.logIn(user, (loginErr: any) => {
         if (loginErr) {
           console.error("Login error:", loginErr);
           return res.redirect("/auth?error=login_failed");
@@ -185,7 +193,10 @@ export async function setupMicrosoftAuth(app: Express) {
         res.redirect("/");
       });
     })(req, res, next);
-  });
+  };
+  
+  app.get("/api/auth/microsoft/callback", handleCallback);
+  app.post("/api/auth/microsoft/callback", handleCallback);
 
   console.log("Microsoft authentication configured successfully");
 }
