@@ -88,6 +88,9 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Implemented secure password hashing using bcrypt with proper salt generation**
 - **Maintained Microsoft 365 SSO option alongside new username/password authentication**
 - **Fixed passport deserialization errors and verified full authentication flow is working**
+- **Added user approval system where all new registrations require admin approval before login**
+- **Created admin interface to view pending users and approve them with one click**
+- **Added approval status display in user management table with visual badges**
 
 ## System Architecture
 

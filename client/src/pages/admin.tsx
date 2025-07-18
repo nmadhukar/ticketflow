@@ -90,6 +90,26 @@ export default function AdminPanel() {
     },
   });
 
+  const approveUserMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      return await apiRequest("POST", `/api/admin/users/${userId}/approve`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      toast({
+        title: "Success",
+        description: "User approved successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to approve user",
+        variant: "destructive",
+      });
+    },
+  });
+
   const assignTeamMutation = useMutation({
     mutationFn: async ({ userId, teamId, role }: { userId: string; teamId: number; role: string }) => {
       return await apiRequest("POST", `/api/admin/users/${userId}/assign-team`, { teamId, role });
@@ -298,6 +318,7 @@ export default function AdminPanel() {
                     <TableHead>Role</TableHead>
                     <TableHead>Department</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Approval</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -322,6 +343,13 @@ export default function AdminPanel() {
                         <Badge variant={user.isActive ? "default" : "secondary"}>
                           {user.isActive ? "Active" : "Inactive"}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {user.role === "customer" && (
+                          <Badge variant={user.isApproved ? "success" : "warning"}>
+                            {user.isApproved ? "Approved" : "Pending"}
+                          </Badge>
+                        )}
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-2">
@@ -362,6 +390,15 @@ export default function AdminPanel() {
                           >
                             {user.isActive ? <Ban className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
                           </Button>
+                          {user.role === "customer" && !user.isApproved && (
+                            <Button
+                              size="sm"
+                              variant="success"
+                              onClick={() => approveUserMutation.mutate(user.id)}
+                            >
+                              Approve
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>

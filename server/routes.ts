@@ -482,6 +482,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/admin/users/:userId/approve", isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(req.user.claims.sub);
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      const { userId } = req.params;
+      const updatedUser = await storage.approveUser(userId);
+      res.json(updatedUser);
+    } catch (error) {
+      console.error("Error approving user:", error);
+      res.status(500).json({ message: "Failed to approve user" });
+    }
+  });
+
   app.post("/api/admin/users/:userId/assign-team", isAuthenticated, async (req: any, res) => {
     try {
       const user = await storage.getUser(req.user.claims.sub);

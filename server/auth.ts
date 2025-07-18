@@ -132,6 +132,10 @@ export function setupAuth(app: Express) {
             return done(null, false, { message: "Account is deactivated" });
           }
 
+          if (!user.isApproved) {
+            return done(null, false, { message: "Your account is pending admin approval. Please wait for approval before logging in." });
+          }
+
           return done(null, user);
         } catch (error) {
           return done(error);
@@ -176,24 +180,23 @@ export function setupAuth(app: Express) {
         firstName: validatedData.firstName,
         lastName: validatedData.lastName,
         password: hashedPassword,
-        role: "user", // Default role
+        role: "customer", // All registrations are customer role
         isActive: true,
+        isApproved: false, // Requires admin approval
       };
 
       const user = await storage.createUser(newUser);
 
-      // Log user in
-      req.login(user, (err) => {
-        if (err) {
-          return res.status(500).json({ message: "Failed to log in after registration" });
-        }
-        res.status(201).json({
+      // Don't log in automatically - user needs approval
+      res.status(201).json({
+        message: "Registration successful! Your account is pending admin approval. You will be notified once approved.",
+        user: {
           id: user.id,
           email: user.email,
           firstName: user.firstName,
           lastName: user.lastName,
           role: user.role,
-        });
+        }
       });
     } catch (error) {
       if (error instanceof z.ZodError) {

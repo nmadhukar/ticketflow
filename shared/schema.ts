@@ -36,6 +36,7 @@ export const users = pgTable("users", {
   department: varchar("department", { length: 100 }),
   phone: varchar("phone", { length: 50 }),
   isActive: boolean("is_active").default(true),
+  isApproved: boolean("is_approved").default(false), // Admin must approve before login
   passwordResetToken: varchar("password_reset_token"),
   passwordResetExpires: timestamp("password_reset_expires"),
   createdAt: timestamp("created_at").defaultNow(),

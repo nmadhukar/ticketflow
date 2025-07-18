@@ -190,6 +190,7 @@ export interface IStorage {
     isActive?: boolean;
   }): Promise<User>;
   toggleUserStatus(userId: string): Promise<User>;
+  approveUser(userId: string): Promise<User>;
   assignUserToTeam(userId: string, teamId: number, role?: string): Promise<TeamMember>;
   removeUserFromTeam(userId: string, teamId: number): Promise<void>;
   updateTeamMemberRole(userId: string, teamId: number, role: string): Promise<TeamMember>;
@@ -785,6 +786,19 @@ export class DatabaseStorage implements IStorage {
       .update(users)
       .set({
         isActive: !currentUser.isActive,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+      .returning();
+    
+    return updatedUser;
+  }
+
+  async approveUser(userId: string): Promise<User> {
+    const [updatedUser] = await db
+      .update(users)
+      .set({
+        isApproved: true,
         updatedAt: new Date(),
       })
       .where(eq(users.id, userId))

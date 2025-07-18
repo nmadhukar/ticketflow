@@ -136,13 +136,13 @@ export default function AuthPage() {
       }
       return res.json();
     },
-    onSuccess: (user) => {
-      queryClient.setQueryData(["/api/auth/user"], user);
+    onSuccess: (data) => {
       toast({
         title: "Account created!",
-        description: "Welcome to TicketFlow.",
+        description: data.message || "Your account is pending admin approval.",
       });
-      setLocation("/");
+      setActiveTab("signin");
+      registerForm.reset();
     },
     onError: (error: Error) => {
       toast({
