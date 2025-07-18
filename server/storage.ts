@@ -292,55 +292,66 @@ export class DatabaseStorage implements IStorage {
       );
     }
     
-    let query = db
-      .select({
-        id: tasks.id,
-        ticketNumber: tasks.ticketNumber,
-        title: tasks.title,
-        description: tasks.description,
-        category: tasks.category,
-        status: tasks.status,
-        priority: tasks.priority,
-        severity: tasks.severity,
-        assigneeId: tasks.assigneeId,
-        assigneeType: tasks.assigneeType,
-        createdBy: tasks.createdBy,
-        notes: tasks.notes,
-        dueDate: tasks.dueDate,
-        resolvedAt: tasks.resolvedAt,
-        closedAt: tasks.closedAt,
-        estimatedHours: tasks.estimatedHours,
-        actualHours: tasks.actualHours,
-        tags: tasks.tags,
-        createdAt: tasks.createdAt,
-        updatedAt: tasks.updatedAt,
-        creatorName: sql<string>`COALESCE(creator.first_name || ' ' || creator.last_name, creator.email, 'Unknown')`,
-        assigneeName: sql<string>`CASE 
-          WHEN ${tasks.assigneeType} = 'team' THEN team.name
-          ELSE COALESCE(assignee.first_name || ' ' || assignee.last_name, assignee.email)
-        END`,
-      })
-      .from(tasks)
-      .leftJoin(users, sql`${users.id} = ${tasks.createdBy}`)
-      .leftJoin(sql`${users} as assignee`, sql`assignee.id = ${tasks.assigneeId} AND ${tasks.assigneeType} = 'user'`)
-      .leftJoin(teams, sql`${teams.id}::varchar = ${tasks.assigneeId} AND ${tasks.assigneeType} = 'team'`)
-      .leftJoin(sql`${users} as creator`, sql`creator.id = ${tasks.createdBy}`);
+    // First get the tasks
+    let taskQuery = db.select().from(tasks);
     
     if (conditions.length > 0) {
-      query = query.where(and(...conditions));
+      taskQuery = taskQuery.where(and(...conditions));
     }
     
-    query = query.orderBy(desc(tasks.createdAt));
+    taskQuery = taskQuery.orderBy(desc(tasks.createdAt));
     
     if (filters.limit) {
-      query = query.limit(filters.limit);
+      taskQuery = taskQuery.limit(filters.limit);
     }
     
     if (filters.offset) {
-      query = query.offset(filters.offset);
+      taskQuery = taskQuery.offset(filters.offset);
     }
     
-    return await query;
+    const taskResults = await taskQuery;
+    
+    // Now enhance with creator and assignee names
+    const enhancedTasks = [];
+    for (const task of taskResults) {
+      let creatorName = 'Unknown';
+      let assigneeName = '';
+      
+      // Get creator name
+      if (task.createdBy) {
+        const [creator] = await db.select().from(users).where(eq(users.id, task.createdBy));
+        if (creator) {
+          creatorName = creator.firstName && creator.lastName 
+            ? `${creator.firstName} ${creator.lastName}` 
+            : creator.email || 'Unknown';
+        }
+      }
+      
+      // Get assignee name
+      if (task.assigneeId) {
+        if (task.assigneeType === 'team') {
+          const [team] = await db.select().from(teams).where(eq(teams.id, parseInt(task.assigneeId)));
+          if (team) {
+            assigneeName = team.name;
+          }
+        } else {
+          const [assignee] = await db.select().from(users).where(eq(users.id, task.assigneeId));
+          if (assignee) {
+            assigneeName = assignee.firstName && assignee.lastName 
+              ? `${assignee.firstName} ${assignee.lastName}` 
+              : assignee.email || '';
+          }
+        }
+      }
+      
+      enhancedTasks.push({
+        ...task,
+        creatorName,
+        assigneeName
+      });
+    }
+    
+    return enhancedTasks;
   }
 
   async updateTask(id: number, updates: Partial<InsertTask>, userId: string): Promise<Task> {
