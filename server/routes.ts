@@ -43,15 +43,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Task routes
   app.get("/api/tasks", isAuthenticated, async (req: any, res) => {
     try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
       const { status, category, assigneeId, search, limit, offset } = req.query;
-      const tasks = await storage.getTasks({
+      
+      // If user is a customer, only show their own tickets
+      let filters: any = {
         status,
         category,
         assigneeId,
         search,
         limit: limit ? parseInt(limit) : undefined,
         offset: offset ? parseInt(offset) : undefined,
-      });
+      };
+      
+      if (user?.role === 'customer') {
+        filters.createdBy = userId;
+        delete filters.assigneeId; // Customers can't filter by assignee
+      }
+      
+      const tasks = await storage.getTasks(filters);
       res.json(tasks);
     } catch (error) {
       console.error("Error fetching tasks:", error);
@@ -78,16 +90,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/tasks/:id", isAuthenticated, async (req, res) => {
+  app.get("/api/tasks/:id", isAuthenticated, async (req: any, res) => {
     try {
       const taskId = parseInt(req.params.id);
       if (isNaN(taskId)) {
         return res.status(400).json({ message: "Invalid task ID" });
       }
+      
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
       const task = await storage.getTask(taskId);
+      
       if (!task) {
         return res.status(404).json({ message: "Task not found" });
       }
+      
+      // If user is a customer, they can only view their own tickets
+      if (user?.role === 'customer' && task.createdBy !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
       res.json(task);
     } catch (error) {
       console.error("Error fetching task:", error);
@@ -117,9 +139,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const taskId = parseInt(req.params.id);
       const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      // Get the task to check ownership
+      const task = await storage.getTask(taskId);
+      if (!task) {
+        return res.status(404).json({ message: "Task not found" });
+      }
+      
+      // Customers can only update their own tickets
+      if (user?.role === 'customer' && task.createdBy !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
       const updates = insertTaskSchema.partial().parse(req.body);
-      const task = await storage.updateTask(taskId, updates, userId);
-      res.json(task);
+      const updatedTask = await storage.updateTask(taskId, updates, userId);
+      res.json(updatedTask);
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid update data", errors: error.errors });
@@ -129,9 +164,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/tasks/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/tasks/:id", isAuthenticated, async (req: any, res) => {
     try {
       const taskId = parseInt(req.params.id);
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      // Customers cannot delete tasks
+      if (user?.role === 'customer') {
+        return res.status(403).json({ message: "Customers cannot delete tickets" });
+      }
+      
       await storage.deleteTask(taskId);
       res.status(204).send();
     } catch (error) {
@@ -141,9 +184,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Task comments
-  app.get("/api/tasks/:id/comments", isAuthenticated, async (req, res) => {
+  app.get("/api/tasks/:id/comments", isAuthenticated, async (req: any, res) => {
     try {
       const taskId = parseInt(req.params.id);
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      // Check if customer has access to this task
+      if (user?.role === 'customer') {
+        const task = await storage.getTask(taskId);
+        if (!task || task.createdBy !== userId) {
+          return res.status(403).json({ message: "Access denied" });
+        }
+      }
+      
       const comments = await storage.getTaskComments(taskId);
       res.json(comments);
     } catch (error) {
@@ -156,6 +210,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const taskId = parseInt(req.params.id);
       const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      // Check if customer has access to this task
+      if (user?.role === 'customer') {
+        const task = await storage.getTask(taskId);
+        if (!task || task.createdBy !== userId) {
+          return res.status(403).json({ message: "Access denied" });
+        }
+      }
+      
       const commentData = insertTaskCommentSchema.parse({
         ...req.body,
         taskId,
@@ -184,8 +248,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Team routes
-  app.get("/api/teams", isAuthenticated, async (req, res) => {
+  app.get("/api/teams", isAuthenticated, async (req: any, res) => {
     try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      // Customers cannot access teams
+      if (user?.role === 'customer') {
+        return res.status(403).json({ message: "Customers cannot access teams" });
+      }
+      
       const teams = await storage.getTeams();
       res.json(teams);
     } catch (error) {
@@ -197,6 +269,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/teams/my", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      // Customers cannot access teams
+      if (user?.role === 'customer') {
+        return res.status(403).json({ message: "Customers cannot access teams" });
+      }
+      
       const teams = await storage.getUserTeams(userId);
       res.json(teams);
     } catch (error) {
@@ -468,9 +547,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Attachment routes
-  app.get("/api/tasks/:id/attachments", isAuthenticated, async (req, res) => {
+  app.get("/api/tasks/:id/attachments", isAuthenticated, async (req: any, res) => {
     try {
       const taskId = parseInt(req.params.id);
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      // Check if customer has access to this task
+      if (user?.role === 'customer') {
+        const task = await storage.getTask(taskId);
+        if (!task || task.createdBy !== userId) {
+          return res.status(403).json({ message: "Access denied" });
+        }
+      }
+      
       const attachments = await storage.getTaskAttachments(taskId);
       res.json(attachments);
     } catch (error) {
@@ -483,6 +573,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const taskId = parseInt(req.params.id);
       const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      // Check if customer has access to this task
+      if (user?.role === 'customer') {
+        const task = await storage.getTask(taskId);
+        if (!task || task.createdBy !== userId) {
+          return res.status(403).json({ message: "Access denied" });
+        }
+      }
+      
       const attachmentData = insertTaskAttachmentSchema.parse({
         ...req.body,
         taskId,

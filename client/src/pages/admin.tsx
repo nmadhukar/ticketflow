@@ -309,8 +309,12 @@ export default function AdminPanel() {
                       </TableCell>
                       <TableCell>{user.email}</TableCell>
                       <TableCell>
-                        <Badge variant={user.role === "admin" ? "destructive" : "default"}>
-                          System {user.role}
+                        <Badge variant={
+                          user.role === "admin" ? "destructive" : 
+                          user.role === "customer" ? "secondary" : 
+                          "default"
+                        }>
+                          {user.role === "customer" ? "Customer" : `System ${user.role}`}
                         </Badge>
                       </TableCell>
                       <TableCell>{user.department || "-"}</TableCell>
@@ -585,6 +589,7 @@ export default function AdminPanel() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="user">User</SelectItem>
+                    <SelectItem value="customer">Customer</SelectItem>
                     <SelectItem value="agent">Agent</SelectItem>
                     <SelectItem value="manager">Manager</SelectItem>
                     <SelectItem value="admin">Admin</SelectItem>

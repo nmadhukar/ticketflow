@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/useAuth";
 import { Layout } from "@/components/layout";
 import { AiChatBot } from "@/components/AiChatBot";
+import { ProtectedRoute } from "@/components/protected-route";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
@@ -31,11 +32,27 @@ function Router() {
           <Layout>
             <Switch>
               <Route path="/" component={Dashboard} />
-              <Route path="/tasks" component={Tasks} />
+              <Route path="/tasks">
+                <ProtectedRoute allowedRoles={["admin", "manager", "agent", "user"]}>
+                  <Tasks />
+                </ProtectedRoute>
+              </Route>
               <Route path="/my-tasks" component={MyTasks} />
-              <Route path="/teams" component={Teams} />
-              <Route path="/teams/:id" component={TeamDetail} />
-              <Route path="/admin" component={AdminPanel} />
+              <Route path="/teams">
+                <ProtectedRoute allowedRoles={["admin", "manager", "agent", "user"]}>
+                  <Teams />
+                </ProtectedRoute>
+              </Route>
+              <Route path="/teams/:id" component={(params) => (
+                <ProtectedRoute allowedRoles={["admin", "manager", "agent", "user"]}>
+                  <TeamDetail />
+                </ProtectedRoute>
+              )} />
+              <Route path="/admin">
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <AdminPanel />
+                </ProtectedRoute>
+              </Route>
               <Route path="/settings" component={Settings} />
               <Route path="/notifications" component={Notifications} />
             </Switch>

@@ -28,12 +28,17 @@ export function Sidebar({ className }: SidebarProps) {
   const [location] = useLocation();
   const { user } = useAuth();
 
-  const navigation = [
-    { name: "Dashboard", href: "/", icon: LayoutDashboard },
-    { name: "All Tickets", href: "/tasks", icon: FolderOpen },
-    { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
-    { name: "Teams", href: "/teams", icon: Users },
-  ];
+  const navigation = user?.role === 'customer' 
+    ? [
+        { name: "Dashboard", href: "/", icon: LayoutDashboard },
+        { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
+      ]
+    : [
+        { name: "Dashboard", href: "/", icon: LayoutDashboard },
+        { name: "All Tickets", href: "/tasks", icon: FolderOpen },
+        { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
+        { name: "Teams", href: "/teams", icon: Users },
+      ];
 
   const adminNavigation = [
     { name: "Admin Panel", href: "/admin", icon: Shield },

@@ -43,6 +43,10 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - Created aiChatMessages database table for storing chat history and sessions
 - Added floating chat interface accessible from all authenticated pages with minimize/maximize functionality
 - Integrated help document search within AI responses to provide contextual assistance
+- Implemented Customer role with restricted permissions - customers can only create tickets, view own tickets, add updates to own tickets
+- Updated backend access control logic across all routes to enforce customer role restrictions
+- Modified frontend sidebar navigation to show only Dashboard and My Tickets for customer users
+- Enhanced admin panel role management to include customer role option in user editing
 
 ## System Architecture
 
