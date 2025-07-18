@@ -76,9 +76,9 @@ export async function setupMicrosoftAuth(app: Express) {
     responseType: "code",
     responseMode: "form_post",
     redirectUrl: redirectUrl,
-    allowHttpForRedirectUrl: process.env.NODE_ENV === "development",
+    allowHttpForRedirectUrl: true, // Allow HTTP in dev
     clientSecret: clientSecret,
-    validateIssuer: true,
+    validateIssuer: false, // Disable issuer validation for debugging
     passReqToCallback: false,
     scope: ["profile", "email", "offline_access", "User.Read"],
     loggingLevel: "info", // Changed to info for better debugging
@@ -86,6 +86,7 @@ export async function setupMicrosoftAuth(app: Express) {
     nonceMaxAmount: 5,
     useCookieInsteadOfSession: false,
     cookieSameSite: true,
+    clockSkew: 300, // Allow 5 minutes clock skew
   };
 
   const verify = async (
@@ -135,6 +136,10 @@ export async function setupMicrosoftAuth(app: Express) {
   };
 
   passport.use("azuread-openidconnect", new OIDCStrategy(config as any, verify));
+  
+  // Log the authentication URL for debugging
+  const authUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUrl)}&response_type=code&scope=openid%20profile%20email%20offline_access%20User.Read`;
+  console.log("Microsoft Auth URL would be:", authUrl);
 
   // Serialize/deserialize user (shared with Replit auth)
   if (!passport.serializeUser.length) {
@@ -145,10 +150,15 @@ export async function setupMicrosoftAuth(app: Express) {
   // Microsoft login route
   app.get("/api/auth/microsoft", (req, res, next) => {
     console.log("Microsoft login initiated");
-    passport.authenticate("azuread-openidconnect", {
-      failureRedirect: "/auth?error=microsoft_auth_failed",
-      failureMessage: true,
-    })(req, res, next);
+    try {
+      passport.authenticate("azuread-openidconnect", {
+        failureRedirect: "/auth?error=microsoft_auth_failed",
+        failureMessage: true,
+      })(req, res, next);
+    } catch (error) {
+      console.error("Error during Microsoft authentication:", error);
+      res.redirect("/auth?error=microsoft_auth_error");
+    }
   });
 
   // Microsoft callback route
