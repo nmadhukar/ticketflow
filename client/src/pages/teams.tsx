@@ -11,7 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Users, Crown } from "lucide-react";
+import { Plus, Users, Crown, ExternalLink } from "lucide-react";
+import { Link } from "wouter";
 import {
   Dialog,
   DialogContent,
@@ -207,8 +208,16 @@ export default function Teams() {
                       <CardDescription className="mb-4">
                         {team.description || "No description provided"}
                       </CardDescription>
-                      <div className="text-xs text-slate-500">
-                        Created {new Date(team.createdAt).toLocaleDateString()}
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs text-slate-500">
+                          Created {new Date(team.createdAt).toLocaleDateString()}
+                        </div>
+                        <Link href={`/teams/${team.id}`}>
+                          <Button size="sm" variant="outline" className="h-8">
+                            <ExternalLink className="h-3 w-3 mr-1" />
+                            Open Team
+                          </Button>
+                        </Link>
                       </div>
                     </CardContent>
                   </Card>
@@ -246,13 +255,16 @@ export default function Teams() {
                     <CardHeader>
                       <div className="flex items-start justify-between">
                         <div className="flex items-center space-x-3">
-                          <div className="w-12 h-12 bg-slate-100 rounded-lg flex items-center justify-center">
-                            <Users className="h-6 w-6 text-slate-600" />
+                          <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center">
+                            <Users className="h-6 w-6 text-emerald-600" />
                           </div>
                           <div>
                             <CardTitle className="text-lg">{team.name}</CardTitle>
                           </div>
                         </div>
+                        <Badge variant="outline" className="bg-slate-50 text-slate-700">
+                          Public
+                        </Badge>
                       </div>
                     </CardHeader>
                     <CardContent>
@@ -263,9 +275,12 @@ export default function Teams() {
                         <div className="text-xs text-slate-500">
                           Created {new Date(team.createdAt).toLocaleDateString()}
                         </div>
-                        <Button variant="outline" size="sm">
-                          View Team
-                        </Button>
+                        <Link href={`/teams/${team.id}`}>
+                          <Button size="sm" variant="outline" className="h-8">
+                            <ExternalLink className="h-3 w-3 mr-1" />
+                            Open Team
+                          </Button>
+                        </Link>
                       </div>
                     </CardContent>
                   </Card>

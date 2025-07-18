@@ -382,10 +382,15 @@ export class DatabaseStorage implements IStorage {
     phone?: string;
     isActive?: boolean;
   }): Promise<User> {
+    // Filter out undefined values and ensure proper date handling
+    const cleanUpdates = Object.fromEntries(
+      Object.entries(updates).filter(([_, value]) => value !== undefined)
+    );
+    
     const [updatedUser] = await db
       .update(users)
       .set({
-        ...updates,
+        ...cleanUpdates,
         updatedAt: new Date(),
       })
       .where(eq(users.id, userId))
@@ -413,22 +418,38 @@ export class DatabaseStorage implements IStorage {
   }
 
   async assignUserToTeam(userId: string, teamId: number, role: string = "member"): Promise<TeamMember> {
-    const [teamMember] = await db
-      .insert(teamMembers)
-      .values({
-        teamId,
-        userId,
-        role,
-      })
-      .onConflictDoUpdate({
-        target: [teamMembers.teamId, teamMembers.userId],
-        set: {
-          role,
-        },
-      })
-      .returning();
+    // Check if the user is already a team member
+    const existingMember = await db
+      .select()
+      .from(teamMembers)
+      .where(and(
+        eq(teamMembers.userId, userId),
+        eq(teamMembers.teamId, teamId)
+      ));
     
-    return teamMember;
+    if (existingMember.length > 0) {
+      // Update existing member
+      const [updatedMember] = await db
+        .update(teamMembers)
+        .set({ role })
+        .where(and(
+          eq(teamMembers.userId, userId),
+          eq(teamMembers.teamId, teamId)
+        ))
+        .returning();
+      return updatedMember;
+    } else {
+      // Insert new member
+      const [newMember] = await db
+        .insert(teamMembers)
+        .values({
+          teamId,
+          userId,
+          role,
+        })
+        .returning();
+      return newMember;
+    }
   }
 
   async removeUserFromTeam(userId: string, teamId: number): Promise<void> {
