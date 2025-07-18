@@ -3,6 +3,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
 import { isUnauthorizedError } from "@/lib/authUtils";
+import { useLocation } from "wouter";
 import Sidebar from "@/components/sidebar";
 import Header from "@/components/header";
 import StatsCard from "@/components/stats-card";
@@ -27,6 +28,7 @@ import {
 export default function Dashboard() {
   const { toast } = useToast();
   const { isAuthenticated, isLoading } = useAuth();
+  const [, setLocation] = useLocation();
 
   // Redirect to home if not authenticated
   useEffect(() => {
@@ -164,7 +166,7 @@ export default function Dashboard() {
                     <div className="text-center py-8">Loading tasks...</div>
                   ) : recentTasks && recentTasks.length > 0 ? (
                     recentTasks.slice(0, 5).map((task: any) => (
-                      <div key={task.id} className="flex items-center space-x-4 p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer">
+                      <div key={task.id} className="flex items-center space-x-4 p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer" onClick={() => setLocation("/tasks")}>
                         <div className={`w-3 h-3 rounded-full ${getPriorityColor(task.priority)}`} />
                         <div className="flex-1">
                           <h4 className="font-medium text-slate-800">{task.title}</h4>
@@ -197,7 +199,7 @@ export default function Dashboard() {
                   )}
                   
                   <div className="pt-6 border-t">
-                    <Button variant="ghost" className="w-full text-blue-600 hover:text-blue-700">
+                    <Button variant="ghost" className="w-full text-blue-600 hover:text-blue-700" onClick={() => setLocation("/tasks")}>
                       View All Tasks
                     </Button>
                   </div>
@@ -259,7 +261,7 @@ export default function Dashboard() {
                             <span className="font-medium">{item.userId}</span> {item.action} a task
                           </p>
                           <p className="text-xs text-slate-500">
-                            {new Date(item.createdAt).toRelativeTimeString()}
+                            {new Date(item.createdAt).toLocaleDateString()}
                           </p>
                         </div>
                       </div>

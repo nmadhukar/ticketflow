@@ -49,7 +49,7 @@ export default function Tasks() {
   }, [isAuthenticated, isLoading, toast]);
 
   const { data: tasks, isLoading: tasksLoading } = useQuery({
-    queryKey: ["/api/tasks", filters],
+    queryKey: ["/api/tasks"],
     retry: false,
     enabled: isAuthenticated,
   });
