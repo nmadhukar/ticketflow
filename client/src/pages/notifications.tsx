@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Bell, CheckCircle, AlertCircle, Info, UserPlus, MessageSquare, Calendar, Settings } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { useLocation } from "wouter";
 
 interface Notification {
   id: string;
@@ -112,6 +113,7 @@ function getNotificationColor(type: Notification["type"]) {
 
 export default function Notifications() {
   const { user } = useAuth();
+  const [, navigate] = useLocation();
 
   // In a real app, this would fetch notifications from the API
   const { data: notifications = mockNotifications, isLoading } = useQuery({
@@ -194,7 +196,15 @@ export default function Notifications() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2">
-                          <div>
+                          <div 
+                            className={notification.actionUrl ? "cursor-pointer" : ""}
+                            onClick={() => {
+                              if (notification.actionUrl) {
+                                markAsRead(notification.id);
+                                navigate("/");
+                              }
+                            }}
+                          >
                             <h4 className="font-semibold text-sm">{notification.title}</h4>
                             <p className="text-sm text-muted-foreground mt-1">
                               {notification.message}
@@ -262,7 +272,11 @@ export default function Notifications() {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => window.location.href = notification.actionUrl!}
+                                onClick={() => {
+                                  // Since these are mock notifications with hardcoded URLs,
+                                  // we'll navigate to the dashboard instead
+                                  navigate("/");
+                                }}
                               >
                                 View
                               </Button>

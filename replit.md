@@ -74,6 +74,9 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - Made recent activity items clickable in dashboard - clicking opens the corresponding ticket
 - Added last updated date and person information to ticket modal header
 - Enhanced backend queries to include lastUpdatedBy field for all tickets
+- Fixed notifications page 404 flash issue by reorganizing route order in App.tsx
+- Fixed blank screen issue when clicking notification links by using wouter navigation instead of window.location
+- Made notification items clickable to navigate to relevant content
 
 ## System Architecture
 

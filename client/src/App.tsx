@@ -30,6 +30,8 @@ function Router() {
   return (
     <>
       <Switch>
+        <Route path="/login" component={LoginPage} />
+        <Route path="/api-docs" component={ApiDocs} />
         {isLoading || !isAuthenticated ? (
           <Route path="/" component={Landing} />
         ) : (
@@ -71,11 +73,10 @@ function Router() {
                   <Invitations />
                 </ProtectedRoute>
               </Route>
+              <Route component={NotFound} />
             </Switch>
           </Layout>
         )}
-        <Route path="/login" component={LoginPage} />
-        <Route path="/api-docs" component={ApiDocs} />
         <Route component={NotFound} />
       </Switch>
       {/* Show AI Chat Bot for authenticated users */}
