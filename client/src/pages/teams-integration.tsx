@@ -37,6 +37,10 @@ export default function TeamsIntegration() {
     queryKey: ["/api/teams-integration/teams"],
     enabled: false, // Only fetch when user wants to connect via Microsoft Graph
   });
+  
+  const { data: ssoStatus } = useQuery<{ configured: boolean }>({
+    queryKey: ["/api/sso/status"],
+  });
 
   const updateSettingsMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -295,16 +299,31 @@ export default function TeamsIntegration() {
         </CardHeader>
         <CardContent className="space-y-4">
           <Alert>
-            <Key className="h-4 w-4" />
-            <AlertTitle>Configuration Required</AlertTitle>
-            <AlertDescription>
-              To enable Microsoft 365 SSO, please set the following environment variables:
-              <ul className="mt-2 space-y-1 text-sm">
-                <li>• MICROSOFT_CLIENT_ID</li>
-                <li>• MICROSOFT_CLIENT_SECRET</li>
-                <li>• MICROSOFT_TENANT_ID</li>
-              </ul>
-            </AlertDescription>
+            {ssoStatus?.configured ? (
+              <>
+                <CheckCircle2 className="h-4 w-4 text-green-600" />
+                <AlertTitle>SSO Configured</AlertTitle>
+                <AlertDescription>
+                  Microsoft 365 SSO is configured and ready to use. Users can sign in with their Microsoft accounts.
+                  <div className="mt-2 space-y-1">
+                    <Link to="/api/auth/microsoft" className="inline-flex items-center gap-2 text-sm underline">
+                      Sign in with Microsoft 365 <ExternalLink className="h-3 w-3" />
+                    </Link>
+                  </div>
+                </AlertDescription>
+              </>
+            ) : (
+              <>
+                <Key className="h-4 w-4" />
+                <AlertTitle>Configuration Required</AlertTitle>
+                <AlertDescription>
+                  Microsoft 365 SSO can be configured in the Admin Panel under the SSO tab.
+                  <p className="mt-2 text-sm">
+                    If you're an administrator, <Link to="/admin?tab=sso" className="underline">configure SSO settings here</Link>.
+                  </p>
+                </AlertDescription>
+              </>
+            )}
           </Alert>
 
           <Button onClick={handleMicrosoftAuthClick} variant="outline" className="w-full">

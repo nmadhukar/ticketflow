@@ -23,17 +23,35 @@ export async function setupMicrosoftAuth(app: Express) {
     app.set("microsoftAuthConfigured", true);
   }
 
-  // Check if Microsoft auth is configured
-  const isMicrosoftConfigured = process.env.MICROSOFT_CLIENT_ID && process.env.MICROSOFT_CLIENT_SECRET && process.env.MICROSOFT_TENANT_ID;
+  // First check database for SSO configuration
+  const ssoConfig = await storage.getSsoConfiguration();
+  
+  // Use database config if available, otherwise fall back to environment variables
+  const clientId = ssoConfig?.clientId || process.env.MICROSOFT_CLIENT_ID;
+  const clientSecret = ssoConfig?.clientSecret || process.env.MICROSOFT_CLIENT_SECRET;
+  const tenantId = ssoConfig?.tenantId || process.env.MICROSOFT_TENANT_ID;
+  
+  const isMicrosoftConfigured = clientId && clientSecret && tenantId;
   
   if (!isMicrosoftConfigured) {
-    console.log("Microsoft authentication not configured. Set MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, and MICROSOFT_TENANT_ID to enable.");
+    if (!ssoConfig) {
+      console.log("Microsoft authentication not configured. Configure in Admin Panel or set environment variables.");
+    }
     
     // Register routes that return configuration error
-    app.get("/api/auth/microsoft", (req, res) => {
-      res.status(503).json({ 
-        message: "Microsoft authentication is not configured. Please contact your administrator to set up Microsoft 365 SSO." 
-      });
+    app.get("/api/auth/microsoft", async (req, res) => {
+      // Re-check database in case config was added after server start
+      const latestConfig = await storage.getSsoConfiguration();
+      if (latestConfig?.clientId && latestConfig?.clientSecret && latestConfig?.tenantId) {
+        // Config now exists, restart server would be needed
+        res.status(503).json({ 
+          message: "Microsoft authentication configuration has been updated. Please restart the server to apply changes." 
+        });
+      } else {
+        res.status(503).json({ 
+          message: "Microsoft authentication is not configured. Please contact your administrator to set up Microsoft 365 SSO." 
+        });
+      }
     });
     
     app.post("/api/auth/microsoft/callback", (req, res) => {
@@ -46,13 +64,13 @@ export async function setupMicrosoftAuth(app: Express) {
   }
 
   const config = {
-    identityMetadata: `https://login.microsoftonline.com/${process.env.MICROSOFT_TENANT_ID}/v2.0/.well-known/openid-configuration`,
-    clientID: process.env.MICROSOFT_CLIENT_ID,
+    identityMetadata: `https://login.microsoftonline.com/${tenantId}/v2.0/.well-known/openid-configuration`,
+    clientID: clientId,
     responseType: "code",
     responseMode: "form_post",
     redirectUrl: `${process.env.REPLIT_DOMAINS?.split(',')[0] ? `https://${process.env.REPLIT_DOMAINS.split(',')[0]}` : 'http://localhost:5000'}/api/auth/microsoft/callback`,
     allowHttpForRedirectUrl: process.env.NODE_ENV === "development",
-    clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
+    clientSecret: clientSecret,
     validateIssuer: true,
     passReqToCallback: false,
     scope: ["profile", "email", "offline_access", "User.Read"],

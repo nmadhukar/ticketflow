@@ -913,7 +913,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // SSO Configuration routes (admin only)
+  // SSO Configuration routes
   app.get("/api/sso/config", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
@@ -928,6 +928,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching SSO configuration:", error);
       res.status(500).json({ message: "Failed to fetch SSO configuration" });
+    }
+  });
+  
+  // SSO Status check (available to all authenticated users)
+  app.get("/api/sso/status", isAuthenticated, async (req: any, res) => {
+    try {
+      const config = await storage.getSsoConfiguration();
+      const isConfigured = !!(config?.clientId && config?.clientSecret && config?.tenantId);
+      res.json({ configured: isConfigured });
+    } catch (error) {
+      console.error("Error checking SSO status:", error);
+      res.status(500).json({ message: "Failed to check SSO status" });
     }
   });
 
