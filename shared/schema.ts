@@ -167,6 +167,10 @@ export const insertTaskSchema = createInsertSchema(tasks).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+}).extend({
+  assigneeId: z.string().nullable().optional(),
+  assigneeTeamId: z.number().nullable().optional(),
+  dueDate: z.string().datetime().nullable().optional().or(z.string().nullable().optional()),
 });
 
 export const insertTeamSchema = createInsertSchema(teams).omit({

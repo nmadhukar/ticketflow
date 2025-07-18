@@ -46,9 +46,14 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     dueDate: "",
   });
 
-  // Load teams for assignment
+  // Load teams and users for assignment
   const { data: teams } = useQuery({
     queryKey: ["/api/teams"],
+    enabled: isOpen,
+  });
+
+  const { data: users } = useQuery({
+    queryKey: ["/api/users"],
     enabled: isOpen,
   });
 
@@ -274,12 +279,19 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                 </SelectContent>
               </Select>
               
-              {formData.assigneeType === "user" && (
-                <Input
-                  placeholder="Enter user ID or email..."
-                  value={formData.assigneeId}
-                  onChange={(e) => handleInputChange("assigneeId", e.target.value)}
-                />
+              {formData.assigneeType === "user" && users && (
+                <Select value={formData.assigneeId} onValueChange={(value) => handleInputChange("assigneeId", value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select user" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {users.map((user: any) => (
+                      <SelectItem key={user.id} value={user.id}>
+                        {user.firstName && user.lastName ? `${user.firstName} ${user.lastName}` : user.email || user.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
               
               {formData.assigneeType === "team" && teams && (

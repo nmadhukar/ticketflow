@@ -24,6 +24,7 @@ export interface IStorage {
   // User operations (mandatory for Replit Auth)
   getUser(id: string): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
+  getAllUsers(): Promise<User[]>;
   
   // Task operations
   createTask(task: InsertTask): Promise<Task>;
@@ -89,9 +90,18 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
+  async getAllUsers(): Promise<User[]> {
+    return await db.select().from(users);
+  }
+
   // Task operations
   async createTask(task: InsertTask): Promise<Task> {
-    const [createdTask] = await db.insert(tasks).values(task).returning();
+    // Convert string date to Date object if needed
+    const taskData = {
+      ...task,
+      dueDate: task.dueDate ? new Date(task.dueDate) : null,
+    };
+    const [createdTask] = await db.insert(tasks).values(taskData).returning();
     
     // Add history entry
     await db.insert(taskHistory).values({
@@ -118,8 +128,6 @@ export class DatabaseStorage implements IStorage {
     limit?: number;
     offset?: number;
   } = {}): Promise<Task[]> {
-    let query = db.select().from(tasks);
-    
     const conditions = [];
     
     if (filters.status) {
@@ -147,22 +155,23 @@ export class DatabaseStorage implements IStorage {
       );
     }
     
-    let finalQuery = query;
+    let query = db.select().from(tasks);
+    
     if (conditions.length > 0) {
-      finalQuery = query.where(and(...conditions));
+      query = query.where(and(...conditions));
     }
     
-    finalQuery = finalQuery.orderBy(desc(tasks.createdAt));
+    query = query.orderBy(desc(tasks.createdAt));
     
     if (filters.limit) {
-      finalQuery = finalQuery.limit(filters.limit);
+      query = query.limit(filters.limit);
     }
     
     if (filters.offset) {
-      finalQuery = finalQuery.offset(filters.offset);
+      query = query.offset(filters.offset);
     }
     
-    return await finalQuery;
+    return await query;
   }
 
   async updateTask(id: number, updates: Partial<InsertTask>, userId: string): Promise<Task> {
@@ -171,9 +180,16 @@ export class DatabaseStorage implements IStorage {
       throw new Error("Task not found");
     }
     
+    // Convert date if needed
+    const updateData = {
+      ...updates,
+      dueDate: updates.dueDate ? new Date(updates.dueDate) : undefined,
+      updatedAt: new Date(),
+    };
+    
     const [updatedTask] = await db
       .update(tasks)
-      .set({ ...updates, updatedAt: new Date() })
+      .set(updateData)
       .where(eq(tasks.id, id))
       .returning();
     
