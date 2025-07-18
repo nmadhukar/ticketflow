@@ -132,33 +132,34 @@ export default function Tasks() {
 
   const getCategoryColor = (category: string) => {
     switch (category) {
-      case "bug": return "bg-red-50 text-red-700 border-red-200";
-      case "feature": return "bg-blue-50 text-blue-700 border-blue-200";
-      case "support": return "bg-purple-50 text-purple-700 border-purple-200";
-      case "enhancement": return "bg-green-50 text-green-700 border-green-200";
-      case "incident": return "bg-orange-50 text-orange-700 border-orange-200";
-      case "request": return "bg-slate-50 text-slate-700 border-slate-200";
-      default: return "bg-slate-50 text-slate-700 border-slate-200";
+      case "bug": return "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400 border-red-200 dark:border-red-800";
+      case "feature": return "bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400 border-blue-200 dark:border-blue-800";
+      case "support": return "bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-400 border-purple-200 dark:border-purple-800";
+      case "enhancement": return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400 border-green-200 dark:border-green-800";
+      case "incident": return "bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400 border-orange-200 dark:border-orange-800";
+      case "request": return "bg-muted text-muted-foreground border-border";
+      default: return "bg-muted text-muted-foreground border-border";
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "open": return "bg-blue-50 text-blue-700 border-blue-200";
-      case "in_progress": return "bg-yellow-50 text-yellow-700 border-yellow-200";
-      case "resolved": return "bg-green-50 text-green-700 border-green-200";
-      case "closed": return "bg-slate-50 text-slate-700 border-slate-200";
-      case "on_hold": return "bg-orange-50 text-orange-700 border-orange-200";
-      default: return "bg-slate-50 text-slate-700 border-slate-200";
+      case "open": return "status-badge-open";
+      case "in_progress": return "status-badge-in-progress";
+      case "resolved": return "status-badge-resolved";
+      case "closed": return "status-badge-closed";
+      case "on_hold": return "status-badge-on-hold";
+      default: return "bg-muted text-muted-foreground border-border";
     }
   };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case "high": return "bg-red-50 text-red-700 border-red-200";
-      case "medium": return "bg-yellow-50 text-yellow-700 border-yellow-200";
-      case "low": return "bg-green-50 text-green-700 border-green-200";
-      default: return "bg-slate-50 text-slate-700 border-slate-200";
+      case "urgent": return "bg-destructive text-destructive-foreground border-destructive";
+      case "high": return "bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400 border-orange-200 dark:border-orange-800";
+      case "medium": return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800";
+      case "low": return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400 border-green-200 dark:border-green-800";
+      default: return "bg-muted text-muted-foreground border-border";
     }
   };
 
@@ -210,7 +211,7 @@ export default function Tasks() {
   };
 
   return (
-    <div className="min-h-screen flex bg-slate-50">
+    <div className="min-h-screen flex bg-background">
       <Sidebar />
       
       <div className="flex-1 flex flex-col">
@@ -223,7 +224,6 @@ export default function Tasks() {
                 setEditingTask(null);
                 setIsTaskModalOpen(true);
               }}
-              className="bg-blue-600 hover:bg-blue-700"
             >
               <Plus className="h-4 w-4 mr-2" />
               New Task
@@ -233,12 +233,12 @@ export default function Tasks() {
         
         <main className="flex-1 p-6 overflow-y-auto">
           {/* Enhanced Filters Bar */}
-          <Card className="mb-6 border-0 shadow-sm">
+          <Card className="mb-6 shadow-business">
             <CardContent className="p-4">
               <div className="flex flex-col lg:flex-row gap-4">
                 {/* Search */}
                 <div className="relative flex-1">
-                  <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                   <Input
                     placeholder="Search by title, description, or ticket number..."
                     value={filters.search}
@@ -295,7 +295,7 @@ export default function Tasks() {
               {/* Active Filters & Stats */}
               <div className="flex items-center justify-between mt-4 pt-4 border-t">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-slate-600">
+                  <span className="text-sm text-muted-foreground">
                     {filteredTasks?.length || 0} of {tasks?.length || 0} tasks
                   </span>
                   {(filters.search || filters.status !== "all" || filters.category !== "all" || filters.priority !== "all") && (
@@ -303,7 +303,7 @@ export default function Tasks() {
                       variant="ghost"
                       size="sm"
                       onClick={() => setFilters({ search: "", status: "all", category: "all", priority: "all" })}
-                      className="h-7 px-2 text-slate-500 hover:text-slate-700"
+                      className="h-7 px-2"
                     >
                       Clear filters
                     </Button>
@@ -314,7 +314,7 @@ export default function Tasks() {
           </Card>
 
           {/* Tasks Table */}
-          <Card className="border-0 shadow-sm">
+          <Card className="shadow-business">
             <CardContent className="p-0">
               {tasksLoading ? (
                 <div className="animate-pulse p-6">
@@ -327,22 +327,22 @@ export default function Tasks() {
               ) : filteredTasks?.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table className="w-full">
-                    <thead className="bg-slate-50 border-b">
+                    <thead className="bg-muted/50 border-b">
                       <tr>
-                        <th className="text-left p-4 font-medium text-slate-900">Ticket</th>
-                        <th className="text-left p-4 font-medium text-slate-900">Title</th>
-                        <th className="text-left p-4 font-medium text-slate-900">Priority</th>
-                        <th className="text-left p-4 font-medium text-slate-900">Status</th>
-                        <th className="text-left p-4 font-medium text-slate-900">Category</th>
-                        <th className="text-left p-4 font-medium text-slate-900">Assigned To</th>
-                        <th className="text-left p-4 font-medium text-slate-900">Due Date</th>
-                        <th className="text-left p-4 font-medium text-slate-900">Created</th>
-                        <th className="text-center p-4 font-medium text-slate-900">Actions</th>
+                        <th className="text-left p-4 font-medium">Ticket</th>
+                        <th className="text-left p-4 font-medium">Title</th>
+                        <th className="text-left p-4 font-medium">Priority</th>
+                        <th className="text-left p-4 font-medium">Status</th>
+                        <th className="text-left p-4 font-medium">Category</th>
+                        <th className="text-left p-4 font-medium">Assigned To</th>
+                        <th className="text-left p-4 font-medium">Due Date</th>
+                        <th className="text-left p-4 font-medium">Created</th>
+                        <th className="text-center p-4 font-medium">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100">
+                    <tbody className="divide-y">
                       {filteredTasks.map((task: any) => (
-                        <tr key={task.id} className="hover:bg-slate-50 transition-colors">
+                        <tr key={task.id} className="hover:bg-muted/50 transition-colors">
                           <td className="p-4">
                             <Badge variant="outline" className="font-mono text-xs">
                               {task.ticketNumber}
@@ -350,9 +350,9 @@ export default function Tasks() {
                           </td>
                           <td className="p-4">
                             <div>
-                              <p className="font-medium text-slate-900 line-clamp-1">{task.title}</p>
+                              <p className="font-medium line-clamp-1">{task.title}</p>
                               {task.description && (
-                                <p className="text-sm text-slate-600 line-clamp-1 mt-1">{task.description}</p>
+                                <p className="text-sm text-muted-foreground line-clamp-1 mt-1">{task.description}</p>
                               )}
                             </div>
                           </td>
@@ -379,7 +379,7 @@ export default function Tasks() {
                           </td>
                           <td className="p-4">
                             {task.assigneeId ? (
-                              <div className="flex items-center gap-2 text-sm text-slate-600">
+                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                 {task.assigneeType === "team" ? (
                                   <Users className="h-4 w-4" />
                                 ) : (
@@ -388,20 +388,20 @@ export default function Tasks() {
                                 <span>{task.assigneeName || task.assigneeId}</span>
                               </div>
                             ) : (
-                              <span className="text-sm text-slate-400">Unassigned</span>
+                              <span className="text-sm text-muted-foreground">Unassigned</span>
                             )}
                           </td>
                           <td className="p-4">
                             {task.dueDate ? (
-                              <div className={`text-sm ${isOverdue(task.dueDate) ? 'text-red-600 font-medium' : 'text-slate-600'}`}>
+                              <div className={`text-sm ${isOverdue(task.dueDate) ? 'text-destructive font-medium' : 'text-muted-foreground'}`}>
                                 {formatDate(task.dueDate)}
                               </div>
                             ) : (
-                              <span className="text-sm text-slate-400">No due date</span>
+                              <span className="text-sm text-muted-foreground">No due date</span>
                             )}
                           </td>
                           <td className="p-4">
-                            <div className="text-sm text-slate-600">
+                            <div className="text-sm text-muted-foreground">
                               {getTimeAgo(task.createdAt)}
                             </div>
                           </td>

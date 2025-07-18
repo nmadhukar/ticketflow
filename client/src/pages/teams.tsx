@@ -116,7 +116,7 @@ export default function Teams() {
   };
 
   return (
-    <div className="min-h-screen flex bg-slate-50">
+    <div className="min-h-screen flex bg-background">
       <Sidebar />
       
       <div className="flex-1 flex flex-col">
@@ -126,7 +126,7 @@ export default function Teams() {
           action={
             <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
               <DialogTrigger asChild>
-                <Button className="bg-blue-600 hover:bg-blue-700">
+                <Button>
                   <Plus className="h-4 w-4 mr-2" />
                   Create Team
                 </Button>
@@ -168,7 +168,6 @@ export default function Teams() {
                   <Button 
                     onClick={handleCreateTeam}
                     disabled={createTeamMutation.isPending}
-                    className="bg-blue-600 hover:bg-blue-700"
                   >
                     {createTeamMutation.isPending ? "Creating..." : "Create Team"}
                   </Button>
@@ -181,24 +180,24 @@ export default function Teams() {
         <main className="flex-1 p-6 overflow-y-auto">
           {/* My Teams Section */}
           <div className="mb-8">
-            <h3 className="text-lg font-semibold text-slate-800 mb-4">My Teams</h3>
+            <h3 className="text-lg font-semibold mb-4">My Teams</h3>
             {myTeamsLoading ? (
               <div className="text-center py-8">Loading your teams...</div>
             ) : myTeams && myTeams.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {myTeams.map((team: any) => (
-                  <Card key={team.id} className="hover:shadow-md transition-shadow">
+                  <Card key={team.id} className="hover:shadow-business transition-shadow">
                     <CardHeader>
                       <div className="flex items-start justify-between">
                         <div className="flex items-center space-x-3">
-                          <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                            <Users className="h-6 w-6 text-blue-600" />
+                          <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                            <Users className="h-6 w-6 text-primary" />
                           </div>
                           <div>
                             <CardTitle className="text-lg">{team.name}</CardTitle>
                           </div>
                         </div>
-                        <Badge variant="outline" className="bg-green-50 text-green-700">
+                        <Badge variant="secondary">
                           <Crown className="h-3 w-3 mr-1" />
                           Member
                         </Badge>

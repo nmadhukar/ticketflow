@@ -198,7 +198,7 @@ export default function AdminPanel() {
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Shield className="h-8 w-8" />
+            <Shield className="h-8 w-8 text-primary" />
             Admin Panel
           </h1>
           <p className="text-muted-foreground">Manage users, teams, and system settings</p>
@@ -213,10 +213,12 @@ export default function AdminPanel() {
 
       {/* System Overview Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
-        <Card>
+        <Card className="hover:shadow-business transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Users</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
+            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+              <Users className="h-4 w-4 text-primary" />
+            </div>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{systemStats?.totalUsers || 0}</div>
@@ -225,10 +227,12 @@ export default function AdminPanel() {
             </p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="hover:shadow-business transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Teams</CardTitle>
-            <UserCog className="h-4 w-4 text-muted-foreground" />
+            <div className="h-8 w-8 rounded-lg bg-secondary/10 flex items-center justify-center">
+              <UserCog className="h-4 w-4 text-secondary-foreground" />
+            </div>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{systemStats?.totalTeams || 0}</div>
@@ -237,10 +241,12 @@ export default function AdminPanel() {
             </p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="hover:shadow-business transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Open Tickets</CardTitle>
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            <div className="h-8 w-8 rounded-lg bg-accent/10 flex items-center justify-center">
+              <BarChart3 className="h-4 w-4 text-accent-foreground" />
+            </div>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{systemStats?.openTickets || 0}</div>
@@ -249,10 +255,12 @@ export default function AdminPanel() {
             </p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="hover:shadow-business transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Avg Resolution Time</CardTitle>
-            <Settings className="h-4 w-4 text-muted-foreground" />
+            <div className="h-8 w-8 rounded-lg bg-muted/10 flex items-center justify-center">
+              <Settings className="h-4 w-4 text-muted-foreground" />
+            </div>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{systemStats?.avgResolutionTime || "N/A"}</div>

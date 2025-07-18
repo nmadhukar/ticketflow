@@ -16,16 +16,16 @@ export default function LoginPage() {
   const [forgotType, setForgotType] = useState<"username" | "password" | null>(null);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-background to-muted/20 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="flex justify-center mb-8">
           <div className="flex items-center gap-2">
-            <Building2 className="h-10 w-10 text-slate-700" />
-            <h1 className="text-3xl font-bold text-slate-800">TicketFlow</h1>
+            <Building2 className="h-10 w-10 text-primary" />
+            <h1 className="text-3xl font-bold">TicketFlow</h1>
           </div>
         </div>
 
-        <Card className="shadow-xl">
+        <Card className="shadow-business">
           <CardHeader className="space-y-1">
             <CardTitle className="text-2xl font-bold text-center">Welcome back</CardTitle>
             <CardDescription className="text-center">
@@ -45,13 +45,13 @@ export default function LoginPage() {
                 <span className="w-full border-t" />
               </div>
               <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-white px-2 text-muted-foreground">Need help?</span>
+                <span className="bg-background px-2 text-muted-foreground">Need help?</span>
               </div>
             </div>
 
             <div className="flex justify-between text-sm">
               <button
-                className="text-blue-600 hover:text-blue-800 hover:underline"
+                className="text-primary hover:text-primary/80 hover:underline transition-colors"
                 onClick={() => {
                   setForgotType("username");
                   setShowForgotDialog(true);
@@ -60,7 +60,7 @@ export default function LoginPage() {
                 Forgot username?
               </button>
               <button
-                className="text-blue-600 hover:text-blue-800 hover:underline"
+                className="text-primary hover:text-primary/80 hover:underline transition-colors"
                 onClick={() => {
                   setForgotType("password");
                   setShowForgotDialog(true);
@@ -73,7 +73,7 @@ export default function LoginPage() {
           <CardFooter>
             <p className="text-center text-sm text-muted-foreground w-full">
               Don't have an account?{" "}
-              <a href="/api/login" className="text-blue-600 hover:text-blue-800 hover:underline">
+              <a href="/api/login" className="text-primary hover:text-primary/80 hover:underline transition-colors">
                 Sign up
               </a>
             </p>
