@@ -38,6 +38,7 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - Enhanced visual hierarchy with business-focused shadow effects and gradient accents
 - Professional redesign extended to teams page with updated card layouts, icon backgrounds, and button styling
 - Admin panel redesigned with professional stat cards featuring icon backgrounds and business-appropriate hover effects
+- Fixed notifications page display issue by removing double Layout wrapper that was preventing proper rendering
 
 ## System Architecture
 

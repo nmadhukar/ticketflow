@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Layout } from "@/components/layout";
 import { Bell, CheckCircle, AlertCircle, Info, UserPlus, MessageSquare, Calendar, Settings } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -136,24 +135,21 @@ export default function Notifications() {
 
   if (isLoading) {
     return (
-      <Layout>
-        <div className="container mx-auto p-6">
-          <div className="animate-pulse space-y-4">
-            <div className="h-8 bg-gray-200 rounded w-1/4"></div>
-            <div className="space-y-3">
-              {[...Array(5)].map((_, i) => (
-                <div key={i} className="h-20 bg-gray-200 rounded"></div>
-              ))}
-            </div>
+      <div className="container mx-auto p-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-8 bg-gray-200 rounded w-1/4"></div>
+          <div className="space-y-3">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="h-20 bg-gray-200 rounded"></div>
+            ))}
           </div>
         </div>
-      </Layout>
+      </div>
     );
   }
 
   return (
-    <Layout>
-      <div className="container mx-auto p-6 max-w-4xl">
+    <div className="container mx-auto p-6 max-w-4xl">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <Bell className="h-8 w-8" />
@@ -295,6 +291,5 @@ export default function Notifications() {
           )}
         </div>
       </div>
-    </Layout>
   );
 }
