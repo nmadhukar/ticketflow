@@ -82,6 +82,12 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - Implemented test notification functionality to verify webhook configuration
 - Added Teams integration link to sidebar navigation for easy access
 - Updated landing page to show Microsoft 365 sign-in option alongside Replit authentication
+- **Replaced Replit authentication with commercial-style authentication system using passport.js**
+- **Added password, password reset token, and expiry fields to users table**
+- **Created comprehensive auth page with registration, sign in, and forgot password functionality**
+- **Implemented secure password hashing using bcrypt with proper salt generation**
+- **Maintained Microsoft 365 SSO option alongside new username/password authentication**
+- **Fixed passport deserialization errors and verified full authentication flow is working**
 
 ## System Architecture
 
@@ -111,10 +117,12 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 ## Key Components
 
 ### Authentication System
-- **Provider**: Replit OpenID Connect integration
-- **Strategy**: Passport.js with OpenID Client strategy
+- **Primary Method**: Commercial-style email/password authentication with passport.js
+- **Secondary Method**: Microsoft 365 SSO integration (optional)
+- **Password Security**: bcrypt hashing with salt rounds
 - **Session Storage**: PostgreSQL-backed sessions using connect-pg-simple
-- **User Management**: Automatic user creation/updates on login
+- **User Management**: Registration, login, logout, and password reset functionality
+- **Auth Page Features**: Tabbed interface for sign in, registration, and forgot password
 
 ### Database Schema
 - **Users**: Profile information synced from Replit with role-based permissions (admin, manager, user)
