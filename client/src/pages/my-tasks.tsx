@@ -182,8 +182,8 @@ export default function MyTasks() {
     <>
       <div className="flex-1 flex flex-col">
         <Header 
-          title="My Tasks" 
-          subtitle="Track your assigned tasks and personal work items"
+          title="My Tickets" 
+          subtitle="Track your assigned tickets and personal work items"
           action={
             <Button 
               onClick={() => {
@@ -193,7 +193,7 @@ export default function MyTasks() {
               className="bg-blue-600 hover:bg-blue-700"
             >
               <Plus className="h-4 w-4 mr-2" />
-              New Task
+              New Ticket
             </Button>
           }
         />
@@ -207,7 +207,7 @@ export default function MyTasks() {
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
                   <Input
-                    placeholder="Search your tasks..."
+                    placeholder="Search your tickets..."
                     value={filters.search}
                     onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
                     className="pl-10 h-10"
@@ -263,7 +263,7 @@ export default function MyTasks() {
               <div className="flex items-center justify-between mt-4 pt-4 border-t">
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-slate-600">
-                    {filteredTasks?.length || 0} of {tasks?.length || 0} tasks
+                    {filteredTasks?.length || 0} of {tasks?.length || 0} tickets
                   </span>
                   {(filters.search || filters.status !== "all" || filters.category !== "all" || filters.priority !== "all") && (
                     <Button
@@ -317,7 +317,12 @@ export default function MyTasks() {
                           </td>
                           <td className="p-4">
                             <div>
-                              <p className="font-medium text-slate-900 line-clamp-1">{task.title}</p>
+                              <p 
+                                className="font-medium text-slate-900 line-clamp-1 cursor-pointer hover:text-primary hover:underline"
+                                onClick={() => handleEditTask(task)}
+                              >
+                                {task.title}
+                              </p>
                               {task.description && (
                                 <p className="text-sm text-slate-600 line-clamp-1 mt-1">{task.description}</p>
                               )}
@@ -396,11 +401,11 @@ export default function MyTasks() {
                     <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
                       <Star className="h-8 w-8 text-slate-400" />
                     </div>
-                    <h3 className="text-lg font-medium text-slate-900 mb-2">No tasks assigned</h3>
+                    <h3 className="text-lg font-medium text-slate-900 mb-2">No tickets assigned</h3>
                     <p className="text-slate-500 mb-6">
                       {filters.search || filters.status !== "all" || filters.category !== "all" || filters.priority !== "all"
-                        ? "Try adjusting your filters to see more tasks."
-                        : "You don't have any tasks assigned yet. Create one or get assigned to existing tasks."}
+                        ? "Try adjusting your filters to see more tickets."
+                        : "You don't have any tickets assigned yet. Create one or get assigned to existing tickets."}
                     </p>
                     {!filters.search && filters.status === "all" && filters.category === "all" && filters.priority === "all" && (
                       <Button 
@@ -411,7 +416,7 @@ export default function MyTasks() {
                         className="bg-blue-600 hover:bg-blue-700"
                       >
                         <Plus className="h-4 w-4 mr-2" />
-                        Create New Task
+                        Create New Ticket
                       </Button>
                     )}
                   </div>

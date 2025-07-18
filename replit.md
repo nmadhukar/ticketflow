@@ -68,6 +68,9 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - Integrated SendGrid email sending for invitation emails with customizable templates
 - Added invitation management interface showing pending, accepted, and expired invitations
 - Updated admin panel with links to new department and invitation management pages
+- Fixed dashboard "Open" button bug - removed button and made ticket titles clickable instead
+- Standardized terminology throughout application from "tasks" to "tickets" for consistency
+- Made ticket titles clickable in all listing pages (dashboard, all tickets, my tickets)
 
 ## System Architecture
 

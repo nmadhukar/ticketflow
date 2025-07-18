@@ -213,8 +213,8 @@ export default function Tasks() {
     <>
       <div className="flex-1 flex flex-col">
         <Header 
-          title="All Tasks" 
-          subtitle="Manage and track all tasks across your projects"
+          title="All Tickets" 
+          subtitle="Manage and track all tickets across your projects"
           action={
             <Button 
               onClick={() => {
@@ -223,7 +223,7 @@ export default function Tasks() {
               }}
             >
               <Plus className="h-4 w-4 mr-2" />
-              New Task
+              New Ticket
             </Button>
           }
         />
@@ -293,7 +293,7 @@ export default function Tasks() {
               <div className="flex items-center justify-between mt-4 pt-4 border-t">
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground">
-                    {filteredTasks?.length || 0} of {tasks?.length || 0} tasks
+                    {filteredTasks?.length || 0} of {tasks?.length || 0} tickets
                   </span>
                   {(filters.search || filters.status !== "all" || filters.category !== "all" || filters.priority !== "all") && (
                     <Button
@@ -347,7 +347,12 @@ export default function Tasks() {
                           </td>
                           <td className="p-4">
                             <div>
-                              <p className="font-medium line-clamp-1">{task.title}</p>
+                              <p 
+                                className="font-medium line-clamp-1 cursor-pointer hover:text-primary hover:underline"
+                                onClick={() => handleEditTask(task)}
+                              >
+                                {task.title}
+                              </p>
                               {task.description && (
                                 <p className="text-sm text-muted-foreground line-clamp-1 mt-1">{task.description}</p>
                               )}
@@ -422,11 +427,11 @@ export default function Tasks() {
                                 <DropdownMenuContent align="end">
                                   <DropdownMenuItem onClick={() => handleEditTask(task)}>
                                     <Edit3 className="h-4 w-4 mr-2" />
-                                    Edit Task
+                                    Edit Ticket
                                   </DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDeleteTask(task.id)} className="text-red-600">
                                     <Trash2 className="h-4 w-4 mr-2" />
-                                    Delete Task
+                                    Delete Ticket
                                   </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
@@ -443,11 +448,11 @@ export default function Tasks() {
                     <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
                       <FileText className="h-8 w-8 text-slate-400" />
                     </div>
-                    <h3 className="text-lg font-medium text-slate-900 mb-2">No tasks found</h3>
+                    <h3 className="text-lg font-medium text-slate-900 mb-2">No tickets found</h3>
                     <p className="text-slate-500 mb-6">
                       {filters.search || filters.status !== "all" || filters.category !== "all" || filters.priority !== "all"
-                        ? "Try adjusting your filters to see more tasks."
-                        : "Get started by creating your first task."}
+                        ? "Try adjusting your filters to see more tickets."
+                        : "Get started by creating your first ticket."}
                     </p>
                     {!filters.search && filters.status === "all" && filters.category === "all" && filters.priority === "all" && (
                       <Button 
@@ -458,7 +463,7 @@ export default function Tasks() {
                         className="bg-blue-600 hover:bg-blue-700"
                       >
                         <Plus className="h-4 w-4 mr-2" />
-                        Create First Task
+                        Create First Ticket
                       </Button>
                     )}
                   </div>

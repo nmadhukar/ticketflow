@@ -251,7 +251,15 @@ export default function Dashboard() {
                       <div key={task.id} className="flex items-center space-x-4 p-4 bg-muted/30 rounded-lg hover:bg-muted/50 transition-all shadow-business hover:shadow-business-hover">
                         <div className={`w-3 h-3 rounded-full ${getPriorityColor(task.priority)}`} />
                         <div className="flex-1">
-                          <h4 className="font-medium">{task.title}</h4>
+                          <h4 
+                            className="font-medium cursor-pointer hover:text-primary hover:underline"
+                            onClick={() => {
+                              setSelectedTask(task);
+                              setIsTaskModalOpen(true);
+                            }}
+                          >
+                            {task.title}
+                          </h4>
                           <p className="text-sm text-muted-foreground">{task.description}</p>
                           <div className="flex items-center space-x-4 mt-2">
                             <Badge className={getCategoryColor(task.category)}>
@@ -274,21 +282,9 @@ export default function Dashboard() {
                             )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Badge className={`${getStatusColor(task.status)} px-2 py-1 text-xs font-medium rounded`}>
-                            {task.status.replace('_', ' ')}
-                          </Badge>
-                          <Button 
-                            size="sm" 
-                            variant="outline"
-                            onClick={() => {
-                              setSelectedTask(task);
-                              setIsTaskModalOpen(true);
-                            }}
-                          >
-                            Open
-                          </Button>
-                        </div>
+                        <Badge className={`${getStatusColor(task.status)} px-2 py-1 text-xs font-medium rounded`}>
+                          {task.status.replace('_', ' ')}
+                        </Badge>
                       </div>
                     ))
                   ) : (
