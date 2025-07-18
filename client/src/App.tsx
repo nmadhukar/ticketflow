@@ -19,6 +19,8 @@ import Settings from "@/pages/settings";
 import Notifications from "@/pages/notifications";
 import ApiDocs from "@/pages/api-docs";
 import LoginPage from "@/pages/login-page";
+import UserGuides from "@/pages/user-guides";
+import AdminGuides from "@/pages/admin-guides";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -55,6 +57,8 @@ function Router() {
               </Route>
               <Route path="/settings" component={Settings} />
               <Route path="/notifications" component={Notifications} />
+              <Route path="/guides" component={UserGuides} />
+              <Route path="/admin/guides" component={AdminGuides} />
             </Switch>
           </Layout>
         )}

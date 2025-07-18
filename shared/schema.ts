@@ -368,3 +368,49 @@ export type SmtpSettings = typeof smtpSettings.$inferSelect;
 export type InsertSmtpSettings = z.infer<typeof insertSmtpSettingsSchema>;
 export type EmailTemplate = typeof emailTemplates.$inferSelect;
 export type InsertEmailTemplate = z.infer<typeof insertEmailTemplateSchema>;
+
+// User Guides table
+export const userGuides = pgTable("user_guides", {
+  id: serial("id").primaryKey(),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  category: varchar("category", { length: 100 }).notNull(),
+  type: varchar("type", { length: 50 }).notNull(), // 'scribehow', 'html', 'video'
+  content: text("content").notNull(), // For HTML content or embed codes
+  scribehowUrl: varchar("scribehow_url", { length: 500 }), // For Scribehow links
+  videoUrl: varchar("video_url", { length: 500 }), // For video embeds
+  tags: text("tags").array(), // For searchability
+  isPublished: boolean("is_published").default(true),
+  viewCount: integer("view_count").default(0),
+  createdBy: varchar("created_by").references(() => users.id).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// User Guide Categories table
+export const userGuideCategories = pgTable("user_guide_categories", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull().unique(),
+  description: text("description"),
+  icon: varchar("icon", { length: 50 }), // Icon name for UI
+  displayOrder: integer("display_order").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Create schemas
+export const insertUserGuideSchema = createInsertSchema(userGuides).omit({
+  id: true,
+  viewCount: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertUserGuideCategorySchema = createInsertSchema(userGuideCategories).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type UserGuide = typeof userGuides.$inferSelect;
+export type InsertUserGuide = z.infer<typeof insertUserGuideSchema>;
+export type UserGuideCategory = typeof userGuideCategories.$inferSelect;
+export type InsertUserGuideCategory = z.infer<typeof insertUserGuideCategorySchema>;

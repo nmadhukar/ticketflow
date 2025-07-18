@@ -1009,6 +1009,166 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // User Guide routes
+  
+  // Get all guide categories
+  app.get('/api/guide-categories', isAuthenticated, async (req, res) => {
+    try {
+      const categories = await storage.getUserGuideCategories();
+      res.json(categories);
+    } catch (error) {
+      console.error("Error fetching guide categories:", error);
+      res.status(500).json({ message: "Failed to fetch guide categories" });
+    }
+  });
+
+  // Get all guides (optionally filter by published status)
+  app.get('/api/guides', isAuthenticated, async (req, res) => {
+    try {
+      const { published } = req.query;
+      const guides = await storage.getUserGuides(published === 'true' ? { isPublished: true } : undefined);
+      res.json(guides);
+    } catch (error) {
+      console.error("Error fetching guides:", error);
+      res.status(500).json({ message: "Failed to fetch guides" });
+    }
+  });
+
+  // Get single guide
+  app.get('/api/guides/:id', isAuthenticated, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const guide = await storage.getUserGuideById(id);
+      
+      if (!guide) {
+        return res.status(404).json({ message: "Guide not found" });
+      }
+      
+      // Increment view count
+      await storage.incrementGuideViewCount(id);
+      
+      res.json(guide);
+    } catch (error) {
+      console.error("Error fetching guide:", error);
+      res.status(500).json({ message: "Failed to fetch guide" });
+    }
+  });
+
+  // Create guide category (admin only)
+  app.post('/api/admin/guide-categories', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const category = await storage.createUserGuideCategory(req.body);
+      res.json(category);
+    } catch (error) {
+      console.error("Error creating guide category:", error);
+      res.status(500).json({ message: "Failed to create guide category" });
+    }
+  });
+
+  // Update guide category (admin only)
+  app.put('/api/admin/guide-categories/:id', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      const category = await storage.updateUserGuideCategory(id, req.body);
+      res.json(category);
+    } catch (error) {
+      console.error("Error updating guide category:", error);
+      res.status(500).json({ message: "Failed to update guide category" });
+    }
+  });
+
+  // Delete guide category (admin only)
+  app.delete('/api/admin/guide-categories/:id', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      await storage.deleteUserGuideCategory(id);
+      res.json({ message: "Guide category deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting guide category:", error);
+      res.status(500).json({ message: "Failed to delete guide category" });
+    }
+  });
+
+  // Create guide (admin only)
+  app.post('/api/admin/guides', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const guide = await storage.createUserGuide({
+        ...req.body,
+        createdBy: userId,
+      });
+      res.json(guide);
+    } catch (error) {
+      console.error("Error creating guide:", error);
+      res.status(500).json({ message: "Failed to create guide" });
+    }
+  });
+
+  // Update guide (admin only)
+  app.put('/api/admin/guides/:id', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      const guide = await storage.updateUserGuide(id, req.body);
+      res.json(guide);
+    } catch (error) {
+      console.error("Error updating guide:", error);
+      res.status(500).json({ message: "Failed to update guide" });
+    }
+  });
+
+  // Delete guide (admin only)
+  app.delete('/api/admin/guides/:id', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      await storage.deleteUserGuide(id);
+      res.json({ message: "Guide deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting guide:", error);
+      res.status(500).json({ message: "Failed to delete guide" });
+    }
+  });
+
   // AI Chat routes
   app.post('/api/chat', isAuthenticated, async (req, res) => {
     try {
@@ -1096,6 +1256,169 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching chat sessions:", error);
       res.status(500).json({ message: "Failed to fetch chat sessions" });
+    }
+  });
+
+  // User Guide routes
+  // Get all user guide categories
+  app.get('/api/guide-categories', isAuthenticated, async (req, res) => {
+    try {
+      const categories = await storage.getUserGuideCategories();
+      res.json(categories);
+    } catch (error) {
+      console.error("Error fetching guide categories:", error);
+      res.status(500).json({ message: "Failed to fetch guide categories" });
+    }
+  });
+
+  // Create user guide category (admin only)
+  app.post('/api/admin/guide-categories', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const category = await storage.createUserGuideCategory(req.body);
+      res.json(category);
+    } catch (error) {
+      console.error("Error creating guide category:", error);
+      res.status(500).json({ message: "Failed to create guide category" });
+    }
+  });
+
+  // Update user guide category (admin only)
+  app.put('/api/admin/guide-categories/:id', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      const category = await storage.updateUserGuideCategory(id, req.body);
+      res.json(category);
+    } catch (error) {
+      console.error("Error updating guide category:", error);
+      res.status(500).json({ message: "Failed to update guide category" });
+    }
+  });
+
+  // Delete user guide category (admin only)
+  app.delete('/api/admin/guide-categories/:id', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      await storage.deleteUserGuideCategory(id);
+      res.json({ message: "Category deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting guide category:", error);
+      res.status(500).json({ message: "Failed to delete guide category" });
+    }
+  });
+
+  // Get all user guides (filtered by query params)
+  app.get('/api/guides', isAuthenticated, async (req, res) => {
+    try {
+      const { category, type, published } = req.query;
+      const guides = await storage.getUserGuides({
+        category: category as string,
+        type: type as string,
+        isPublished: published !== undefined ? published === 'true' : undefined,
+      });
+      res.json(guides);
+    } catch (error) {
+      console.error("Error fetching guides:", error);
+      res.status(500).json({ message: "Failed to fetch guides" });
+    }
+  });
+
+  // Get single user guide
+  app.get('/api/guides/:id', isAuthenticated, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const guide = await storage.getUserGuideById(id);
+      
+      if (!guide) {
+        return res.status(404).json({ message: "Guide not found" });
+      }
+
+      // Increment view count
+      await storage.incrementGuideViewCount(id);
+      
+      res.json(guide);
+    } catch (error) {
+      console.error("Error fetching guide:", error);
+      res.status(500).json({ message: "Failed to fetch guide" });
+    }
+  });
+
+  // Create user guide (admin only)
+  app.post('/api/admin/guides', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const guide = await storage.createUserGuide({
+        ...req.body,
+        createdBy: userId,
+      });
+      res.json(guide);
+    } catch (error) {
+      console.error("Error creating guide:", error);
+      res.status(500).json({ message: "Failed to create guide" });
+    }
+  });
+
+  // Update user guide (admin only)
+  app.put('/api/admin/guides/:id', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      const guide = await storage.updateUserGuide(id, req.body);
+      res.json(guide);
+    } catch (error) {
+      console.error("Error updating guide:", error);
+      res.status(500).json({ message: "Failed to update guide" });
+    }
+  });
+
+  // Delete user guide (admin only)
+  app.delete('/api/admin/guides/:id', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      await storage.deleteUserGuide(id);
+      res.json({ message: "Guide deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting guide:", error);
+      res.status(500).json({ message: "Failed to delete guide" });
     }
   });
 

@@ -12,6 +12,8 @@ import {
   emailTemplates,
   helpDocuments,
   aiChatMessages,
+  userGuides,
+  userGuideCategories,
   type User,
   type UpsertUser,
   type Task,
@@ -37,6 +39,10 @@ import {
   type InsertHelpDocument,
   type AiChatMessage,
   type InsertAiChatMessage,
+  type UserGuide,
+  type InsertUserGuide,
+  type UserGuideCategory,
+  type InsertUserGuideCategory,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, like, count, sql, isNotNull } from "drizzle-orm";
@@ -151,6 +157,20 @@ export interface IStorage {
   createChatMessage(message: InsertAiChatMessage): Promise<AiChatMessage>;
   getChatMessages(userId: string, sessionId: string): Promise<AiChatMessage[]>;
   getChatSessions(userId: string): Promise<{ sessionId: string; lastMessage: string; createdAt: Date }[]>;
+  
+  // User Guide operations
+  createUserGuide(guide: InsertUserGuide): Promise<UserGuide>;
+  updateUserGuide(id: number, guide: Partial<InsertUserGuide>): Promise<UserGuide>;
+  deleteUserGuide(id: number): Promise<void>;
+  getUserGuides(filters?: { category?: string; type?: string; isPublished?: boolean }): Promise<UserGuide[]>;
+  getUserGuideById(id: number): Promise<UserGuide | undefined>;
+  incrementGuideViewCount(id: number): Promise<void>;
+  
+  // User Guide Category operations
+  createUserGuideCategory(category: InsertUserGuideCategory): Promise<UserGuideCategory>;
+  updateUserGuideCategory(id: number, category: Partial<InsertUserGuideCategory>): Promise<UserGuideCategory>;
+  deleteUserGuideCategory(id: number): Promise<void>;
+  getUserGuideCategories(): Promise<UserGuideCategory[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -972,6 +992,89 @@ export class DatabaseStorage implements IStorage {
     }
 
     return Array.from(sessionMap.values()).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  // User Guide operations
+  async createUserGuide(guide: InsertUserGuide): Promise<UserGuide> {
+    const [created] = await db.insert(userGuides).values(guide).returning();
+    return created;
+  }
+
+  async updateUserGuide(id: number, guide: Partial<InsertUserGuide>): Promise<UserGuide> {
+    const [updated] = await db
+      .update(userGuides)
+      .set({
+        ...guide,
+        updatedAt: new Date(),
+      })
+      .where(eq(userGuides.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteUserGuide(id: number): Promise<void> {
+    await db.delete(userGuides).where(eq(userGuides.id, id));
+  }
+
+  async getUserGuides(filters?: { category?: string; type?: string; isPublished?: boolean }): Promise<UserGuide[]> {
+    let query = db.select().from(userGuides);
+    
+    const conditions = [];
+    if (filters?.category) {
+      conditions.push(eq(userGuides.category, filters.category));
+    }
+    if (filters?.type) {
+      conditions.push(eq(userGuides.type, filters.type));
+    }
+    if (filters?.isPublished !== undefined) {
+      conditions.push(eq(userGuides.isPublished, filters.isPublished));
+    }
+    
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as any;
+    }
+    
+    return await query.orderBy(desc(userGuides.createdAt));
+  }
+
+  async getUserGuideById(id: number): Promise<UserGuide | undefined> {
+    const [guide] = await db.select().from(userGuides).where(eq(userGuides.id, id));
+    return guide;
+  }
+
+  async incrementGuideViewCount(id: number): Promise<void> {
+    await db
+      .update(userGuides)
+      .set({
+        viewCount: sql`${userGuides.viewCount} + 1`,
+      })
+      .where(eq(userGuides.id, id));
+  }
+
+  // User Guide Category operations
+  async createUserGuideCategory(category: InsertUserGuideCategory): Promise<UserGuideCategory> {
+    const [created] = await db.insert(userGuideCategories).values(category).returning();
+    return created;
+  }
+
+  async updateUserGuideCategory(id: number, category: Partial<InsertUserGuideCategory>): Promise<UserGuideCategory> {
+    const [updated] = await db
+      .update(userGuideCategories)
+      .set(category)
+      .where(eq(userGuideCategories.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteUserGuideCategory(id: number): Promise<void> {
+    await db.delete(userGuideCategories).where(eq(userGuideCategories.id, id));
+  }
+
+  async getUserGuideCategories(): Promise<UserGuideCategory[]> {
+    return await db
+      .select()
+      .from(userGuideCategories)
+      .orderBy(userGuideCategories.displayOrder, userGuideCategories.name);
   }
 }
 

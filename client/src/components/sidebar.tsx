@@ -11,6 +11,7 @@ import {
   UserCircle,
   FolderOpen,
   Settings,
+  BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -45,6 +46,7 @@ export function Sidebar({ className }: SidebarProps) {
   ];
 
   const bottomNavigation = [
+    { name: "User Guides", href: "/guides", icon: BookOpen },
     { name: "Settings", href: "/settings", icon: Settings },
   ];
 

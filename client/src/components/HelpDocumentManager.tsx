@@ -10,7 +10,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText, Upload, Trash2, Edit, Eye, Search, X } from "lucide-react";
+import { FileText, Upload, Trash2, Edit, Eye, Search, X, BookOpen } from "lucide-react";
+import { Link } from "wouter";
 
 export default function HelpDocumentManager() {
   const { toast } = useToast();
@@ -199,6 +200,25 @@ export default function HelpDocumentManager() {
 
   return (
     <div className="space-y-4">
+      {/* Info Banner */}
+      <div className="bg-muted/50 border rounded-lg p-4 flex items-start justify-between">
+        <div className="flex-1">
+          <h4 className="font-medium flex items-center gap-2 mb-1">
+            <FileText className="h-4 w-4" />
+            Word Document Help System
+          </h4>
+          <p className="text-sm text-muted-foreground">
+            Upload Word documents that users can reference for help. For interactive guides with videos and HTML content, use the User Guide Management system.
+          </p>
+        </div>
+        <Link href="/admin/guides">
+          <Button variant="outline" size="sm" className="flex items-center gap-2">
+            <BookOpen className="h-4 w-4" />
+            User Guide Management
+          </Button>
+        </Link>
+      </div>
+
       {/* Header with Upload button */}
       <div className="flex justify-between items-center">
         <div className="relative w-64">
