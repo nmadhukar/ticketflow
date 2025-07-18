@@ -21,6 +21,9 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - Converted task listing pages from card to table layout based on user preference
 - Enhanced TaskModal with in-ticket editing capabilities for status, assignment, and due dates
 - Added comprehensive status update functionality within ticket view
+- Fixed modal layout issues - reorganized sections for better visibility and scrolling
+- Added ability to reassign tickets to different users or teams with "Unassigned" option
+- Separated status editing into its own visual section when editing existing tickets
 - Maintained enhanced filtering system with visual search and filter controls
 - Added overdue and due soon indicators in table views
 

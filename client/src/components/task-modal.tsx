@@ -306,7 +306,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden p-0">
+      <DialogContent className="max-w-4xl h-[90vh] overflow-hidden p-0 flex flex-col">
         <div className="flex flex-col h-full">
           {/* Header */}
           <div className="border-b bg-slate-50 px-6 py-4">
@@ -357,8 +357,8 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
               </div>
 
               <div className="flex-1 overflow-y-auto">
-                <TabsContent value="details" className="mt-0 p-6 space-y-6">
-                  <form onSubmit={handleSubmit} className="space-y-6">
+                <TabsContent value="details" className="mt-0 h-full">
+                  <form onSubmit={handleSubmit} className="p-6 space-y-6">
                     {/* Essential Information */}
                     <Card className="border-l-4 border-l-blue-500">
                       <CardHeader className="pb-3">
@@ -484,12 +484,23 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                           </div>
                         </div>
 
-                        {/* Status field - only shown when editing existing task */}
-                        {task && (
+                      </CardContent>
+                    </Card>
+
+                    {/* Status & Priority - only show status when editing */}
+                    {task && (
+                      <Card className="border-l-4 border-l-yellow-500">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-lg flex items-center gap-2">
+                            <CircleDot className="h-5 w-5 text-yellow-600" />
+                            Ticket Status
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
                           <div>
                             <Label htmlFor="status" className="text-sm font-medium text-slate-700 flex items-center gap-2">
                               <CircleDot className="h-4 w-4" />
-                              Status
+                              Current Status
                             </Label>
                             <Select value={formData.status} onValueChange={(value) => handleInputChange("status", value)}>
                               <SelectTrigger className="mt-2">
@@ -529,9 +540,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                               </SelectContent>
                             </Select>
                           </div>
-                        )}
-                      </CardContent>
-                    </Card>
+                        </CardContent>
+                      </Card>
+                    )}
 
                     {/* Assignment & Timeline */}
                     <Card className="border-l-4 border-l-green-500">
@@ -584,13 +595,19 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                         </div>
 
                         {formData.assigneeType === "user" && (
-                          <div>
+                          <div className="col-span-2">
                             <Label className="text-sm font-medium text-slate-700">Assign to User</Label>
                             <Select value={formData.assigneeId} onValueChange={(value) => handleInputChange("assigneeId", value)}>
                               <SelectTrigger className="mt-2">
                                 <SelectValue placeholder="Select user" />
                               </SelectTrigger>
                               <SelectContent>
+                                <SelectItem value="">
+                                  <div className="flex items-center gap-2">
+                                    <User className="h-4 w-4" />
+                                    Unassigned
+                                  </div>
+                                </SelectItem>
                                 {users?.map((user: any) => (
                                   <SelectItem key={user.id} value={user.id}>
                                     <div className="flex items-center gap-2">
@@ -607,13 +624,19 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                         )}
 
                         {formData.assigneeType === "team" && (
-                          <div>
+                          <div className="col-span-2">
                             <Label className="text-sm font-medium text-slate-700">Assign to Team</Label>
                             <Select value={formData.assigneeTeamId} onValueChange={(value) => handleInputChange("assigneeTeamId", value)}>
                               <SelectTrigger className="mt-2">
                                 <SelectValue placeholder="Select team" />
                               </SelectTrigger>
                               <SelectContent>
+                                <SelectItem value="">
+                                  <div className="flex items-center gap-2">
+                                    <Users className="h-4 w-4" />
+                                    Unassigned
+                                  </div>
+                                </SelectItem>
                                 {teams?.map((team: any) => (
                                   <SelectItem key={team.id} value={team.id.toString()}>
                                     <div className="flex items-center gap-2">
@@ -627,26 +650,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                           </div>
                         )}
 
-                        {task && (
-                          <div>
-                            <Label className="text-sm font-medium text-slate-700 flex items-center gap-2">
-                              <CircleDot className="h-4 w-4" />
-                              Status
-                            </Label>
-                            <Select value={formData.status} onValueChange={(value) => handleInputChange("status", value)}>
-                              <SelectTrigger className="mt-2">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="open">Open</SelectItem>
-                                <SelectItem value="in_progress">In Progress</SelectItem>
-                                <SelectItem value="resolved">Resolved</SelectItem>
-                                <SelectItem value="closed">Closed</SelectItem>
-                                <SelectItem value="on_hold">On Hold</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        )}
+
                       </CardContent>
                     </Card>
 
