@@ -27,13 +27,21 @@ import Invitations from "@/pages/invitations";
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
 
+  if (isLoading) {
+    return null; // or a loading spinner
+  }
+
   return (
     <>
       <Switch>
         <Route path="/login" component={LoginPage} />
         <Route path="/api-docs" component={ApiDocs} />
-        {isLoading || !isAuthenticated ? (
-          <Route path="/" component={Landing} />
+        
+        {!isAuthenticated ? (
+          <>
+            <Route path="/" component={Landing} />
+            <Route component={NotFound} />
+          </>
         ) : (
           <Layout>
             <Switch>
@@ -77,7 +85,6 @@ function Router() {
             </Switch>
           </Layout>
         )}
-        <Route component={NotFound} />
       </Switch>
       {/* Show AI Chat Bot for authenticated users */}
       {!isLoading && isAuthenticated && <AiChatBot />}
