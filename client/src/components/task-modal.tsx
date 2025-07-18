@@ -183,6 +183,8 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       description: formData.description.trim(),
       category: formData.category,
       priority: formData.priority,
+      status: formData.status,
+      notes: formData.notes.trim(),
       assigneeId: formData.assigneeType === "user" ? formData.assigneeId || null : null,
       assigneeTeamId: formData.assigneeType === "team" ? parseInt(formData.assigneeTeamId) || null : null,
       assigneeType: formData.assigneeType,
@@ -281,15 +283,17 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
             )}
             
             {task && (
-              <div>
-                <Label htmlFor="notes">Notes</Label>
+              <div className="col-span-full">
+                <Label htmlFor="notes">Progress Notes & Updates</Label>
                 <Textarea
                   id="notes"
-                  placeholder="Add notes about progress, updates, or comments..."
+                  placeholder="Add notes about progress, updates, or comments on this task..."
                   value={formData.notes}
                   onChange={(e) => handleInputChange("notes", e.target.value)}
                   rows={4}
+                  className="mt-1"
                 />
+                <p className="text-xs text-gray-500 mt-1">Use this field to track work progress, blockers, or updates on the task.</p>
               </div>
             )}
             
