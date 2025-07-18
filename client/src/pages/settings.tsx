@@ -9,11 +9,18 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Layout } from "@/components/layout";
-import { User, Bell, Shield, Palette, Globe, Key } from "lucide-react";
-import { useState } from "react";
+import { User, Bell, Shield, Palette, Globe, Key, Building, Plus, Copy, Eye, EyeOff, Trash2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { isUnauthorizedError } from "@/lib/authUtils";
 
 export default function Settings() {
   const { user } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  
   const [notifications, setNotifications] = useState({
     email: true,
     push: false,
@@ -29,6 +36,158 @@ export default function Settings() {
     dateFormat: "MM/DD/YYYY",
   });
 
+  const [companyName, setCompanyName] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
+  const [primaryColor, setPrimaryColor] = useState("#3b82f6");
+  const [newApiKeyName, setNewApiKeyName] = useState("");
+  const [showApiKey, setShowApiKey] = useState<string | null>(null);
+  const [apiKeyVisibility, setApiKeyVisibility] = useState<Record<number, boolean>>({});
+
+  // Fetch company settings
+  const { data: companySettings } = useQuery({
+    queryKey: ["/api/company-settings"],
+    enabled: user?.role === 'admin',
+  });
+
+  // Fetch API keys
+  const { data: apiKeys } = useQuery({
+    queryKey: ["/api/api-keys"],
+  });
+
+  useEffect(() => {
+    if (companySettings) {
+      setCompanyName(companySettings.companyName || "TicketFlow");
+      setLogoUrl(companySettings.logoUrl || "");
+      setPrimaryColor(companySettings.primaryColor || "#3b82f6");
+    }
+  }, [companySettings]);
+
+  // Update company settings mutation
+  const updateCompanySettingsMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return await apiRequest("PATCH", "/api/company-settings", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/company-settings"] });
+      toast({
+        title: "Success",
+        description: "Company settings updated successfully",
+      });
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: "Failed to update company settings",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Create API key mutation
+  const createApiKeyMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return await apiRequest("POST", "/api/api-keys", data);
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/api-keys"] });
+      setShowApiKey(data.plainKey);
+      setNewApiKeyName("");
+      toast({
+        title: "Success",
+        description: "API key created successfully. Copy it now - it won't be shown again!",
+      });
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: "Failed to create API key",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Delete API key mutation
+  const deleteApiKeyMutation = useMutation({
+    mutationFn: async (id: number) => {
+      return await apiRequest("DELETE", `/api/api-keys/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/api-keys"] });
+      toast({
+        title: "Success",
+        description: "API key revoked successfully",
+      });
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: "Failed to revoke API key",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleUpdateCompanySettings = () => {
+    updateCompanySettingsMutation.mutate({
+      companyName,
+      logoUrl: logoUrl || null,
+      primaryColor,
+    });
+  };
+
+  const handleCreateApiKey = () => {
+    if (!newApiKeyName.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a name for the API key",
+        variant: "destructive",
+      });
+      return;
+    }
+    createApiKeyMutation.mutate({ name: newApiKeyName.trim() });
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast({
+      title: "Copied",
+      description: "API key copied to clipboard",
+    });
+  };
+
   return (
     <Layout>
       <div className="container mx-auto p-6 max-w-4xl">
@@ -40,7 +199,7 @@ export default function Settings() {
         </div>
 
         <Tabs defaultValue="profile" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className={`grid w-full ${user?.role === 'admin' ? 'grid-cols-6' : 'grid-cols-5'}`}>
             <TabsTrigger value="profile" className="flex items-center gap-2">
               <User className="h-4 w-4" />
               Profile
@@ -61,6 +220,12 @@ export default function Settings() {
               <Key className="h-4 w-4" />
               API Keys
             </TabsTrigger>
+            {user?.role === 'admin' && (
+              <TabsTrigger value="company" className="flex items-center gap-2">
+                <Building className="h-4 w-4" />
+                Company
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="profile" className="space-y-6">
@@ -400,25 +565,263 @@ export default function Settings() {
           <TabsContent value="api" className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle>API Access</CardTitle>
+                <CardTitle>API Keys</CardTitle>
                 <CardDescription>
-                  Manage API keys and integrations (Coming Soon)
+                  Manage API keys for third-party integrations
                 </CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="text-center py-8">
-                  <Key className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">API Keys Management</h3>
-                  <p className="text-muted-foreground mb-4">
-                    API key management and third-party integrations will be available in a future update.
+              <CardContent className="space-y-6">
+                {/* Create New API Key */}
+                <div className="space-y-4">
+                  <h4 className="text-sm font-medium">Create New API Key</h4>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="API Key Name (e.g., Mobile App, CI/CD Pipeline)"
+                      value={newApiKeyName}
+                      onChange={(e) => setNewApiKeyName(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleCreateApiKey()}
+                    />
+                    <Button
+                      onClick={handleCreateApiKey}
+                      disabled={createApiKeyMutation.isPending}
+                    >
+                      {createApiKeyMutation.isPending ? "Creating..." : "Create Key"}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Show newly created API key */}
+                {showApiKey && (
+                  <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                    <h4 className="text-sm font-medium text-green-900 mb-2">
+                      API Key Created Successfully
+                    </h4>
+                    <p className="text-xs text-green-700 mb-3">
+                      Copy this key now. For security reasons, it won't be shown again.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 p-2 bg-white border rounded text-sm font-mono">
+                        {showApiKey}
+                      </code>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          copyToClipboard(showApiKey);
+                          setShowApiKey(null);
+                        }}
+                      >
+                        <Copy className="h-4 w-4 mr-1" />
+                        Copy & Close
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                <Separator />
+
+                {/* Existing API Keys */}
+                <div className="space-y-4">
+                  <h4 className="text-sm font-medium">Active API Keys</h4>
+                  {apiKeys && apiKeys.length > 0 ? (
+                    <div className="space-y-2">
+                      {apiKeys.map((apiKey: any) => (
+                        <div
+                          key={apiKey.id}
+                          className="flex items-center justify-between p-3 border rounded-lg"
+                        >
+                          <div className="flex-1">
+                            <p className="font-medium">{apiKey.name}</p>
+                            <div className="flex items-center gap-4 mt-1">
+                              <p className="text-xs text-muted-foreground">
+                                Created: {new Date(apiKey.createdAt).toLocaleDateString()}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Last used: {apiKey.lastUsed ? new Date(apiKey.lastUsed).toLocaleDateString() : 'Never'}
+                              </p>
+                              {apiKey.expiresAt && (
+                                <p className="text-xs text-muted-foreground">
+                                  Expires: {new Date(apiKey.expiresAt).toLocaleDateString()}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <code className="text-xs font-mono bg-muted px-2 py-1 rounded">
+                              {apiKey.key.substring(0, 8)}...
+                            </code>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                const visibility = { ...apiKeyVisibility };
+                                visibility[apiKey.id] = !visibility[apiKey.id];
+                                setApiKeyVisibility(visibility);
+                              }}
+                            >
+                              {apiKeyVisibility[apiKey.id] ? (
+                                <EyeOff className="h-4 w-4" />
+                              ) : (
+                                <Eye className="h-4 w-4" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => deleteApiKeyMutation.mutate(apiKey.id)}
+                              disabled={deleteApiKeyMutation.isPending}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Key className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p>No API keys yet. Create one to get started!</p>
+                    </div>
+                  )}
+                </div>
+
+                <Separator />
+
+                {/* API Documentation Link */}
+                <div className="rounded-lg bg-muted p-4">
+                  <h4 className="text-sm font-medium mb-2">API Documentation</h4>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Learn how to integrate with TicketFlow using our REST API.
                   </p>
-                  <Button variant="outline" disabled>
-                    Coming Soon
+                  <Button variant="outline" size="sm" asChild>
+                    <a href="/api-docs" target="_blank">
+                      View API Documentation
+                    </a>
                   </Button>
                 </div>
               </CardContent>
             </Card>
           </TabsContent>
+
+          {user?.role === 'admin' && (
+            <TabsContent value="company" className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Company Branding</CardTitle>
+                  <CardDescription>
+                    Customize your company's branding across the platform
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Company Name */}
+                    <div className="space-y-2">
+                      <Label htmlFor="companyName">Company Name</Label>
+                      <Input
+                        id="companyName"
+                        placeholder="Your Company Name"
+                        value={companyName}
+                        onChange={(e) => setCompanyName(e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        This will appear in the navigation and emails
+                      </p>
+                    </div>
+
+                    {/* Logo URL */}
+                    <div className="space-y-2">
+                      <Label htmlFor="logoUrl">Logo URL</Label>
+                      <Input
+                        id="logoUrl"
+                        placeholder="https://example.com/logo.png"
+                        value={logoUrl}
+                        onChange={(e) => setLogoUrl(e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Provide a URL to your company logo
+                      </p>
+                    </div>
+
+                    {/* Primary Color */}
+                    <div className="space-y-2">
+                      <Label htmlFor="primaryColor">Primary Color</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="primaryColor"
+                          type="color"
+                          value={primaryColor}
+                          onChange={(e) => setPrimaryColor(e.target.value)}
+                          className="w-20 h-10 p-1 cursor-pointer"
+                        />
+                        <Input
+                          value={primaryColor}
+                          onChange={(e) => setPrimaryColor(e.target.value)}
+                          placeholder="#3b82f6"
+                          className="flex-1"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Used for buttons and accent elements
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Preview */}
+                  <Separator />
+                  
+                  <div className="space-y-4">
+                    <h4 className="text-sm font-medium">Preview</h4>
+                    <div className="border rounded-lg p-4 bg-muted/50">
+                      <div className="flex items-center gap-3 mb-4">
+                        {logoUrl ? (
+                          <img 
+                            src={logoUrl} 
+                            alt={companyName}
+                            className="h-8 w-auto object-contain"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          <div 
+                            className="h-8 w-8 rounded flex items-center justify-center text-white font-bold"
+                            style={{ backgroundColor: primaryColor }}
+                          >
+                            {companyName.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <span className="font-semibold text-lg">{companyName || "Your Company"}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button 
+                          size="sm"
+                          style={{ backgroundColor: primaryColor, borderColor: primaryColor }}
+                          className="text-white hover:opacity-90"
+                        >
+                          Primary Button
+                        </Button>
+                        <Button 
+                          size="sm"
+                          variant="outline"
+                          style={{ borderColor: primaryColor, color: primaryColor }}
+                        >
+                          Secondary Button
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Button 
+                    onClick={handleUpdateCompanySettings}
+                    disabled={updateCompanySettingsMutation.isPending}
+                    className="w-full md:w-auto"
+                  >
+                    {updateCompanySettingsMutation.isPending ? "Saving..." : "Save Branding"}
+                  </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
         </Tabs>
       </div>
     </Layout>

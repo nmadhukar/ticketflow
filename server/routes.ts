@@ -2,7 +2,14 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { insertTaskSchema, insertTeamSchema, insertTaskCommentSchema } from "@shared/schema";
+import { 
+  insertTaskSchema, 
+  insertTeamSchema, 
+  insertTaskCommentSchema,
+  insertTaskAttachmentSchema,
+  insertCompanySettingsSchema,
+  insertApiKeySchema 
+} from "@shared/schema";
 import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -456,6 +463,140 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error creating task comment:", error);
       res.status(500).json({ message: "Failed to create comment" });
+    }
+  });
+
+  // Attachment routes
+  app.get("/api/tasks/:id/attachments", isAuthenticated, async (req, res) => {
+    try {
+      const taskId = parseInt(req.params.id);
+      const attachments = await storage.getTaskAttachments(taskId);
+      res.json(attachments);
+    } catch (error) {
+      console.error("Error fetching attachments:", error);
+      res.status(500).json({ message: "Failed to fetch attachments" });
+    }
+  });
+
+  app.post("/api/tasks/:id/attachments", isAuthenticated, async (req: any, res) => {
+    try {
+      const taskId = parseInt(req.params.id);
+      const userId = req.user.claims.sub;
+      const attachmentData = insertTaskAttachmentSchema.parse({
+        ...req.body,
+        taskId,
+        userId,
+      });
+      const attachment = await storage.addTaskAttachment(attachmentData);
+      res.status(201).json(attachment);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid attachment data", errors: error.errors });
+      }
+      console.error("Error creating attachment:", error);
+      res.status(500).json({ message: "Failed to create attachment" });
+    }
+  });
+
+  app.delete("/api/attachments/:id", isAuthenticated, async (req, res) => {
+    try {
+      const attachmentId = parseInt(req.params.id);
+      await storage.deleteTaskAttachment(attachmentId);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting attachment:", error);
+      res.status(500).json({ message: "Failed to delete attachment" });
+    }
+  });
+
+  // Company settings routes
+  app.get("/api/company-settings", isAuthenticated, async (req, res) => {
+    try {
+      const settings = await storage.getCompanySettings();
+      res.json(settings || { companyName: "TicketFlow", primaryColor: "#3b82f6" });
+    } catch (error) {
+      console.error("Error fetching company settings:", error);
+      res.status(500).json({ message: "Failed to fetch company settings" });
+    }
+  });
+
+  app.patch("/api/company-settings", isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(req.user.claims.sub);
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Only admins can update company settings" });
+      }
+      
+      const userId = req.user.claims.sub;
+      const settingsData = insertCompanySettingsSchema.parse(req.body);
+      const settings = await storage.updateCompanySettings(settingsData, userId);
+      res.json(settings);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid settings data", errors: error.errors });
+      }
+      console.error("Error updating company settings:", error);
+      res.status(500).json({ message: "Failed to update company settings" });
+    }
+  });
+
+  // API key routes
+  app.get("/api/api-keys", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const apiKeys = await storage.getApiKeys(userId);
+      // Don't send the actual key hashes to the client
+      const sanitizedKeys = apiKeys.map(key => ({
+        ...key,
+        keyHash: undefined,
+      }));
+      res.json(sanitizedKeys);
+    } catch (error) {
+      console.error("Error fetching API keys:", error);
+      res.status(500).json({ message: "Failed to fetch API keys" });
+    }
+  });
+
+  app.post("/api/api-keys", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const apiKeyData = insertApiKeySchema.parse({
+        ...req.body,
+        userId,
+      });
+      const { apiKey, plainKey } = await storage.createApiKey(apiKeyData);
+      res.status(201).json({
+        ...apiKey,
+        keyHash: undefined,
+        plainKey, // Only sent once on creation
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid API key data", errors: error.errors });
+      }
+      console.error("Error creating API key:", error);
+      res.status(500).json({ message: "Failed to create API key" });
+    }
+  });
+
+  app.delete("/api/api-keys/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const keyId = parseInt(req.params.id);
+      const userId = req.user.claims.sub;
+      
+      // Verify the key belongs to the user
+      const apiKeys = await storage.getApiKeys(userId);
+      const keyExists = apiKeys.some(key => key.id === keyId);
+      
+      if (!keyExists) {
+        return res.status(404).json({ message: "API key not found" });
+      }
+      
+      await storage.revokeApiKey(keyId);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error revoking API key:", error);
+      res.status(500).json({ message: "Failed to revoke API key" });
     }
   });
 

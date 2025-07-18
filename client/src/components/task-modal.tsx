@@ -41,7 +41,11 @@ import {
   AlertTriangle, 
   CircleDot,
   Target,
-  Zap
+  Zap,
+  Paperclip,
+  Download,
+  Trash2,
+  Upload
 } from "lucide-react";
 
 interface TaskModalProps {
@@ -83,6 +87,12 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
 
   const { data: taskComments } = useQuery({
     queryKey: ["/api/tasks", task?.id, "comments"],
+    enabled: !!task?.id && isOpen,
+    retry: false,
+  });
+
+  const { data: taskAttachments, refetch: refetchAttachments } = useQuery({
+    queryKey: ["/api/tasks", task?.id, "attachments"],
     enabled: !!task?.id && isOpen,
     retry: false,
   });
@@ -304,6 +314,88 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     }
   };
 
+  // File attachment mutations
+  const addAttachmentMutation = useMutation({
+    mutationFn: async (attachmentData: any) => {
+      return await apiRequest("POST", `/api/tasks/${task?.id}/attachments`, attachmentData);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "File attached successfully",
+      });
+      refetchAttachments();
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: "Failed to attach file",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteAttachmentMutation = useMutation({
+    mutationFn: async (attachmentId: number) => {
+      return await apiRequest("DELETE", `/api/attachments/${attachmentId}`);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "Attachment deleted successfully",
+      });
+      refetchAttachments();
+    },
+    onError: (error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
+      toast({
+        title: "Error",
+        description: "Failed to delete attachment",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !task?.id) return;
+
+    // In a real app, you would upload the file to a storage service
+    // For now, we'll simulate with a fake URL
+    const fakeUrl = `https://storage.example.com/${Date.now()}_${file.name}`;
+    
+    await addAttachmentMutation.mutateAsync({
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+      fileUrl: fakeUrl,
+    });
+
+    // Reset the input
+    e.target.value = '';
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl h-[90vh] overflow-hidden p-0 flex flex-col">
@@ -345,13 +437,22 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                     Task Details
                   </TabsTrigger>
                   {task && (
-                    <TabsTrigger 
-                      value="comments" 
-                      className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
-                    >
-                      <Send className="h-4 w-4 mr-2" />
-                      Comments {taskComments?.length ? `(${taskComments.length})` : ''}
-                    </TabsTrigger>
+                    <>
+                      <TabsTrigger 
+                        value="comments" 
+                        className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
+                      >
+                        <Send className="h-4 w-4 mr-2" />
+                        Comments {taskComments?.length ? `(${taskComments.length})` : ''}
+                      </TabsTrigger>
+                      <TabsTrigger 
+                        value="attachments" 
+                        className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
+                      >
+                        <Paperclip className="h-4 w-4 mr-2" />
+                        Attachments {taskAttachments?.length ? `(${taskAttachments.length})` : ''}
+                      </TabsTrigger>
+                    </>
                   )}
                 </TabsList>
               </div>
@@ -735,6 +836,97 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                           <div className="text-center py-8 text-slate-500">
                             <Send className="h-8 w-8 mx-auto mb-2 opacity-50" />
                             <p>No comments yet. Be the first to add one!</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </TabsContent>
+                )}
+
+                {task && (
+                  <TabsContent value="attachments" className="mt-0 p-6">
+                    <div className="space-y-4">
+                      {/* Upload Attachment */}
+                      <Card>
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <Upload className="h-4 w-4" />
+                            Upload Attachment
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-blue-500 transition-colors">
+                            <input
+                              type="file"
+                              id="file-upload"
+                              className="hidden"
+                              onChange={handleFileUpload}
+                              disabled={addAttachmentMutation.isPending}
+                            />
+                            <label
+                              htmlFor="file-upload"
+                              className="cursor-pointer"
+                            >
+                              <Paperclip className="h-8 w-8 mx-auto mb-2 text-slate-400" />
+                              <p className="text-sm text-slate-600">
+                                Click to upload or drag and drop
+                              </p>
+                              <p className="text-xs text-slate-500 mt-1">
+                                PDF, DOC, DOCX, XLS, XLSX, PNG, JPG up to 10MB
+                              </p>
+                            </label>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      {/* Attachments List */}
+                      <div className="space-y-3">
+                        <h3 className="font-medium text-slate-900">Attached Files</h3>
+                        {taskAttachments?.length > 0 ? (
+                          taskAttachments.map((attachment: any) => (
+                            <Card key={attachment.id} className="border-l-4 border-l-purple-200">
+                              <CardContent className="pt-4">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-purple-100 rounded-full">
+                                      <Paperclip className="h-4 w-4 text-purple-600" />
+                                    </div>
+                                    <div>
+                                      <p className="font-medium text-slate-900">
+                                        {attachment.fileName}
+                                      </p>
+                                      <p className="text-xs text-slate-500">
+                                        {(attachment.fileSize / 1024).toFixed(2)} KB • 
+                                        Uploaded by {attachment.userName} on{' '}
+                                        {new Date(attachment.uploadedAt).toLocaleDateString()}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => window.open(attachment.fileUrl, '_blank')}
+                                    >
+                                      <Download className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => deleteAttachmentMutation.mutate(attachment.id)}
+                                      disabled={deleteAttachmentMutation.isPending}
+                                    >
+                                      <Trash2 className="h-4 w-4 text-red-500" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          ))
+                        ) : (
+                          <div className="text-center py-8 text-slate-500">
+                            <Paperclip className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                            <p>No attachments yet. Upload a file to get started!</p>
                           </div>
                         )}
                       </div>

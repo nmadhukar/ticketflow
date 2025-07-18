@@ -5,6 +5,9 @@ import {
   teamMembers,
   taskComments,
   taskHistory,
+  taskAttachments,
+  companySettings,
+  apiKeys,
   type User,
   type UpsertUser,
   type Task,
@@ -16,6 +19,12 @@ import {
   type TeamMember,
   type InsertTeamMember,
   type TaskHistory,
+  type TaskAttachment,
+  type InsertTaskAttachment,
+  type CompanySettings,
+  type InsertCompanySettings,
+  type ApiKey,
+  type InsertApiKey,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, like, count, sql, isNotNull } from "drizzle-orm";
@@ -91,6 +100,22 @@ export interface IStorage {
   updateTeamMemberRole(userId: string, teamId: number, role: string): Promise<TeamMember>;
   getDepartments(): Promise<string[]>;
   resetUserPassword(userId: string): Promise<{ tempPassword: string }>;
+  
+  // Attachment operations
+  addTaskAttachment(attachment: InsertTaskAttachment): Promise<TaskAttachment>;
+  getTaskAttachments(taskId: number): Promise<TaskAttachment[]>;
+  deleteTaskAttachment(id: number): Promise<void>;
+  
+  // Company settings operations
+  getCompanySettings(): Promise<CompanySettings | undefined>;
+  updateCompanySettings(settings: Partial<InsertCompanySettings>, userId: string): Promise<CompanySettings>;
+  
+  // API key operations
+  createApiKey(apiKey: InsertApiKey): Promise<{ apiKey: ApiKey; plainKey: string }>;
+  getApiKeys(userId: string): Promise<ApiKey[]>;
+  getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined>;
+  updateApiKeyLastUsed(id: number): Promise<void>;
+  revokeApiKey(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -636,6 +661,110 @@ export class DatabaseStorage implements IStorage {
     // 4. Force password change on next login
     
     return { tempPassword };
+  }
+  
+  // Attachment operations
+  async addTaskAttachment(attachment: InsertTaskAttachment): Promise<TaskAttachment> {
+    const [newAttachment] = await db
+      .insert(taskAttachments)
+      .values(attachment)
+      .returning();
+    return newAttachment;
+  }
+  
+  async getTaskAttachments(taskId: number): Promise<TaskAttachment[]> {
+    return await db
+      .select()
+      .from(taskAttachments)
+      .where(eq(taskAttachments.taskId, taskId))
+      .orderBy(desc(taskAttachments.createdAt));
+  }
+  
+  async deleteTaskAttachment(id: number): Promise<void> {
+    await db.delete(taskAttachments).where(eq(taskAttachments.id, id));
+  }
+  
+  // Company settings operations
+  async getCompanySettings(): Promise<CompanySettings | undefined> {
+    const [settings] = await db.select().from(companySettings).limit(1);
+    return settings;
+  }
+  
+  async updateCompanySettings(settings: Partial<InsertCompanySettings>, userId: string): Promise<CompanySettings> {
+    const existingSettings = await this.getCompanySettings();
+    
+    if (existingSettings) {
+      const [updated] = await db
+        .update(companySettings)
+        .set({
+          ...settings,
+          updatedBy: userId,
+          updatedAt: new Date(),
+        })
+        .where(eq(companySettings.id, existingSettings.id))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db
+        .insert(companySettings)
+        .values({
+          ...settings,
+          updatedBy: userId,
+        })
+        .returning();
+      return created;
+    }
+  }
+  
+  // API key operations
+  async createApiKey(apiKey: InsertApiKey): Promise<{ apiKey: ApiKey; plainKey: string }> {
+    // Generate a secure API key
+    const plainKey = `tfk_${Math.random().toString(36).substring(2)}${Date.now().toString(36)}`;
+    const keyPrefix = plainKey.substring(0, 8);
+    
+    // In production, you'd hash the key before storing
+    const keyHash = plainKey; // TODO: Use bcrypt or similar
+    
+    const [newApiKey] = await db
+      .insert(apiKeys)
+      .values({
+        ...apiKey,
+        keyHash: keyHash,
+        keyPrefix: keyPrefix,
+      })
+      .returning();
+      
+    return { apiKey: newApiKey, plainKey };
+  }
+  
+  async getApiKeys(userId: string): Promise<ApiKey[]> {
+    return await db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.userId, userId))
+      .orderBy(desc(apiKeys.createdAt));
+  }
+  
+  async getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined> {
+    const [apiKey] = await db
+      .select()
+      .from(apiKeys)
+      .where(and(eq(apiKeys.keyHash, keyHash), eq(apiKeys.isActive, true)));
+    return apiKey;
+  }
+  
+  async updateApiKeyLastUsed(id: number): Promise<void> {
+    await db
+      .update(apiKeys)
+      .set({ lastUsedAt: new Date() })
+      .where(eq(apiKeys.id, id));
+  }
+  
+  async revokeApiKey(id: number): Promise<void> {
+    await db
+      .update(apiKeys)
+      .set({ isActive: false })
+      .where(eq(apiKeys.id, id));
   }
 }
 

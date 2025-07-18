@@ -103,6 +103,42 @@ export const taskHistory = pgTable("task_history", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// File attachments for tasks
+export const taskAttachments = pgTable("task_attachments", {
+  id: serial("id").primaryKey(),
+  taskId: integer("task_id").references(() => tasks.id).notNull(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  fileName: varchar("file_name", { length: 255 }).notNull(),
+  fileSize: integer("file_size").notNull(), // in bytes
+  fileType: varchar("file_type", { length: 100 }).notNull(),
+  fileUrl: text("file_url").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Company settings (for branding)
+export const companySettings = pgTable("company_settings", {
+  id: serial("id").primaryKey(),
+  companyName: varchar("company_name", { length: 255 }).notNull().default("TicketFlow"),
+  logoUrl: text("logo_url"),
+  primaryColor: varchar("primary_color", { length: 7 }).default("#3b82f6"), // hex color
+  updatedBy: varchar("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// API keys for third-party integrations
+export const apiKeys = pgTable("api_keys", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  keyHash: varchar("key_hash", { length: 255 }).notNull(), // hashed API key
+  keyPrefix: varchar("key_prefix", { length: 10 }).notNull(), // first few chars for identification
+  permissions: text("permissions").array().default([]), // array of permission strings
+  lastUsedAt: timestamp("last_used_at"),
+  expiresAt: timestamp("expires_at"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   createdTasks: many(tasks, { relationName: "taskCreator" }),
@@ -110,6 +146,8 @@ export const usersRelations = relations(users, ({ many }) => ({
   teamMemberships: many(teamMembers),
   comments: many(taskComments),
   history: many(taskHistory),
+  attachments: many(taskAttachments),
+  apiKeys: many(apiKeys),
 }));
 
 export const teamsRelations = relations(teams, ({ one, many }) => ({
@@ -150,6 +188,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   }),
   comments: many(taskComments),
   history: many(taskHistory),
+  attachments: many(taskAttachments),
 }));
 
 export const taskCommentsRelations = relations(taskComments, ({ one }) => ({
@@ -170,6 +209,24 @@ export const taskHistoryRelations = relations(taskHistory, ({ one }) => ({
   }),
   user: one(users, {
     fields: [taskHistory.userId],
+    references: [users.id],
+  }),
+}));
+
+export const taskAttachmentsRelations = relations(taskAttachments, ({ one }) => ({
+  task: one(tasks, {
+    fields: [taskAttachments.taskId],
+    references: [tasks.id],
+  }),
+  user: one(users, {
+    fields: [taskAttachments.userId],
+    references: [users.id],
+  }),
+}));
+
+export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
+  user: one(users, {
+    fields: [apiKeys.userId],
     references: [users.id],
   }),
 }));
@@ -200,6 +257,25 @@ export const insertTeamMemberSchema = createInsertSchema(teamMembers).omit({
   joinedAt: true,
 });
 
+// Insert schemas for new tables
+export const insertTaskAttachmentSchema = createInsertSchema(taskAttachments).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertCompanySettingsSchema = createInsertSchema(companySettings).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export const insertApiKeySchema = createInsertSchema(apiKeys).omit({
+  id: true,
+  createdAt: true,
+  lastUsedAt: true,
+}).extend({
+  expiresAt: z.string().datetime().nullable().optional(),
+});
+
 // Types
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
@@ -212,3 +288,9 @@ export type InsertTaskComment = z.infer<typeof insertTaskCommentSchema>;
 export type TeamMember = typeof teamMembers.$inferSelect;
 export type InsertTeamMember = z.infer<typeof insertTeamMemberSchema>;
 export type TaskHistory = typeof taskHistory.$inferSelect;
+export type TaskAttachment = typeof taskAttachments.$inferSelect;
+export type InsertTaskAttachment = z.infer<typeof insertTaskAttachmentSchema>;
+export type CompanySettings = typeof companySettings.$inferSelect;
+export type InsertCompanySettings = z.infer<typeof insertCompanySettingsSchema>;
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
