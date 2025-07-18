@@ -267,7 +267,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { userId } = req.params;
       const updates = req.body;
       
-      const updatedUser = await storage.updateUserRole(userId, updates);
+      const updatedUser = await storage.updateUserProfile(userId, updates);
       res.json(updatedUser);
     } catch (error) {
       console.error("Error updating user:", error);
@@ -337,6 +337,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching departments:", error);
       res.status(500).json({ message: "Failed to fetch departments" });
+    }
+  });
+
+  app.post("/api/admin/users/:userId/reset-password", isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(req.user.claims.sub);
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      const { userId } = req.params;
+      const result = await storage.resetUserPassword(userId);
+      res.json(result);
+    } catch (error) {
+      console.error("Error resetting password:", error);
+      res.status(500).json({ message: "Failed to reset password" });
     }
   });
 

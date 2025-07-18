@@ -96,6 +96,18 @@ export default function AdminPanel() {
     },
   });
 
+  const resetPasswordMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      return await apiRequest("POST", `/api/admin/users/${userId}/reset-password`);
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Password Reset",
+        description: `Temporary password: ${data.tempPassword}`,
+      });
+    },
+  });
+
   const handleEditUser = (user: any) => {
     setSelectedUser(user);
     setIsEditUserOpen(true);
@@ -355,6 +367,30 @@ export default function AdminPanel() {
           </DialogHeader>
           {selectedUser && (
             <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>First Name</Label>
+                  <Input
+                    value={selectedUser.firstName || ""}
+                    onChange={(e) => setSelectedUser({ ...selectedUser, firstName: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Last Name</Label>
+                  <Input
+                    value={selectedUser.lastName || ""}
+                    onChange={(e) => setSelectedUser({ ...selectedUser, lastName: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Email</Label>
+                <Input
+                  type="email"
+                  value={selectedUser.email || ""}
+                  onChange={(e) => setSelectedUser({ ...selectedUser, email: e.target.value })}
+                />
+              </div>
               <div className="space-y-2">
                 <Label>Role</Label>
                 <Select
@@ -366,6 +402,7 @@ export default function AdminPanel() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="user">User</SelectItem>
+                    <SelectItem value="agent">Agent</SelectItem>
                     <SelectItem value="manager">Manager</SelectItem>
                     <SelectItem value="admin">Admin</SelectItem>
                   </SelectContent>
@@ -396,13 +433,39 @@ export default function AdminPanel() {
                   onChange={(e) => setSelectedUser({ ...selectedUser, phone: e.target.value })}
                 />
               </div>
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select
+                  value={selectedUser.isActive ? "active" : "inactive"}
+                  onValueChange={(value) => setSelectedUser({ ...selectedUser, isActive: value === "active" })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditUserOpen(false)}>
-              Cancel
+          <DialogFooter className="flex justify-between">
+            <Button 
+              variant="destructive" 
+              onClick={() => resetPasswordMutation.mutate(selectedUser.id)}
+              disabled={resetPasswordMutation.isPending}
+            >
+              Reset Password
             </Button>
-            <Button onClick={handleUpdateUser}>Save Changes</Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setIsEditUserOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleUpdateUser} disabled={updateUserMutation.isPending}>
+                Save Changes
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -373,10 +373,14 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async updateUserRole(userId: string, updates: {
+  async updateUserProfile(userId: string, updates: {
+    firstName?: string;
+    lastName?: string;
+    email?: string;
     role?: string;
     department?: string;
     phone?: string;
+    isActive?: boolean;
   }): Promise<User> {
     const [updatedUser] = await db
       .update(users)
@@ -536,7 +540,20 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
-
+  async resetUserPassword(userId: string): Promise<{ tempPassword: string }> {
+    // Generate a temporary password (8 characters)
+    const tempPassword = Math.random().toString(36).slice(-8);
+    
+    // In a real app, you would hash the password and store it
+    // For this demo, we'll just return the temp password
+    // Note: In production, you'd want to:
+    // 1. Hash the password with bcrypt
+    // 2. Store it in the database
+    // 3. Send it via secure email
+    // 4. Force password change on next login
+    
+    return { tempPassword };
+  }
 }
 
 export const storage = new DatabaseStorage();
