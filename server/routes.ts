@@ -913,6 +913,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // SSO Configuration routes (admin only)
+  app.get("/api/sso/config", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const config = await storage.getSsoConfiguration();
+      res.json(config || { clientId: '', clientSecret: '', tenantId: '' });
+    } catch (error) {
+      console.error("Error fetching SSO configuration:", error);
+      res.status(500).json({ message: "Failed to fetch SSO configuration" });
+    }
+  });
+
+  app.post("/api/sso/config", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const config = await storage.upsertSsoConfiguration({
+        ...req.body,
+        updatedBy: userId,
+      });
+      res.json(config);
+    } catch (error) {
+      console.error("Error updating SSO configuration:", error);
+      res.status(500).json({ message: "Failed to update SSO configuration" });
+    }
+  });
+
   // Send test email (admin only)
   app.post("/api/email/test", isAuthenticated, async (req: any, res) => {
     try {

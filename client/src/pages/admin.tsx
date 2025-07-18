@@ -63,6 +63,20 @@ export default function AdminPanel() {
     retry: false,
   });
 
+  const { data: ssoConfigData } = useQuery({
+    queryKey: ["/api/sso/config"],
+    retry: false,
+    onSuccess: (data) => {
+      if (data) {
+        setSsoConfig({
+          clientId: data.clientId || "",
+          clientSecret: data.clientSecret || "",
+          tenantId: data.tenantId || "",
+        });
+      }
+    },
+  });
+
   const updateUserMutation = useMutation({
     mutationFn: async (userData: any) => {
       return await apiRequest("PATCH", `/api/admin/users/${userData.id}`, userData);
@@ -191,6 +205,26 @@ export default function AdminPanel() {
       toast({
         title: "Error",
         description: "Failed to upload logo",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const saveSsoConfigMutation = useMutation({
+    mutationFn: async (config: typeof ssoConfig) => {
+      return await apiRequest("POST", "/api/sso/config", config);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sso/config"] });
+      toast({
+        title: "SSO Configuration Saved",
+        description: "Microsoft 365 SSO settings have been updated successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to save SSO configuration",
         variant: "destructive",
       });
     },
@@ -777,13 +811,11 @@ export default function AdminPanel() {
                 <Button 
                   className="bg-primary hover:bg-primary/90"
                   onClick={() => {
-                    toast({
-                      title: "Configuration Saved",
-                      description: "Microsoft 365 SSO settings have been updated",
-                    });
+                    saveSsoConfigMutation.mutate(ssoConfig);
                   }}
+                  disabled={saveSsoConfigMutation.isPending}
                 >
-                  Save Configuration
+                  {saveSsoConfigMutation.isPending ? "Saving..." : "Save Configuration"}
                 </Button>
               </div>
             </CardContent>

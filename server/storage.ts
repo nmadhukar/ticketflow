@@ -52,6 +52,9 @@ import {
   type InsertUserInvitation,
   type TeamsIntegrationSettings,
   type InsertTeamsIntegrationSettings,
+  ssoConfiguration,
+  type SsoConfiguration,
+  type InsertSsoConfiguration,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, like, count, sql, isNotNull } from "drizzle-orm";
@@ -268,6 +271,10 @@ export interface IStorage {
   getTeamsIntegrationSettings(userId: string): Promise<TeamsIntegrationSettings | undefined>;
   upsertTeamsIntegrationSettings(settings: InsertTeamsIntegrationSettings): Promise<TeamsIntegrationSettings>;
   deleteTeamsIntegrationSettings(userId: string): Promise<void>;
+  
+  // SSO Configuration operations
+  getSsoConfiguration(): Promise<SsoConfiguration | undefined>;
+  upsertSsoConfiguration(config: InsertSsoConfiguration): Promise<SsoConfiguration>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1470,6 +1477,31 @@ export class DatabaseStorage implements IStorage {
     await db
       .delete(teamsIntegrationSettings)
       .where(eq(teamsIntegrationSettings.userId, userId));
+  }
+  
+  // SSO Configuration operations
+  async getSsoConfiguration(): Promise<SsoConfiguration | undefined> {
+    const [config] = await db
+      .select()
+      .from(ssoConfiguration)
+      .orderBy(desc(ssoConfiguration.updatedAt))
+      .limit(1);
+    return config;
+  }
+
+  async upsertSsoConfiguration(config: InsertSsoConfiguration): Promise<SsoConfiguration> {
+    // Delete any existing configuration
+    await db.delete(ssoConfiguration);
+    
+    // Insert new configuration
+    const [result] = await db
+      .insert(ssoConfiguration)
+      .values({
+        ...config,
+        updatedAt: new Date(),
+      })
+      .returning();
+    return result;
   }
 }
 

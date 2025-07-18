@@ -502,3 +502,24 @@ export const insertTeamsIntegrationSettingsSchema = createInsertSchema(teamsInte
 
 export type TeamsIntegrationSettings = typeof teamsIntegrationSettings.$inferSelect;
 export type InsertTeamsIntegrationSettings = z.infer<typeof insertTeamsIntegrationSettingsSchema>;
+
+// SSO Configuration table for storing Microsoft 365 SSO settings
+export const ssoConfiguration = pgTable('sso_configuration', {
+  id: serial('id').primaryKey(),
+  clientId: varchar('client_id'),
+  clientSecret: varchar('client_secret'),
+  tenantId: varchar('tenant_id'),
+  updatedBy: varchar('updated_by').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// SSO configuration schemas and types
+export const insertSsoConfigurationSchema = createInsertSchema(ssoConfiguration).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type SsoConfiguration = typeof ssoConfiguration.$inferSelect;
+export type InsertSsoConfiguration = z.infer<typeof insertSsoConfigurationSchema>;
