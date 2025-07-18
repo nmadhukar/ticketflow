@@ -786,6 +786,129 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Help documentation routes
+  
+  // Get all help documents (public)
+  app.get('/api/help', async (req, res) => {
+    try {
+      const documents = await storage.getHelpDocuments();
+      res.json(documents);
+    } catch (error) {
+      console.error("Error fetching help documents:", error);
+      res.status(500).json({ message: "Failed to fetch help documents" });
+    }
+  });
+
+  // Search help documents (public)
+  app.get('/api/help/search', async (req, res) => {
+    try {
+      const { q } = req.query;
+      if (!q || typeof q !== 'string') {
+        return res.status(400).json({ message: "Search query is required" });
+      }
+      
+      const documents = await storage.searchHelpDocuments(q);
+      res.json(documents);
+    } catch (error) {
+      console.error("Error searching help documents:", error);
+      res.status(500).json({ message: "Failed to search help documents" });
+    }
+  });
+
+  // Get single help document (public)
+  app.get('/api/help/:id', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const document = await storage.getHelpDocument(id);
+      
+      if (!document) {
+        return res.status(404).json({ message: "Help document not found" });
+      }
+      
+      // Increment view count
+      await storage.incrementViewCount(id);
+      
+      res.json(document);
+    } catch (error) {
+      console.error("Error fetching help document:", error);
+      res.status(500).json({ message: "Failed to fetch help document" });
+    }
+  });
+
+  // Upload help document (admin only)
+  app.post('/api/admin/help', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const { title, filename, content, fileData, category, tags } = req.body;
+      
+      if (!title || !filename || !content || !fileData) {
+        return res.status(400).json({ message: "Title, filename, content, and file data are required" });
+      }
+
+      const document = await storage.createHelpDocument({
+        title,
+        filename,
+        content,
+        fileData,
+        category,
+        tags,
+        uploadedBy: userId,
+      });
+
+      res.json(document);
+    } catch (error) {
+      console.error("Error creating help document:", error);
+      res.status(500).json({ message: "Failed to create help document" });
+    }
+  });
+
+  // Update help document (admin only)
+  app.put('/api/admin/help/:id', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      const updates = req.body;
+      
+      const document = await storage.updateHelpDocument(id, updates);
+      res.json(document);
+    } catch (error) {
+      console.error("Error updating help document:", error);
+      res.status(500).json({ message: "Failed to update help document" });
+    }
+  });
+
+  // Delete help document (admin only)
+  app.delete('/api/admin/help/:id', isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.user as any).claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      await storage.deleteHelpDocument(id);
+      
+      res.json({ message: "Help document deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting help document:", error);
+      res.status(500).json({ message: "Failed to delete help document" });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

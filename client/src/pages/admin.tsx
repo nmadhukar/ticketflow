@@ -12,8 +12,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle, Home, Palette, Upload } from "lucide-react";
+import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle, Home, Palette, Upload, BookOpen, FileText, Trash2, Edit, Search } from "lucide-react";
 import { useLocation, Link } from "wouter";
+import HelpDocumentManager from "@/components/HelpDocumentManager";
 
 export default function AdminPanel() {
   const { user } = useAuth();
@@ -277,6 +278,7 @@ export default function AdminPanel() {
           <TabsTrigger value="teams">Team Management</TabsTrigger>
           <TabsTrigger value="settings">System Settings</TabsTrigger>
           <TabsTrigger value="branding">Company Branding</TabsTrigger>
+          <TabsTrigger value="help">Help Documentation</TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="space-y-4">
@@ -512,6 +514,25 @@ export default function AdminPanel() {
                     Your logo will appear in the navigation bar and on customer-facing documents.
                   </p>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="help" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <BookOpen className="h-5 w-5" />
+                Help Documentation
+              </CardTitle>
+              <CardDescription>
+                Upload and manage Word documents that users can reference before creating tickets
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-6">
+                <HelpDocumentManager />
               </div>
             </CardContent>
           </Card>

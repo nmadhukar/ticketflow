@@ -318,6 +318,24 @@ export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit
 // Types
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
+
+// Help documentation table
+export const helpDocuments = pgTable("help_documents", {
+  id: serial("id").primaryKey(),
+  title: varchar("title").notNull(),
+  filename: varchar("filename").notNull(),
+  content: text("content").notNull(), // Extracted text content for search
+  fileData: text("file_data").notNull(), // Base64 encoded file data
+  uploadedBy: varchar("uploaded_by").references(() => users.id),
+  category: varchar("category"),
+  tags: text("tags").array(),
+  viewCount: integer("view_count").default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type HelpDocument = typeof helpDocuments.$inferSelect;
+export type InsertHelpDocument = typeof helpDocuments.$inferInsert;
 export type Task = typeof tasks.$inferSelect;
 export type InsertTask = z.infer<typeof insertTaskSchema>;
 export type Team = typeof teams.$inferSelect;

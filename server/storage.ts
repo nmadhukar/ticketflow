@@ -10,6 +10,7 @@ import {
   apiKeys,
   smtpSettings,
   emailTemplates,
+  helpDocuments,
   type User,
   type UpsertUser,
   type Task,
@@ -31,6 +32,8 @@ import {
   type InsertSmtpSettings,
   type EmailTemplate,
   type InsertEmailTemplate,
+  type HelpDocument,
+  type InsertHelpDocument,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, like, count, sql, isNotNull } from "drizzle-orm";
@@ -131,6 +134,15 @@ export interface IStorage {
   getEmailTemplates(): Promise<EmailTemplate[]>;
   getEmailTemplate(name: string): Promise<EmailTemplate | undefined>;
   updateEmailTemplate(name: string, template: Partial<InsertEmailTemplate>, userId: string): Promise<EmailTemplate>;
+  
+  // Help Document operations
+  createHelpDocument(doc: InsertHelpDocument): Promise<HelpDocument>;
+  getHelpDocuments(): Promise<HelpDocument[]>;
+  getHelpDocument(id: number): Promise<HelpDocument | undefined>;
+  updateHelpDocument(id: number, doc: Partial<InsertHelpDocument>): Promise<HelpDocument>;
+  deleteHelpDocument(id: number): Promise<void>;
+  incrementViewCount(id: number): Promise<void>;
+  searchHelpDocuments(query: string): Promise<HelpDocument[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -848,6 +860,61 @@ export class DatabaseStorage implements IStorage {
         .returning();
       return created;
     }
+  }
+
+  // Help Document operations
+  async createHelpDocument(doc: InsertHelpDocument): Promise<HelpDocument> {
+    const [created] = await db.insert(helpDocuments).values(doc).returning();
+    return created;
+  }
+
+  async getHelpDocuments(): Promise<HelpDocument[]> {
+    return await db.select().from(helpDocuments).orderBy(desc(helpDocuments.createdAt));
+  }
+
+  async getHelpDocument(id: number): Promise<HelpDocument | undefined> {
+    const [doc] = await db.select().from(helpDocuments).where(eq(helpDocuments.id, id));
+    return doc;
+  }
+
+  async updateHelpDocument(id: number, doc: Partial<InsertHelpDocument>): Promise<HelpDocument> {
+    const [updated] = await db
+      .update(helpDocuments)
+      .set({
+        ...doc,
+        updatedAt: new Date(),
+      })
+      .where(eq(helpDocuments.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteHelpDocument(id: number): Promise<void> {
+    await db.delete(helpDocuments).where(eq(helpDocuments.id, id));
+  }
+
+  async incrementViewCount(id: number): Promise<void> {
+    await db
+      .update(helpDocuments)
+      .set({
+        viewCount: sql`${helpDocuments.viewCount} + 1`,
+      })
+      .where(eq(helpDocuments.id, id));
+  }
+
+  async searchHelpDocuments(query: string): Promise<HelpDocument[]> {
+    const searchTerm = `%${query.toLowerCase()}%`;
+    return await db
+      .select()
+      .from(helpDocuments)
+      .where(
+        or(
+          like(sql`LOWER(${helpDocuments.title})`, searchTerm),
+          like(sql`LOWER(${helpDocuments.content})`, searchTerm),
+          like(sql`LOWER(${helpDocuments.category})`, searchTerm)
+        )
+      )
+      .orderBy(desc(helpDocuments.viewCount));
   }
 }
 
