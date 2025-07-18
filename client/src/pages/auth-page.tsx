@@ -53,6 +53,28 @@ export default function AuthPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<"signin" | "register" | "forgot">("signin");
+  
+  // Check for error in URL params
+  const urlParams = new URLSearchParams(window.location.search);
+  const error = urlParams.get('error');
+  
+  // Show error message based on error type
+  const getErrorMessage = (error: string | null) => {
+    switch (error) {
+      case 'microsoft_auth_failed':
+        return 'Microsoft authentication failed. Please check your credentials and try again.';
+      case 'microsoft_auth_error':
+        return 'An error occurred during Microsoft authentication. Please try again.';
+      case 'microsoft_no_user':
+        return 'Unable to retrieve user information from Microsoft. Please try again.';
+      case 'login_failed':
+        return 'Login failed. Please try again.';
+      default:
+        return null;
+    }
+  };
+  
+  const errorMessage = getErrorMessage(error);
   const [resetToken, setResetToken] = useState<string>("");
 
   // Login form
@@ -225,6 +247,13 @@ export default function AuthPage() {
               </div>
             </CardHeader>
             <CardContent>
+              {errorMessage && (
+                <Alert variant="destructive" className="mb-4">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{errorMessage}</AlertDescription>
+                </Alert>
+              )}
+              
               {resetToken ? (
                 // Reset Password Form
                 <form onSubmit={resetForm.handleSubmit((data) => resetMutation.mutate(data))}>

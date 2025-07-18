@@ -737,6 +737,22 @@ export default function AdminPanel() {
                   </p>
                 </div>
               </div>
+              
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Azure AD Configuration Required</AlertTitle>
+                <AlertDescription>
+                  <p className="mb-2">Add this redirect URI to your Azure AD app registration:</p>
+                  <code className="block bg-muted p-2 rounded text-xs break-all">
+                    {window.location.origin}/api/auth/microsoft/callback
+                  </code>
+                  <div className="mt-3 space-y-1 text-sm">
+                    <p><strong>Platform:</strong> Web</p>
+                    <p><strong>Grant type:</strong> Authorization code</p>
+                    <p><strong>Supported account types:</strong> Accounts in any organizational directory</p>
+                  </div>
+                </AlertDescription>
+              </Alert>
 
               <div className="border-t pt-6">
                 <h3 className="text-lg font-semibold mb-4">SSO Status</h3>

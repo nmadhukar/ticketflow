@@ -63,12 +63,19 @@ export async function setupMicrosoftAuth(app: Express) {
     return;
   }
 
+  const redirectUrl = `${process.env.REPLIT_DOMAINS?.split(',')[0] ? `https://${process.env.REPLIT_DOMAINS.split(',')[0]}` : 'http://localhost:5000'}/api/auth/microsoft/callback`;
+  
+  console.log("Microsoft Auth Configuration:");
+  console.log("- Client ID:", clientId);
+  console.log("- Tenant ID:", tenantId);
+  console.log("- Redirect URL:", redirectUrl);
+  
   const config = {
     identityMetadata: `https://login.microsoftonline.com/${tenantId}/v2.0/.well-known/openid-configuration`,
     clientID: clientId,
     responseType: "code",
     responseMode: "form_post",
-    redirectUrl: `${process.env.REPLIT_DOMAINS?.split(',')[0] ? `https://${process.env.REPLIT_DOMAINS.split(',')[0]}` : 'http://localhost:5000'}/api/auth/microsoft/callback`,
+    redirectUrl: redirectUrl,
     allowHttpForRedirectUrl: process.env.NODE_ENV === "development",
     clientSecret: clientSecret,
     validateIssuer: true,
@@ -136,22 +143,39 @@ export async function setupMicrosoftAuth(app: Express) {
   }
 
   // Microsoft login route
-  app.get("/api/auth/microsoft",
+  app.get("/api/auth/microsoft", (req, res, next) => {
+    console.log("Microsoft login initiated");
     passport.authenticate("azuread-openidconnect", {
-      failureRedirect: "/",
-    })
-  );
+      failureRedirect: "/auth?error=microsoft_auth_failed",
+      failureMessage: true,
+    })(req, res, next);
+  });
 
   // Microsoft callback route
-  app.post("/api/auth/microsoft/callback",
+  app.post("/api/auth/microsoft/callback", (req, res, next) => {
+    console.log("Microsoft callback received");
     passport.authenticate("azuread-openidconnect", {
-      failureRedirect: "/",
-    }),
-    (req, res) => {
-      // Successful authentication
-      res.redirect("/");
-    }
-  );
+      failureRedirect: "/auth?error=microsoft_auth_failed",
+      failureMessage: true,
+    }, (err: any, user: any) => {
+      if (err) {
+        console.error("Microsoft auth error:", err);
+        return res.redirect("/auth?error=microsoft_auth_error");
+      }
+      if (!user) {
+        console.error("Microsoft auth: No user returned");
+        return res.redirect("/auth?error=microsoft_no_user");
+      }
+      req.logIn(user, (loginErr) => {
+        if (loginErr) {
+          console.error("Login error:", loginErr);
+          return res.redirect("/auth?error=login_failed");
+        }
+        // Successful authentication
+        res.redirect("/");
+      });
+    })(req, res, next);
+  });
 
   console.log("Microsoft authentication configured successfully");
 }
