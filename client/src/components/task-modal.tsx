@@ -96,9 +96,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         priority: task.priority || "medium",
         status: task.status || "open",
         notes: task.notes || "",
-        assigneeId: task.assigneeId || "",
+        assigneeId: task.assigneeId || "unassigned",
         assigneeType: task.assigneeType || "user",
-        assigneeTeamId: task.assigneeTeamId?.toString() || "",
+        assigneeTeamId: task.assigneeTeamId?.toString() || "unassigned",
         dueDate: task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : "",
       });
       setCurrentTab("details");
@@ -253,9 +253,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       priority: formData.priority,
       status: formData.status,
       notes: formData.notes.trim(),
-      assigneeId: formData.assigneeType === "user" ? formData.assigneeId : null,
+      assigneeId: formData.assigneeType === "user" && formData.assigneeId !== "unassigned" ? formData.assigneeId : null,
       assigneeType: formData.assigneeType,
-      assigneeTeamId: formData.assigneeType === "team" ? parseInt(formData.assigneeTeamId) : null,
+      assigneeTeamId: formData.assigneeType === "team" && formData.assigneeTeamId !== "unassigned" ? parseInt(formData.assigneeTeamId) : null,
       dueDate: formData.dueDate ? new Date(formData.dueDate).toISOString() : null,
     };
 
@@ -602,7 +602,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                 <SelectValue placeholder="Select user" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="">
+                                <SelectItem value="unassigned">
                                   <div className="flex items-center gap-2">
                                     <User className="h-4 w-4" />
                                     Unassigned
@@ -631,7 +631,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                 <SelectValue placeholder="Select team" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="">
+                                <SelectItem value="unassigned">
                                   <div className="flex items-center gap-2">
                                     <Users className="h-4 w-4" />
                                     Unassigned
