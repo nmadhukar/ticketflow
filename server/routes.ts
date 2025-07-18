@@ -62,6 +62,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/tasks/:id", isAuthenticated, async (req, res) => {
     try {
       const taskId = parseInt(req.params.id);
+      if (isNaN(taskId)) {
+        return res.status(400).json({ message: "Invalid task ID" });
+      }
       const task = await storage.getTask(taskId);
       if (!task) {
         return res.status(404).json({ message: "Task not found" });

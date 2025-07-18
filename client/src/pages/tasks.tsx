@@ -289,7 +289,7 @@ export default function Tasks() {
                       ? "Try adjusting your filters to see more tasks."
                       : "Get started by creating your first task."}
                   </p>
-                  {!filters.search && !filters.status && !filters.category && !filters.priority && (
+                  {!filters.search && (filters.status === "all" || !filters.status) && (filters.category === "all" || !filters.category) && (filters.priority === "all" || !filters.priority) && (
                     <Button 
                       onClick={() => {
                         setEditingTask(null);
