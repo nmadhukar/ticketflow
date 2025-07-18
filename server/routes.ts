@@ -74,7 +74,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (user?.role === 'customer') {
         filters.createdBy = userId;
         delete filters.assigneeId; // Customers can't filter by assignee
+      } else if (user?.role !== 'admin' && !assigneeId) {
+        // For non-admin users (not customers), show tasks they created or are assigned to
+        filters.userIdFilter = userId;
       }
+      // Admins see all tasks by default
       
       const tasks = await storage.getTasks(filters);
       res.json(tasks);
@@ -567,7 +571,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/stats", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
-      const stats = await storage.getTaskStats(userId);
+      const user = await storage.getUser(userId);
+      
+      // If admin, show all stats, otherwise show user-specific stats
+      const stats = await storage.getTaskStats(user?.role === 'admin' ? undefined : userId);
       res.json(stats);
     } catch (error) {
       console.error("Error fetching stats:", error);

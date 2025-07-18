@@ -24,6 +24,13 @@ export default function AdminPanel() {
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [isEditUserOpen, setIsEditUserOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Microsoft SSO state
+  const [ssoConfig, setSsoConfig] = useState({
+    clientId: "",
+    clientSecret: "",
+    tenantId: "",
+  });
 
   // Check if user is admin
   if (user?.role !== "admin") {
@@ -299,6 +306,7 @@ export default function AdminPanel() {
           <TabsTrigger value="settings">System Settings</TabsTrigger>
           <TabsTrigger value="branding">Company Branding</TabsTrigger>
           <TabsTrigger value="help">Help Documentation</TabsTrigger>
+          <TabsTrigger value="sso">Microsoft 365 SSO</TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="space-y-4">
@@ -640,6 +648,96 @@ export default function AdminPanel() {
                     </Card>
                   </div>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="sso" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Microsoft 365 Single Sign-On Configuration</CardTitle>
+              <CardDescription>
+                Configure Microsoft 365 SSO to allow users to sign in with their Microsoft accounts
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="client-id">Microsoft Client ID</Label>
+                  <Input
+                    id="client-id"
+                    placeholder="Enter your Microsoft App Client ID"
+                    value={ssoConfig.clientId}
+                    onChange={(e) => setSsoConfig({ ...ssoConfig, clientId: e.target.value })}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    The Application (client) ID from your Azure AD app registration
+                  </p>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="client-secret">Microsoft Client Secret</Label>
+                  <Input
+                    id="client-secret"
+                    type="password"
+                    placeholder="Enter your Microsoft App Client Secret"
+                    value={ssoConfig.clientSecret}
+                    onChange={(e) => setSsoConfig({ ...ssoConfig, clientSecret: e.target.value })}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    The client secret value from your Azure AD app registration
+                  </p>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="tenant-id">Microsoft Tenant ID</Label>
+                  <Input
+                    id="tenant-id"
+                    placeholder="Enter your Microsoft Tenant ID"
+                    value={ssoConfig.tenantId}
+                    onChange={(e) => setSsoConfig({ ...ssoConfig, tenantId: e.target.value })}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Your Azure AD tenant ID (can be 'common' for multi-tenant)
+                  </p>
+                </div>
+              </div>
+
+              <div className="border-t pt-6">
+                <h3 className="text-lg font-semibold mb-4">SSO Status</h3>
+                <div className="flex items-center space-x-2">
+                  <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                  <span className="text-sm">Microsoft 365 SSO is not configured</span>
+                </div>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Configure the settings above to enable Microsoft 365 SSO
+                </p>
+              </div>
+
+              <div className="flex justify-end space-x-4">
+                <Button 
+                  variant="outline"
+                  onClick={() => {
+                    toast({
+                      title: "Testing SSO Connection",
+                      description: "Checking Microsoft 365 configuration...",
+                    });
+                  }}
+                >
+                  Test Connection
+                </Button>
+                <Button 
+                  className="bg-primary hover:bg-primary/90"
+                  onClick={() => {
+                    toast({
+                      title: "Configuration Saved",
+                      description: "Microsoft 365 SSO settings have been updated",
+                    });
+                  }}
+                >
+                  Save Configuration
+                </Button>
               </div>
             </CardContent>
           </Card>

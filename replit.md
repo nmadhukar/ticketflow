@@ -93,6 +93,9 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Added approval status display in user management table with visual badges**
 - **Implemented auto-approval for invited users - users who register with an invited email are automatically approved**
 - **Created admin user: maddy@talbothealthservices.com with full admin privileges**
+- **Fixed dashboard ticket counts to show all tickets for admin users (was showing 0 due to user ID mismatch)**
+- **Added Microsoft 365 SSO configuration UI in admin panel with client ID, secret, and tenant ID fields**
+- **Enhanced stats endpoint to show global statistics for admins while maintaining user-specific stats for regular users**
 
 ## System Architecture
 
