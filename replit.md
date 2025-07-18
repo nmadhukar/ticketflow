@@ -47,6 +47,10 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - Updated backend access control logic across all routes to enforce customer role restrictions
 - Modified frontend sidebar navigation to show only Dashboard and My Tickets for customer users
 - Enhanced admin panel role management to include customer role option in user editing
+- Added interactive dashboard filtering - clicking stats cards now filters the tasks table below
+- Implemented visual indicators for active filters with badges and clear button
+- Stats cards show active state with ring highlight when filtering is applied
+- Fixed duplicate sidebar issues in Settings and Teams pages by removing redundant Layout wrappers
 
 ## System Architecture
 

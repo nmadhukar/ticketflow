@@ -6,11 +6,12 @@ interface StatsCardProps {
   value: number;
   icon: React.ReactNode;
   loading?: boolean;
+  isActive?: boolean;
 }
 
-export default function StatsCard({ title, value, icon, loading }: StatsCardProps) {
+export default function StatsCard({ title, value, icon, loading, isActive }: StatsCardProps) {
   return (
-    <Card className="shadow-business hover:shadow-business-hover transition-all">
+    <Card className={`shadow-business hover:shadow-business-hover transition-all ${isActive ? 'ring-2 ring-primary' : ''}`}>
       <CardContent className="p-6">
         <div className="flex items-center justify-between">
           <div>

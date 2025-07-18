@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
@@ -30,6 +30,8 @@ export default function Dashboard() {
   const { toast } = useToast();
   const { isAuthenticated, isLoading } = useAuth();
   const [, setLocation] = useLocation();
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [priorityFilter, setPriorityFilter] = useState<string | null>(null);
 
   // Redirect to home if not authenticated
   useEffect(() => {
@@ -74,6 +76,19 @@ export default function Dashboard() {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   }
 
+  // Filter tasks based on current filters
+  const filteredTasks = recentTasks?.filter((task: any) => {
+    if (statusFilter) {
+      if (statusFilter === "completed") {
+        if (task.status !== "resolved" && task.status !== "closed") return false;
+      } else if (task.status !== statusFilter) {
+        return false;
+      }
+    }
+    if (priorityFilter && task.priority !== priorityFilter) return false;
+    return true;
+  });
+
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case "urgent": return "bg-destructive";
@@ -112,30 +127,66 @@ export default function Dashboard() {
       <main className="flex-1 p-6 overflow-y-auto">
           {/* Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            <StatsCard
-              title="Total Tasks"
-              value={stats?.total || 0}
-              icon={<BarChart3 className="text-blue-600" />}
-              loading={statsLoading}
-            />
-            <StatsCard
-              title="In Progress"
-              value={stats?.inProgress || 0}
-              icon={<Clock className="text-yellow-600" />}
-              loading={statsLoading}
-            />
-            <StatsCard
-              title="Completed"
-              value={(stats?.resolved || 0) + (stats?.closed || 0)}
-              icon={<CheckCircle className="text-green-600" />}
-              loading={statsLoading}
-            />
-            <StatsCard
-              title="High Priority"
-              value={stats?.highPriority || 0}
-              icon={<AlertTriangle className="text-red-600" />}
-              loading={statsLoading}
-            />
+            <div 
+              onClick={() => {
+                setStatusFilter(null);
+                setPriorityFilter(null);
+              }}
+              className="cursor-pointer transform transition-transform hover:scale-105"
+            >
+              <StatsCard
+                title="Total Tasks"
+                value={stats?.total || 0}
+                icon={<BarChart3 className="text-blue-600" />}
+                loading={statsLoading}
+                isActive={!statusFilter && !priorityFilter}
+              />
+            </div>
+            <div 
+              onClick={() => {
+                setStatusFilter("in_progress");
+                setPriorityFilter(null);
+              }}
+              className="cursor-pointer transform transition-transform hover:scale-105"
+            >
+              <StatsCard
+                title="In Progress"
+                value={stats?.inProgress || 0}
+                icon={<Clock className="text-yellow-600" />}
+                loading={statsLoading}
+                isActive={statusFilter === "in_progress"}
+              />
+            </div>
+            <div 
+              onClick={() => {
+                setStatusFilter("completed");
+                setPriorityFilter(null);
+              }}
+              className="cursor-pointer transform transition-transform hover:scale-105"
+            >
+              <StatsCard
+                title="Completed"
+                value={(stats?.resolved || 0) + (stats?.closed || 0)}
+                icon={<CheckCircle className="text-green-600" />}
+                loading={statsLoading}
+                isActive={statusFilter === "completed"}
+              />
+            </div>
+            <div 
+              onClick={() => {
+                setStatusFilter(null);
+                setPriorityFilter("high");
+              }}
+              className="cursor-pointer transform transition-transform hover:scale-105"
+            >
+              <StatsCard
+                title="High Priority"
+                value={stats?.highPriority || 0}
+                icon={<AlertTriangle className="text-red-600" />}
+                loading={statsLoading}
+                isActive={priorityFilter === "high"}
+              />
+            </div>
           </div>
 
           {/* Main Content Grid */}
@@ -145,7 +196,34 @@ export default function Dashboard() {
               <Card>
                 <CardHeader>
                   <div className="flex items-center justify-between">
-                    <CardTitle>Recent Tasks</CardTitle>
+                    <div className="flex items-center gap-3">
+                      <CardTitle>Recent Tasks</CardTitle>
+                      {(statusFilter || priorityFilter) && (
+                        <div className="flex items-center gap-2">
+                          {statusFilter && (
+                            <Badge variant="secondary" className="text-xs">
+                              Status: {statusFilter.replace('_', ' ')}
+                            </Badge>
+                          )}
+                          {priorityFilter && (
+                            <Badge variant="secondary" className="text-xs">
+                              Priority: {priorityFilter}
+                            </Badge>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setStatusFilter(null);
+                              setPriorityFilter(null);
+                            }}
+                            className="h-6 px-2 text-xs"
+                          >
+                            Clear filters
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                     <div className="flex items-center space-x-3">
                       <div className="relative">
                         <Input
@@ -164,8 +242,8 @@ export default function Dashboard() {
                 <CardContent className="space-y-4">
                   {tasksLoading ? (
                     <div className="text-center py-8">Loading tasks...</div>
-                  ) : recentTasks && recentTasks.length > 0 ? (
-                    recentTasks.slice(0, 5).map((task: any) => (
+                  ) : filteredTasks && filteredTasks.length > 0 ? (
+                    filteredTasks.slice(0, 5).map((task: any) => (
                       <div key={task.id} className="flex items-center space-x-4 p-4 bg-muted/30 rounded-lg hover:bg-muted/50 transition-all shadow-business hover:shadow-business-hover cursor-pointer" onClick={() => setLocation("/tasks")}>
                         <div className={`w-3 h-3 rounded-full ${getPriorityColor(task.priority)}`} />
                         <div className="flex-1">
@@ -194,7 +272,7 @@ export default function Dashboard() {
                     ))
                   ) : (
                     <div className="text-center py-8 text-slate-500">
-                      No tasks found. Create your first task to get started!
+                      {(statusFilter || priorityFilter) ? "No tasks match the selected filters" : "No tasks found. Create your first task to get started!"}
                     </div>
                   )}
                   
