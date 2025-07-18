@@ -11,12 +11,14 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Search } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Plus, Search, MoreVertical } from "lucide-react";
 
 export default function MyTasks() {
   const { toast } = useToast();
   const { isAuthenticated, isLoading } = useAuth();
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState(null);
   const [filters, setFilters] = useState({
     search: "",
     status: "all",
@@ -40,7 +42,7 @@ export default function MyTasks() {
   }, [isAuthenticated, isLoading, toast]);
 
   const { data: tasks, isLoading: tasksLoading } = useQuery({
-    queryKey: ["/api/tasks/my", filters],
+    queryKey: ["/api/tasks/my"],
     retry: false,
     enabled: isAuthenticated,
   });
@@ -78,6 +80,11 @@ export default function MyTasks() {
     }
   };
 
+  const handleEditTask = (task: any) => {
+    setEditingTask(task);
+    setIsTaskModalOpen(true);
+  };
+
   const filteredTasks = tasks?.filter((task: any) => {
     if (filters.search && !task.title.toLowerCase().includes(filters.search.toLowerCase()) && 
         !task.description?.toLowerCase().includes(filters.search.toLowerCase())) {
@@ -99,7 +106,10 @@ export default function MyTasks() {
           subtitle="Tasks assigned to you or created by you"
           action={
             <Button 
-              onClick={() => setIsTaskModalOpen(true)}
+              onClick={() => {
+                setEditingTask(null);
+                setIsTaskModalOpen(true);
+              }}
               className="bg-blue-600 hover:bg-blue-700"
             >
               <Plus className="h-4 w-4 mr-2" />
@@ -199,6 +209,19 @@ export default function MyTasks() {
                           {task.createdBy !== task.assigneeId && ` by ${task.createdBy}`}
                         </div>
                       </div>
+                      
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleEditTask(task)}>
+                            Edit Task
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </CardContent>
                 </Card>
@@ -221,7 +244,11 @@ export default function MyTasks() {
 
       <TaskModal
         isOpen={isTaskModalOpen}
-        onClose={() => setIsTaskModalOpen(false)}
+        onClose={() => {
+          setIsTaskModalOpen(false);
+          setEditingTask(null);
+        }}
+        task={editingTask}
       />
     </div>
   );

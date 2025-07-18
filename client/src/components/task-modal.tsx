@@ -40,6 +40,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     description: "",
     category: "",
     priority: "medium",
+    status: "open",
     assigneeId: "",
     assigneeType: "user",
     assigneeTeamId: "",
@@ -64,6 +65,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         description: task.description || "",
         category: task.category || "",
         priority: task.priority || "medium",
+        status: task.status || "open",
         assigneeId: task.assigneeId || "",
         assigneeType: task.assigneeType || "user",
         assigneeTeamId: task.assigneeTeamId?.toString() || "",
@@ -75,6 +77,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         description: "",
         category: "",
         priority: "medium",
+        status: "open",
         assigneeId: "",
         assigneeType: "user",
         assigneeTeamId: "",
@@ -89,6 +92,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/tasks/my"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       onClose();
       toast({
@@ -122,6 +126,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/tasks/my"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       onClose();
       toast({
@@ -254,6 +259,23 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                 </SelectContent>
               </Select>
             </div>
+            
+            {task && (
+              <div>
+                <Label htmlFor="status">Status</Label>
+                <Select value={formData.status} onValueChange={(value) => handleInputChange("status", value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="open">Open</SelectItem>
+                    <SelectItem value="in_progress">In Progress</SelectItem>
+                    <SelectItem value="resolved">Resolved</SelectItem>
+                    <SelectItem value="closed">Closed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             
             <div>
               <Label htmlFor="dueDate">Due Date</Label>
