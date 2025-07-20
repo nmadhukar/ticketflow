@@ -277,6 +277,16 @@ export function setupAuth(app: Express) {
     });
   });
 
+  // GET logout route for direct navigation
+  app.get("/api/logout", (req, res) => {
+    req.logout((err) => {
+      if (err) {
+        console.error("Logout error:", err);
+      }
+      res.redirect("/");
+    });
+  });
+
   // Get current user
   app.get("/api/auth/user", (req, res) => {
     if (!req.isAuthenticated() || !req.user) {

@@ -96,6 +96,7 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Fixed dashboard ticket counts to show all tickets for admin users (was showing 0 due to user ID mismatch)**
 - **Added Microsoft 365 SSO configuration UI in admin panel with client ID, secret, and tenant ID fields**
 - **Enhanced stats endpoint to show global statistics for admins while maintaining user-specific stats for regular users**
+- **Fixed signout "page not found" error by adding GET /api/logout route alongside existing POST /api/auth/logout endpoint**
 
 ## System Architecture
 
