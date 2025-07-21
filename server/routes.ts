@@ -13,7 +13,7 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./auth";
 import { setupMicrosoftAuth, isMicrosoftUser } from "./microsoftAuth";
 import { teamsIntegration } from "./microsoftTeams";
-import { sendTestEmail } from "./sendgrid";
+import { sendTestEmail } from "./ses";
 import { 
   insertTaskSchema, 
   insertTeamSchema, 
@@ -1019,11 +1019,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
       
-      // This will be implemented when we integrate SendGrid
+      // This will be implemented when we integrate email templates
       const { to, templateName } = req.body;
       
       // For now, just return success
-      res.json({ message: "Test email functionality will be available after SendGrid integration" });
+      res.json({ message: "Test email functionality will be available after email template integration" });
     } catch (error) {
       console.error("Error sending test email:", error);
       res.status(500).json({ message: "Failed to send test email" });
@@ -1068,7 +1068,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (success) {
         res.json({ message: "Test email sent successfully" });
       } else {
-        res.status(500).json({ message: "Failed to send test email. Please check your SendGrid API key." });
+        res.status(500).json({ message: "Failed to send test email. Please check your AWS credentials and ensure the email addresses are verified in SES." });
       }
     } catch (error) {
       console.error("SMTP test error:", error);
@@ -1710,13 +1710,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         invitedBy: userId,
       });
 
-      // Send invitation email using SendGrid if SMTP is configured
+      // Send invitation email using Amazon SES if configured
       const smtpSettings = await storage.getSmtpSettings();
-      if (smtpSettings && process.env.SENDGRID_API_KEY) {
-        const { sendEmail } = await import('./sendgrid');
-        const inviteUrl = `${req.protocol}://${req.get('host')}/invite/${invitation.invitationToken}`;
+      if (smtpSettings && process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+        const { sendEmail } = await import('./ses');
+        const inviteUrl = `${req.protocol}://${req.get('host')}/auth?mode=register&email=${encodeURIComponent(invitation.email)}`;
         
-        await sendEmail(process.env.SENDGRID_API_KEY, {
+        await sendEmail({
           to: invitation.email,
           from: smtpSettings.fromEmail,
           subject: 'You have been invited to TicketFlow',

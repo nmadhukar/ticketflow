@@ -100,6 +100,8 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Fixed duplicate menu columns issue in Teams page by correcting HTML structure to prevent Layout wrapper duplication**
 - **Added "Invite User" button directly to User Management tab header in admin panel for easier access to invitation functionality**
 - **Fixed company logo display in sidebar - now properly shows uploaded logo from company branding settings with fallback to default icon**
+- **Added UI interface to view sent invitations with status tracking in admin panel and sidebar navigation**
+- **Replaced SendGrid with Amazon SES for email sending functionality including invitation emails**
 
 ## System Architecture
 
