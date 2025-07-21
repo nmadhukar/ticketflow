@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle, Home, Palette, Upload, BookOpen, FileText, Trash2, Edit, Search, Building, UserPlus, AlertCircle } from "lucide-react";
 import { useLocation, Link } from "wouter";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import HelpDocumentManager from "@/components/HelpDocumentManager";
 
 export default function AdminPanel() {
@@ -25,6 +26,7 @@ export default function AdminPanel() {
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [isEditUserOpen, setIsEditUserOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [userStatusFilter, setUserStatusFilter] = useState<"all" | "active" | "inactive">("active");
   
   // Microsoft SSO state
   const [ssoConfig, setSsoConfig] = useState({
@@ -108,6 +110,13 @@ export default function AdminPanel() {
       toast({
         title: "Success",
         description: "User status updated",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update user status",
+        variant: "destructive",
       });
     },
   });
@@ -348,18 +357,33 @@ export default function AdminPanel() {
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <div>
+                <div className="flex-1">
                   <CardTitle>User Management</CardTitle>
                   <CardDescription>
                     Manage user accounts, roles, and permissions
                   </CardDescription>
                 </div>
-                <Link to="/admin/invitations">
-                  <Button>
-                    <UserPlus className="h-4 w-4 mr-2" />
-                    Invite User
-                  </Button>
-                </Link>
+                <div className="flex items-center gap-4">
+                  <Select
+                    value={userStatusFilter}
+                    onValueChange={(value: "all" | "active" | "inactive") => setUserStatusFilter(value)}
+                  >
+                    <SelectTrigger className="w-[150px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Users</SelectItem>
+                      <SelectItem value="active">Active Users</SelectItem>
+                      <SelectItem value="inactive">Inactive Users</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Link to="/admin/invitations">
+                    <Button>
+                      <UserPlus className="h-4 w-4 mr-2" />
+                      Invite User
+                    </Button>
+                  </Link>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -377,7 +401,12 @@ export default function AdminPanel() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {users?.map((user: any) => (
+                  {users?.filter((user: any) => {
+                    if (userStatusFilter === "all") return true;
+                    if (userStatusFilter === "active") return user.isActive;
+                    if (userStatusFilter === "inactive") return !user.isActive;
+                    return true;
+                  }).map((user: any) => (
                     <TableRow key={user.id}>
                       <TableCell>
                         {user.firstName} {user.lastName}
@@ -440,13 +469,23 @@ export default function AdminPanel() {
                               ))}
                             </SelectContent>
                           </Select>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => toggleUserStatusMutation.mutate(user.id)}
-                          >
-                            {user.isActive ? <Ban className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
-                          </Button>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => toggleUserStatusMutation.mutate(user.id)}
+                                  disabled={toggleUserStatusMutation.isPending}
+                                >
+                                  {user.isActive ? <Ban className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {user.isActive ? "Deactivate user" : "Activate user"}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                           {user.role === "customer" && !user.isApproved && (
                             <Button
                               size="sm"
