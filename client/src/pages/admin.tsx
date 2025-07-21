@@ -347,10 +347,20 @@ export default function AdminPanel() {
         <TabsContent value="users" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>User Management</CardTitle>
-              <CardDescription>
-                Manage user accounts, roles, and permissions
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>User Management</CardTitle>
+                  <CardDescription>
+                    Manage user accounts, roles, and permissions
+                  </CardDescription>
+                </div>
+                <Link to="/admin/invitations">
+                  <Button>
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Invite User
+                  </Button>
+                </Link>
+              </div>
             </CardHeader>
             <CardContent>
               <Table>

@@ -1,6 +1,7 @@
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard,
   CheckSquare,
@@ -29,6 +30,10 @@ interface SidebarProps {
 export function Sidebar({ className }: SidebarProps) {
   const [location] = useLocation();
   const { user } = useAuth();
+  
+  const { data: companySettings } = useQuery({
+    queryKey: ["/api/company-settings"],
+  });
 
   const navigation = user?.role === 'customer' 
     ? [
@@ -57,8 +62,16 @@ export function Sidebar({ className }: SidebarProps) {
       <div className="flex h-16 items-center px-6 border-b gradient-business-subtle">
         <Link href="/">
           <div className="flex items-center gap-2 font-semibold text-lg cursor-pointer">
-            <TicketIcon className="h-6 w-6 text-primary" />
-            <span className="text-foreground">TicketFlow</span>
+            {companySettings?.logoUrl ? (
+              <img 
+                src={companySettings.logoUrl} 
+                alt={companySettings.companyName || "Company Logo"}
+                className="h-8 w-auto object-contain max-w-[120px]"
+              />
+            ) : (
+              <TicketIcon className="h-6 w-6 text-primary" />
+            )}
+            <span className="text-foreground">{companySettings?.companyName || "TicketFlow"}</span>
           </div>
         </Link>
       </div>
