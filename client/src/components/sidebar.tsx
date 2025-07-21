@@ -14,6 +14,7 @@ import {
   Settings,
   BookOpen,
   MessageSquare,
+  Mail,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -49,6 +50,7 @@ export function Sidebar({ className }: SidebarProps) {
 
   const adminNavigation = [
     { name: "Admin Panel", href: "/admin", icon: Shield },
+    { name: "Invitations", href: "/admin/invitations", icon: Mail },
   ];
 
   const bottomNavigation = [

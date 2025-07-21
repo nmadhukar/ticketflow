@@ -346,6 +346,7 @@ export default function AdminPanel() {
       <Tabs defaultValue="users" className="space-y-4">
         <TabsList>
           <TabsTrigger value="users">User Management</TabsTrigger>
+          <TabsTrigger value="invitations">Invitations</TabsTrigger>
           <TabsTrigger value="teams">Team Management</TabsTrigger>
           <TabsTrigger value="settings">System Settings</TabsTrigger>
           <TabsTrigger value="branding">Company Branding</TabsTrigger>
@@ -501,6 +502,32 @@ export default function AdminPanel() {
                   ))}
                 </TableBody>
               </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="invitations" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>User Invitations</CardTitle>
+                  <CardDescription>
+                    View and manage user invitations
+                  </CardDescription>
+                </div>
+                <Link to="/admin/invitations">
+                  <Button>
+                    <Mail className="h-4 w-4 mr-2" />
+                    Manage Invitations
+                  </Button>
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Click "Manage Invitations" to view all sent invitations, their status, and send new invitations.
+              </p>
             </CardContent>
           </Card>
         </TabsContent>
