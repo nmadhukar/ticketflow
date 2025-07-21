@@ -30,11 +30,11 @@ export default function Invitations() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: invitations, isLoading } = useQuery({
+  const { data: invitations, isLoading } = useQuery<UserInvitation[]>({
     queryKey: ["/api/admin/invitations"],
   });
 
-  const { data: departments } = useQuery({
+  const { data: departments } = useQuery<Department[]>({
     queryKey: ["/api/departments"],
   });
 
@@ -50,12 +50,9 @@ export default function Invitations() {
 
   const createMutation = useMutation({
     mutationFn: async (data: InvitationFormData) => {
-      await apiRequest("/api/admin/invitations", {
-        method: "POST",
-        body: JSON.stringify({
-          ...data,
-          departmentId: data.departmentId ? parseInt(data.departmentId) : null,
-        }),
+      await apiRequest("POST", "/api/admin/invitations", {
+        ...data,
+        departmentId: data.departmentId ? parseInt(data.departmentId) : null,
       });
     },
     onSuccess: () => {
@@ -265,7 +262,7 @@ export default function Invitations() {
                       <CardDescription className="mt-2 flex items-center gap-4">
                         <span className="flex items-center gap-1">
                           <Calendar className="w-4 h-4" />
-                          Sent {format(new Date(invitation.createdAt), "PPP")}
+                          Sent {invitation.createdAt ? format(new Date(invitation.createdAt), "PPP") : "Unknown"}
                         </span>
                         <span className="flex items-center gap-1">
                           <Clock className="w-4 h-4" />
