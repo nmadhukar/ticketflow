@@ -173,7 +173,7 @@ export default function Teams() {
           }
         />
         
-        <main className="flex-1 p-6 overflow-y-auto">
+        <div className="flex-1 p-6 overflow-y-auto">
           {/* My Teams Section */}
           <div className="mb-8">
             <h3 className="text-lg font-semibold mb-4">My Teams</h3>
@@ -293,7 +293,7 @@ export default function Teams() {
               </Card>
             )}
           </div>
-        </main>
+        </div>
       </div>
   );
 }
