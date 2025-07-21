@@ -97,6 +97,9 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Added Microsoft 365 SSO configuration UI in admin panel with client ID, secret, and tenant ID fields**
 - **Enhanced stats endpoint to show global statistics for admins while maintaining user-specific stats for regular users**
 - **Fixed signout "page not found" error by adding GET /api/logout route alongside existing POST /api/auth/logout endpoint**
+- **Fixed duplicate menu columns issue in Teams page by correcting HTML structure to prevent Layout wrapper duplication**
+- **Added "Invite User" button directly to User Management tab header in admin panel for easier access to invitation functionality**
+- **Fixed company logo display in sidebar - now properly shows uploaded logo from company branding settings with fallback to default icon**
 
 ## System Architecture
 
