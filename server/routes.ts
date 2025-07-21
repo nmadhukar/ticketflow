@@ -1030,6 +1030,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get SMTP settings (admin only)
+  app.get('/api/smtp/settings', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const settings = await storage.getSmtpSettings();
+      
+      // Return AWS SES settings in the format expected by frontend
+      if (settings) {
+        res.json({
+          awsAccessKeyId: settings.awsAccessKeyId,
+          awsSecretAccessKey: settings.awsSecretAccessKey,
+          awsRegion: settings.awsRegion || 'us-east-1',
+          fromEmail: settings.fromEmail,
+          fromName: settings.fromName || 'TicketFlow',
+        });
+      } else {
+        res.json({});
+      }
+    } catch (error) {
+      console.error("Error fetching SMTP settings:", error);
+      res.status(500).json({ message: "Failed to fetch SMTP settings" });
+    }
+  });
+  
+  // Save SMTP settings (admin only)
+  app.post('/api/smtp/settings', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      // Save AWS SES settings
+      const smtpSettings = {
+        awsAccessKeyId: req.body.awsAccessKeyId,
+        awsSecretAccessKey: req.body.awsSecretAccessKey,
+        awsRegion: req.body.awsRegion || 'us-east-1',
+        fromEmail: req.body.fromEmail,
+        fromName: req.body.fromName || 'TicketFlow',
+        useAwsSes: true,
+        isActive: true,
+      };
+      
+      const settings = await storage.updateSmtpSettings(smtpSettings, userId);
+      
+      // Return in the format expected by frontend
+      res.json({
+        awsAccessKeyId: settings.awsAccessKeyId,
+        awsSecretAccessKey: settings.awsSecretAccessKey,
+        awsRegion: settings.awsRegion,
+        fromEmail: settings.fromEmail,
+        fromName: settings.fromName,
+      });
+    } catch (error) {
+      console.error("Error saving SMTP settings:", error);
+      res.status(500).json({ message: "Failed to save SMTP settings" });
+    }
+  });
+
   // Test SMTP configuration
   app.post('/api/smtp/test', isAuthenticated, async (req, res) => {
     try {
@@ -1053,13 +1120,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "SMTP settings not configured" });
       }
 
-      // Test sending email
+      // Test sending email using AWS SES
       const success = await sendTestEmail(
-        smtpSettings.host,
-        smtpSettings.port,
-        smtpSettings.username,
-        smtpSettings.password || '',
-        smtpSettings.encryption,
+        '', // host not used for AWS SES
+        0, // port not used for AWS SES
+        smtpSettings.awsAccessKeyId || '',
+        smtpSettings.awsSecretAccessKey || '',
+        smtpSettings.awsRegion || 'us-east-1',
         smtpSettings.fromEmail,
         smtpSettings.fromName,
         testEmail

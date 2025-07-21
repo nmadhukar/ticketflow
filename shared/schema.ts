@@ -153,16 +153,22 @@ export const apiKeys = pgTable("api_keys", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-// SMTP settings for email notifications
+// SMTP settings for email notifications (also used for AWS SES)
 export const smtpSettings = pgTable("smtp_settings", {
   id: serial("id").primaryKey(),
-  host: varchar("host", { length: 255 }).notNull(),
-  port: integer("port").notNull().default(587),
-  username: varchar("username", { length: 255 }).notNull(),
-  password: varchar("password", { length: 255 }).notNull(), // encrypted
+  // AWS SES settings
+  awsAccessKeyId: varchar("aws_access_key_id", { length: 255 }),
+  awsSecretAccessKey: varchar("aws_secret_access_key", { length: 255 }), // encrypted
+  awsRegion: varchar("aws_region", { length: 50 }).default("us-east-1"),
+  // SMTP settings (can be used as fallback)
+  host: varchar("host", { length: 255 }),
+  port: integer("port").default(587),
+  username: varchar("username", { length: 255 }),
+  password: varchar("password", { length: 255 }), // encrypted
   fromEmail: varchar("from_email", { length: 255 }).notNull(),
   fromName: varchar("from_name", { length: 255 }).notNull().default("TicketFlow"),
   encryption: varchar("encryption", { length: 10 }).default("tls"), // tls, ssl, none
+  useAwsSes: boolean("use_aws_ses").default(true), // Toggle between AWS SES and SMTP
   isActive: boolean("is_active").default(true),
   updatedBy: varchar("updated_by").references(() => users.id),
   updatedAt: timestamp("updated_at").defaultNow(),

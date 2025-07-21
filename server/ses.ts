@@ -70,13 +70,27 @@ export async function sendTestEmail(
   fromName: string,
   toEmail: string
 ): Promise<boolean> {
-  // For AWS SES, we'll use the API approach
-  // The SMTP settings are stored for future use if needed
+  // For AWS SES, we use the provided credentials
+  // The parameters reflect AWS SES configuration:
+  // host = not used for AWS SES API
+  // port = not used for AWS SES API  
+  // username = AWS Access Key ID
+  // password = AWS Secret Access Key
+  // encryption = AWS Region
   
-  if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+  if (!username || !password) {
     console.error('AWS credentials not configured');
     return false;
   }
+
+  // Create a temporary SES client with the provided credentials
+  const testSesClient = new SESClient({
+    region: encryption || "us-east-1", // encryption field stores the region
+    credentials: {
+      accessKeyId: username,
+      secretAccessKey: password,
+    },
+  });
 
   try {
     const html = `
@@ -88,7 +102,7 @@ export async function sendTestEmail(
           <ul style="list-style: none; padding: 0;">
             <li><strong>From:</strong> ${fromName} &lt;${fromEmail}&gt;</li>
             <li><strong>Service:</strong> Amazon SES</li>
-            <li><strong>Region:</strong> ${process.env.AWS_REGION || 'us-east-1'}</li>
+            <li><strong>Region:</strong> ${encryption || 'us-east-1'}</li>
           </ul>
         </div>
         <p style="color: #666; font-size: 14px;">
@@ -102,16 +116,35 @@ export async function sendTestEmail(
       `Configuration Details:\n` +
       `From: ${fromName} <${fromEmail}>\n` +
       `Service: Amazon SES\n` +
-      `Region: ${process.env.AWS_REGION || 'us-east-1'}\n\n` +
+      `Region: ${encryption || 'us-east-1'}\n\n` +
       `If you received this email, your email configuration is working properly!`;
 
-    return await sendEmail({
-      to: toEmail,
-      from: `${fromName} <${fromEmail}>`,
-      subject: 'TicketFlow Test Email',
-      text,
-      html,
+    const command = new SendEmailCommand({
+      Source: `${fromName} <${fromEmail}>`,
+      Destination: {
+        ToAddresses: [toEmail],
+      },
+      Message: {
+        Subject: {
+          Data: 'TicketFlow Test Email',
+          Charset: "UTF-8",
+        },
+        Body: {
+          Text: {
+            Data: text,
+            Charset: "UTF-8",
+          },
+          Html: {
+            Data: html,
+            Charset: "UTF-8",
+          },
+        },
+      },
     });
+
+    await testSesClient.send(command);
+    console.log(`Test email sent successfully to ${toEmail}`);
+    return true;
   } catch (error) {
     console.error('Test email error:', error);
     return false;

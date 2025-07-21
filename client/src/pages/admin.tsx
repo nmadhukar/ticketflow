@@ -27,6 +27,14 @@ export default function AdminPanel() {
   const [isEditUserOpen, setIsEditUserOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [userStatusFilter, setUserStatusFilter] = useState<"all" | "active" | "inactive">("active");
+  const [testEmailAddress, setTestEmailAddress] = useState("");
+  const [emailSettings, setEmailSettings] = useState<any>({
+    awsAccessKeyId: "",
+    awsSecretAccessKey: "",
+    awsRegion: "us-east-1",
+    fromEmail: "",
+    fromName: "TicketFlow",
+  });
   
   // Microsoft SSO state
   const [ssoConfig, setSsoConfig] = useState({
@@ -75,6 +83,22 @@ export default function AdminPanel() {
           clientId: data.clientId || "",
           clientSecret: data.clientSecret || "",
           tenantId: data.tenantId || "",
+        });
+      }
+    },
+  });
+  
+  const { data: smtpSettingsData } = useQuery({
+    queryKey: ["/api/smtp/settings"],
+    retry: false,
+    onSuccess: (data) => {
+      if (data) {
+        setEmailSettings({
+          awsAccessKeyId: data.awsAccessKeyId || "",
+          awsSecretAccessKey: data.awsSecretAccessKey || "",
+          awsRegion: data.awsRegion || "us-east-1",
+          fromEmail: data.fromEmail || "",
+          fromName: data.fromName || "TicketFlow",
         });
       }
     },
@@ -239,6 +263,45 @@ export default function AdminPanel() {
       });
     },
   });
+  
+  const saveEmailSettingsMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest("POST", "/api/smtp/settings", emailSettings);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/smtp/settings"] });
+      toast({
+        title: "Success",
+        description: "Email configuration saved successfully",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to save email configuration",
+        variant: "destructive",
+      });
+    },
+  });
+  
+  const testEmailMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest("POST", "/api/smtp/test", { testEmail: testEmailAddress });
+    },
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "Test email sent successfully",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to send test email",
+        variant: "destructive",
+      });
+    },
+  });
 
   const handleLogoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -352,6 +415,7 @@ export default function AdminPanel() {
           <TabsTrigger value="branding">Company Branding</TabsTrigger>
           <TabsTrigger value="help">Help Documentation</TabsTrigger>
           <TabsTrigger value="sso">Microsoft 365 SSO</TabsTrigger>
+          <TabsTrigger value="email">Email Settings</TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="space-y-4">
@@ -904,6 +968,153 @@ export default function AdminPanel() {
                   disabled={saveSsoConfigMutation.isPending}
                 >
                   {saveSsoConfigMutation.isPending ? "Saving..." : "Save Configuration"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="email" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Email Configuration</CardTitle>
+              <CardDescription>
+                Configure AWS SES for sending system emails (invitations, notifications, etc.)
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <Alert className="border-blue-200 bg-blue-50">
+                <AlertCircle className="h-4 w-4 text-blue-600" />
+                <AlertTitle className="text-blue-800">AWS SES Configuration</AlertTitle>
+                <AlertDescription className="text-blue-700">
+                  <p className="mb-2">TicketFlow uses Amazon Simple Email Service (SES) for reliable email delivery.</p>
+                  <ul className="list-disc list-inside space-y-1 text-sm">
+                    <li>Create an AWS account and enable SES in your preferred region</li>
+                    <li>Verify your sender email address in SES</li>
+                    <li>In sandbox mode, verify all recipient email addresses</li>
+                    <li>Request production access to send to any email address</li>
+                  </ul>
+                </AlertDescription>
+              </Alert>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="aws-access-key">AWS Access Key ID</Label>
+                  <Input
+                    id="aws-access-key"
+                    placeholder="Enter your AWS Access Key ID"
+                    value={emailSettings?.awsAccessKeyId || ""}
+                    onChange={(e) => setEmailSettings({ ...emailSettings, awsAccessKeyId: e.target.value })}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Your AWS IAM user access key with SES permissions
+                  </p>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="aws-secret-key">AWS Secret Access Key</Label>
+                  <Input
+                    id="aws-secret-key"
+                    type="password"
+                    placeholder="Enter your AWS Secret Access Key"
+                    value={emailSettings?.awsSecretAccessKey || ""}
+                    onChange={(e) => setEmailSettings({ ...emailSettings, awsSecretAccessKey: e.target.value })}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Your AWS IAM user secret key (keep this secure)
+                  </p>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="aws-region">AWS Region</Label>
+                  <Select
+                    value={emailSettings?.awsRegion || "us-east-1"}
+                    onValueChange={(value) => setEmailSettings({ ...emailSettings, awsRegion: value })}
+                  >
+                    <SelectTrigger id="aws-region">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="us-east-1">US East (N. Virginia)</SelectItem>
+                      <SelectItem value="us-west-2">US West (Oregon)</SelectItem>
+                      <SelectItem value="eu-west-1">EU (Ireland)</SelectItem>
+                      <SelectItem value="eu-central-1">EU (Frankfurt)</SelectItem>
+                      <SelectItem value="ap-southeast-1">Asia Pacific (Singapore)</SelectItem>
+                      <SelectItem value="ap-southeast-2">Asia Pacific (Sydney)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-sm text-muted-foreground">
+                    The AWS region where SES is configured
+                  </p>
+                </div>
+
+                <div className="border-t pt-4">
+                  <h3 className="text-lg font-semibold mb-4">Sender Configuration</h3>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="from-email">From Email Address</Label>
+                      <Input
+                        id="from-email"
+                        type="email"
+                        placeholder="noreply@yourcompany.com"
+                        value={emailSettings?.fromEmail || ""}
+                        onChange={(e) => setEmailSettings({ ...emailSettings, fromEmail: e.target.value })}
+                      />
+                      <p className="text-sm text-muted-foreground">
+                        This email must be verified in AWS SES
+                      </p>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label htmlFor="from-name">From Name</Label>
+                      <Input
+                        id="from-name"
+                        placeholder="TicketFlow System"
+                        value={emailSettings?.fromName || "TicketFlow"}
+                        onChange={(e) => setEmailSettings({ ...emailSettings, fromName: e.target.value })}
+                      />
+                      <p className="text-sm text-muted-foreground">
+                        The display name for system emails
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t pt-4">
+                  <h3 className="text-lg font-semibold mb-4">Email Test</h3>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="test-email">Test Email Address</Label>
+                      <Input
+                        id="test-email"
+                        type="email"
+                        placeholder="test@example.com"
+                        value={testEmailAddress}
+                        onChange={(e) => setTestEmailAddress(e.target.value)}
+                      />
+                      <p className="text-sm text-muted-foreground">
+                        Send a test email to verify configuration
+                      </p>
+                    </div>
+                    
+                    <Button
+                      variant="outline"
+                      onClick={() => testEmailMutation.mutate()}
+                      disabled={!testEmailAddress || testEmailMutation.isPending}
+                    >
+                      {testEmailMutation.isPending ? "Sending..." : "Send Test Email"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-4 pt-4">
+                <Button 
+                  className="bg-primary hover:bg-primary/90"
+                  onClick={() => saveEmailSettingsMutation.mutate()}
+                  disabled={saveEmailSettingsMutation.isPending}
+                >
+                  {saveEmailSettingsMutation.isPending ? "Saving..." : "Save Configuration"}
                 </Button>
               </div>
             </CardContent>
