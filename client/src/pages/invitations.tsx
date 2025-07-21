@@ -43,7 +43,7 @@ export default function Invitations() {
     defaultValues: {
       email: "",
       role: "user",
-      departmentId: "",
+      departmentId: "none",
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days from now
     },
   });
@@ -52,7 +52,7 @@ export default function Invitations() {
     mutationFn: async (data: InvitationFormData) => {
       await apiRequest("POST", "/api/admin/invitations", {
         ...data,
-        departmentId: data.departmentId ? parseInt(data.departmentId) : null,
+        departmentId: data.departmentId && data.departmentId !== "none" ? parseInt(data.departmentId) : null,
       });
     },
     onSuccess: () => {
@@ -191,7 +191,7 @@ export default function Invitations() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="">No Department</SelectItem>
+                          <SelectItem value="none">No Department</SelectItem>
                           {departments?.map((dept: Department) => (
                             <SelectItem key={dept.id} value={dept.id.toString()}>
                               {dept.name}
