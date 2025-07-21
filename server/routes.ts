@@ -1706,6 +1706,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const invitation = await storage.createUserInvitation({
         ...req.body,
+        expiresAt: new Date(req.body.expiresAt),
         invitedBy: userId,
       });
 
