@@ -1726,7 +1726,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               response += `${contentPreview}\n\n`;
             }
           } else {
-            response = "I'm here to help! However, the AI service is not configured. Please ask your administrator to configure AWS credentials in the Admin Panel > Email Configuration section.";
+            response = "I'm here to help! However, the AI service is not configured. Please ask your administrator to configure AWS credentials in the Admin Panel > Email Settings tab.";
           }
         } catch (error) {
           console.error("Error searching help documents:", error);

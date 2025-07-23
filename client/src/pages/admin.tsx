@@ -549,7 +549,7 @@ export default function AdminPanel() {
           <TabsTrigger value="help">Help Documentation</TabsTrigger>
           <TabsTrigger value="policies">Company Policies</TabsTrigger>
           <TabsTrigger value="sso">Microsoft 365 SSO</TabsTrigger>
-          <TabsTrigger value="email">Email Settings</TabsTrigger>
+          <TabsTrigger value="email">AWS & Email Settings</TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="space-y-4">
@@ -1339,22 +1339,25 @@ export default function AdminPanel() {
         <TabsContent value="email" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Email Configuration</CardTitle>
+              <CardTitle>AWS Configuration</CardTitle>
               <CardDescription>
-                Configure AWS SES for sending system emails (invitations, notifications, etc.)
+                Configure AWS credentials for email delivery (SES) and AI chat assistant (Bedrock)
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <Alert className="border-blue-200 bg-blue-50">
                 <AlertCircle className="h-4 w-4 text-blue-600" />
-                <AlertTitle className="text-blue-800">AWS SES Configuration</AlertTitle>
+                <AlertTitle className="text-blue-800">AWS Services Configuration</AlertTitle>
                 <AlertDescription className="text-blue-700">
-                  <p className="mb-2">TicketFlow uses Amazon Simple Email Service (SES) for reliable email delivery.</p>
+                  <p className="mb-2">TicketFlow uses AWS services for email delivery and AI chat functionality:</p>
                   <ul className="list-disc list-inside space-y-1 text-sm">
-                    <li>Create an AWS account and enable SES in your preferred region</li>
-                    <li>Verify your sender email address in SES</li>
-                    <li>In sandbox mode, verify all recipient email addresses</li>
-                    <li>Request production access to send to any email address</li>
+                    <li><strong>AWS SES (Simple Email Service):</strong> For sending system emails</li>
+                    <li><strong>AWS Bedrock:</strong> For AI-powered chat assistant</li>
+                  </ul>
+                  <p className="mt-2 font-semibold">Required IAM Permissions:</p>
+                  <ul className="list-disc list-inside space-y-1 text-sm">
+                    <li>ses:SendEmail, ses:SendRawEmail</li>
+                    <li>bedrock:InvokeModel (for anthropic.claude-3-sonnet model)</li>
                   </ul>
                 </AlertDescription>
               </Alert>
@@ -1369,7 +1372,7 @@ export default function AdminPanel() {
                     onChange={(e) => setEmailSettings({ ...emailSettings, awsAccessKeyId: e.target.value })}
                   />
                   <p className="text-sm text-muted-foreground">
-                    Your AWS IAM user access key with SES permissions
+                    Your AWS IAM user access key with SES and Bedrock permissions
                   </p>
                 </div>
                 
@@ -1410,6 +1413,22 @@ export default function AdminPanel() {
                   </p>
                 </div>
 
+                <div className="border-t pt-4">
+                  <h3 className="text-lg font-semibold mb-4">AWS Status</h3>
+                  <div className="flex items-center space-x-2 mb-4">
+                    <div className={`w-3 h-3 rounded-full ${
+                      emailSettings?.awsAccessKeyId && emailSettings?.awsSecretAccessKey && emailSettings?.awsRegion 
+                        ? 'bg-green-500' 
+                        : 'bg-red-500'
+                    }`}></div>
+                    <span className="text-sm">
+                      {emailSettings?.awsAccessKeyId && emailSettings?.awsSecretAccessKey && emailSettings?.awsRegion 
+                        ? 'AWS credentials are configured - Email and AI chat features are enabled' 
+                        : 'AWS credentials not configured - AI chat will use document search only'}
+                    </span>
+                  </div>
+                </div>
+                
                 <div className="border-t pt-4">
                   <h3 className="text-lg font-semibold mb-4">Sender Configuration</h3>
                   <div className="space-y-4">
