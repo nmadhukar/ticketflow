@@ -160,7 +160,7 @@ export const smtpSettings = pgTable("smtp_settings", {
   awsAccessKeyId: varchar("aws_access_key_id", { length: 255 }),
   awsSecretAccessKey: varchar("aws_secret_access_key", { length: 255 }), // encrypted
   awsRegion: varchar("aws_region", { length: 50 }).default("us-east-1"),
-  // SMTP settings (can be used as fallback)
+  // SMTP settings (can be used as fallback) - nullable for AWS SES usage
   host: varchar("host", { length: 255 }),
   port: integer("port").default(587),
   username: varchar("username", { length: 255 }),
