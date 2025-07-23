@@ -102,6 +102,9 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Fixed company logo display in sidebar - now properly shows uploaded logo from company branding settings with fallback to default icon**
 - **Added UI interface to view sent invitations with status tracking in admin panel and sidebar navigation**
 - **Replaced SendGrid with Amazon SES for email sending functionality including invitation emails**
+- **Major reorganization of Settings vs Admin panel - moved all system-level features (API Keys, Company branding) from Settings to Admin panel**
+- **Settings page now contains only user-specific preferences: Profile, Notifications, Preferences, and simplified Security**
+- **Admin panel now has complete API Keys management and Company branding tabs for proper separation of concerns**
 
 ## System Architecture
 

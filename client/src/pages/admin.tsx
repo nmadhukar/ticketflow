@@ -12,12 +12,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle, Home, Palette, Upload, BookOpen, FileText, Trash2, Edit, Search, Building, UserPlus, AlertCircle, Mail, FileEdit } from "lucide-react";
+import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle, Home, Palette, Upload, BookOpen, FileText, Trash2, Edit, Search, Building, UserPlus, AlertCircle, Mail, FileEdit, Key, Eye, EyeOff, Copy } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { useLocation, Link } from "wouter";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import HelpDocumentManager from "@/components/HelpDocumentManager";
+import { Separator } from "@/components/ui/separator";
 
 export default function AdminPanel() {
   const { user } = useAuth();
@@ -45,6 +46,11 @@ export default function AdminPanel() {
     clientSecret: "",
     tenantId: "",
   });
+  
+  // API Keys state
+  const [newApiKeyName, setNewApiKeyName] = useState("");
+  const [showApiKey, setShowApiKey] = useState<string | null>(null);
+  const [apiKeyVisibility, setApiKeyVisibility] = useState<Record<number, boolean>>({});
 
   // Check if user is admin
   if (user?.role !== "admin") {
@@ -70,6 +76,10 @@ export default function AdminPanel() {
   const { data: departments } = useQuery({
     queryKey: ["/api/admin/departments"],
     retry: false,
+  });
+
+  const { data: apiKeys } = useQuery({
+    queryKey: ["/api/api-keys"],
   });
 
   const { data: companySettings } = useQuery({
@@ -359,6 +369,69 @@ export default function AdminPanel() {
     };
     reader.readAsDataURL(file);
   };
+  
+  // API Key mutations
+  const createApiKeyMutation = useMutation({
+    mutationFn: async (name: string) => {
+      return await apiRequest("POST", "/api/api-keys", { name });
+    },
+    onSuccess: (data) => {
+      setShowApiKey(data.key);
+      queryClient.invalidateQueries({ queryKey: ["/api/api-keys"] });
+      setNewApiKeyName("");
+      toast({
+        title: "Success",
+        description: "API key created successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to create API key",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteApiKeyMutation = useMutation({
+    mutationFn: async (id: number) => {
+      return await apiRequest("DELETE", `/api/api-keys/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/api-keys"] });
+      toast({
+        title: "Success",
+        description: "API key revoked successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to revoke API key",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleCreateApiKey = () => {
+    if (!newApiKeyName.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a name for the API key",
+        variant: "destructive",
+      });
+      return;
+    }
+    createApiKeyMutation.mutate(newApiKeyName);
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast({
+      title: "Success",
+      description: "Copied to clipboard",
+    });
+  };
 
   return (
     <div className="container mx-auto p-6">
@@ -443,6 +516,7 @@ export default function AdminPanel() {
           <TabsTrigger value="users">User Management</TabsTrigger>
           <TabsTrigger value="invitations">Invitations</TabsTrigger>
           <TabsTrigger value="teams">Team Management</TabsTrigger>
+          <TabsTrigger value="api">API Keys</TabsTrigger>
           <TabsTrigger value="settings">System Settings</TabsTrigger>
           <TabsTrigger value="branding">Company Branding</TabsTrigger>
           <TabsTrigger value="help">Help Documentation</TabsTrigger>
@@ -665,6 +739,146 @@ export default function AdminPanel() {
                   ))}
                 </TableBody>
               </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="api" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>API Keys</CardTitle>
+              <CardDescription>
+                Manage API keys for third-party integrations
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Create New API Key */}
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium">Create New API Key</h4>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="API Key Name (e.g., Mobile App, CI/CD Pipeline)"
+                    value={newApiKeyName}
+                    onChange={(e) => setNewApiKeyName(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleCreateApiKey()}
+                  />
+                  <Button
+                    onClick={handleCreateApiKey}
+                    disabled={createApiKeyMutation.isPending}
+                  >
+                    {createApiKeyMutation.isPending ? "Creating..." : "Create Key"}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Show newly created API key */}
+              {showApiKey && (
+                <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                  <h4 className="text-sm font-medium text-green-900 mb-2">
+                    API Key Created Successfully
+                  </h4>
+                  <p className="text-xs text-green-700 mb-3">
+                    Copy this key now. For security reasons, it won't be shown again.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 p-2 bg-white border rounded text-sm font-mono">
+                      {showApiKey}
+                    </code>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        copyToClipboard(showApiKey);
+                        setShowApiKey(null);
+                      }}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <Separator />
+
+              {/* Existing API Keys */}
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium">Active API Keys</h4>
+                {apiKeys && apiKeys.length > 0 ? (
+                  <div className="space-y-2">
+                    {apiKeys.map((apiKey: any) => (
+                      <div
+                        key={apiKey.id}
+                        className="flex items-center justify-between p-3 border rounded-lg"
+                      >
+                        <div className="flex-1">
+                          <p className="font-medium">{apiKey.name}</p>
+                          <div className="flex items-center gap-4 mt-1">
+                            <p className="text-xs text-muted-foreground">
+                              Created: {new Date(apiKey.createdAt).toLocaleDateString()}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Last used: {apiKey.lastUsed ? new Date(apiKey.lastUsed).toLocaleDateString() : 'Never'}
+                            </p>
+                            {apiKey.expiresAt && (
+                              <p className="text-xs text-muted-foreground">
+                                Expires: {new Date(apiKey.expiresAt).toLocaleDateString()}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <code className="text-xs font-mono bg-muted px-2 py-1 rounded">
+                            {apiKey.key.substring(0, 8)}...
+                          </code>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              const visibility = { ...apiKeyVisibility };
+                              visibility[apiKey.id] = !visibility[apiKey.id];
+                              setApiKeyVisibility(visibility);
+                            }}
+                          >
+                            {apiKeyVisibility[apiKey.id] ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => deleteApiKeyMutation.mutate(apiKey.id)}
+                            disabled={deleteApiKeyMutation.isPending}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Key className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p>No API keys yet. Create one to get started!</p>
+                  </div>
+                )}
+              </div>
+
+              <Separator />
+
+              {/* API Documentation Link */}
+              <div className="rounded-lg bg-muted p-4">
+                <h4 className="text-sm font-medium mb-2">API Documentation</h4>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Learn how to integrate with TicketFlow using our REST API.
+                </p>
+                <Button variant="outline" size="sm" asChild>
+                  <a href="/api-docs" target="_blank">
+                    View API Documentation
+                  </a>
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
