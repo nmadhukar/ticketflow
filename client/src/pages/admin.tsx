@@ -399,7 +399,7 @@ export default function AdminPanel() {
       return await apiRequest("POST", "/api/api-keys", { name });
     },
     onSuccess: (data) => {
-      setShowApiKey(data.key);
+      setShowApiKey(data.plainKey);
       queryClient.invalidateQueries({ queryKey: ["/api/api-keys"] });
       setNewApiKeyName("");
       toast({

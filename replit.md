@@ -115,6 +115,9 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Fixed duplicate menu columns issue in team-detail.tsx page by removing redundant Sidebar component and wrapper div - consistent with previous Layout fixes**
 - **Fixed invitation cancellation bug - cancelled invitations now show "Cancelled" status badge instead of "Pending" by adding cancelled status handling to getStatusBadge function**
 - **Fixed Company Branding functionality - company name is now properly editable with save button, logo upload includes file size validation (5MB limit), and resolved missing ticket_prefix database column issue**
+- **Implemented Company Policy Document Management system - admins can now upload and manage policy documents (Word, PDF) that integrate with AI chatbot for answering policy-related questions**
+- **Added Company Policies tab to admin panel with full CRUD operations for policy documents including upload, download, and delete functionality**
+- **Fixed API key creation error - corrected frontend/backend mismatch where frontend expected 'key' but backend returns 'plainKey' in response**
 
 ## System Architecture
 
