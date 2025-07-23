@@ -111,6 +111,7 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Enhanced ticket number generation logic with proper sequence handling to ensure unique ticket numbers across years**
 - **Fixed duplicate menu columns issue in team-detail.tsx page by removing redundant Sidebar component and wrapper div - consistent with previous Layout fixes**
 - **Fixed invitation cancellation bug - cancelled invitations now show "Cancelled" status badge instead of "Pending" by adding cancelled status handling to getStatusBadge function**
+- **Fixed Company Branding functionality - company name is now properly editable with save button, logo upload includes file size validation (5MB limit), and resolved missing ticket_prefix database column issue**
 
 ## System Architecture
 

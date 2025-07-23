@@ -54,6 +54,9 @@ export default function AdminPanel() {
   const [perplexityApiKey, setPerplexityApiKey] = useState("");
   const [showPerplexityKey, setShowPerplexityKey] = useState(false);
   const [perplexityKeyExists, setPerplexityKeyExists] = useState(false);
+  
+  // Company branding state
+  const [companyName, setCompanyName] = useState("");
 
   // Check if user is admin
   if (user?.role !== "admin") {
@@ -88,6 +91,11 @@ export default function AdminPanel() {
   const { data: companySettings } = useQuery({
     queryKey: ["/api/company-settings"],
     retry: false,
+    onSuccess: (data) => {
+      if (data) {
+        setCompanyName(data.companyName || "");
+      }
+    },
   });
   
   const { data: emailTemplates } = useQuery({
@@ -372,6 +380,16 @@ export default function AdminPanel() {
       toast({
         title: "Error",
         description: "Please upload a JPG or PNG image",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Check file size (5MB limit)
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: "Error",
+        description: "File size must be less than 5MB",
         variant: "destructive",
       });
       return;
@@ -1038,10 +1056,19 @@ export default function AdminPanel() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label>Company Name</Label>
-                  <Input 
-                    value={companySettings?.companyName || ""}
-                    onChange={(e) => updateCompanySettingsMutation.mutate({ companyName: e.target.value })}
-                  />
+                  <div className="flex gap-2">
+                    <Input 
+                      value={companyName}
+                      onChange={(e) => setCompanyName(e.target.value)}
+                      placeholder="Enter company name"
+                    />
+                    <Button
+                      onClick={() => updateCompanySettingsMutation.mutate({ companyName })}
+                      disabled={updateCompanySettingsMutation.isPending || companyName === companySettings?.companyName}
+                    >
+                      {updateCompanySettingsMutation.isPending ? "Saving..." : "Save"}
+                    </Button>
+                  </div>
                 </div>
                 
                 <div className="space-y-4">
@@ -1068,7 +1095,7 @@ export default function AdminPanel() {
                         className="flex items-center gap-2"
                       >
                         <Upload className="h-4 w-4" />
-                        Upload Logo
+                        {uploadLogoMutation.isPending ? "Uploading..." : "Upload Logo"}
                       </Button>
                       <p className="text-sm text-muted-foreground">
                         JPG or PNG, max 5MB
