@@ -1,4 +1,5 @@
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import type { EmailTemplate } from "@shared/schema";
 
 // Initialize SES client
 const sesClient = new SESClient({
@@ -15,6 +16,14 @@ interface EmailParams {
   subject: string;
   text?: string;
   html?: string;
+}
+
+interface TemplateEmailOptions {
+  to: string;
+  template: EmailTemplate;
+  variables: Record<string, string>;
+  fromEmail: string;
+  fromName: string;
 }
 
 export async function sendEmail(params: EmailParams): Promise<boolean> {
@@ -58,6 +67,27 @@ export async function sendEmail(params: EmailParams): Promise<boolean> {
     console.error('AWS SES email error:', error);
     return false;
   }
+}
+
+export async function sendEmailWithTemplate(options: TemplateEmailOptions): Promise<boolean> {
+  const { to, template, variables, fromEmail, fromName } = options;
+  
+  // Replace variables in subject and body
+  let subject = template.subject;
+  let html = template.body;
+  
+  Object.entries(variables).forEach(([key, value]) => {
+    const regex = new RegExp(`{{${key}}}`, 'g');
+    subject = subject.replace(regex, value);
+    html = html.replace(regex, value);
+  });
+  
+  return sendEmail({
+    to,
+    from: `${fromName} <${fromEmail}>`,
+    subject,
+    html,
+  });
 }
 
 export async function sendTestEmail(

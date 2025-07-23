@@ -1718,6 +1718,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Cancel user invitation (admin only)
+  app.delete('/api/admin/invitations/:id', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      await storage.cancelUserInvitation(id);
+      res.json({ message: "Invitation cancelled successfully" });
+    } catch (error) {
+      console.error("Error cancelling invitation:", error);
+      res.status(500).json({ message: "Failed to cancel invitation" });
+    }
+  });
+
+  // Resend user invitation (admin only)
+  app.post('/api/admin/invitations/:id/resend', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id);
+      const invitation = await storage.getUserInvitationById(id);
+      
+      if (!invitation) {
+        return res.status(404).json({ message: "Invitation not found" });
+      }
+
+      if (invitation.status === 'accepted') {
+        return res.status(400).json({ message: "Cannot resend accepted invitation" });
+      }
+
+      // Send invitation email using the template
+      const smtpSettings = await storage.getSmtpSettings();
+      const emailTemplate = await storage.getEmailTemplate('user_invitation');
+      const companySettings = await storage.getCompanySettings();
+      
+      if (smtpSettings && emailTemplate && smtpSettings.awsAccessKeyId && smtpSettings.awsSecretAccessKey) {
+        const { sendEmailWithTemplate } = await import('./ses');
+        const inviteUrl = `${req.protocol}://${req.get('host')}/auth?mode=register&email=${encodeURIComponent(invitation.email)}&token=${invitation.invitationToken}`;
+        
+        const department = invitation.departmentId ? await storage.getDepartmentById(invitation.departmentId) : null;
+        const inviter = await storage.getUser(invitation.invitedBy);
+        
+        await sendEmailWithTemplate({
+          to: invitation.email,
+          template: emailTemplate,
+          variables: {
+            companyName: companySettings?.companyName || 'TicketFlow',
+            invitedName: invitation.email.split('@')[0], // Use email prefix as name
+            inviterName: inviter ? `${inviter.firstName} ${inviter.lastName}` : 'Admin',
+            email: invitation.email,
+            role: invitation.role.charAt(0).toUpperCase() + invitation.role.slice(1),
+            department: department?.name || 'Not assigned',
+            registrationUrl: inviteUrl,
+            year: new Date().getFullYear().toString(),
+          },
+          fromEmail: smtpSettings.fromEmail,
+          fromName: smtpSettings.fromName,
+        });
+      }
+
+      res.json({ message: "Invitation resent successfully" });
+    } catch (error) {
+      console.error("Error resending invitation:", error);
+      res.status(500).json({ message: "Failed to resend invitation" });
+    }
+  });
+
   // Department routes (admin only)
   app.get('/api/departments', isAuthenticated, async (req, res) => {
     try {
@@ -1816,25 +1893,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         invitedBy: userId,
       });
 
-      // Send invitation email using Amazon SES if configured
+      // Send invitation email using the template
       const smtpSettings = await storage.getSmtpSettings();
-      if (smtpSettings && process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
-        const { sendEmail } = await import('./ses');
-        const inviteUrl = `${req.protocol}://${req.get('host')}/auth?mode=register&email=${encodeURIComponent(invitation.email)}`;
+      const emailTemplate = await storage.getEmailTemplate('user_invitation');
+      const companySettings = await storage.getCompanySettings();
+      
+      if (smtpSettings && emailTemplate && smtpSettings.awsAccessKeyId && smtpSettings.awsSecretAccessKey) {
+        const { sendEmailWithTemplate } = await import('./ses');
+        const inviteUrl = `${req.protocol}://${req.get('host')}/auth?mode=register&email=${encodeURIComponent(invitation.email)}&token=${invitation.invitationToken}`;
         
-        await sendEmail({
+        const department = invitation.departmentId ? await storage.getDepartmentById(invitation.departmentId) : null;
+        
+        await sendEmailWithTemplate({
           to: invitation.email,
-          from: smtpSettings.fromEmail,
-          subject: 'You have been invited to TicketFlow',
-          html: `
-            <h2>Welcome to TicketFlow!</h2>
-            <p>You have been invited to join TicketFlow as a ${invitation.role}.</p>
-            <p>Click the link below to accept your invitation and set up your account:</p>
-            <p><a href="${inviteUrl}">Accept Invitation</a></p>
-            <p>This invitation will expire on ${new Date(invitation.expiresAt).toLocaleDateString()}.</p>
-            <p>If you have any questions, please contact your administrator.</p>
-          `,
-          text: `Welcome to TicketFlow! You have been invited to join as a ${invitation.role}. Visit ${inviteUrl} to accept your invitation.`,
+          template: emailTemplate,
+          variables: {
+            companyName: companySettings?.companyName || 'TicketFlow',
+            invitedName: invitation.email.split('@')[0], // Use email prefix as name
+            inviterName: user.firstName ? `${user.firstName} ${user.lastName}` : 'Admin',
+            email: invitation.email,
+            role: invitation.role.charAt(0).toUpperCase() + invitation.role.slice(1),
+            department: department?.name || 'Not assigned',
+            registrationUrl: inviteUrl,
+            year: new Date().getFullYear().toString(),
+          },
+          fromEmail: smtpSettings.fromEmail,
+          fromName: smtpSettings.fromName,
         });
       }
 

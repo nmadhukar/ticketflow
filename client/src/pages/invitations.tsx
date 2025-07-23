@@ -73,6 +73,45 @@ export default function Invitations() {
     },
   });
 
+  const cancelMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/admin/invitations/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/invitations"] });
+      toast({
+        title: "Success",
+        description: "Invitation cancelled successfully",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to cancel invitation",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const resendMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("POST", `/api/admin/invitations/${id}/resend`);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "Invitation resent successfully",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to resend invitation",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleSubmit = (data: InvitationFormData) => {
     createMutation.mutate(data);
   };
@@ -161,7 +200,7 @@ export default function Invitations() {
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue />
+                            <SelectValue placeholder="Select a role" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
@@ -172,7 +211,7 @@ export default function Invitations() {
                         </SelectContent>
                       </Select>
                       <FormDescription>
-                        The role determines the user's permissions
+                        Choose the role for the invited user
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -277,21 +316,41 @@ export default function Invitations() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                    {department && (
-                      <span>Department: {department.name}</span>
-                    )}
-                    {invitation.acceptedAt && (
-                      <span>Accepted on {format(new Date(invitation.acceptedAt), "PPP")}</span>
+                  <div className="flex justify-between items-center">
+                    <div className="text-sm text-muted-foreground">
+                      {department && <span>Department: {department.name}</span>}
+                    </div>
+                    {invitation.status === 'pending' && new Date(invitation.expiresAt) > new Date() && (
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => resendMutation.mutate(invitation.id)}
+                          disabled={resendMutation.isPending}
+                        >
+                          {resendMutation.isPending ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Mail className="w-4 h-4" />
+                          )}
+                          <span className="ml-2">Resend</span>
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => cancelMutation.mutate(invitation.id)}
+                          disabled={cancelMutation.isPending}
+                        >
+                          {cancelMutation.isPending ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <X className="w-4 h-4" />
+                          )}
+                          <span className="ml-2">Cancel</span>
+                        </Button>
+                      </div>
                     )}
                   </div>
-                  {invitation.status === "pending" && new Date(invitation.expiresAt) > new Date() && (
-                    <div className="mt-4 p-3 bg-muted rounded-md">
-                      <p className="text-sm font-mono break-all">
-                        Invitation Token: {invitation.invitationToken}
-                      </p>
-                    </div>
-                  )}
                 </CardContent>
               </Card>
             );

@@ -1369,6 +1369,11 @@ export class DatabaseStorage implements IStorage {
     const [created] = await db.insert(departments).values(department).returning();
     return created;
   }
+  
+  async getDepartmentById(id: number): Promise<Department | undefined> {
+    const [dept] = await db.select().from(departments).where(eq(departments.id, id));
+    return dept;
+  }
 
   async updateDepartment(id: number, department: Partial<InsertDepartment>): Promise<Department> {
     const [updated] = await db
@@ -1447,6 +1452,21 @@ export class DatabaseStorage implements IStorage {
           sql`${userInvitations.expiresAt} < NOW()`
         )
       );
+  }
+  
+  async getUserInvitationById(id: number): Promise<UserInvitation | undefined> {
+    const [invitation] = await db
+      .select()
+      .from(userInvitations)
+      .where(eq(userInvitations.id, id));
+    return invitation;
+  }
+  
+  async cancelUserInvitation(id: number): Promise<void> {
+    await db
+      .update(userInvitations)
+      .set({ status: 'cancelled' })
+      .where(eq(userInvitations.id, id));
   }
   
   // Teams Integration operations
