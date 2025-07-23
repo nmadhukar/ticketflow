@@ -121,6 +121,10 @@ export default function Invitations() {
       return <Badge variant="secondary" className="gap-1"><Check className="w-3 h-3" /> Accepted</Badge>;
     }
     
+    if (invitation.status === "cancelled") {
+      return <Badge variant="destructive" className="gap-1"><X className="w-3 h-3" /> Cancelled</Badge>;
+    }
+    
     const isExpired = new Date(invitation.expiresAt) < new Date();
     if (isExpired) {
       return <Badge variant="destructive" className="gap-1"><X className="w-3 h-3" /> Expired</Badge>;

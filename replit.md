@@ -110,6 +110,7 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Added ticketPrefix field to companySettings table and automatic ticket number generation in format PREFIX-YYYY-XXXX**
 - **Enhanced ticket number generation logic with proper sequence handling to ensure unique ticket numbers across years**
 - **Fixed duplicate menu columns issue in team-detail.tsx page by removing redundant Sidebar component and wrapper div - consistent with previous Layout fixes**
+- **Fixed invitation cancellation bug - cancelled invitations now show "Cancelled" status badge instead of "Pending" by adding cancelled status handling to getStatusBadge function**
 
 ## System Architecture
 
