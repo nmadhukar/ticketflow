@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle, Home, Palette, Upload, BookOpen, FileText, Trash2, Edit, Search, Building, UserPlus, AlertCircle, Mail, FileEdit, Key, Eye, EyeOff, Copy } from "lucide-react";
+import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle, Home, Palette, Upload, BookOpen, FileText, Trash2, Edit, Search, Building, UserPlus, AlertCircle, Mail, FileEdit, Key, Eye, EyeOff, Copy, Plug } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { useLocation, Link } from "wouter";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -22,6 +22,7 @@ import { Separator } from "@/components/ui/separator";
 import { BedrockUsageStats } from "@/components/bedrock-usage-stats";
 import { FaqCacheManager } from "@/components/faq-cache-manager";
 import { CompanyPolicyManager } from "@/components/company-policy-manager";
+import { cn } from "@/lib/utils";
 
 export default function AdminPanel() {
   const { user } = useAuth();
@@ -42,6 +43,7 @@ export default function AdminPanel() {
   });
   const [selectedTemplate, setSelectedTemplate] = useState<any>(null);
   const [isEditTemplateOpen, setIsEditTemplateOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("users");
   
   // Microsoft SSO state
   const [ssoConfig, setSsoConfig] = useState({
@@ -538,19 +540,179 @@ export default function AdminPanel() {
         </Card>
       </div>
 
-      <Tabs defaultValue="users" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="users">User Management</TabsTrigger>
-          <TabsTrigger value="invitations">Invitations</TabsTrigger>
-          <TabsTrigger value="teams">Team Management</TabsTrigger>
-          <TabsTrigger value="api">API Keys</TabsTrigger>
-          <TabsTrigger value="settings">System Settings</TabsTrigger>
-          <TabsTrigger value="branding">Company Branding</TabsTrigger>
-          <TabsTrigger value="help">Help Documentation</TabsTrigger>
-          <TabsTrigger value="policies">Company Policies</TabsTrigger>
-          <TabsTrigger value="sso">Microsoft 365 SSO</TabsTrigger>
-          <TabsTrigger value="email">AWS & Email Settings</TabsTrigger>
-        </TabsList>
+      <div className="flex gap-6">
+        {/* Sidebar Navigation */}
+        <div className="w-64 flex-shrink-0">
+          <Card className="sticky top-6">
+            <CardContent className="p-4 space-y-6">
+              {/* User & Team Management Section */}
+              <div>
+                <h3 className="text-sm font-semibold text-muted-foreground mb-2 flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  USER & TEAM MANAGEMENT
+                </h3>
+                <nav className="space-y-1">
+                  <button
+                    onClick={() => setActiveTab("users")}
+                    className={cn(
+                      "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
+                      activeTab === "users" 
+                        ? "bg-primary text-primary-foreground" 
+                        : "hover:bg-muted"
+                    )}
+                  >
+                    User Management
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("invitations")}
+                    className={cn(
+                      "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
+                      activeTab === "invitations" 
+                        ? "bg-primary text-primary-foreground" 
+                        : "hover:bg-muted"
+                    )}
+                  >
+                    Invitations
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("teams")}
+                    className={cn(
+                      "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
+                      activeTab === "teams" 
+                        ? "bg-primary text-primary-foreground" 
+                        : "hover:bg-muted"
+                    )}
+                  >
+                    Team Management
+                  </button>
+                </nav>
+              </div>
+
+              {/* Configuration Section */}
+              <div>
+                <h3 className="text-sm font-semibold text-muted-foreground mb-2 flex items-center gap-2">
+                  <Settings className="h-4 w-4" />
+                  CONFIGURATION
+                </h3>
+                <nav className="space-y-1">
+                  <button
+                    onClick={() => setActiveTab("settings")}
+                    className={cn(
+                      "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
+                      activeTab === "settings" 
+                        ? "bg-primary text-primary-foreground" 
+                        : "hover:bg-muted"
+                    )}
+                  >
+                    System Settings
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("branding")}
+                    className={cn(
+                      "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
+                      activeTab === "branding" 
+                        ? "bg-primary text-primary-foreground" 
+                        : "hover:bg-muted"
+                    )}
+                  >
+                    Company Branding
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("api")}
+                    className={cn(
+                      "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
+                      activeTab === "api" 
+                        ? "bg-primary text-primary-foreground" 
+                        : "hover:bg-muted"
+                    )}
+                  >
+                    API Keys
+                  </button>
+                </nav>
+              </div>
+
+              {/* Content & Documentation Section */}
+              <div>
+                <h3 className="text-sm font-semibold text-muted-foreground mb-2 flex items-center gap-2">
+                  <BookOpen className="h-4 w-4" />
+                  CONTENT & DOCUMENTATION
+                </h3>
+                <nav className="space-y-1">
+                  <button
+                    onClick={() => setActiveTab("help")}
+                    className={cn(
+                      "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
+                      activeTab === "help" 
+                        ? "bg-primary text-primary-foreground" 
+                        : "hover:bg-muted"
+                    )}
+                  >
+                    Help Documentation
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("policies")}
+                    className={cn(
+                      "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
+                      activeTab === "policies" 
+                        ? "bg-primary text-primary-foreground" 
+                        : "hover:bg-muted"
+                    )}
+                  >
+                    Company Policies
+                  </button>
+                </nav>
+              </div>
+
+              {/* Integrations Section */}
+              <div>
+                <h3 className="text-sm font-semibold text-muted-foreground mb-2 flex items-center gap-2">
+                  <Plug className="h-4 w-4" />
+                  INTEGRATIONS
+                </h3>
+                <nav className="space-y-1">
+                  <button
+                    onClick={() => setActiveTab("sso")}
+                    className={cn(
+                      "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
+                      activeTab === "sso" 
+                        ? "bg-primary text-primary-foreground" 
+                        : "hover:bg-muted"
+                    )}
+                  >
+                    Microsoft 365 SSO
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("email")}
+                    className={cn(
+                      "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
+                      activeTab === "email" 
+                        ? "bg-primary text-primary-foreground" 
+                        : "hover:bg-muted"
+                    )}
+                  >
+                    AWS & Email Settings
+                  </button>
+                </nav>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Main Content Area */}
+        <div className="flex-1">
+          <Tabs value={activeTab} className="space-y-4">
+            <TabsList className="hidden">
+              <TabsTrigger value="users">Users</TabsTrigger>
+              <TabsTrigger value="invitations">Invitations</TabsTrigger>
+              <TabsTrigger value="teams">Teams</TabsTrigger>
+              <TabsTrigger value="api">API</TabsTrigger>
+              <TabsTrigger value="settings">Settings</TabsTrigger>
+              <TabsTrigger value="branding">Branding</TabsTrigger>
+              <TabsTrigger value="help">Help</TabsTrigger>
+              <TabsTrigger value="policies">Policies</TabsTrigger>
+              <TabsTrigger value="sso">SSO</TabsTrigger>
+              <TabsTrigger value="email">Email</TabsTrigger>
+            </TabsList>
 
         <TabsContent value="users" className="space-y-4">
           <Card>
@@ -1543,6 +1705,8 @@ export default function AdminPanel() {
           </Card>
         </TabsContent>
       </Tabs>
+        </div>
+      </div>
 
       {/* Edit Email Template Dialog */}
       <Dialog open={isEditTemplateOpen} onOpenChange={setIsEditTemplateOpen}>
