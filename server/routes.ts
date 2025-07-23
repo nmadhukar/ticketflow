@@ -1613,7 +1613,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Check if we have AWS Bedrock credentials
       const smtpSettings = await storage.getSmtpSettings();
-      const hasBedrockCredentials = smtpSettings?.awsAccessKeyId && smtpSettings?.awsSecretAccessKey && smtpSettings?.awsRegion;
+      const hasBedrockCredentials = (smtpSettings?.bedrockAccessKeyId && smtpSettings?.bedrockSecretAccessKey && smtpSettings?.bedrockRegion) || 
+                                     (smtpSettings?.awsAccessKeyId && smtpSettings?.awsSecretAccessKey && smtpSettings?.awsRegion);
       
       let response = "";
       const relevantDocIds: number[] = [];
@@ -1638,12 +1639,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
           
-          // Configure AWS Bedrock client
+          // Configure AWS Bedrock client - use Bedrock-specific credentials if available, otherwise fall back to SES credentials
           const bedrockClient = new BedrockRuntimeClient({
-            region: smtpSettings.awsRegion,
+            region: smtpSettings.bedrockRegion || smtpSettings.awsRegion || 'us-east-1',
             credentials: {
-              accessKeyId: smtpSettings.awsAccessKeyId,
-              secretAccessKey: smtpSettings.awsSecretAccessKey,
+              accessKeyId: smtpSettings.bedrockAccessKeyId || smtpSettings.awsAccessKeyId || '',
+              secretAccessKey: smtpSettings.bedrockSecretAccessKey || smtpSettings.awsSecretAccessKey || '',
             },
           });
           

@@ -38,6 +38,10 @@ export default function AdminPanel() {
     awsAccessKeyId: "",
     awsSecretAccessKey: "",
     awsRegion: "us-east-1",
+    bedrockAccessKeyId: "",
+    bedrockSecretAccessKey: "",
+    bedrockRegion: "us-east-1",
+    bedrockModelId: "anthropic.claude-instant-v1",
     fromEmail: "",
     fromName: "TicketFlow",
   });
@@ -128,6 +132,10 @@ export default function AdminPanel() {
           awsAccessKeyId: data.awsAccessKeyId || "",
           awsSecretAccessKey: data.awsSecretAccessKey || "",
           awsRegion: data.awsRegion || "us-east-1",
+          bedrockAccessKeyId: data.bedrockAccessKeyId || "",
+          bedrockSecretAccessKey: data.bedrockSecretAccessKey || "",
+          bedrockRegion: data.bedrockRegion || "us-east-1",
+          bedrockModelId: data.bedrockModelId || "anthropic.claude-instant-v1",
           fromEmail: data.fromEmail || "",
           fromName: data.fromName || "TicketFlow",
         });
@@ -1516,44 +1524,43 @@ export default function AdminPanel() {
                     <li><strong>AWS SES (Simple Email Service):</strong> For sending system emails</li>
                     <li><strong>AWS Bedrock:</strong> For AI-powered chat assistant</li>
                   </ul>
-                  <p className="mt-2 font-semibold">Required IAM Permissions:</p>
-                  <ul className="list-disc list-inside space-y-1 text-sm">
-                    <li>ses:SendEmail, ses:SendRawEmail</li>
-                    <li>bedrock:InvokeModel (for anthropic.claude-3-sonnet model)</li>
-                  </ul>
+                  <p className="mt-2 text-xs text-orange-700">You can use separate AWS credentials for each service for better security and access control.</p>
                 </AlertDescription>
               </Alert>
 
+              {/* AWS SES Configuration */}
               <div className="space-y-4">
+                <h3 className="text-lg font-semibold border-b pb-2">AWS SES Configuration (Email)</h3>
+                
                 <div className="space-y-2">
-                  <Label htmlFor="aws-access-key">AWS Access Key ID</Label>
+                  <Label htmlFor="aws-access-key">AWS Access Key ID (SES)</Label>
                   <Input
                     id="aws-access-key"
-                    placeholder="Enter your AWS Access Key ID"
+                    placeholder="Enter your AWS Access Key ID for SES"
                     value={emailSettings?.awsAccessKeyId || ""}
                     onChange={(e) => setEmailSettings({ ...emailSettings, awsAccessKeyId: e.target.value })}
                   />
                   <p className="text-sm text-muted-foreground">
-                    Your AWS IAM user access key with SES and Bedrock permissions
+                    IAM user access key with ses:SendEmail and ses:SendRawEmail permissions
                   </p>
                 </div>
                 
                 <div className="space-y-2">
-                  <Label htmlFor="aws-secret-key">AWS Secret Access Key</Label>
+                  <Label htmlFor="aws-secret-key">AWS Secret Access Key (SES)</Label>
                   <Input
                     id="aws-secret-key"
                     type="password"
-                    placeholder="Enter your AWS Secret Access Key"
+                    placeholder="Enter your AWS Secret Access Key for SES"
                     value={emailSettings?.awsSecretAccessKey || ""}
                     onChange={(e) => setEmailSettings({ ...emailSettings, awsSecretAccessKey: e.target.value })}
                   />
                   <p className="text-sm text-muted-foreground">
-                    Your AWS IAM user secret key (keep this secure)
+                    Your AWS IAM user secret key for SES
                   </p>
                 </div>
                 
                 <div className="space-y-2">
-                  <Label htmlFor="aws-region">AWS Region</Label>
+                  <Label htmlFor="aws-region">AWS Region (SES)</Label>
                   <Select
                     value={emailSettings?.awsRegion || "us-east-1"}
                     onValueChange={(value) => setEmailSettings({ ...emailSettings, awsRegion: value })}
@@ -1574,22 +1581,112 @@ export default function AdminPanel() {
                     The AWS region where SES is configured
                   </p>
                 </div>
+              </div>
 
-                <div className="border-t pt-4">
-                  <h3 className="text-lg font-semibold mb-4">AWS Status</h3>
-                  <div className="flex items-center space-x-2 mb-4">
+              {/* AWS Bedrock Configuration */}
+              <div className="space-y-4 border-t pt-6">
+                <h3 className="text-lg font-semibold border-b pb-2">AWS Bedrock Configuration (AI Chat)</h3>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="bedrock-access-key">AWS Access Key ID (Bedrock)</Label>
+                  <Input
+                    id="bedrock-access-key"
+                    placeholder="Enter your AWS Access Key ID for Bedrock"
+                    value={emailSettings?.bedrockAccessKeyId || ""}
+                    onChange={(e) => setEmailSettings({ ...emailSettings, bedrockAccessKeyId: e.target.value })}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    IAM user access key with bedrock:InvokeModel permission
+                  </p>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="bedrock-secret-key">AWS Secret Access Key (Bedrock)</Label>
+                  <Input
+                    id="bedrock-secret-key"
+                    type="password"
+                    placeholder="Enter your AWS Secret Access Key for Bedrock"
+                    value={emailSettings?.bedrockSecretAccessKey || ""}
+                    onChange={(e) => setEmailSettings({ ...emailSettings, bedrockSecretAccessKey: e.target.value })}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Your AWS IAM user secret key for Bedrock
+                  </p>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="bedrock-region">AWS Region (Bedrock)</Label>
+                  <Select
+                    value={emailSettings?.bedrockRegion || "us-east-1"}
+                    onValueChange={(value) => setEmailSettings({ ...emailSettings, bedrockRegion: value })}
+                  >
+                    <SelectTrigger id="bedrock-region">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="us-east-1">US East (N. Virginia)</SelectItem>
+                      <SelectItem value="us-west-2">US West (Oregon)</SelectItem>
+                      <SelectItem value="eu-west-1">EU (Ireland)</SelectItem>
+                      <SelectItem value="eu-central-1">EU (Frankfurt)</SelectItem>
+                      <SelectItem value="ap-southeast-1">Asia Pacific (Singapore)</SelectItem>
+                      <SelectItem value="ap-northeast-1">Asia Pacific (Tokyo)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-sm text-muted-foreground">
+                    The AWS region where Bedrock is available
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="bedrock-model">AI Model</Label>
+                  <Select
+                    value={emailSettings?.bedrockModelId || "anthropic.claude-instant-v1"}
+                    onValueChange={(value) => setEmailSettings({ ...emailSettings, bedrockModelId: value })}
+                  >
+                    <SelectTrigger id="bedrock-model">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="anthropic.claude-instant-v1">Claude Instant v1 (Fast & Affordable)</SelectItem>
+                      <SelectItem value="anthropic.claude-v2">Claude v2 (Balanced)</SelectItem>
+                      <SelectItem value="anthropic.claude-3-sonnet-20240229-v1:0">Claude 3 Sonnet (Advanced)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-sm text-muted-foreground">
+                    Select the AI model to use (ensure you have access to the selected model)
+                  </p>
+                </div>
+              </div>
+
+              <div className="border-t pt-4">
+                <h3 className="text-lg font-semibold mb-4">Service Status</h3>
+                <div className="space-y-3">
+                  <div className="flex items-center space-x-2">
                     <div className={`w-3 h-3 rounded-full ${
                       emailSettings?.awsAccessKeyId && emailSettings?.awsSecretAccessKey && emailSettings?.awsRegion 
                         ? 'bg-green-500' 
-                        : 'bg-red-500'
+                        : 'bg-yellow-500'
                     }`}></div>
                     <span className="text-sm">
                       {emailSettings?.awsAccessKeyId && emailSettings?.awsSecretAccessKey && emailSettings?.awsRegion 
-                        ? 'AWS credentials are configured - Email and AI chat features are enabled' 
-                        : 'AWS credentials not configured - AI chat will use document search only'}
+                        ? 'AWS SES configured - Email features enabled' 
+                        : 'AWS SES not configured - Email features disabled'}
+                    </span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-3 h-3 rounded-full ${
+                      emailSettings?.bedrockAccessKeyId && emailSettings?.bedrockSecretAccessKey && emailSettings?.bedrockRegion 
+                        ? 'bg-green-500' 
+                        : 'bg-yellow-500'
+                    }`}></div>
+                    <span className="text-sm">
+                      {emailSettings?.bedrockAccessKeyId && emailSettings?.bedrockSecretAccessKey && emailSettings?.bedrockRegion 
+                        ? 'AWS Bedrock configured - AI chat fully enabled' 
+                        : 'AWS Bedrock not configured - AI chat will use document search only'}
                     </span>
                   </div>
                 </div>
+              </div>
                 
                 <div className="border-t pt-4">
                   <h3 className="text-lg font-semibold mb-4">Sender Configuration</h3>
@@ -1690,7 +1787,6 @@ export default function AdminPanel() {
                     )}
                   </div>
                 </div>
-              </div>
 
               <div className="flex justify-end space-x-4 pt-4">
                 <Button 
