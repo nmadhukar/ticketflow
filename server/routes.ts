@@ -1637,7 +1637,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         message: aiMessage,
-        relatedDocuments: helpDocs.slice(0, 3),
+        relatedDocuments: [],
       });
     } catch (error) {
       console.error("Error in chat:", error);
