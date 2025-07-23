@@ -894,9 +894,17 @@ export default function AdminPanel() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label>Ticket Number Prefix</Label>
-                <Input defaultValue="TKT" disabled />
+                <Input 
+                  value={companySettings?.ticketPrefix || "TKT"} 
+                  onChange={(e) => {
+                    const value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+                    setCompanySettings({ ...companySettings, ticketPrefix: value });
+                  }}
+                  placeholder="TKT"
+                  maxLength={10}
+                />
                 <p className="text-sm text-muted-foreground">
-                  Prefix used for generating ticket numbers
+                  Prefix used for generating ticket numbers (max 10 characters, letters and numbers only)
                 </p>
               </div>
               <div className="space-y-2">
@@ -919,7 +927,16 @@ export default function AdminPanel() {
                   Days after which resolved tickets are automatically closed
                 </p>
               </div>
-              <Button className="mt-4">Save Settings</Button>
+              <Button 
+                className="mt-4" 
+                onClick={() => updateCompanySettingsMutation.mutate({ 
+                  ...companySettings,
+                  ticketPrefix: companySettings?.ticketPrefix || "TKT" 
+                })}
+                disabled={updateCompanySettingsMutation.isPending}
+              >
+                {updateCompanySettingsMutation.isPending ? "Saving..." : "Save Settings"}
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>

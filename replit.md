@@ -106,6 +106,9 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Settings page now contains only user-specific preferences: Profile, Notifications, Preferences, and simplified Security**
 - **Admin panel now has complete API Keys management and Company branding tabs for proper separation of concerns**
 - **Fixed critical invitation email bug - resolved AWS credentials mismatch by updating sendEmailWithTemplate calls to include awsAccessKeyId, awsSecretAccessKey, and awsRegion from database**
+- **Implemented configurable ticket number prefix feature - admins can now customize the ticket prefix (default: TKT) through System Settings in admin panel**
+- **Added ticketPrefix field to companySettings table and automatic ticket number generation in format PREFIX-YYYY-XXXX**
+- **Enhanced ticket number generation logic with proper sequence handling to ensure unique ticket numbers across years**
 
 ## System Architecture
 

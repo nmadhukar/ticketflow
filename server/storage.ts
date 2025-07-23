@@ -358,11 +358,46 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.id, userId));
   }
 
+  // Helper function to generate the next ticket number
+  async getNextTicketNumber(): Promise<string> {
+    // Get company settings for the prefix
+    const settings = await this.getCompanySettings();
+    const prefix = settings?.ticketPrefix || "TKT";
+    
+    // Get the current year
+    const year = new Date().getFullYear();
+    
+    // Find the highest ticket number for this year
+    const pattern = `${prefix}-${year}-%`;
+    const [highestTicket] = await db
+      .select({ ticketNumber: tasks.ticketNumber })
+      .from(tasks)
+      .where(sql`${tasks.ticketNumber} LIKE ${pattern}`)
+      .orderBy(desc(tasks.ticketNumber))
+      .limit(1);
+    
+    let nextNumber = 1;
+    if (highestTicket) {
+      // Extract the number part from the ticket number
+      const parts = highestTicket.ticketNumber.split('-');
+      if (parts.length === 3) {
+        nextNumber = parseInt(parts[2]) + 1;
+      }
+    }
+    
+    // Format the ticket number with zero padding
+    return `${prefix}-${year}-${nextNumber.toString().padStart(4, '0')}`;
+  }
+
   // Task operations
   async createTask(task: InsertTask): Promise<Task> {
+    // Generate ticket number
+    const ticketNumber = await this.getNextTicketNumber();
+    
     // Convert string date to Date object if needed
     const taskData = {
       ...task,
+      ticketNumber,
       dueDate: task.dueDate ? new Date(task.dueDate) : null,
     };
     const [createdTask] = await db.insert(tasks).values(taskData).returning();

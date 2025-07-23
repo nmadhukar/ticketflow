@@ -135,6 +135,7 @@ export const companySettings = pgTable("company_settings", {
   companyName: varchar("company_name", { length: 255 }).notNull().default("TicketFlow"),
   logoUrl: text("logo_url"),
   primaryColor: varchar("primary_color", { length: 7 }).default("#3b82f6"), // hex color
+  ticketPrefix: varchar("ticket_prefix", { length: 10 }).notNull().default("TKT"), // Configurable ticket prefix
   updatedBy: varchar("updated_by").references(() => users.id),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
