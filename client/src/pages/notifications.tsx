@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -114,25 +115,29 @@ function getNotificationColor(type: Notification["type"]) {
 export default function Notifications() {
   const { user } = useAuth();
   const [, navigate] = useLocation();
+  const [notificationList, setNotificationList] = useState<Notification[]>(mockNotifications);
 
   // In a real app, this would fetch notifications from the API
-  const { data: notifications = mockNotifications, isLoading } = useQuery({
+  const { data: notifications = notificationList, isLoading } = useQuery({
     queryKey: ["/api/notifications"],
-    queryFn: () => Promise.resolve(mockNotifications),
+    queryFn: () => Promise.resolve(notificationList),
+    onSuccess: (data: Notification[]) => setNotificationList(data),
   });
 
-  const unreadCount = notifications.filter(n => !n.read).length;
-  const readNotifications = notifications.filter(n => n.read);
-  const unreadNotifications = notifications.filter(n => !n.read);
+  const unreadCount = notificationList.filter(n => !n.read).length;
+  const readNotifications = notificationList.filter(n => n.read);
+  const unreadNotifications = notificationList.filter(n => !n.read);
 
   const markAllAsRead = () => {
-    // In a real app, this would call an API to mark all notifications as read
-    console.log("Mark all as read");
+    // In a real app, this would also call an API
+    setNotificationList(prev => prev.map(n => ({ ...n, read: true })));
   };
 
   const markAsRead = (id: string) => {
-    // In a real app, this would call an API to mark a specific notification as read
-    console.log("Mark as read:", id);
+    // In a real app, this would also call an API
+    setNotificationList(prev => prev.map(n => 
+      n.id === id ? { ...n, read: true } : n
+    ));
   };
 
   if (isLoading) {
