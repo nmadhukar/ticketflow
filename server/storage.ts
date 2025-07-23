@@ -55,6 +55,12 @@ import {
   ssoConfiguration,
   type SsoConfiguration,
   type InsertSsoConfiguration,
+  bedrockUsage,
+  type BedrockUsage,
+  type InsertBedrockUsage,
+  faqCache,
+  type FaqCache,
+  type InsertFaqCache,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, like, count, sql, isNotNull } from "drizzle-orm";
@@ -275,6 +281,23 @@ export interface IStorage {
   // SSO Configuration operations
   getSsoConfiguration(): Promise<SsoConfiguration | undefined>;
   upsertSsoConfiguration(config: InsertSsoConfiguration): Promise<SsoConfiguration>;
+  
+  // Bedrock usage tracking
+  trackBedrockUsage(usage: InsertBedrockUsage): Promise<BedrockUsage>;
+  getBedrockUsageByUser(userId: string, startDate?: Date, endDate?: Date): Promise<BedrockUsage[]>;
+  getBedrockUsageSummary(startDate?: Date, endDate?: Date): Promise<{
+    totalCost: number;
+    totalTokens: number;
+    userCount: number;
+    requestCount: number;
+  }>;
+  
+  // FAQ cache operations
+  getFaqCacheEntry(questionHash: string): Promise<FaqCache | undefined>;
+  createFaqCacheEntry(entry: InsertFaqCache): Promise<FaqCache>;
+  updateFaqCacheHit(id: number): Promise<void>;
+  getPopularFaqs(limit?: number): Promise<FaqCache[]>;
+  clearFaqCache(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1564,6 +1587,100 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     return result;
+  }
+  
+  // Bedrock usage tracking implementations
+  async trackBedrockUsage(usage: InsertBedrockUsage): Promise<BedrockUsage> {
+    const [result] = await db
+      .insert(bedrockUsage)
+      .values(usage)
+      .returning();
+    return result;
+  }
+  
+  async getBedrockUsageByUser(userId: string, startDate?: Date, endDate?: Date): Promise<BedrockUsage[]> {
+    let query = db.select().from(bedrockUsage).where(eq(bedrockUsage.userId, userId));
+    
+    if (startDate) {
+      query = query.where(sql`${bedrockUsage.createdAt} >= ${startDate}`);
+    }
+    if (endDate) {
+      query = query.where(sql`${bedrockUsage.createdAt} <= ${endDate}`);
+    }
+    
+    return await query.orderBy(desc(bedrockUsage.createdAt));
+  }
+  
+  async getBedrockUsageSummary(startDate?: Date, endDate?: Date): Promise<{
+    totalCost: number;
+    totalTokens: number;
+    userCount: number;
+    requestCount: number;
+  }> {
+    let whereConditions = [];
+    
+    if (startDate) {
+      whereConditions.push(sql`${bedrockUsage.createdAt} >= ${startDate}`);
+    }
+    if (endDate) {
+      whereConditions.push(sql`${bedrockUsage.createdAt} <= ${endDate}`);
+    }
+    
+    const [result] = await db
+      .select({
+        totalCost: sql<number>`COALESCE(SUM(${bedrockUsage.cost}), 0)`,
+        totalTokens: sql<number>`COALESCE(SUM(${bedrockUsage.totalTokens}), 0)`,
+        userCount: sql<number>`COUNT(DISTINCT ${bedrockUsage.userId})`,
+        requestCount: sql<number>`COUNT(*)`,
+      })
+      .from(bedrockUsage)
+      .where(whereConditions.length > 0 ? and(...whereConditions) : undefined);
+    
+    return {
+      totalCost: parseFloat(result.totalCost?.toString() || "0"),
+      totalTokens: parseInt(result.totalTokens?.toString() || "0"),
+      userCount: parseInt(result.userCount?.toString() || "0"),
+      requestCount: parseInt(result.requestCount?.toString() || "0"),
+    };
+  }
+  
+  // FAQ cache implementations
+  async getFaqCacheEntry(questionHash: string): Promise<FaqCache | undefined> {
+    const [entry] = await db
+      .select()
+      .from(faqCache)
+      .where(eq(faqCache.questionHash, questionHash));
+    return entry;
+  }
+  
+  async createFaqCacheEntry(entry: InsertFaqCache): Promise<FaqCache> {
+    const [result] = await db
+      .insert(faqCache)
+      .values(entry)
+      .returning();
+    return result;
+  }
+  
+  async updateFaqCacheHit(id: number): Promise<void> {
+    await db
+      .update(faqCache)
+      .set({
+        hitCount: sql`${faqCache.hitCount} + 1`,
+        lastUsed: new Date(),
+      })
+      .where(eq(faqCache.id, id));
+  }
+  
+  async getPopularFaqs(limit: number = 10): Promise<FaqCache[]> {
+    return await db
+      .select()
+      .from(faqCache)
+      .orderBy(desc(faqCache.hitCount))
+      .limit(limit);
+  }
+  
+  async clearFaqCache(): Promise<void> {
+    await db.delete(faqCache);
   }
 }
 

@@ -19,6 +19,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import HelpDocumentManager from "@/components/HelpDocumentManager";
 import { Separator } from "@/components/ui/separator";
+import { BedrockUsageStats } from "@/components/bedrock-usage-stats";
+import { FaqCacheManager } from "@/components/faq-cache-manager";
 
 export default function AdminPanel() {
   const { user } = useAuth();
@@ -881,7 +883,7 @@ export default function AdminPanel() {
                         </div>
                         <div className="flex items-center gap-2">
                           <code className="text-xs font-mono bg-muted px-2 py-1 rounded">
-                            {apiKey.key.substring(0, 8)}...
+                            {apiKey.key ? apiKey.key.substring(0, 8) + '...' : 'N/A'}
                           </code>
                           <Button
                             variant="ghost"
@@ -931,6 +933,22 @@ export default function AdminPanel() {
                     View API Documentation
                   </a>
                 </Button>
+              </div>
+
+              <Separator />
+
+              {/* Bedrock Usage Statistics */}
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium">AI Usage Statistics</h4>
+                <BedrockUsageStats />
+              </div>
+
+              <Separator />
+
+              {/* FAQ Cache Management */}
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium">FAQ Cache Management</h4>
+                <FaqCacheManager />
               </div>
             </CardContent>
           </Card>

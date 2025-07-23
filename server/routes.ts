@@ -23,6 +23,7 @@ import {
   insertApiKeySchema 
 } from "@shared/schema";
 import { z } from "zod";
+import { createHash } from 'crypto';
 
 /**
  * Registers all application routes and returns HTTP server instance
@@ -1526,6 +1527,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Helper function to normalize questions for FAQ caching
+  function normalizeQuestion(question: string): string {
+    return question
+      .toLowerCase()
+      .replace(/[^\w\s]/g, '') // Remove special characters
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .trim();
+  }
+
+  // Helper function to calculate question hash
+  function calculateQuestionHash(normalizedQuestion: string): string {
+    return createHash('sha256').update(normalizedQuestion).digest('hex');
+  }
+  
+  // Helper function to calculate token costs for Bedrock
+  function calculateBedrockCost(inputTokens: number, outputTokens: number, modelId: string): number {
+    // Claude 3 Sonnet pricing per 1M tokens (as of 2024)
+    const pricePerMillionInputTokens = 3.00; // $3 per 1M input tokens
+    const pricePerMillionOutputTokens = 15.00; // $15 per 1M output tokens
+    
+    const inputCost = (inputTokens / 1_000_000) * pricePerMillionInputTokens;
+    const outputCost = (outputTokens / 1_000_000) * pricePerMillionOutputTokens;
+    
+    return inputCost + outputCost;
+  }
+  
+  // Helper function to estimate token count (rough approximation)
+  function estimateTokenCount(text: string): number {
+    // Rough estimation: 1 token ≈ 4 characters for English text
+    return Math.ceil(text.length / 4);
+  }
+
   // AI Chat routes
   app.post('/api/chat', isAuthenticated, async (req, res) => {
     try {
@@ -1544,12 +1577,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
         content: message,
       });
 
+      // Check FAQ cache first
+      const normalizedQuestion = normalizeQuestion(message);
+      const questionHash = calculateQuestionHash(normalizedQuestion);
+      
+      const cachedAnswer = await storage.getFaqCacheEntry(questionHash);
+      if (cachedAnswer) {
+        // Update hit count
+        await storage.updateFaqCacheHit(cachedAnswer.id);
+        
+        // Save cached response
+        const aiMessage = await storage.createChatMessage({
+          userId,
+          sessionId,
+          role: 'assistant',
+          content: cachedAnswer.answer,
+          relatedDocumentIds: [],
+        });
+        
+        return res.json({
+          message: aiMessage,
+          relatedDocuments: [],
+          fromCache: true,
+        });
+      }
+
       // Check if we have AWS Bedrock credentials
       const smtpSettings = await storage.getSmtpSettings();
       const hasBedrockCredentials = smtpSettings?.awsAccessKeyId && smtpSettings?.awsSecretAccessKey && smtpSettings?.awsRegion;
       
       let response = "";
       const relevantDocIds: number[] = [];
+      let usageData = null;
       
       if (hasBedrockCredentials) {
         // Use AWS Bedrock for intelligent responses
@@ -1579,12 +1638,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             },
           });
           
-          // Prepare the prompt for Claude
-          const prompt = `\n\nHuman: You are a helpful assistant for TicketFlow, a ticketing system. Answer questions based on the provided context when available. Be concise and helpful.${context}
-
-User question: ${message}
-
-\n\nAssistant:`;
+          // Prepare the system message and user message
+          const systemMessage = "You are a helpful assistant for TicketFlow, a ticketing system. Answer questions based on the provided context when available. Be concise and helpful.";
+          
+          let userMessage = message;
+          if (context) {
+            userMessage = `Context:\n${context}\n\nUser question: ${message}`;
+          }
           
           // Create the request payload for Claude
           const command = new InvokeModelCommand({
@@ -1595,9 +1655,10 @@ User question: ${message}
               anthropic_version: "bedrock-2023-05-31",
               max_tokens: 1000,
               temperature: 0.2,
+              system: systemMessage,
               messages: [{
                 role: "user",
-                content: prompt
+                content: userMessage
               }]
             }),
           });
@@ -1607,8 +1668,36 @@ User question: ${message}
           const responseBody = JSON.parse(new TextDecoder().decode(bedrockResponse.body));
           response = responseBody.content[0].text;
           
-        } catch (error) {
+          // Track usage
+          const inputTokens = estimateTokenCount(systemMessage + userMessage);
+          const outputTokens = estimateTokenCount(response);
+          const totalTokens = inputTokens + outputTokens;
+          const modelId = "anthropic.claude-3-sonnet-20240229-v1:0";
+          const cost = calculateBedrockCost(inputTokens, outputTokens, modelId);
+          
+          usageData = await storage.trackBedrockUsage({
+            userId,
+            sessionId,
+            inputTokens,
+            outputTokens,
+            totalTokens,
+            modelId,
+            cost: cost.toFixed(6),
+          });
+          
+          // Cache the response if it's a straightforward Q&A (not context-dependent)
+          if (!context && response.length > 50) {
+            await storage.createFaqCacheEntry({
+              questionHash,
+              originalQuestion: message,
+              normalizedQuestion,
+              answer: response,
+            });
+          }
+          
+        } catch (error: any) {
           console.error("Error calling AWS Bedrock:", error);
+          console.error("Error details:", error.message, error.name);
           // Fallback to simple response
           response = "I apologize, but I'm having trouble processing your request. Please try again later or contact support.";
         }
@@ -1648,9 +1737,16 @@ User question: ${message}
       res.json({
         message: aiMessage,
         relatedDocuments: [],
+        usageData: usageData ? {
+          inputTokens: usageData.inputTokens,
+          outputTokens: usageData.outputTokens,
+          totalTokens: usageData.totalTokens,
+          cost: parseFloat(usageData.cost),
+        } : undefined,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error in chat:", error);
+      console.error("Chat error details:", error.message, error.stack);
       res.status(500).json({ message: "Failed to process chat message" });
     }
   });
@@ -1678,6 +1774,83 @@ User question: ${message}
     } catch (error) {
       console.error("Error fetching chat sessions:", error);
       res.status(500).json({ message: "Failed to fetch chat sessions" });
+    }
+  });
+
+  // Bedrock usage endpoints
+  app.get('/api/bedrock/usage', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      // Allow users to see their own usage, admins to see all
+      const targetUserId = user?.role === 'admin' && req.query.userId ? 
+        req.query.userId as string : userId;
+      
+      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
+      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
+      
+      const usage = await storage.getBedrockUsageByUser(targetUserId, startDate, endDate);
+      res.json(usage);
+    } catch (error) {
+      console.error("Error fetching Bedrock usage:", error);
+      res.status(500).json({ message: "Failed to fetch Bedrock usage" });
+    }
+  });
+
+  app.get('/api/bedrock/usage/summary', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
+      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
+      
+      const summary = await storage.getBedrockUsageSummary(startDate, endDate);
+      res.json(summary);
+    } catch (error) {
+      console.error("Error fetching Bedrock usage summary:", error);
+      res.status(500).json({ message: "Failed to fetch Bedrock usage summary" });
+    }
+  });
+
+  // FAQ cache endpoints
+  app.get('/api/faq-cache', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
+      const popularFaqs = await storage.getPopularFaqs(limit);
+      res.json(popularFaqs);
+    } catch (error) {
+      console.error("Error fetching FAQ cache:", error);
+      res.status(500).json({ message: "Failed to fetch FAQ cache" });
+    }
+  });
+
+  app.delete('/api/faq-cache', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      await storage.clearFaqCache();
+      res.json({ message: "FAQ cache cleared successfully" });
+    } catch (error) {
+      console.error("Error clearing FAQ cache:", error);
+      res.status(500).json({ message: "Failed to clear FAQ cache" });
     }
   });
 

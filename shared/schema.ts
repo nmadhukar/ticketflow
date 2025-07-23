@@ -8,6 +8,7 @@ import {
   serial,
   integer,
   boolean,
+  decimal,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -336,6 +337,8 @@ export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit
   updatedAt: true,
 });
 
+
+
 // User insert schema
 export const insertUserSchema = createInsertSchema(users).omit({
   createdAt: true,
@@ -405,6 +408,31 @@ export const teamsIntegrationSettings = pgTable("teams_integration_settings", {
   notificationTypes: text("notification_types").array().default([]), // ticket_created, ticket_updated, ticket_assigned, etc.
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Bedrock usage tracking
+export const bedrockUsage = pgTable("bedrock_usage", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  sessionId: varchar("session_id", { length: 255 }).notNull(),
+  inputTokens: integer("input_tokens").notNull(),
+  outputTokens: integer("output_tokens").notNull(),
+  totalTokens: integer("total_tokens").notNull(),
+  modelId: varchar("model_id", { length: 255 }).notNull(),
+  cost: decimal("cost", { precision: 10, scale: 6 }).notNull(), // Cost in USD
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// FAQ cache for frequently asked questions
+export const faqCache = pgTable("faq_cache", {
+  id: serial("id").primaryKey(),
+  questionHash: varchar("question_hash", { length: 64 }).notNull().unique(), // SHA-256 hash of normalized question
+  originalQuestion: text("original_question").notNull(),
+  normalizedQuestion: text("normalized_question").notNull(),
+  answer: text("answer").notNull(),
+  hitCount: integer("hit_count").notNull().default(1),
+  lastUsed: timestamp("last_used").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 export type HelpDocument = typeof helpDocuments.$inferSelect;
@@ -530,3 +558,23 @@ export const insertSsoConfigurationSchema = createInsertSchema(ssoConfiguration)
 
 export type SsoConfiguration = typeof ssoConfiguration.$inferSelect;
 export type InsertSsoConfiguration = z.infer<typeof insertSsoConfigurationSchema>;
+
+// Bedrock usage schemas and types
+export const insertBedrockUsageSchema = createInsertSchema(bedrockUsage).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type BedrockUsage = typeof bedrockUsage.$inferSelect;
+export type InsertBedrockUsage = z.infer<typeof insertBedrockUsageSchema>;
+
+// FAQ cache schemas and types
+export const insertFaqCacheSchema = createInsertSchema(faqCache).omit({
+  id: true,
+  createdAt: true,
+  lastUsed: true,
+  hitCount: true,
+});
+
+export type FaqCache = typeof faqCache.$inferSelect;
+export type InsertFaqCache = z.infer<typeof insertFaqCacheSchema>;

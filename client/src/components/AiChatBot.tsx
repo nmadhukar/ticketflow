@@ -52,18 +52,18 @@ export function AiChatBot() {
   // Send message mutation
   const sendMessageMutation = useMutation({
     mutationFn: async (messageText: string) => {
-      return await apiRequest('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId,
-          message: messageText,
-        }),
+      const response = await apiRequest('POST', '/api/chat', {
+        sessionId,
+        message: messageText,
       });
+      return await response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/chat', sessionId] });
       setMessage("");
+    },
+    onError: (error: Error) => {
+      console.error("Chat error:", error);
     },
   });
 
