@@ -1904,7 +1904,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "File is required" });
       }
 
-      const { title, description } = req.body;
+      const { description } = req.body;
+      
+      // Use filename (without extension) as title if not provided
+      const title = req.body.title || req.file.originalname.replace(/\.[^/.]+$/, '');
       
       // Convert file to Base64 for storage
       const fileData = req.file.buffer.toString('base64');
