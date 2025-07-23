@@ -12,7 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle, Home, Palette, Upload, BookOpen, FileText, Trash2, Edit, Search, Building, UserPlus, AlertCircle, Mail } from "lucide-react";
+import { Shield, Users, Settings, BarChart3, UserCog, Ban, CheckCircle, Home, Palette, Upload, BookOpen, FileText, Trash2, Edit, Search, Building, UserPlus, AlertCircle, Mail, FileEdit } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { useLocation, Link } from "wouter";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -35,6 +36,8 @@ export default function AdminPanel() {
     fromEmail: "",
     fromName: "TicketFlow",
   });
+  const [selectedTemplate, setSelectedTemplate] = useState<any>(null);
+  const [isEditTemplateOpen, setIsEditTemplateOpen] = useState(false);
   
   // Microsoft SSO state
   const [ssoConfig, setSsoConfig] = useState({
@@ -71,6 +74,11 @@ export default function AdminPanel() {
 
   const { data: companySettings } = useQuery({
     queryKey: ["/api/company-settings"],
+    retry: false,
+  });
+  
+  const { data: emailTemplates } = useQuery({
+    queryKey: ["/api/email-templates"],
     retry: false,
   });
 
@@ -160,6 +168,30 @@ export default function AdminPanel() {
       toast({
         title: "Error",
         description: "Failed to approve user",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateEmailTemplateMutation = useMutation({
+    mutationFn: async (data: { name: string; subject: string; body: string }) => {
+      return await apiRequest("PUT", `/api/email-templates/${data.name}`, {
+        subject: data.subject,
+        body: data.body,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/email-templates"] });
+      toast({
+        title: "Success",
+        description: "Email template updated successfully",
+      });
+      setIsEditTemplateOpen(false);
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update email template",
         variant: "destructive",
       });
     },
@@ -1106,6 +1138,47 @@ export default function AdminPanel() {
                     </Button>
                   </div>
                 </div>
+
+                <div className="border-t pt-4">
+                  <h3 className="text-lg font-semibold mb-4">Email Templates</h3>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Customize email templates for different system notifications
+                  </p>
+                  <div className="space-y-4">
+                    <Select
+                      value={selectedTemplate?.name || ""}
+                      onValueChange={(value) => {
+                        const template = emailTemplates?.find((t: any) => t.name === value);
+                        setSelectedTemplate(template);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a template to edit" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="user_invitation">User Invitation</SelectItem>
+                        <SelectItem value="password_reset">Password Reset</SelectItem>
+                        <SelectItem value="ticket_created">Ticket Created</SelectItem>
+                        <SelectItem value="ticket_updated">Ticket Updated</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    
+                    {selectedTemplate && (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setIsEditTemplateOpen(true);
+                          }}
+                        >
+                          <FileEdit className="h-4 w-4 mr-2" />
+                          Edit Template
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
 
               <div className="flex justify-end space-x-4 pt-4">
@@ -1121,6 +1194,77 @@ export default function AdminPanel() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Edit Email Template Dialog */}
+      <Dialog open={isEditTemplateOpen} onOpenChange={setIsEditTemplateOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Email Template</DialogTitle>
+            <DialogDescription>
+              Customize the email template that will be sent to users
+            </DialogDescription>
+          </DialogHeader>
+          {selectedTemplate && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Template Name</Label>
+                <Input value={selectedTemplate.name} disabled />
+              </div>
+              
+              <div className="space-y-2">
+                <Label>Subject</Label>
+                <Input
+                  value={selectedTemplate.subject || ""}
+                  onChange={(e) => setSelectedTemplate({ ...selectedTemplate, subject: e.target.value })}
+                  placeholder="Email subject line"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label>Template Body (HTML)</Label>
+                <Textarea
+                  value={selectedTemplate.body || ""}
+                  onChange={(e) => setSelectedTemplate({ ...selectedTemplate, body: e.target.value })}
+                  placeholder="Email template HTML content"
+                  className="font-mono text-sm h-96"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label>Available Variables</Label>
+                <div className="bg-muted p-3 rounded-md">
+                  <p className="text-sm font-medium mb-2">You can use these variables in your template:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedTemplate.variables?.map((variable: string) => (
+                      <code key={variable} className="bg-background px-2 py-1 rounded text-xs">
+                        {`{{${variable}}}`}
+                      </code>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsEditTemplateOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => {
+                    updateEmailTemplateMutation.mutate({
+                      name: selectedTemplate.name,
+                      subject: selectedTemplate.subject,
+                      body: selectedTemplate.body,
+                    });
+                  }}
+                  disabled={updateEmailTemplateMutation.isPending}
+                >
+                  {updateEmailTemplateMutation.isPending ? "Saving..." : "Save Template"}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Edit User Dialog */}
       <Dialog open={isEditUserOpen} onOpenChange={setIsEditUserOpen}>

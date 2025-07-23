@@ -1143,6 +1143,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Email template routes
+  
+  // Get all email templates (admin only)
+  app.get('/api/email-templates', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const templates = await storage.getEmailTemplates();
+      res.json(templates);
+    } catch (error) {
+      console.error("Error fetching email templates:", error);
+      res.status(500).json({ message: "Failed to fetch email templates" });
+    }
+  });
+  
+  // Update email template (admin only)
+  app.put('/api/email-templates/:name', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const { name } = req.params;
+      const template = await storage.updateEmailTemplate(name, req.body, userId);
+      res.json(template);
+    } catch (error) {
+      console.error("Error updating email template:", error);
+      res.status(500).json({ message: "Failed to update email template" });
+    }
+  });
+
   // Help documentation routes
   
   // Get all help documents (public)
