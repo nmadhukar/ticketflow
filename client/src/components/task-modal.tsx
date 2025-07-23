@@ -140,7 +140,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       onClose();
       toast({
         title: "Success",
-        description: "Task created successfully",
+        description: "Ticket created successfully",
       });
     },
     onError: (error) => {
@@ -157,7 +157,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       }
       toast({
         title: "Error",
-        description: "Failed to create task",
+        description: "Failed to create ticket",
         variant: "destructive",
       });
     },
@@ -176,7 +176,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       }
       toast({
         title: "Success",
-        description: "Task updated successfully",
+        description: "Ticket updated successfully",
       });
     },
     onError: (error) => {
@@ -193,7 +193,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       }
       toast({
         title: "Error",
-        description: "Failed to update task",
+        description: "Failed to update ticket",
         variant: "destructive",
       });
     },
@@ -409,12 +409,12 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                 </div>
                 <div className="flex-1">
                   <DialogTitle className="text-xl font-semibold text-slate-900">
-                    {task ? `Edit Task ${task.ticketNumber || ''}` : "Create New Task"}
+                    {task ? `Edit Ticket ${task.ticketNumber || ''}` : "Create New Ticket"}
                   </DialogTitle>
                   <DialogDescription className="text-slate-600 mt-1">
                     {task ? (
                       <div className="space-y-1">
-                        <p>Update the task details and track progress.</p>
+                        <p>Update the ticket details and track progress.</p>
                         <div className="flex flex-col gap-1 text-xs">
                           {task.creatorName && task.createdAt && (
                             <p className="flex items-center gap-1">
