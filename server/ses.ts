@@ -1,21 +1,15 @@
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import type { EmailTemplate } from "@shared/schema";
 
-// Initialize SES client
-const sesClient = new SESClient({
-  region: process.env.AWS_REGION || "us-east-1",
-  credentials: process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY ? {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  } : undefined,
-});
-
 interface EmailParams {
   to: string;
   from: string;
   subject: string;
   text?: string;
   html?: string;
+  awsAccessKeyId?: string;
+  awsSecretAccessKey?: string;
+  awsRegion?: string;
 }
 
 interface TemplateEmailOptions {
@@ -24,13 +18,30 @@ interface TemplateEmailOptions {
   variables: Record<string, string>;
   fromEmail: string;
   fromName: string;
+  awsAccessKeyId?: string;
+  awsSecretAccessKey?: string;
+  awsRegion?: string;
 }
 
 export async function sendEmail(params: EmailParams): Promise<boolean> {
-  if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+  // Use provided credentials or fall back to environment variables
+  const accessKeyId = params.awsAccessKeyId || process.env.AWS_ACCESS_KEY_ID;
+  const secretAccessKey = params.awsSecretAccessKey || process.env.AWS_SECRET_ACCESS_KEY;
+  const region = params.awsRegion || process.env.AWS_REGION || "us-east-1";
+
+  if (!accessKeyId || !secretAccessKey) {
     console.error('AWS credentials not configured');
     return false;
   }
+
+  // Create SES client with the provided credentials
+  const sesClient = new SESClient({
+    region,
+    credentials: {
+      accessKeyId,
+      secretAccessKey,
+    },
+  });
 
   try {
     const command = new SendEmailCommand({
@@ -70,7 +81,7 @@ export async function sendEmail(params: EmailParams): Promise<boolean> {
 }
 
 export async function sendEmailWithTemplate(options: TemplateEmailOptions): Promise<boolean> {
-  const { to, template, variables, fromEmail, fromName } = options;
+  const { to, template, variables, fromEmail, fromName, awsAccessKeyId, awsSecretAccessKey, awsRegion } = options;
   
   // Replace variables in subject and body
   let subject = template.subject;
@@ -87,6 +98,9 @@ export async function sendEmailWithTemplate(options: TemplateEmailOptions): Prom
     from: `${fromName} <${fromEmail}>`,
     subject,
     html,
+    awsAccessKeyId,
+    awsSecretAccessKey,
+    awsRegion,
   });
 }
 

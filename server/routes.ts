@@ -1785,6 +1785,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           },
           fromEmail: smtpSettings.fromEmail,
           fromName: smtpSettings.fromName,
+          awsAccessKeyId: smtpSettings.awsAccessKeyId,
+          awsSecretAccessKey: smtpSettings.awsSecretAccessKey,
+          awsRegion: smtpSettings.awsRegion,
         });
       }
 
@@ -1919,6 +1922,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           },
           fromEmail: smtpSettings.fromEmail,
           fromName: smtpSettings.fromName,
+          awsAccessKeyId: smtpSettings.awsAccessKeyId,
+          awsSecretAccessKey: smtpSettings.awsSecretAccessKey,
+          awsRegion: smtpSettings.awsRegion,
         });
       }
 

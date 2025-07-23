@@ -105,6 +105,7 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Major reorganization of Settings vs Admin panel - moved all system-level features (API Keys, Company branding) from Settings to Admin panel**
 - **Settings page now contains only user-specific preferences: Profile, Notifications, Preferences, and simplified Security**
 - **Admin panel now has complete API Keys management and Company branding tabs for proper separation of concerns**
+- **Fixed critical invitation email bug - resolved AWS credentials mismatch by updating sendEmailWithTemplate calls to include awsAccessKeyId, awsSecretAccessKey, and awsRegion from database**
 
 ## System Architecture
 
