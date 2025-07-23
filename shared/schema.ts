@@ -440,7 +440,8 @@ export const companyPolicies = pgTable("company_policies", {
   id: serial("id").primaryKey(),
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description"),
-  content: text("content").notNull(),
+  content: text("content"), // Extracted text content for search (nullable for binary files)
+  fileData: text("file_data").notNull(), // Base64 encoded file data
   fileName: varchar("file_name", { length: 255 }).notNull(),
   fileSize: integer("file_size").notNull(),
   mimeType: varchar("mime_type", { length: 100 }).notNull(),

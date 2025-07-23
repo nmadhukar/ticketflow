@@ -1906,13 +1906,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const { title, description } = req.body;
       
-      // Convert file to text content
-      const content = req.file.buffer.toString('utf-8');
+      // Convert file to Base64 for storage
+      const fileData = req.file.buffer.toString('base64');
       
       const policy = await storage.createCompanyPolicy({
         title,
         description,
-        content,
+        content: null, // Will be extracted later if it's a text-based file
+        fileData,
         fileName: req.file.originalname,
         fileSize: req.file.size,
         mimeType: req.file.mimetype,
@@ -1942,8 +1943,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updateData: any = { title, description };
       
       if (req.file) {
-        const content = req.file.buffer.toString('utf-8');
-        updateData.content = content;
+        const fileData = req.file.buffer.toString('base64');
+        updateData.fileData = fileData;
+        updateData.content = null; // Will be extracted later if it's a text-based file
         updateData.fileName = req.file.originalname;
         updateData.fileSize = req.file.size;
         updateData.mimeType = req.file.mimetype;
@@ -1990,6 +1992,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error toggling company policy status:", error);
       res.status(500).json({ message: "Failed to toggle company policy status" });
+    }
+  });
+
+  app.get('/api/company-policies/:id/download', isAuthenticated, async (req, res) => {
+    try {
+      const policyId = parseInt(req.params.id);
+      const policy = await storage.getCompanyPolicyById(policyId);
+      
+      if (!policy) {
+        return res.status(404).json({ message: "Company policy not found" });
+      }
+      
+      // Check if fileData exists (new format) or fall back to content (old format)
+      const fileBuffer = policy.fileData 
+        ? Buffer.from(policy.fileData, 'base64')
+        : Buffer.from(policy.content || '', 'utf-8');
+      
+      res.setHeader('Content-Type', policy.mimeType);
+      res.setHeader('Content-Disposition', `attachment; filename="${policy.fileName}"`);
+      res.send(fileBuffer);
+    } catch (error) {
+      console.error("Error downloading company policy:", error);
+      res.status(500).json({ message: "Failed to download company policy" });
     }
   });
 
