@@ -435,6 +435,21 @@ export const faqCache = pgTable("faq_cache", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Company Policy Documents table
+export const companyPolicies = pgTable("company_policies", {
+  id: serial("id").primaryKey(),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  content: text("content").notNull(),
+  fileName: varchar("file_name", { length: 255 }).notNull(),
+  fileSize: integer("file_size").notNull(),
+  mimeType: varchar("mime_type", { length: 100 }).notNull(),
+  uploadedBy: varchar("uploaded_by").notNull().references(() => users.id),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export type HelpDocument = typeof helpDocuments.$inferSelect;
 export type InsertHelpDocument = typeof helpDocuments.$inferInsert;
 export type AiChatMessage = typeof aiChatMessages.$inferSelect;
@@ -578,3 +593,13 @@ export const insertFaqCacheSchema = createInsertSchema(faqCache).omit({
 
 export type FaqCache = typeof faqCache.$inferSelect;
 export type InsertFaqCache = z.infer<typeof insertFaqCacheSchema>;
+
+// Company Policy schemas and types
+export const insertCompanyPolicySchema = createInsertSchema(companyPolicies).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertCompanyPolicy = z.infer<typeof insertCompanyPolicySchema>;
+export type CompanyPolicy = typeof companyPolicies.$inferSelect;

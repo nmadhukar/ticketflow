@@ -61,6 +61,9 @@ import {
   faqCache,
   type FaqCache,
   type InsertFaqCache,
+  companyPolicies,
+  type CompanyPolicy,
+  type InsertCompanyPolicy,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, like, count, sql, isNotNull } from "drizzle-orm";
@@ -298,6 +301,14 @@ export interface IStorage {
   updateFaqCacheHit(id: number): Promise<void>;
   getPopularFaqs(limit?: number): Promise<FaqCache[]>;
   clearFaqCache(): Promise<void>;
+
+  // Company Policy operations
+  createCompanyPolicy(policy: InsertCompanyPolicy): Promise<CompanyPolicy>;
+  updateCompanyPolicy(id: number, policy: Partial<InsertCompanyPolicy>): Promise<CompanyPolicy>;
+  deleteCompanyPolicy(id: number): Promise<void>;
+  getCompanyPolicyById(id: number): Promise<CompanyPolicy | undefined>;
+  getAllCompanyPolicies(includeInactive?: boolean): Promise<CompanyPolicy[]>;
+  toggleCompanyPolicyStatus(id: number): Promise<CompanyPolicy>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1681,6 +1692,71 @@ export class DatabaseStorage implements IStorage {
   
   async clearFaqCache(): Promise<void> {
     await db.delete(faqCache);
+  }
+
+  // Company Policy operations
+  async createCompanyPolicy(policy: InsertCompanyPolicy): Promise<CompanyPolicy> {
+    const [result] = await db
+      .insert(companyPolicies)
+      .values(policy)
+      .returning();
+    return result;
+  }
+
+  async updateCompanyPolicy(id: number, policy: Partial<InsertCompanyPolicy>): Promise<CompanyPolicy> {
+    const [result] = await db
+      .update(companyPolicies)
+      .set({
+        ...policy,
+        updatedAt: new Date(),
+      })
+      .where(eq(companyPolicies.id, id))
+      .returning();
+    return result;
+  }
+
+  async deleteCompanyPolicy(id: number): Promise<void> {
+    await db.delete(companyPolicies).where(eq(companyPolicies.id, id));
+  }
+
+  async getCompanyPolicyById(id: number): Promise<CompanyPolicy | undefined> {
+    const [policy] = await db
+      .select()
+      .from(companyPolicies)
+      .where(eq(companyPolicies.id, id));
+    return policy;
+  }
+
+  async getAllCompanyPolicies(includeInactive: boolean = false): Promise<CompanyPolicy[]> {
+    if (includeInactive) {
+      return await db
+        .select()
+        .from(companyPolicies)
+        .orderBy(desc(companyPolicies.createdAt));
+    }
+    
+    return await db
+      .select()
+      .from(companyPolicies)
+      .where(eq(companyPolicies.isActive, true))
+      .orderBy(desc(companyPolicies.createdAt));
+  }
+
+  async toggleCompanyPolicyStatus(id: number): Promise<CompanyPolicy> {
+    const policy = await this.getCompanyPolicyById(id);
+    if (!policy) {
+      throw new Error('Company policy not found');
+    }
+    
+    const [result] = await db
+      .update(companyPolicies)
+      .set({
+        isActive: !policy.isActive,
+        updatedAt: new Date(),
+      })
+      .where(eq(companyPolicies.id, id))
+      .returning();
+    return result;
   }
 }
 

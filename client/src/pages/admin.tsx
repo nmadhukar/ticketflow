@@ -21,6 +21,7 @@ import HelpDocumentManager from "@/components/HelpDocumentManager";
 import { Separator } from "@/components/ui/separator";
 import { BedrockUsageStats } from "@/components/bedrock-usage-stats";
 import { FaqCacheManager } from "@/components/faq-cache-manager";
+import { CompanyPolicyManager } from "@/components/company-policy-manager";
 
 export default function AdminPanel() {
   const { user } = useAuth();
@@ -546,6 +547,7 @@ export default function AdminPanel() {
           <TabsTrigger value="settings">System Settings</TabsTrigger>
           <TabsTrigger value="branding">Company Branding</TabsTrigger>
           <TabsTrigger value="help">Help Documentation</TabsTrigger>
+          <TabsTrigger value="policies">Company Policies</TabsTrigger>
           <TabsTrigger value="sso">Microsoft 365 SSO</TabsTrigger>
           <TabsTrigger value="email">Email Settings</TabsTrigger>
         </TabsList>
@@ -1167,6 +1169,23 @@ export default function AdminPanel() {
                   </div>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="policies" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Company Policies
+              </CardTitle>
+              <CardDescription>
+                Upload and manage company policy documents. These documents will be used by the AI chatbot to answer policy-related questions.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <CompanyPolicyManager />
             </CardContent>
           </Card>
         </TabsContent>

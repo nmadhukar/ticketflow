@@ -24,6 +24,15 @@ import {
 } from "@shared/schema";
 import { z } from "zod";
 import { createHash } from 'crypto';
+import multer from 'multer';
+
+// Configure multer for file uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+});
 
 /**
  * Registers all application routes and returns HTTP server instance
@@ -1851,6 +1860,136 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error clearing FAQ cache:", error);
       res.status(500).json({ message: "Failed to clear FAQ cache" });
+    }
+  });
+
+  // Company Policy endpoints
+  app.get('/api/company-policies', isAuthenticated, async (req, res) => {
+    try {
+      const includeInactive = req.query.includeInactive === 'true';
+      const policies = await storage.getAllCompanyPolicies(includeInactive);
+      res.json(policies);
+    } catch (error) {
+      console.error("Error fetching company policies:", error);
+      res.status(500).json({ message: "Failed to fetch company policies" });
+    }
+  });
+
+  app.get('/api/company-policies/:id', isAuthenticated, async (req, res) => {
+    try {
+      const policyId = parseInt(req.params.id);
+      const policy = await storage.getCompanyPolicyById(policyId);
+      
+      if (!policy) {
+        return res.status(404).json({ message: "Company policy not found" });
+      }
+      
+      res.json(policy);
+    } catch (error) {
+      console.error("Error fetching company policy:", error);
+      res.status(500).json({ message: "Failed to fetch company policy" });
+    }
+  });
+
+  app.post('/api/admin/company-policies', isAuthenticated, upload.single('file'), async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ message: "File is required" });
+      }
+
+      const { title, description } = req.body;
+      
+      // Convert file to text content
+      const content = req.file.buffer.toString('utf-8');
+      
+      const policy = await storage.createCompanyPolicy({
+        title,
+        description,
+        content,
+        fileName: req.file.originalname,
+        fileSize: req.file.size,
+        mimeType: req.file.mimetype,
+        uploadedBy: userId,
+        isActive: true,
+      });
+      
+      res.json(policy);
+    } catch (error) {
+      console.error("Error creating company policy:", error);
+      res.status(500).json({ message: "Failed to create company policy" });
+    }
+  });
+
+  app.put('/api/admin/company-policies/:id', isAuthenticated, upload.single('file'), async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const policyId = parseInt(req.params.id);
+      const { title, description } = req.body;
+      
+      const updateData: any = { title, description };
+      
+      if (req.file) {
+        const content = req.file.buffer.toString('utf-8');
+        updateData.content = content;
+        updateData.fileName = req.file.originalname;
+        updateData.fileSize = req.file.size;
+        updateData.mimeType = req.file.mimetype;
+      }
+      
+      const policy = await storage.updateCompanyPolicy(policyId, updateData);
+      res.json(policy);
+    } catch (error) {
+      console.error("Error updating company policy:", error);
+      res.status(500).json({ message: "Failed to update company policy" });
+    }
+  });
+
+  app.delete('/api/admin/company-policies/:id', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const policyId = parseInt(req.params.id);
+      await storage.deleteCompanyPolicy(policyId);
+      res.json({ message: "Company policy deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting company policy:", error);
+      res.status(500).json({ message: "Failed to delete company policy" });
+    }
+  });
+
+  app.post('/api/admin/company-policies/:id/toggle', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const policyId = parseInt(req.params.id);
+      const policy = await storage.toggleCompanyPolicyStatus(policyId);
+      res.json(policy);
+    } catch (error) {
+      console.error("Error toggling company policy status:", error);
+      res.status(500).json({ message: "Failed to toggle company policy status" });
     }
   });
 
