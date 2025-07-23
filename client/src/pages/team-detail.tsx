@@ -5,7 +5,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { apiRequest } from "@/lib/queryClient";
 import { useParams, useLocation } from "wouter";
-import { Sidebar } from "@/components/sidebar";
 import Header from "@/components/header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -189,11 +188,8 @@ export default function TeamDetail() {
   ) || [];
 
   return (
-    <div className="min-h-screen flex bg-slate-50">
-      <Sidebar />
-      
-      <div className="flex-1 flex flex-col">
-        <Header 
+    <div className="flex-1 flex flex-col">
+      <Header 
           title={team?.name || "Loading..."}
           subtitle={team?.description || "Team details and member management"}
           action={
@@ -392,7 +388,6 @@ export default function TeamDetail() {
             </div>
           )}
         </main>
-      </div>
     </div>
   );
 }

@@ -109,6 +109,7 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Implemented configurable ticket number prefix feature - admins can now customize the ticket prefix (default: TKT) through System Settings in admin panel**
 - **Added ticketPrefix field to companySettings table and automatic ticket number generation in format PREFIX-YYYY-XXXX**
 - **Enhanced ticket number generation logic with proper sequence handling to ensure unique ticket numbers across years**
+- **Fixed duplicate menu columns issue in team-detail.tsx page by removing redundant Sidebar component and wrapper div - consistent with previous Layout fixes**
 
 ## System Architecture
 
