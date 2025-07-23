@@ -1655,21 +1655,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
             userMessage = `Context:\n${context}\n\nUser question: ${message}`;
           }
           
-          // Create the request payload for Claude
+          // Try different models based on availability
+          // Using Claude Instant v1 which has broader availability
+          let modelId = "anthropic.claude-instant-v1";
+          let modelPayload: any = {
+            anthropic_version: "bedrock-2023-05-31",
+            max_tokens: 1000,
+            temperature: 0.2,
+            system: systemMessage,
+            messages: [{
+              role: "user",
+              content: userMessage
+            }]
+          };
+          
+          // Check if we should use a different model based on settings or fallback
+          const companySettings = await storage.getCompanySettings();
+          if (companySettings?.bedrockModelId) {
+            modelId = companySettings.bedrockModelId;
+          }
+          
+          // Create the request payload based on model type
           const command = new InvokeModelCommand({
-            modelId: "anthropic.claude-3-sonnet-20240229-v1:0", // Using Claude 3 Sonnet
+            modelId,
             contentType: "application/json",
             accept: "application/json",
-            body: JSON.stringify({
-              anthropic_version: "bedrock-2023-05-31",
-              max_tokens: 1000,
-              temperature: 0.2,
-              system: systemMessage,
-              messages: [{
-                role: "user",
-                content: userMessage
-              }]
-            }),
+            body: JSON.stringify(modelPayload),
           });
           
           // Invoke the model
@@ -1681,7 +1692,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const inputTokens = estimateTokenCount(systemMessage + userMessage);
           const outputTokens = estimateTokenCount(response);
           const totalTokens = inputTokens + outputTokens;
-          const modelId = "anthropic.claude-3-sonnet-20240229-v1:0";
           const cost = calculateBedrockCost(inputTokens, outputTokens, modelId);
           
           usageData = await storage.trackBedrockUsage({
