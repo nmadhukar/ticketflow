@@ -822,6 +822,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Save Perplexity API key
+  app.post('/api/api-keys/perplexity', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const { apiKey } = req.body;
+      if (!apiKey) {
+        return res.status(400).json({ message: "API key is required" });
+      }
+      
+      // Check if Perplexity key already exists
+      const existingKeys = await storage.getApiKeys('system');
+      const perplexityKey = existingKeys.find(key => key.name === 'Perplexity API Key');
+      
+      if (perplexityKey) {
+        // Update existing key
+        await storage.updateApiKey(perplexityKey.id, { keyHash: apiKey });
+      } else {
+        // Create new key
+        await storage.createApiKey({
+          userId: 'system',
+          name: 'Perplexity API Key',
+          keyHash: apiKey,
+          keyPrefix: apiKey.substring(0, 8),
+          permissions: ['ai_chat'],
+          isActive: true,
+        });
+      }
+      
+      res.json({ message: "Perplexity API key saved successfully" });
+    } catch (error) {
+      console.error("Error saving Perplexity API key:", error);
+      res.status(500).json({ message: "Failed to save Perplexity API key" });
+    }
+  });
+
+  // Get Perplexity API key status
+  app.get('/api/api-keys/perplexity/status', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const apiKeys = await storage.getApiKeys('system');
+      const perplexityKey = apiKeys.find(key => key.name === 'Perplexity API Key' && key.isActive);
+      
+      res.json({ exists: !!perplexityKey });
+    } catch (error) {
+      console.error("Error checking Perplexity API key:", error);
+      res.status(500).json({ message: "Failed to check Perplexity API key" });
+    }
+  });
+
   // SMTP settings routes (admin only)
   app.get("/api/smtp/settings", isAuthenticated, async (req: any, res) => {
     try {
@@ -1483,31 +1544,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
         content: message,
       });
 
-      // Get help documents to search through
-      const helpDocs = await storage.searchHelpDocuments(message);
+      // Check if we have Perplexity API key
+      const apiKeys = await storage.getApiKeys('system');
+      const perplexityKey = apiKeys.find(key => key.name === 'Perplexity API Key' && key.isActive);
       
-      // Simple AI response logic - search for relevant help documents
-      let response = "I'm here to help! ";
+      let response = "";
       const relevantDocIds: number[] = [];
       
-      if (helpDocs.length > 0) {
-        response += "Based on your question, here's what I found:\n\n";
-        
-        // Take top 3 most relevant documents
-        const topDocs = helpDocs.slice(0, 3);
-        
-        for (const doc of topDocs) {
-          relevantDocIds.push(doc.id);
-          response += `**${doc.title}**\n`;
+      if (perplexityKey) {
+        // Use Perplexity API for intelligent responses
+        try {
+          // Get help documents for context
+          const helpDocs = await storage.searchHelpDocuments(message);
+          let context = "";
           
-          // Extract relevant portion of content
-          const contentPreview = doc.content.substring(0, 500) + (doc.content.length > 500 ? '...' : '');
-          response += `${contentPreview}\n\n`;
+          if (helpDocs.length > 0) {
+            context = "\n\nRelevant documentation context:\n";
+            const topDocs = helpDocs.slice(0, 3);
+            for (const doc of topDocs) {
+              relevantDocIds.push(doc.id);
+              context += `- ${doc.title}: ${doc.content.substring(0, 200)}...\n`;
+            }
+          }
+          
+          const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${perplexityKey.keyHash}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: 'llama-3.1-sonar-small-128k-online',
+              messages: [
+                {
+                  role: 'system',
+                  content: `You are a helpful assistant for TicketFlow, a ticketing system. Answer questions based on the provided context when available. Be concise and helpful.${context}`
+                },
+                {
+                  role: 'user',
+                  content: message
+                }
+              ],
+              temperature: 0.2,
+              top_p: 0.9,
+              stream: false,
+            }),
+          });
+          
+          if (!perplexityResponse.ok) {
+            throw new Error(`Perplexity API error: ${perplexityResponse.status}`);
+          }
+          
+          const data = await perplexityResponse.json();
+          response = data.choices[0].message.content;
+        } catch (error) {
+          console.error("Error calling Perplexity API:", error);
+          // Fallback to simple response
+          response = "I apologize, but I'm having trouble processing your request. Please try again later or contact support.";
         }
-        
-        response += "Would you like me to provide more details about any of these topics?";
       } else {
-        response += "I couldn't find specific help documentation related to your question. Could you please provide more details or try rephrasing your question?";
+        // No API key configured - use simple fallback
+        try {
+          const helpDocs = await storage.searchHelpDocuments(message);
+          
+          if (helpDocs.length > 0) {
+            response = "I found some relevant documentation:\n\n";
+            const topDocs = helpDocs.slice(0, 3);
+            
+            for (const doc of topDocs) {
+              relevantDocIds.push(doc.id);
+              response += `**${doc.title}**\n`;
+              const contentPreview = doc.content.substring(0, 300) + (doc.content.length > 300 ? '...' : '');
+              response += `${contentPreview}\n\n`;
+            }
+          } else {
+            response = "I'm here to help! However, the AI service is not configured. Please ask your administrator to add a Perplexity API key in the Admin Panel > API Keys section.";
+          }
+        } catch (error) {
+          console.error("Error searching help documents:", error);
+          response = "I'm experiencing technical difficulties. Please try again later.";
+        }
       }
 
       // Save AI response

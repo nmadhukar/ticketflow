@@ -1143,6 +1143,13 @@ export class DatabaseStorage implements IStorage {
       .set({ isActive: false })
       .where(eq(apiKeys.id, id));
   }
+  
+  async updateApiKey(id: number, updates: { keyHash?: string; isActive?: boolean }): Promise<void> {
+    await db
+      .update(apiKeys)
+      .set(updates)
+      .where(eq(apiKeys.id, id));
+  }
 
   // SMTP settings operations
   async getSmtpSettings(): Promise<SmtpSettings | undefined> {

@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -51,6 +51,9 @@ export default function AdminPanel() {
   const [newApiKeyName, setNewApiKeyName] = useState("");
   const [showApiKey, setShowApiKey] = useState<string | null>(null);
   const [apiKeyVisibility, setApiKeyVisibility] = useState<Record<number, boolean>>({});
+  const [perplexityApiKey, setPerplexityApiKey] = useState("");
+  const [showPerplexityKey, setShowPerplexityKey] = useState(false);
+  const [perplexityKeyExists, setPerplexityKeyExists] = useState(false);
 
   // Check if user is admin
   if (user?.role !== "admin") {
@@ -121,6 +124,22 @@ export default function AdminPanel() {
       }
     },
   });
+  
+  // Check for existing Perplexity key on mount
+  useEffect(() => {
+    const checkPerplexityKey = async () => {
+      try {
+        const response = await apiRequest("GET", "/api/api-keys/perplexity/status");
+        setPerplexityKeyExists(response.exists);
+      } catch (error) {
+        console.error("Error checking Perplexity key:", error);
+      }
+    };
+    
+    if (user?.role === 'admin') {
+      checkPerplexityKey();
+    }
+  }, [user]);
 
   const updateUserMutation = useMutation({
     mutationFn: async (userData: any) => {
@@ -413,6 +432,26 @@ export default function AdminPanel() {
     },
   });
 
+  const savePerplexityKeyMutation = useMutation({
+    mutationFn: async (apiKey: string) => {
+      return await apiRequest("POST", "/api/api-keys/perplexity", { apiKey });
+    },
+    onSuccess: () => {
+      setPerplexityKeyExists(true);
+      toast({
+        title: "Success",
+        description: "Perplexity API key saved successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to save Perplexity API key",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleCreateApiKey = () => {
     if (!newApiKeyName.trim()) {
       toast({
@@ -431,6 +470,18 @@ export default function AdminPanel() {
       title: "Success",
       description: "Copied to clipboard",
     });
+  };
+
+  const handleSavePerplexityKey = () => {
+    if (!perplexityApiKey.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a valid Perplexity API key",
+        variant: "destructive",
+      });
+      return;
+    }
+    savePerplexityKeyMutation.mutate(perplexityApiKey);
   };
 
   return (
@@ -797,6 +848,40 @@ export default function AdminPanel() {
                   </div>
                 </div>
               )}
+
+              <Separator />
+
+              {/* Perplexity API Key Section */}
+              <div className="space-y-4">
+                <h4 className="text-sm font-medium">AI Chat Integration (Perplexity)</h4>
+                <p className="text-sm text-muted-foreground">
+                  Configure Perplexity API key for AI-powered chat assistance
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    type={showPerplexityKey ? "text" : "password"}
+                    placeholder="Enter your Perplexity API key"
+                    value={perplexityApiKey}
+                    onChange={(e) => setPerplexityApiKey(e.target.value)}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setShowPerplexityKey(!showPerplexityKey)}
+                  >
+                    {showPerplexityKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                  <Button
+                    onClick={handleSavePerplexityKey}
+                    disabled={savePerplexityKeyMutation.isPending}
+                  >
+                    {savePerplexityKeyMutation.isPending ? "Saving..." : "Save"}
+                  </Button>
+                </div>
+                {perplexityKeyExists && (
+                  <p className="text-xs text-green-600">✓ Perplexity API key is configured</p>
+                )}
+              </div>
 
               <Separator />
 
