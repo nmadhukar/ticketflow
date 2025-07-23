@@ -118,6 +118,8 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Implemented Company Policy Document Management system - admins can now upload and manage policy documents (Word, PDF) that integrate with AI chatbot for answering policy-related questions**
 - **Added Company Policies tab to admin panel with full CRUD operations for policy documents including upload, download, and delete functionality**
 - **Fixed API key creation error - corrected frontend/backend mismatch where frontend expected 'key' but backend returns 'plainKey' in response**
+- **Implemented separate AWS API key management for SES and Bedrock services - added separate configuration sections in admin panel allowing different IAM users for email and AI chat functionality**
+- **Fixed TaskModal terminology consistency - changed all references from "task" to "ticket" including button text "Create Ticket", error messages, tab labels, and dialog descriptions**
 
 ## System Architecture
 

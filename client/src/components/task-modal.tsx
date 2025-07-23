@@ -241,7 +241,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     if (!formData.title.trim()) {
       toast({
         title: "Error",
-        description: "Task title is required",
+        description: "Ticket title is required",
         variant: "destructive",
       });
       return;
@@ -250,7 +250,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     if (!formData.category) {
       toast({
         title: "Error",
-        description: "Task category is required",
+        description: "Ticket category is required",
         variant: "destructive",
       });
       return;
@@ -431,7 +431,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                           )}
                         </div>
                       </div>
-                    ) : "Fill in the details to create a new task for your team."}
+                    ) : "Fill in the details to create a new ticket for your team."}
                   </DialogDescription>
                 </div>
                 {task && (
@@ -453,7 +453,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                     className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
                   >
                     <FileText className="h-4 w-4 mr-2" />
-                    Task Details
+                    Ticket Details
                   </TabsTrigger>
                   {task && (
                     <>
@@ -969,7 +969,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
               >
                 {createTaskMutation.isPending || updateTaskMutation.isPending 
                   ? (task ? "Updating..." : "Creating...") 
-                  : (task ? "Update Task" : "Create Task")
+                  : (task ? "Update Ticket" : "Create Ticket")
                 }
               </Button>
             </DialogFooter>
