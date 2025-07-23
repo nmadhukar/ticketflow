@@ -1544,16 +1544,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         content: message,
       });
 
-      // Check if we have Perplexity API key
-      const apiKeys = await storage.getApiKeys('system');
-      const perplexityKey = apiKeys.find(key => key.name === 'Perplexity API Key' && key.isActive);
+      // Check if we have AWS Bedrock credentials
+      const smtpSettings = await storage.getSmtpSettings();
+      const hasBedrockCredentials = smtpSettings?.awsAccessKeyId && smtpSettings?.awsSecretAccessKey && smtpSettings?.awsRegion;
       
       let response = "";
       const relevantDocIds: number[] = [];
       
-      if (perplexityKey) {
-        // Use Perplexity API for intelligent responses
+      if (hasBedrockCredentials) {
+        // Use AWS Bedrock for intelligent responses
         try {
+          // Import AWS Bedrock client
+          const { BedrockRuntimeClient, InvokeModelCommand } = await import('@aws-sdk/client-bedrock-runtime');
+          
           // Get help documents for context
           const helpDocs = await storage.searchHelpDocuments(message);
           let context = "";
@@ -1567,43 +1570,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
           
-          const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${perplexityKey.keyHash}`,
-              'Content-Type': 'application/json',
+          // Configure AWS Bedrock client
+          const bedrockClient = new BedrockRuntimeClient({
+            region: smtpSettings.awsRegion,
+            credentials: {
+              accessKeyId: smtpSettings.awsAccessKeyId,
+              secretAccessKey: smtpSettings.awsSecretAccessKey,
             },
+          });
+          
+          // Prepare the prompt for Claude
+          const prompt = `\n\nHuman: You are a helpful assistant for TicketFlow, a ticketing system. Answer questions based on the provided context when available. Be concise and helpful.${context}
+
+User question: ${message}
+
+\n\nAssistant:`;
+          
+          // Create the request payload for Claude
+          const command = new InvokeModelCommand({
+            modelId: "anthropic.claude-3-sonnet-20240229-v1:0", // Using Claude 3 Sonnet
+            contentType: "application/json",
+            accept: "application/json",
             body: JSON.stringify({
-              model: 'llama-3.1-sonar-small-128k-online',
-              messages: [
-                {
-                  role: 'system',
-                  content: `You are a helpful assistant for TicketFlow, a ticketing system. Answer questions based on the provided context when available. Be concise and helpful.${context}`
-                },
-                {
-                  role: 'user',
-                  content: message
-                }
-              ],
+              anthropic_version: "bedrock-2023-05-31",
+              max_tokens: 1000,
               temperature: 0.2,
-              top_p: 0.9,
-              stream: false,
+              messages: [{
+                role: "user",
+                content: prompt
+              }]
             }),
           });
           
-          if (!perplexityResponse.ok) {
-            throw new Error(`Perplexity API error: ${perplexityResponse.status}`);
-          }
+          // Invoke the model
+          const bedrockResponse = await bedrockClient.send(command);
+          const responseBody = JSON.parse(new TextDecoder().decode(bedrockResponse.body));
+          response = responseBody.content[0].text;
           
-          const data = await perplexityResponse.json();
-          response = data.choices[0].message.content;
         } catch (error) {
-          console.error("Error calling Perplexity API:", error);
+          console.error("Error calling AWS Bedrock:", error);
           // Fallback to simple response
           response = "I apologize, but I'm having trouble processing your request. Please try again later or contact support.";
         }
       } else {
-        // No API key configured - use simple fallback
+        // No AWS credentials configured - use simple fallback
         try {
           const helpDocs = await storage.searchHelpDocuments(message);
           
@@ -1618,7 +1628,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               response += `${contentPreview}\n\n`;
             }
           } else {
-            response = "I'm here to help! However, the AI service is not configured. Please ask your administrator to add a Perplexity API key in the Admin Panel > API Keys section.";
+            response = "I'm here to help! However, the AI service is not configured. Please ask your administrator to configure AWS credentials in the Admin Panel > Email Configuration section.";
           }
         } catch (error) {
           console.error("Error searching help documents:", error);

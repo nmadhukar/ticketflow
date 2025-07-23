@@ -51,9 +51,6 @@ export default function AdminPanel() {
   const [newApiKeyName, setNewApiKeyName] = useState("");
   const [showApiKey, setShowApiKey] = useState<string | null>(null);
   const [apiKeyVisibility, setApiKeyVisibility] = useState<Record<number, boolean>>({});
-  const [perplexityApiKey, setPerplexityApiKey] = useState("");
-  const [showPerplexityKey, setShowPerplexityKey] = useState(false);
-  const [perplexityKeyExists, setPerplexityKeyExists] = useState(false);
   
   // Company branding state
   const [companyName, setCompanyName] = useState("");
@@ -133,21 +130,7 @@ export default function AdminPanel() {
     },
   });
   
-  // Check for existing Perplexity key on mount
-  useEffect(() => {
-    const checkPerplexityKey = async () => {
-      try {
-        const response = await apiRequest("GET", "/api/api-keys/perplexity/status");
-        setPerplexityKeyExists(response.exists);
-      } catch (error) {
-        console.error("Error checking Perplexity key:", error);
-      }
-    };
-    
-    if (user?.role === 'admin') {
-      checkPerplexityKey();
-    }
-  }, [user]);
+
 
   const updateUserMutation = useMutation({
     mutationFn: async (userData: any) => {
@@ -450,25 +433,7 @@ export default function AdminPanel() {
     },
   });
 
-  const savePerplexityKeyMutation = useMutation({
-    mutationFn: async (apiKey: string) => {
-      return await apiRequest("POST", "/api/api-keys/perplexity", { apiKey });
-    },
-    onSuccess: () => {
-      setPerplexityKeyExists(true);
-      toast({
-        title: "Success",
-        description: "Perplexity API key saved successfully",
-      });
-    },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to save Perplexity API key",
-        variant: "destructive",
-      });
-    },
-  });
+
 
   const handleCreateApiKey = () => {
     if (!newApiKeyName.trim()) {
@@ -490,17 +455,7 @@ export default function AdminPanel() {
     });
   };
 
-  const handleSavePerplexityKey = () => {
-    if (!perplexityApiKey.trim()) {
-      toast({
-        title: "Error",
-        description: "Please enter a valid Perplexity API key",
-        variant: "destructive",
-      });
-      return;
-    }
-    savePerplexityKeyMutation.mutate(perplexityApiKey);
-  };
+
 
   return (
     <div className="container mx-auto p-6">
@@ -869,36 +824,31 @@ export default function AdminPanel() {
 
               <Separator />
 
-              {/* Perplexity API Key Section */}
+              {/* AWS Bedrock AI Chat Integration Info */}
               <div className="space-y-4">
-                <h4 className="text-sm font-medium">AI Chat Integration (Perplexity)</h4>
-                <p className="text-sm text-muted-foreground">
-                  Configure Perplexity API key for AI-powered chat assistance
-                </p>
-                <div className="flex gap-2">
-                  <Input
-                    type={showPerplexityKey ? "text" : "password"}
-                    placeholder="Enter your Perplexity API key"
-                    value={perplexityApiKey}
-                    onChange={(e) => setPerplexityApiKey(e.target.value)}
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setShowPerplexityKey(!showPerplexityKey)}
-                  >
-                    {showPerplexityKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                  <Button
-                    onClick={handleSavePerplexityKey}
-                    disabled={savePerplexityKeyMutation.isPending}
-                  >
-                    {savePerplexityKeyMutation.isPending ? "Saving..." : "Save"}
-                  </Button>
+                <h4 className="text-sm font-medium">AI Chat Integration (AWS Bedrock)</h4>
+                <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
+                  <p className="text-sm">
+                    The AI chat assistant uses AWS Bedrock with Claude 3 Sonnet for intelligent responses.
+                  </p>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Configuration Status:</p>
+                    {emailSettings.awsAccessKeyId && emailSettings.awsSecretAccessKey ? (
+                      <p className="text-sm text-green-600 flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4" />
+                        AWS credentials are configured - AI chat is enabled
+                      </p>
+                    ) : (
+                      <p className="text-sm text-amber-600 flex items-center gap-2">
+                        <AlertCircle className="h-4 w-4" />
+                        AWS credentials not configured - AI chat will use document search only
+                      </p>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Note: AI chat uses the same AWS credentials as email configuration. Configure AWS credentials in the Email Configuration tab.
+                  </p>
                 </div>
-                {perplexityKeyExists && (
-                  <p className="text-xs text-green-600">✓ Perplexity API key is configured</p>
-                )}
               </div>
 
               <Separator />

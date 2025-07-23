@@ -11,6 +11,7 @@
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.848.0",
     "@aws-sdk/client-ses": "^3.848.0",
     "@azure/msal-node": "^3.6.3",
     "@hookform/resolvers": "^3.10.0",
