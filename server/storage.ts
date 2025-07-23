@@ -1152,7 +1152,7 @@ export class DatabaseStorage implements IStorage {
     return await db
       .select()
       .from(apiKeys)
-      .where(eq(apiKeys.userId, userId))
+      .where(and(eq(apiKeys.userId, userId), eq(apiKeys.isActive, true)))
       .orderBy(desc(apiKeys.createdAt));
   }
   

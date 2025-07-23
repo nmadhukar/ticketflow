@@ -850,7 +850,7 @@ export default function AdminPanel() {
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Note: AI chat uses the same AWS credentials as email configuration. Configure AWS credentials in the Email Configuration tab.
+                    Note: AI chat uses the same AWS credentials as email configuration. Configure AWS credentials in the AWS & Email Settings tab.
                   </p>
                 </div>
               </div>
