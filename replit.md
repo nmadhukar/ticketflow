@@ -122,6 +122,7 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Fixed TaskModal terminology consistency - changed all references from "task" to "ticket" including button text "Create Ticket", error messages, tab labels, and dialog descriptions**
 - **Fixed invitation registration flow - auth page now properly handles invitation URL parameters (mode, email, token), switches to register tab, pre-fills email field as read-only, and shows invitation indicator**
 - **Enhanced registration endpoint to handle invited users who already exist (from SSO) but need to set password - allows password setup for existing users with valid invitations**
+- **Added validation to prevent sending invitations to emails that are already registered - system now checks for existing users and pending invitations before creating new invitations**
 
 ## System Architecture
 

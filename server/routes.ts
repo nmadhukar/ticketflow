@@ -2367,6 +2367,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
 
+      // Check if a user with this email already exists
+      const existingUser = await storage.getUserByEmail(req.body.email);
+      if (existingUser) {
+        return res.status(400).json({ 
+          message: "A user with this email address already exists in the system." 
+        });
+      }
+
+      // Check for existing pending invitations
+      const existingInvitations = await storage.getUserInvitations({ status: 'pending' });
+      const hasPendingInvitation = existingInvitations.some(inv => 
+        inv.email === req.body.email && new Date(inv.expiresAt) > new Date()
+      );
+      
+      if (hasPendingInvitation) {
+        return res.status(400).json({ 
+          message: "An invitation has already been sent to this email address and is still pending." 
+        });
+      }
+
       const invitation = await storage.createUserInvitation({
         ...req.body,
         expiresAt: new Date(req.body.expiresAt),
