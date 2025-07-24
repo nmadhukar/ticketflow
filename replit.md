@@ -120,6 +120,8 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Fixed API key creation error - corrected frontend/backend mismatch where frontend expected 'key' but backend returns 'plainKey' in response**
 - **Implemented separate AWS API key management for SES and Bedrock services - added separate configuration sections in admin panel allowing different IAM users for email and AI chat functionality**
 - **Fixed TaskModal terminology consistency - changed all references from "task" to "ticket" including button text "Create Ticket", error messages, tab labels, and dialog descriptions**
+- **Fixed invitation registration flow - auth page now properly handles invitation URL parameters (mode, email, token), switches to register tab, pre-fills email field as read-only, and shows invitation indicator**
+- **Enhanced registration endpoint to handle invited users who already exist (from SSO) but need to set password - allows password setup for existing users with valid invitations**
 
 ## System Architecture
 

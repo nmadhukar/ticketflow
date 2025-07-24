@@ -166,16 +166,52 @@ export function setupAuth(app: Express) {
       
       // Check if user already exists
       const existingUser = await storage.getUserByEmail(validatedData.email);
-      if (existingUser) {
-        return res.status(400).json({ message: "Email already registered" });
-      }
-
+      
       // Check if this email has a pending invitation
       const invitations = await storage.getUserInvitations({ status: 'pending' });
       const invitation = invitations.find(inv => 
         inv.email === validatedData.email && 
         new Date(inv.expiresAt) > new Date()
       );
+
+      // Handle existing user with invitation
+      if (existingUser && invitation) {
+        // If user exists but has no password (e.g., created through SSO), allow password setup
+        if (!existingUser.password) {
+          const hashedPassword = await hashPassword(validatedData.password);
+          await storage.updateUser(existingUser.id, {
+            password: hashedPassword,
+            firstName: validatedData.firstName,
+            lastName: validatedData.lastName,
+            role: invitation.role,
+            isApproved: true,
+            departmentId: invitation.departmentId || undefined,
+          });
+          
+          await storage.markInvitationAccepted(invitation.id);
+          
+          return res.status(201).json({
+            message: "Account activated successfully! You can now log in with your credentials.",
+            user: {
+              id: existingUser.id,
+              email: existingUser.email,
+              firstName: validatedData.firstName,
+              lastName: validatedData.lastName,
+              role: invitation.role,
+              isApproved: true,
+            }
+          });
+        } else {
+          return res.status(400).json({ 
+            message: "This email is already registered. Please sign in with your existing password." 
+          });
+        }
+      }
+      
+      // Check if user exists without invitation
+      if (existingUser) {
+        return res.status(400).json({ message: "Email already registered" });
+      }
 
       // Hash password
       const hashedPassword = await hashPassword(validatedData.password);

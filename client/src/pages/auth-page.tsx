@@ -52,11 +52,18 @@ type ResetPasswordForm = z.infer<typeof resetPasswordSchema>;
 export default function AuthPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState<"signin" | "register" | "forgot">("signin");
   
-  // Check for error in URL params
+  // Check for URL params
   const urlParams = new URLSearchParams(window.location.search);
   const error = urlParams.get('error');
+  const mode = urlParams.get('mode');
+  const invitationEmail = urlParams.get('email');
+  const invitationToken = urlParams.get('token');
+  
+  // Set initial tab based on mode parameter
+  const [activeTab, setActiveTab] = useState<"signin" | "register" | "forgot">(
+    mode === 'register' ? 'register' : 'signin'
+  );
   
   // Show error message based on error type
   const getErrorMessage = (error: string | null) => {
@@ -90,7 +97,7 @@ export default function AuthPage() {
   const registerForm = useForm<RegisterForm>({
     resolver: zodResolver(registerSchema),
     defaultValues: {
-      email: "",
+      email: invitationEmail || "",
       password: "",
       confirmPassword: "",
       firstName: "",
@@ -353,6 +360,14 @@ export default function AuthPage() {
                   <TabsContent value="register">
                     <form onSubmit={registerForm.handleSubmit((data) => registerMutation.mutate(data))}>
                       <div className="space-y-4">
+                        {invitationEmail && invitationToken && (
+                          <Alert>
+                            <CheckCircle className="h-4 w-4" />
+                            <AlertDescription>
+                              You've been invited to join TicketFlow! Complete the form below to create your account.
+                            </AlertDescription>
+                          </Alert>
+                        )}
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-2">
                             <Label htmlFor="register-firstName">First Name</Label>
@@ -384,6 +399,7 @@ export default function AuthPage() {
                             type="email"
                             placeholder="you@example.com"
                             {...registerForm.register("email")}
+                            disabled={!!invitationEmail}
                           />
                           {registerForm.formState.errors.email && (
                             <p className="text-sm text-destructive">{registerForm.formState.errors.email.message}</p>
