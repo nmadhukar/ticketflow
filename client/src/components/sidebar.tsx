@@ -15,6 +15,7 @@ import {
   BookOpen,
   MessageSquare,
   Mail,
+  Brain,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -46,11 +47,13 @@ export function Sidebar({ className }: SidebarProps) {
         { name: "All Tickets", href: "/tasks", icon: FolderOpen },
         { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
         { name: "Teams", href: "/teams", icon: Users },
+        { name: "Knowledge Base", href: "/knowledge-base", icon: BookOpen },
       ];
 
   const adminNavigation = [
     { name: "Admin Panel", href: "/admin", icon: Shield },
     { name: "Invitations", href: "/admin/invitations", icon: Mail },
+    { name: "AI Settings", href: "/ai-settings", icon: Brain },
   ];
 
   const bottomNavigation = [

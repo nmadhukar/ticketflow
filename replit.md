@@ -135,6 +135,12 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Implemented four core AI functions: analyzeTicket(), generateResponse(), updateKnowledgeBase(), and calculateConfidence() with proper error handling**
 - **Added support for separate AWS credentials for Bedrock service, allowing different IAM users for AI chat and email functionality**
 - **Integrated Bedrock AI into ticket creation workflow with automatic response generation for high-confidence scenarios**
+- **Implemented WebSocket server on backend with /ws endpoint for real-time updates and authentication handling**
+- **Created missing database tables for AI features: ticket_auto_responses, ticket_complexity_scores, knowledge_articles, escalation_rules, ai_analytics**
+- **Fixed team query issue in storage.ts by correcting table reference from 'team' to 'teams' in SQL queries**
+- **Fixed Brain icon import issue in admin panel to resolve React component errors**
+- **Updated dashboard to properly use TicketList component and handle ticket detail views with conditional rendering**
+- **Added Knowledge Base and AI Settings navigation links to sidebar (Knowledge Base for all users, AI Settings for admin only)**
 
 ## System Architecture
 

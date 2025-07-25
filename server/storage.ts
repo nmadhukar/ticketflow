@@ -472,7 +472,7 @@ export class DatabaseStorage implements IStorage {
         updatedAt: tasks.updatedAt,
         creatorName: sql<string>`COALESCE(creator.first_name || ' ' || creator.last_name, creator.email, 'Unknown')`,
         assigneeName: sql<string>`CASE 
-          WHEN ${tasks.assigneeType} = 'team' THEN team.name
+          WHEN ${tasks.assigneeType} = 'team' THEN ${teams.name}
           ELSE COALESCE(assignee.first_name || ' ' || assignee.last_name, assignee.email)
         END`,
         lastUpdatedBy: sql<string>`(

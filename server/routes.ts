@@ -9,6 +9,7 @@
 
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./auth";
 import { setupMicrosoftAuth, isMicrosoftUser } from "./microsoftAuth";
@@ -2930,5 +2931,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   const httpServer = createServer(app);
+  
+  // WebSocket server for real-time updates
+  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  
+  // Store connected clients with their user IDs
+  const clients = new Map<string, WebSocket>();
+  
+  wss.on('connection', (ws, req) => {
+    console.log('WebSocket client connected');
+    
+    // Extract user ID from the session or authentication
+    let userId: string | null = null;
+    
+    ws.on('message', (message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        
+        if (data.type === 'auth' && data.userId) {
+          userId = data.userId;
+          clients.set(userId, ws);
+          ws.send(JSON.stringify({ type: 'connected', message: 'WebSocket connection established' }));
+        }
+        
+        // Handle other message types if needed
+      } catch (error) {
+        console.error('WebSocket message error:', error);
+      }
+    });
+    
+    ws.on('close', () => {
+      if (userId) {
+        clients.delete(userId);
+      }
+      console.log('WebSocket client disconnected');
+    });
+    
+    ws.on('error', (error) => {
+      console.error('WebSocket error:', error);
+    });
+  });
+  
+  // Helper function to broadcast updates to specific users
+  function broadcastToUser(userId: string, message: any) {
+    const client = clients.get(userId);
+    if (client && client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(message));
+    }
+  }
+  
+  // Helper function to broadcast to all connected clients
+  function broadcastToAll(message: any) {
+    clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(message));
+      }
+    });
+  }
+  
+  // Attach broadcast functions to app for use in routes
+  (app as any).broadcastToUser = broadcastToUser;
+  (app as any).broadcastToAll = broadcastToAll;
+  
   return httpServer;
 }

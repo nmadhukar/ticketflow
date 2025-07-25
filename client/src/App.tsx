@@ -25,6 +25,9 @@ import Departments from "@/pages/departments";
 import Invitations from "@/pages/invitations";
 import AiAnalytics from "@/pages/ai-analytics";
 import TeamsIntegration from "@/pages/teams-integration";
+import KnowledgeBase from "@/pages/knowledge-base";
+import AISettings from "@/pages/ai-settings";
+import { WebSocketProvider } from "@/hooks/useWebSocket";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -45,8 +48,9 @@ function Router() {
             <Route component={NotFound} />
           </>
         ) : (
-          <Layout>
-            <Switch>
+          <WebSocketProvider>
+            <Layout>
+              <Switch>
               <Route path="/" component={Dashboard} />
               <Route path="/tasks">
                 <ProtectedRoute allowedRoles={["admin", "manager", "agent", "user"]}>
@@ -89,9 +93,25 @@ function Router() {
                   <AiAnalytics />
                 </ProtectedRoute>
               </Route>
+              <Route path="/knowledge-base">
+                <ProtectedRoute allowedRoles={["admin", "manager", "agent", "user"]}>
+                  <KnowledgeBase />
+                </ProtectedRoute>
+              </Route>
+              <Route path="/admin/ai-settings">
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <AISettings />
+                </ProtectedRoute>
+              </Route>
+              <Route path="/tickets/:id" component={(params) => (
+                <ProtectedRoute allowedRoles={["admin", "manager", "agent", "user", "customer"]}>
+                  <Dashboard />
+                </ProtectedRoute>
+              )} />
               <Route component={NotFound} />
-            </Switch>
-          </Layout>
+              </Switch>
+            </Layout>
+          </WebSocketProvider>
         )}
       </Switch>
       {/* Show AI Chat Bot for authenticated users */}

@@ -3,10 +3,12 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
 import { isUnauthorizedError } from "@/lib/authUtils";
-import { useLocation } from "wouter";
+import { useLocation, useParams } from "wouter";
 import Header from "@/components/header";
 import StatsCard from "@/components/stats-card";
 import TaskCard from "@/components/task-card";
+import TicketList from "@/components/ticket-list";
+import TicketDetail from "@/components/ticket-detail";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -21,9 +23,12 @@ import {
   Filter, 
   Plus,
   MessageCircle,
-  UserCheck
+  UserCheck,
+  Brain,
+  Book
 } from "lucide-react";
 import TaskModal from "@/components/task-modal";
+import { useWebSocketContext } from "@/hooks/useWebSocket";
 
 
 
@@ -31,10 +36,15 @@ export default function Dashboard() {
   const { toast } = useToast();
   const { isAuthenticated, isLoading } = useAuth();
   const [, setLocation] = useLocation();
+  const params = useParams();
+  const { isConnected } = useWebSocketContext();
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<any>(null);
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
+  
+  // If there's a ticket ID in the URL, show ticket detail view
+  const ticketId = params?.id ? parseInt(params.id) : null;
 
   // Redirect to home if not authenticated
   useEffect(() => {
@@ -123,6 +133,18 @@ export default function Dashboard() {
     }
   };
 
+  // If viewing a specific ticket, show ticket detail view
+  if (ticketId) {
+    return (
+      <div className="flex-1 flex flex-col">
+        <Header title="Ticket Details" subtitle="View and manage ticket information" />
+        <main className="flex-1 p-6 overflow-y-auto">
+          <TicketDetail ticketId={ticketId} onClose={() => setLocation("/")} />
+        </main>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="flex-1 flex flex-col">
@@ -193,113 +215,23 @@ export default function Dashboard() {
             </div>
           </div>
 
+          {/* WebSocket Connection Status */}
+          {isConnected && (
+            <div className="mb-4 flex items-center gap-2 text-sm text-green-600">
+              <div className="w-2 h-2 rounded-full bg-green-600 animate-pulse" />
+              Real-time updates active
+            </div>
+          )}
+
           {/* Main Content Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Recent Tasks */}
+            {/* Ticket List */}
             <div className="lg:col-span-2">
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <CardTitle>Recent Tickets</CardTitle>
-                      {(statusFilter || priorityFilter) && (
-                        <div className="flex items-center gap-2">
-                          {statusFilter && (
-                            <Badge variant="secondary" className="text-xs">
-                              Status: {statusFilter.replace('_', ' ')}
-                            </Badge>
-                          )}
-                          {priorityFilter && (
-                            <Badge variant="secondary" className="text-xs">
-                              Priority: {priorityFilter}
-                            </Badge>
-                          )}
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              setStatusFilter(null);
-                              setPriorityFilter(null);
-                            }}
-                            className="h-6 px-2 text-xs"
-                          >
-                            Clear filters
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center space-x-3">
-                      <div className="relative">
-                        <Input
-                          placeholder="Search tickets..."
-                          className="w-64 pl-10"
-                        />
-                        <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
-                      </div>
-                      <Button variant="outline" size="sm">
-                        <Filter className="h-4 w-4 mr-2" />
-                        Filter
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {tasksLoading ? (
-                    <div className="text-center py-8">Loading tickets...</div>
-                  ) : filteredTasks && filteredTasks.length > 0 ? (
-                    filteredTasks.slice(0, 5).map((task: any) => (
-                      <div key={task.id} className="flex items-center space-x-4 p-4 bg-muted/30 rounded-lg hover:bg-muted/50 transition-all shadow-business hover:shadow-business-hover">
-                        <div className={`w-3 h-3 rounded-full ${getPriorityColor(task.priority)}`} />
-                        <div className="flex-1">
-                          <h4 
-                            className="font-medium cursor-pointer hover:text-primary hover:underline"
-                            onClick={() => {
-                              setSelectedTask(task);
-                              setIsTaskModalOpen(true);
-                            }}
-                          >
-                            {task.title}
-                          </h4>
-                          <p className="text-sm text-muted-foreground">{task.description}</p>
-                          <div className="flex items-center space-x-4 mt-2">
-                            <Badge className={getCategoryColor(task.category)}>
-                              {task.category}
-                            </Badge>
-                            {task.assigneeId && (
-                              <span className="text-sm text-muted-foreground">
-                                Assigned to: {task.assigneeName || task.assigneeId}
-                              </span>
-                            )}
-                            {task.creatorName && (
-                              <span className="text-sm text-muted-foreground">
-                                Created by: {task.creatorName}
-                              </span>
-                            )}
-                            {task.dueDate && (
-                              <span className="text-sm text-muted-foreground">
-                                Due: {new Date(task.dueDate).toLocaleDateString()}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <Badge className={`${getStatusColor(task.status)} px-2 py-1 text-xs font-medium rounded`}>
-                          {task.status.replace('_', ' ')}
-                        </Badge>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-8 text-slate-500">
-                      {(statusFilter || priorityFilter) ? "No tickets match the selected filters" : "No tickets found. Create your first ticket to get started!"}
-                    </div>
-                  )}
-                  
-                  <div className="pt-6 border-t">
-                    <Button variant="ghost" className="w-full text-primary hover:text-primary/80" onClick={() => setLocation("/tasks")}>
-                      View All Tickets
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+              <TicketList 
+                onTicketSelect={(ticket) => setLocation(`/tickets/${ticket.id}`)}
+                showAIInfo={true}
+                allowDragDrop={true}
+              />
             </div>
             
             {/* Sidebar Content */}
