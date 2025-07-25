@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { Layout } from "@/components/layout";
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -80,7 +80,7 @@ function QueueStatusDisplay() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Pending</p>
-              <p className="text-2xl font-bold">{queueStatus?.pending || 0}</p>
+              <p className="text-2xl font-bold">{(queueStatus as any)?.pending || 0}</p>
             </div>
             <Database className="h-8 w-8 text-muted-foreground" />
           </div>
@@ -92,7 +92,7 @@ function QueueStatusDisplay() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Processing</p>
-              <p className="text-2xl font-bold">{queueStatus?.processing || 0}</p>
+              <p className="text-2xl font-bold">{(queueStatus as any)?.processing || 0}</p>
             </div>
             <RefreshCw className="h-8 w-8 text-primary animate-spin" />
           </div>
@@ -104,7 +104,7 @@ function QueueStatusDisplay() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Completed Today</p>
-              <p className="text-2xl font-bold">{queueStatus?.completedToday || 0}</p>
+              <p className="text-2xl font-bold">{(queueStatus as any)?.completedToday || 0}</p>
             </div>
             <CheckCircle className="h-8 w-8 text-green-500" />
           </div>
@@ -193,31 +193,31 @@ function LearningAnalytics() {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Articles Created</span>
-            <span className="font-medium">{analytics?.articlesCreated || 0}</span>
+            <span className="font-medium">{(analytics as any)?.articlesCreated || 0}</span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Avg. Effectiveness</span>
-            <span className="font-medium">{((analytics?.avgEffectiveness || 0) * 100).toFixed(1)}%</span>
+            <span className="font-medium">{(((analytics as any)?.avgEffectiveness || 0) * 100).toFixed(1)}%</span>
           </div>
         </div>
         
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Auto-Responses Sent</span>
-            <span className="font-medium">{analytics?.autoResponsesSent || 0}</span>
+            <span className="font-medium">{(analytics as any)?.autoResponsesSent || 0}</span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Tickets Resolved by AI</span>
-            <span className="font-medium">{analytics?.ticketsResolvedByAI || 0}</span>
+            <span className="font-medium">{(analytics as any)?.ticketsResolvedByAI || 0}</span>
           </div>
         </div>
       </div>
       
-      {analytics?.topCategories && analytics.topCategories.length > 0 && (
+      {(analytics as any)?.topCategories && (analytics as any).topCategories.length > 0 && (
         <div className="space-y-2">
           <p className="text-sm font-medium">Top Knowledge Categories</p>
           <div className="space-y-1">
-            {analytics.topCategories.map((cat: any, index: number) => (
+            {(analytics as any).topCategories.map((cat: any, index: number) => (
               <div key={index} className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">{cat.category}</span>
                 <span>{cat.count} articles</span>
@@ -350,22 +350,21 @@ export default function AISettings() {
 
   if (isLoading) {
     return (
-      <Layout>
+      <div className="container mx-auto py-6">
         <div className="flex items-center justify-center h-96">
           <div className="text-center">
             <Brain className="h-8 w-8 animate-pulse mx-auto mb-4" />
             <p>Loading AI settings...</p>
           </div>
         </div>
-      </Layout>
+      </div>
     );
   }
 
-  const bedrockConfigured = apiKeys?.bedrock?.configured;
+  const bedrockConfigured = (apiKeys as any)?.bedrock?.configured;
 
   return (
-    <Layout>
-      <div className="space-y-6">
+    <div className="container mx-auto py-6 space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -635,7 +634,7 @@ export default function AISettings() {
                     <SelectValue placeholder="Select team for escalations" />
                   </SelectTrigger>
                   <SelectContent>
-                    {teams?.map((team: any) => (
+                    {(teams as any)?.map((team: any) => (
                       <SelectItem key={team.id} value={team.id.toString()}>
                         {team.name}
                       </SelectItem>
@@ -830,7 +829,6 @@ export default function AISettings() {
             {updateSettings.isPending ? "Saving..." : "Save Settings"}
           </Button>
         </div>
-      </div>
-    </Layout>
+    </div>
   );
 }

@@ -3,12 +3,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Code } from "lucide-react";
-import { Layout } from "@/components/layout";
-
 export default function ApiDocs() {
   return (
-    <Layout>
-      <div className="container mx-auto p-6 max-w-4xl">
+    <div className="container mx-auto p-6 max-w-4xl">
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">API Documentation</h1>
           <p className="text-muted-foreground">
@@ -228,7 +225,6 @@ Content-Type: application/json`}
             </Card>
           </TabsContent>
         </Tabs>
-      </div>
-    </Layout>
+    </div>
   );
 }
