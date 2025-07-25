@@ -42,8 +42,8 @@ export default function KnowledgeBase() {
   const [isArticleDialogOpen, setIsArticleDialogOpen] = useState(false);
   const [selectedArticle, setSelectedArticle] = useState<KnowledgeArticle | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<string>("");
-  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   
   // Form states for article creation/editing
   const [articleTitle, setArticleTitle] = useState("");
@@ -69,7 +69,7 @@ export default function KnowledgeBase() {
 
   // Redirect to home if not authenticated or not admin
   useEffect(() => {
-    if (!isLoading && (!isAuthenticated || user?.role !== 'admin')) {
+    if (!isLoading && (!isAuthenticated || (user as any)?.role !== 'admin')) {
       toast({
         title: "Unauthorized",
         description: "Admin access required. Redirecting...",
@@ -87,8 +87,8 @@ export default function KnowledgeBase() {
     queryKey: ['/api/admin/knowledge', { category: categoryFilter, published: statusFilter }],
     queryFn: async () => {
       const params = new URLSearchParams();
-      if (categoryFilter) params.append('category', categoryFilter);
-      if (statusFilter) params.append('published', statusFilter);
+      if (categoryFilter && categoryFilter !== 'all') params.append('category', categoryFilter);
+      if (statusFilter && statusFilter !== 'all') params.append('published', statusFilter);
       
       const response = await fetch(`/api/admin/knowledge?${params.toString()}`, {
         credentials: 'include',
@@ -97,7 +97,7 @@ export default function KnowledgeBase() {
       return response.json();
     },
     retry: false,
-    enabled: isAuthenticated && user?.role === 'admin',
+    enabled: isAuthenticated && (user as any)?.role === 'admin',
   });
 
   // Create/Update article mutation
@@ -269,8 +269,8 @@ export default function KnowledgeBase() {
       article.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
       article.summary?.toLowerCase().includes(searchQuery.toLowerCase());
     
-    const matchesCategory = !categoryFilter || article.category === categoryFilter;
-    const matchesStatus = !statusFilter || 
+    const matchesCategory = !categoryFilter || categoryFilter === 'all' || article.category === categoryFilter;
+    const matchesStatus = !statusFilter || statusFilter === 'all' || 
       (statusFilter === 'published' && article.isPublished) ||
       (statusFilter === 'draft' && !article.isPublished);
     
@@ -304,7 +304,7 @@ export default function KnowledgeBase() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header />
+      <Header title="Knowledge Base" />
       <main className="container mx-auto px-4 py-8">
         <div className="space-y-6">
           <div className="flex justify-between items-center">
@@ -459,7 +459,7 @@ export default function KnowledgeBase() {
                       <SelectValue placeholder="All categories" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All categories</SelectItem>
+                      <SelectItem value="all">All categories</SelectItem>
                       {knowledgeCategories.map((category) => (
                         <SelectItem key={category} value={category}>
                           <div className="flex items-center gap-2">
@@ -478,7 +478,7 @@ export default function KnowledgeBase() {
                       <SelectValue placeholder="All statuses" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All statuses</SelectItem>
+                      <SelectItem value="all">All statuses</SelectItem>
                       <SelectItem value="published">Published</SelectItem>
                       <SelectItem value="draft">Draft</SelectItem>
                     </SelectContent>
@@ -489,8 +489,8 @@ export default function KnowledgeBase() {
                     variant="outline" 
                     onClick={() => {
                       setSearchQuery("");
-                      setCategoryFilter("");
-                      setStatusFilter("");
+                      setCategoryFilter("all");
+                      setStatusFilter("all");
                     }}
                   >
                     Clear Filters

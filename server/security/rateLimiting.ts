@@ -8,7 +8,7 @@ const aiApiCallTracker = new Map<string, { count: number; resetTime: number }>()
 // General API rate limiting
 export const generalRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  max: process.env.NODE_ENV === 'development' ? 10000 : 100, // High limit for development
   message: {
     error: 'Too many requests',
     message: 'Too many requests from this IP, please try again later.',

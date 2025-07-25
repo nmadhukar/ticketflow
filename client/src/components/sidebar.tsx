@@ -1,3 +1,4 @@
+import React from "react";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
@@ -25,21 +26,23 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-function SignOutButton() {
+const SignOutButton = React.forwardRef<HTMLButtonElement>((props, ref) => {
   const { logout, isLoggingOut } = useAuth();
   
   return (
     <Button
+      ref={ref}
       variant="ghost"
       className="w-full justify-start"
       onClick={logout}
       disabled={isLoggingOut}
+      {...props}
     >
       <LogOut className="mr-3 h-4 w-4" />
       {isLoggingOut ? "Signing Out..." : "Sign Out"}
     </Button>
   );
-}
+});
 
 interface SidebarProps {
   className?: string;

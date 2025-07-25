@@ -206,7 +206,7 @@ export default function Departments() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="">No Manager</SelectItem>
+                          <SelectItem value="none">No Manager</SelectItem>
                           {users.filter((user: User) => user.role === 'admin' || user.role === 'manager').map((user: User) => (
                             <SelectItem key={user.id} value={user.id}>
                               {user.firstName} {user.lastName} ({user.email})
@@ -334,7 +334,7 @@ export default function Departments() {
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="">No Manager</SelectItem>
+                        <SelectItem value="none">No Manager</SelectItem>
                         {users?.filter((user: User) => user.role === 'admin' || user.role === 'manager').map((user: User) => (
                           <SelectItem key={user.id} value={user.id}>
                             {user.firstName} {user.lastName} ({user.email})

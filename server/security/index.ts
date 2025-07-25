@@ -45,7 +45,7 @@ export const securityConfig = {
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d'
   },
   rateLimiting: {
-    enabled: process.env.RATE_LIMITING_ENABLED !== 'false',
+    enabled: process.env.NODE_ENV === 'production' && process.env.RATE_LIMITING_ENABLED !== 'false',
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'), // 15 minutes
     maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100')
   },
