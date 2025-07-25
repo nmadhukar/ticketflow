@@ -1,8 +1,13 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { applySecurity, applyRouteSpecificSecurity, securityHealthCheck } from './security';
 
 const app = express();
+
+// Apply security middleware first
+applySecurity(app);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -45,7 +50,15 @@ app.use((req, res, next) => {
     console.error("Failed to seed email templates:", error);
   }
   
+  // Apply route-specific security
+  applyRouteSpecificSecurity(app);
+  
   const server = await registerRoutes(app);
+
+  // Security health check endpoint
+  app.get('/api/security/health', (req, res) => {
+    res.json(securityHealthCheck());
+  });
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
