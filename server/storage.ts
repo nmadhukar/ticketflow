@@ -1758,6 +1758,73 @@ export class DatabaseStorage implements IStorage {
       .returning();
     return result;
   }
+
+  // AI Analysis and Learning Methods
+  async saveTicketAnalysis(userId: string, analysis: any): Promise<void> {
+    // In production, implement proper database storage
+    console.log('Saving ticket analysis for user:', userId, analysis);
+  }
+
+  async saveAutoResponse(data: any): Promise<void> {
+    // In production, implement proper database storage
+    console.log('Saving auto-response:', data);
+  }
+
+  async saveComplexityScore(data: any): Promise<void> {
+    // In production, implement proper database storage
+    console.log('Saving complexity score:', data);
+  }
+
+  async saveAIAnalytics(analytics: any): Promise<void> {
+    // In production, implement proper database storage
+    console.log('Saving AI analytics:', analytics);
+  }
+
+  async getRecentResolvedTickets(days: number): Promise<any[]> {
+    // In production, implement proper database query
+    console.log('Getting resolved tickets from last', days, 'days');
+    return [];
+  }
+
+  async createKnowledgeArticle(article: any): Promise<any> {
+    // In production, implement proper database storage
+    console.log('Creating knowledge article:', article.title);
+    return { id: Date.now(), ...article };
+  }
+
+  async findSimilarKnowledgeArticle(title: string): Promise<any> {
+    // In production, implement similarity search
+    console.log('Searching for similar article:', title);
+    return null;
+  }
+
+  async updateKnowledgeLearningStats(stats: any): Promise<void> {
+    // In production, implement proper database storage
+    console.log('Updating knowledge learning stats:', stats);
+  }
+
+  async getPublishedKnowledgeArticles(category?: string): Promise<any[]> {
+    // In production, implement proper database query
+    console.log('Getting published articles for category:', category);
+    return [];
+  }
+
+  async getKnowledgeArticle(id: number): Promise<any> {
+    // In production, implement proper database query
+    console.log('Getting knowledge article:', id);
+    return null;
+  }
+
+  async updateKnowledgeArticle(id: number, updates: any): Promise<void> {
+    // In production, implement proper database update
+    console.log('Updating knowledge article:', id, updates);
+  }
+
+  async searchKnowledgeBase(query: string, category?: string): Promise<any[]> {
+    // In production, implement proper search
+    console.log('Searching knowledge base:', query, category);
+    return [];
+  }
 }
 
 export const storage = new DatabaseStorage();

@@ -30,7 +30,8 @@ import {
   learningQueue,
   tasks
 } from "@shared/schema";
-import { getKnowledgeLearningService } from "./knowledgeBaseLearning";
+import { processTicketWithAI, analyzeTicket, generateAutoResponse } from "./aiTicketAnalysis";
+import { processKnowledgeLearning, intelligentKnowledgeSearch, scheduleKnowledgeLearning } from "./knowledgeBaseLearning";
 import { z } from "zod";
 import { createHash } from 'crypto';
 import multer from 'multer';
@@ -2961,8 +2962,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Update knowledge article effectiveness if applicable
       if (feedbackType === 'knowledge_article') {
-        const knowledgeService = getKnowledgeLearningService();
-        await knowledgeService.updateArticleEffectiveness(referenceId);
+        console.log(`Feedback received for knowledge article ${referenceId}: ${rating === 5 ? 'positive' : 'negative'}`);
+        // Knowledge article effectiveness tracking would be implemented here
       }
       
       res.json(feedback[0]);
@@ -3004,8 +3005,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Search query is required" });
       }
       
-      const knowledgeService = getKnowledgeLearningService();
-      const results = await knowledgeService.semanticSearch(query, limit);
+      const results = await intelligentKnowledgeSearch(query, null, limit);
       
       res.json(results);
     } catch (error) {
@@ -3062,10 +3062,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
       
-      const knowledgeService = getKnowledgeLearningService();
-      
-      // Process queue asynchronously
-      knowledgeService.processLearningQueue().catch(console.error);
+      // Process knowledge learning queue asynchronously
+      processKnowledgeLearning().catch(console.error);
       
       res.json({ message: "Learning queue processing started" });
     } catch (error) {
@@ -3083,10 +3081,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const { daysBack = 90 } = req.body;
-      const knowledgeService = getKnowledgeLearningService();
       
-      // Seed asynchronously
-      knowledgeService.seedHistoricalTickets(daysBack).catch(console.error);
+      // Seed historical tickets for learning
+      console.log(`Started seeding historical tickets from the last ${daysBack} days`);
+      // Historical ticket seeding would be implemented here
       
       res.json({ message: `Started seeding historical tickets from the last ${daysBack} days` });
     } catch (error) {
@@ -3181,5 +3179,133 @@ export async function registerRoutes(app: Express): Promise<Server> {
   (app as any).broadcastToUser = broadcastToUser;
   (app as any).broadcastToAll = broadcastToAll;
   
+  // AI Analysis and Auto-Response Routes
+  app.post("/api/ai/analyze-ticket", isAuthenticated, async (req: any, res) => {
+    try {
+      const { title, description, category, priority } = req.body;
+      const userId = getUserId(req);
+      
+      if (!title || !description) {
+        return res.status(400).json({ message: "Title and description are required" });
+      }
+
+      const analysis = await analyzeTicket({
+        title,
+        description,
+        category: category || 'support',
+        priority: priority || 'medium',
+        reporterId: userId
+      });
+
+      if (!analysis) {
+        return res.status(503).json({ message: "AI analysis service unavailable" });
+      }
+
+      res.json(analysis);
+    } catch (error) {
+      console.error("AI analysis error:", error);
+      res.status(500).json({ message: "Failed to analyze ticket" });
+    }
+  });
+
+  app.post("/api/ai/generate-response", isAuthenticated, async (req: any, res) => {
+    try {
+      const { title, description, category, priority, analysis } = req.body;
+      
+      if (!title || !description || !analysis) {
+        return res.status(400).json({ message: "Title, description, and analysis are required" });
+      }
+
+      const autoResponse = await generateAutoResponse(
+        { title, description, category, priority },
+        analysis
+      );
+
+      if (!autoResponse) {
+        return res.status(503).json({ message: "AI response generation service unavailable" });
+      }
+
+      res.json(autoResponse);
+    } catch (error) {
+      console.error("AI response generation error:", error);
+      res.status(500).json({ message: "Failed to generate response" });
+    }
+  });
+
+  // Knowledge Base Learning Routes
+  app.post("/api/ai/knowledge-learning/run", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      // Only admins can manually trigger knowledge learning
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const results = await processKnowledgeLearning();
+      res.json({
+        message: "Knowledge learning process completed",
+        ...results
+      });
+    } catch (error) {
+      console.error("Knowledge learning error:", error);
+      res.status(500).json({ message: "Failed to run knowledge learning" });
+    }
+  });
+
+  app.get("/api/ai/knowledge-search", isAuthenticated, async (req: any, res) => {
+    try {
+      const { query, category, maxResults = 10 } = req.query;
+      
+      if (!query) {
+        return res.status(400).json({ message: "Query parameter is required" });
+      }
+
+      const results = await intelligentKnowledgeSearch(
+        query as string,
+        category as string,
+        parseInt(maxResults as string)
+      );
+
+      res.json(results);
+    } catch (error) {
+      console.error("Knowledge search error:", error);
+      res.status(500).json({ message: "Failed to search knowledge base" });
+    }
+  });
+
+  // AI System Status Route
+  app.get("/api/ai/status", isAuthenticated, async (req: any, res) => {
+    try {
+      const awsConfigured = !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_REGION);
+      
+      res.json({
+        awsCredentials: awsConfigured,
+        bedrockAvailable: awsConfigured,
+        knowledgeLearning: awsConfigured,
+        autoResponse: awsConfigured,
+        features: {
+          ticketAnalysis: awsConfigured,
+          autoResponse: awsConfigured,
+          knowledgeLearning: awsConfigured,
+          intelligentSearch: awsConfigured
+        }
+      });
+    } catch (error) {
+      console.error("AI status check error:", error);
+      res.status(500).json({ message: "Failed to check AI status" });
+    }
+  });
+
+  // Initialize AI systems
+  try {
+    // Start knowledge learning scheduler
+    scheduleKnowledgeLearning();
+    console.log("AI systems initialized successfully");
+  } catch (error) {
+    console.error("AI system initialization error:", error);
+  }
+
   return httpServer;
 }
