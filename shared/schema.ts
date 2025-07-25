@@ -774,7 +774,6 @@ export type InsertEscalationRule = z.infer<typeof insertEscalationRuleSchema>;
 export type TicketComplexityScore = typeof ticketComplexityScores.$inferSelect;
 export type InsertTicketComplexityScore = z.infer<typeof insertTicketComplexityScoreSchema>;
 
-// Schemas for knowledge base tables
 export const insertKnowledgeEmbeddingSchema = createInsertSchema(knowledgeEmbeddings).omit({
   id: true,
   createdAt: true,
@@ -797,7 +796,7 @@ export const insertLearningQueueSchema = createInsertSchema(learningQueue).omit(
   processedAt: true,
 });
 
-// Types for knowledge base tables
+// Types for knowledge base tables (removed duplicates)
 export type KnowledgeEmbedding = typeof knowledgeEmbeddings.$inferSelect;
 export type InsertKnowledgeEmbedding = z.infer<typeof insertKnowledgeEmbeddingSchema>;
 export type AiFeedback = typeof aiFeedback.$inferSelect;

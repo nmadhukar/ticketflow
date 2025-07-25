@@ -2709,15 +2709,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
       
-      const articles = await db
-        .select()
-        .from(knowledgeArticles)
-        .orderBy(desc(knowledgeArticles.createdAt));
+      const { category, published } = req.query;
+      const filters: any = {};
+      if (category) filters.category = category as string;
+      if (published !== undefined) filters.isPublished = published === 'true';
       
+      const articles = await storage.getAllKnowledgeArticles(filters);
       res.json(articles);
     } catch (error) {
       console.error("Error fetching knowledge articles:", error);
       res.status(500).json({ message: "Failed to fetch knowledge articles" });
+    }
+  });
+
+  // Create knowledge article (admin)
+  app.post('/api/admin/knowledge', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const articleData = {
+        ...req.body,
+        createdBy: userId,
+      };
+
+      const article = await storage.createKnowledgeArticle(articleData);
+      res.status(201).json(article);
+    } catch (error) {
+      console.error("Error creating knowledge article:", error);
+      res.status(500).json({ message: "Failed to create knowledge article" });
+    }
+  });
+
+  // Update knowledge article (admin)
+  app.put('/api/admin/knowledge/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(getUserId(req));
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const articleId = parseInt(req.params.id);
+      const article = await storage.updateKnowledgeArticle(articleId, req.body);
+      res.json(article);
+    } catch (error) {
+      console.error("Error updating knowledge article:", error);
+      res.status(500).json({ message: "Failed to update knowledge article" });
+    }
+  });
+
+  // Delete knowledge article (admin)
+  app.delete('/api/admin/knowledge/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(getUserId(req));
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const articleId = parseInt(req.params.id);
+      await storage.deleteKnowledgeArticle(articleId);
+      res.json({ message: "Knowledge article deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting knowledge article:", error);
+      res.status(500).json({ message: "Failed to delete knowledge article" });
     }
   });
   
@@ -3264,6 +3322,216 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("AI status check error:", error);
       res.status(500).json({ message: "Failed to check AI status" });
+    }
+  });
+
+  // Knowledge Base Management Routes (admin only)
+  
+  // Get all knowledge articles with filtering
+  app.get('/api/admin/knowledge', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const { category, published } = req.query;
+      
+      const filters: any = {};
+      if (category) filters.category = category as string;
+      if (published !== undefined) {
+        filters.isPublished = published === 'true';
+      }
+      
+      const articles = await storage.getAllKnowledgeArticles(filters);
+      res.json(articles);
+    } catch (error) {
+      console.error('Error fetching knowledge articles:', error);
+      res.status(500).json({ message: 'Failed to fetch knowledge articles' });
+    }
+  });
+
+  // Create a new knowledge article
+  app.post('/api/admin/knowledge', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const { title, summary, content, category, tags, isPublished } = req.body;
+      
+      if (!title || !content) {
+        return res.status(400).json({ message: 'Title and content are required' });
+      }
+      
+      const article = await storage.createKnowledgeArticle({
+        title,
+        summary: summary || null,
+        content,
+        category: category || 'general',
+        tags: tags || [],
+        isPublished: isPublished || false,
+        createdBy: userId,
+        source: 'manual',
+      });
+      
+      res.status(201).json(article);
+    } catch (error) {
+      console.error('Error creating knowledge article:', error);
+      res.status(500).json({ message: 'Failed to create knowledge article' });
+    }
+  });
+
+  // Get a specific knowledge article
+  app.get('/api/admin/knowledge/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const id = parseInt(req.params.id);
+      const article = await storage.getKnowledgeArticle(id);
+      
+      if (!article) {
+        return res.status(404).json({ message: 'Knowledge article not found' });
+      }
+      
+      res.json(article);
+    } catch (error) {
+      console.error('Error fetching knowledge article:', error);
+      res.status(500).json({ message: 'Failed to fetch knowledge article' });
+    }
+  });
+
+  // Update a knowledge article
+  app.put('/api/admin/knowledge/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const id = parseInt(req.params.id);
+      const updates = req.body;
+      
+      // Ensure we don't update protected fields
+      delete updates.id;
+      delete updates.createdAt;
+      delete updates.usageCount;
+      delete updates.createdBy;
+      
+      const article = await storage.updateKnowledgeArticle(id, updates);
+      res.json(article);
+    } catch (error) {
+      console.error('Error updating knowledge article:', error);
+      res.status(500).json({ message: 'Failed to update knowledge article' });
+    }
+  });
+
+  // Delete a knowledge article
+  app.delete('/api/admin/knowledge/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const id = parseInt(req.params.id);
+      await storage.deleteKnowledgeArticle(id);
+      res.json({ message: 'Knowledge article deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting knowledge article:', error);
+      res.status(500).json({ message: 'Failed to delete knowledge article' });
+    }
+  });
+
+  // Toggle article published status
+  app.patch('/api/admin/knowledge/:id/toggle-status', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const id = parseInt(req.params.id);
+      const article = await storage.toggleKnowledgeArticleStatus(id);
+      res.json(article);
+    } catch (error) {
+      console.error('Error toggling article status:', error);
+      res.status(500).json({ message: 'Failed to toggle article status' });
+    }
+  });
+
+  // Public knowledge base search (for all users)
+  app.get('/api/knowledge/search', isAuthenticated, async (req: any, res) => {
+    try {
+      const { q: query, category } = req.query;
+      
+      if (!query) {
+        return res.status(400).json({ message: 'Search query is required' });
+      }
+      
+      const articles = await storage.searchKnowledgeBase(query as string, category as string);
+      res.json(articles);
+    } catch (error) {
+      console.error('Error searching knowledge base:', error);
+      res.status(500).json({ message: 'Failed to search knowledge base' });
+    }
+  });
+
+  // Get published knowledge articles (for all users)
+  app.get('/api/knowledge/articles', isAuthenticated, async (req: any, res) => {
+    try {
+      const { category } = req.query;
+      const articles = await storage.getPublishedKnowledgeArticles(category as string);
+      res.json(articles);
+    } catch (error) {
+      console.error('Error fetching published articles:', error);
+      res.status(500).json({ message: 'Failed to fetch knowledge articles' });
+    }
+  });
+
+  // Track article usage (when users view an article)
+  app.post('/api/knowledge/:id/track-usage', isAuthenticated, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.incrementKnowledgeArticleUsage(id);
+      res.json({ message: 'Usage tracked successfully' });
+    } catch (error) {
+      console.error('Error tracking article usage:', error);
+      res.status(500).json({ message: 'Failed to track usage' });
+    }
+  });
+
+  // Rate article effectiveness (user feedback)
+  app.post('/api/knowledge/:id/rate', isAuthenticated, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { rating } = req.body;
+      
+      if (rating < 1 || rating > 5) {
+        return res.status(400).json({ message: 'Rating must be between 1 and 5' });
+      }
+      
+      await storage.updateArticleEffectiveness(id, rating);
+      res.json({ message: 'Rating submitted successfully' });
+    } catch (error) {
+      console.error('Error rating article:', error);
+      res.status(500).json({ message: 'Failed to submit rating' });
     }
   });
 

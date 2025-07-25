@@ -1,175 +1,137 @@
-import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
-
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
+import { isUnauthorizedError } from "@/lib/authUtils";
+import Header from "@/components/header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
-import { useToast } from "@/hooks/use-toast";
-import { format } from "date-fns";
-import {
-  Search,
-  Plus,
-  Edit,
-  Trash2,
-  FileText,
-  Tag,
-  Calendar,
-  User,
-  Brain,
-  CheckCircle,
-  XCircle,
-  Book,
-  Sparkles,
-  BarChart,
-  ThumbsUp,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Progress } from "@/components/ui/progress";
+import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Plus, Edit, Trash2, BookOpen, Search, Eye, EyeOff, Brain, FileText, HelpCircle, Lightbulb, AlertCircle, CheckCircle, Clock, Loader2 } from "lucide-react";
+import { format } from "date-fns";
+import type { KnowledgeArticle } from "@shared/schema";
 
-interface KnowledgeArticle {
-  id: number;
-  title: string;
-  summary: string;
-  content: string;
-  category: string;
-  tags: string[];
-  status: "draft" | "published" | "archived";
-  viewCount: number;
-  helpfulCount: number;
-  sourceTicketId?: number;
-  createdBy: string;
-  createdByName?: string;
-  createdAt: string;
-  updatedAt: string;
-  isPublished: boolean;
-  effectivenessScore: number;
-  usageCount: number;
-  sourceTicketNumber?: string;
-  resolutionFromTicketId?: number;
-}
-
+/**
+ * Knowledge Base Management Page
+ * 
+ * This component provides comprehensive knowledge base management functionality including:
+ * - Manual creation of knowledge articles for common issues and resolutions
+ * - Integration with AI-powered learning from resolved tickets
+ * - Article management with publishing, editing, and deletion capabilities
+ * - Search and filtering by category, status, and content
+ * - Performance analytics for article effectiveness
+ * 
+ * The page is designed for admin users to manage both manually created articles
+ * and AI-generated knowledge from the learning system.
+ */
 export default function KnowledgeBase() {
   const { toast } = useToast();
-  const [searchTerm, setSearchTerm] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<string>("published");
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [editingArticle, setEditingArticle] = useState<KnowledgeArticle | null>(null);
-  const [showAIGenerated, setShowAIGenerated] = useState(true);
-  const [isSemanticSearch, setIsSemanticSearch] = useState(false);
-  const [semanticSearchResults, setSemanticSearchResults] = useState<any[]>([]);
+  const { isAuthenticated, isLoading, user } = useAuth();
+  const queryClient = useQueryClient();
   
-  // Form state
-  const [formData, setFormData] = useState({
-    title: "",
-    summary: "",
-    content: "",
-    category: "general",
-    tags: "",
-    status: "draft" as "draft" | "published" | "archived",
-  });
+  const [isArticleDialogOpen, setIsArticleDialogOpen] = useState(false);
+  const [selectedArticle, setSelectedArticle] = useState<KnowledgeArticle | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>("");
+  
+  // Form states for article creation/editing
+  const [articleTitle, setArticleTitle] = useState("");
+  const [articleSummary, setArticleSummary] = useState("");
+  const [articleContent, setArticleContent] = useState("");
+  const [articleCategory, setArticleCategory] = useState("");
+  const [articleTags, setArticleTags] = useState("");
+  const [isPublished, setIsPublished] = useState(false);
+
+  // Predefined categories for common issue types
+  const knowledgeCategories = [
+    "troubleshooting",
+    "how-to",
+    "faq",
+    "technical",
+    "user-guide",
+    "system-admin",
+    "security",
+    "integration",
+    "performance",
+    "general"
+  ];
+
+  // Redirect to home if not authenticated or not admin
+  useEffect(() => {
+    if (!isLoading && (!isAuthenticated || user?.role !== 'admin')) {
+      toast({
+        title: "Unauthorized",
+        description: "Admin access required. Redirecting...",
+        variant: "destructive",
+      });
+      setTimeout(() => {
+        window.location.href = "/api/login";
+      }, 500);
+      return;
+    }
+  }, [isAuthenticated, isLoading, user, toast]);
 
   // Fetch knowledge articles
-  const { data: articles, isLoading } = useQuery({
-    queryKey: ["/api/knowledge"],
+  const { data: articles = [], isLoading: articlesLoading, refetch: refetchArticles } = useQuery<KnowledgeArticle[]>({
+    queryKey: ['/api/admin/knowledge', { category: categoryFilter, published: statusFilter }],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (categoryFilter) params.append('category', categoryFilter);
+      if (statusFilter) params.append('published', statusFilter);
+      
+      const response = await fetch(`/api/admin/knowledge?${params.toString()}`, {
+        credentials: 'include',
+      });
+      if (!response.ok) throw new Error('Failed to fetch knowledge articles');
+      return response.json();
+    },
+    retry: false,
+    enabled: isAuthenticated && user?.role === 'admin',
   });
 
-  // Search knowledge base
-  const searchArticles = useMutation({
-    mutationFn: async (query: string) => {
-      const res = await apiRequest("POST", "/api/knowledge-base/search", { query, limit: 10 });
-      return res.json();
-    },
-    onSuccess: (data) => {
-      setSemanticSearchResults(data);
-      setIsSemanticSearch(true);
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Search failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  // Create article mutation
-  const createArticle = useMutation({
-    mutationFn: async (data: typeof formData) => {
-      const res = await apiRequest("POST", "/api/knowledge", {
-        ...data,
-        tags: data.tags.split(",").map(t => t.trim()).filter(Boolean),
-      });
-      return res.json();
+  // Create/Update article mutation
+  const saveArticleMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const url = selectedArticle 
+        ? `/api/admin/knowledge/${selectedArticle.id}`
+        : '/api/admin/knowledge';
+      
+      return await apiRequest(selectedArticle ? 'PUT' : 'POST', url, data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/knowledge"] });
-      setIsCreateDialogOpen(false);
-      resetForm();
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/knowledge'] });
+      resetArticleForm();
+      setIsArticleDialogOpen(false);
       toast({
-        title: "Article created",
-        description: "The knowledge article has been created successfully.",
+        title: "Success",
+        description: `Knowledge article ${selectedArticle ? 'updated' : 'created'} successfully`,
       });
     },
     onError: (error: Error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
       toast({
-        title: "Creation failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  // Update article mutation
-  const updateArticle = useMutation({
-    mutationFn: async ({ id, data }: { id: number; data: typeof formData }) => {
-      const res = await apiRequest("PATCH", `/api/knowledge/${id}`, {
-        ...data,
-        tags: data.tags.split(",").map(t => t.trim()).filter(Boolean),
-      });
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/knowledge"] });
-      setEditingArticle(null);
-      resetForm();
-      toast({
-        title: "Article updated",
-        description: "The knowledge article has been updated successfully.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Update failed",
+        title: "Error",
         description: error.message,
         variant: "destructive",
       });
@@ -177,588 +139,493 @@ export default function KnowledgeBase() {
   });
 
   // Delete article mutation
-  const deleteArticle = useMutation({
+  const deleteArticleMutation = useMutation({
     mutationFn: async (id: number) => {
-      const res = await apiRequest("DELETE", `/api/knowledge/${id}`);
-      return res.json();
+      return await apiRequest('DELETE', `/api/admin/knowledge/${id}`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/knowledge"] });
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/knowledge'] });
       toast({
-        title: "Article deleted",
-        description: "The knowledge article has been deleted successfully.",
+        title: "Success",
+        description: "Knowledge article deleted successfully",
       });
     },
     onError: (error: Error) => {
+      if (isUnauthorizedError(error)) {
+        toast({
+          title: "Unauthorized",
+          description: "You are logged out. Logging in again...",
+          variant: "destructive",
+        });
+        setTimeout(() => {
+          window.location.href = "/api/login";
+        }, 500);
+        return;
+      }
       toast({
-        title: "Deletion failed",
+        title: "Error",
         description: error.message,
         variant: "destructive",
       });
     },
   });
 
-  // Create from resolved ticket
-  const createFromTicket = useMutation({
-    mutationFn: async (ticketId: number) => {
-      const res = await apiRequest("POST", `/api/knowledge/from-ticket/${ticketId}`);
-      return res.json();
+  // Toggle publish status mutation
+  const togglePublishMutation = useMutation({
+    mutationFn: async (article: KnowledgeArticle) => {
+      return await apiRequest('PUT', `/api/admin/knowledge/${article.id}`, {
+        isPublished: !article.isPublished
+      });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/knowledge"] });
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/knowledge'] });
       toast({
-        title: "Article created from ticket",
-        description: "A knowledge article has been created from the resolved ticket.",
+        title: "Success",
+        description: "Article status updated successfully",
       });
     },
     onError: (error: Error) => {
       toast({
-        title: "Creation failed",
+        title: "Error",
         description: error.message,
         variant: "destructive",
       });
     },
   });
 
-  const resetForm = () => {
-    setFormData({
-      title: "",
-      summary: "",
-      content: "",
-      category: "general",
-      tags: "",
-      status: "draft",
-    });
+  // Trigger AI learning mutation
+  const triggerLearningMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch('/api/ai/knowledge-learning/run', {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!response.ok) throw new Error('Failed to trigger knowledge learning');
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/knowledge'] });
+      toast({
+        title: "AI Learning Complete",
+        description: `Found ${data.patternsFound} patterns, created ${data.articlesCreated} articles (${data.articlesPublished} published)`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const resetArticleForm = () => {
+    setArticleTitle("");
+    setArticleSummary("");
+    setArticleContent("");
+    setArticleCategory("");
+    setArticleTags("");
+    setIsPublished(false);
+    setSelectedArticle(null);
   };
 
-  const handleEdit = (article: KnowledgeArticle) => {
-    setEditingArticle(article);
-    setFormData({
-      title: article.title,
-      summary: article.summary,
-      content: article.content,
-      category: article.category,
-      tags: article.tags.join(", "),
-      status: article.status,
-    });
+  const handleEditArticle = (article: KnowledgeArticle) => {
+    setSelectedArticle(article);
+    setArticleTitle(article.title);
+    setArticleSummary(article.summary || "");
+    setArticleContent(article.content);
+    setArticleCategory(article.category || "");
+    setArticleTags(article.tags?.join(", ") || "");
+    setIsPublished(article.isPublished || false);
+    setIsArticleDialogOpen(true);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (editingArticle) {
-      await updateArticle.mutateAsync({ id: editingArticle.id, data: formData });
-    } else {
-      await createArticle.mutateAsync(formData);
-    }
-  };
-
-  const handleSemanticSearch = async () => {
-    if (!searchTerm.trim()) {
-      setIsSemanticSearch(false);
-      setSemanticSearchResults([]);
+  const handleSaveArticle = () => {
+    if (!articleTitle.trim() || !articleContent.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Title and content are required",
+        variant: "destructive",
+      });
       return;
     }
+
+    const data = {
+      title: articleTitle.trim(),
+      summary: articleSummary.trim(),
+      content: articleContent.trim(),
+      category: articleCategory || "general",
+      tags: articleTags ? articleTags.split(",").map(tag => tag.trim()).filter(Boolean) : [],
+      isPublished,
+    };
     
-    await searchArticles.mutateAsync(searchTerm);
+    saveArticleMutation.mutate(data);
   };
 
-  // Filter articles
-  const filteredArticles = articles || [];
-  const displayArticles = isSemanticSearch 
-    ? semanticSearchResults.map(result => result.article)
-    : filteredArticles.filter((article: KnowledgeArticle) => {
-        const matchesSearch = searchTerm === "" ||
-          article.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          article.summary.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          article.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          article.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
-        
-        const matchesCategory = categoryFilter === "all" || article.category === categoryFilter;
-        const matchesStatus = statusFilter === "all" || article.isPublished;
-        const matchesAIFilter = !showAIGenerated || (showAIGenerated && article.resolutionFromTicketId);
+  // Filter articles based on search and filters
+  const filteredArticles = articles.filter((article: KnowledgeArticle) => {
+    const matchesSearch = !searchQuery || 
+      article.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      article.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      article.summary?.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesCategory = !categoryFilter || article.category === categoryFilter;
+    const matchesStatus = !statusFilter || 
+      (statusFilter === 'published' && article.isPublished) ||
+      (statusFilter === 'draft' && !article.isPublished);
+    
+    return matchesSearch && matchesCategory && matchesStatus;
+  });
 
-        return matchesSearch && matchesCategory && matchesStatus;
-      });
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "published":
-        return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
-      case "draft":
-        return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400";
-      case "archived":
-        return "bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400";
-      default:
-        return "bg-muted text-muted-foreground";
+  const getStatusBadge = (article: KnowledgeArticle) => {
+    if (article.isPublished) {
+      return <Badge variant="default" className="bg-green-100 text-green-800"><CheckCircle className="h-3 w-3 mr-1" />Published</Badge>;
     }
+    return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />Draft</Badge>;
   };
 
-  const getCategoryColor = (category: string) => {
+  const getCategoryIcon = (category: string) => {
     switch (category) {
-      case "general":
-        return "bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400";
-      case "technical":
-        return "bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-400";
-      case "troubleshooting":
-        return "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400";
-      case "howto":
-        return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
-      case "faq":
-        return "bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400";
-      default:
-        return "bg-muted text-muted-foreground";
+      case 'troubleshooting': return <AlertCircle className="h-4 w-4" />;
+      case 'how-to': return <BookOpen className="h-4 w-4" />;
+      case 'faq': return <HelpCircle className="h-4 w-4" />;
+      case 'technical': return <Brain className="h-4 w-4" />;
+      default: return <FileText className="h-4 w-4" />;
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-border" />
+      </div>
+    );
+  }
 
   return (
-    <div className="container mx-auto py-6 space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold flex items-center gap-2">
-              <Book className="h-8 w-8" />
-              Knowledge Base
-            </h1>
-            <p className="text-muted-foreground">
-              Manage and search knowledge articles created from resolved tickets
-            </p>
-          </div>
-          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="h-4 w-4 mr-2" />
-                Create Article
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl">
-              <form onSubmit={handleSubmit}>
-                <DialogHeader>
-                  <DialogTitle>Create Knowledge Article</DialogTitle>
-                  <DialogDescription>
-                    Create a new knowledge article to help resolve future tickets faster.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="title">Title</Label>
-                    <Input
-                      id="title"
-                      value={formData.title}
-                      onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                      placeholder="Enter article title"
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="summary">Summary</Label>
-                    <Textarea
-                      id="summary"
-                      value={formData.summary}
-                      onChange={(e) => setFormData({ ...formData, summary: e.target.value })}
-                      placeholder="Brief summary of the article"
-                      rows={2}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="content">Content</Label>
-                    <Textarea
-                      id="content"
-                      value={formData.content}
-                      onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                      placeholder="Detailed article content"
-                      rows={6}
-                      required
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="category">Category</Label>
-                      <Select
-                        value={formData.category}
-                        onValueChange={(value) => setFormData({ ...formData, category: value })}
-                      >
-                        <SelectTrigger id="category">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="general">General</SelectItem>
-                          <SelectItem value="technical">Technical</SelectItem>
-                          <SelectItem value="troubleshooting">Troubleshooting</SelectItem>
-                          <SelectItem value="howto">How-To</SelectItem>
-                          <SelectItem value="faq">FAQ</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="status">Status</Label>
-                      <Select
-                        value={formData.status}
-                        onValueChange={(value: "draft" | "published" | "archived") => 
-                          setFormData({ ...formData, status: value })
-                        }
-                      >
-                        <SelectTrigger id="status">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="draft">Draft</SelectItem>
-                          <SelectItem value="published">Published</SelectItem>
-                          <SelectItem value="archived">Archived</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="tags">Tags (comma-separated)</Label>
-                    <Input
-                      id="tags"
-                      value={formData.tags}
-                      onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
-                      placeholder="tag1, tag2, tag3"
-                    />
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button type="submit" disabled={createArticle.isPending}>
-                    Create Article
-                  </Button>
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
-        </div>
-
-        {/* Filters */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Search & Filter</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-4">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search articles..."
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    if (!e.target.value.trim()) {
-                      setIsSemanticSearch(false);
-                      setSemanticSearchResults([]);
-                    }
-                  }}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSemanticSearch()}
-                  className="pl-9"
-                />
-              </div>
-              <Button 
-                onClick={handleSemanticSearch}
-                disabled={searchArticles.isPending || !searchTerm.trim()}
-                variant={isSemanticSearch ? "default" : "outline"}
+    <div className="min-h-screen bg-background">
+      <Header />
+      <main className="container mx-auto px-4 py-8">
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-3xl font-bold">Knowledge Base Management</h1>
+              <p className="text-muted-foreground mt-2">
+                Manage knowledge articles for common issues and resolutions
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => triggerLearningMutation.mutate()}
+                disabled={triggerLearningMutation.isPending}
+                variant="outline"
               >
-                <Brain className="h-4 w-4 mr-2" />
-                {searchArticles.isPending ? "Searching..." : "AI Search"}
+                {triggerLearningMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Brain className="h-4 w-4 mr-2" />
+                )}
+                AI Learning
               </Button>
-              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Category" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Categories</SelectItem>
-                  <SelectItem value="general">General</SelectItem>
-                  <SelectItem value="technical">Technical</SelectItem>
-                  <SelectItem value="troubleshooting">Troubleshooting</SelectItem>
-                  <SelectItem value="howto">How-To</SelectItem>
-                  <SelectItem value="faq">FAQ</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-32">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="published">Published</SelectItem>
-                  <SelectItem value="draft">Draft</SelectItem>
-                  <SelectItem value="archived">Archived</SelectItem>
-                </SelectContent>
-              </Select>
+              <Dialog open={isArticleDialogOpen} onOpenChange={setIsArticleDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button onClick={() => resetArticleForm()}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Article
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>
+                      {selectedArticle ? 'Edit Knowledge Article' : 'Create Knowledge Article'}
+                    </DialogTitle>
+                    <DialogDescription>
+                      {selectedArticle 
+                        ? 'Update the knowledge article details below.'
+                        : 'Create a new knowledge article for common issues and their resolutions.'
+                      }
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="title">Title *</Label>
+                      <Input
+                        id="title"
+                        value={articleTitle}
+                        onChange={(e) => setArticleTitle(e.target.value)}
+                        placeholder="e.g., How to reset password"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="summary">Summary</Label>
+                      <Input
+                        id="summary"
+                        value={articleSummary}
+                        onChange={(e) => setArticleSummary(e.target.value)}
+                        placeholder="Brief description of the solution"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="category">Category</Label>
+                      <Select value={articleCategory} onValueChange={setArticleCategory}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select category" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {knowledgeCategories.map((category) => (
+                            <SelectItem key={category} value={category}>
+                              <div className="flex items-center gap-2">
+                                {getCategoryIcon(category)}
+                                {category.charAt(0).toUpperCase() + category.slice(1).replace('-', ' ')}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label htmlFor="tags">Tags</Label>
+                      <Input
+                        id="tags"
+                        value={articleTags}
+                        onChange={(e) => setArticleTags(e.target.value)}
+                        placeholder="Comma-separated tags (e.g., password, authentication, login)"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="content">Content *</Label>
+                      <Textarea
+                        id="content"
+                        value={articleContent}
+                        onChange={(e) => setArticleContent(e.target.value)}
+                        placeholder="Detailed step-by-step resolution..."
+                        className="min-h-[200px]"
+                      />
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch
+                        id="published"
+                        checked={isPublished}
+                        onCheckedChange={setIsPublished}
+                      />
+                      <Label htmlFor="published">Publish immediately</Label>
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => setIsArticleDialogOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      onClick={handleSaveArticle}
+                      disabled={saveArticleMutation.isPending}
+                    >
+                      {saveArticleMutation.isPending && (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      )}
+                      {selectedArticle ? 'Update' : 'Create'} Article
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
-            
-            {/* AI-Generated Filter and Search Info */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="ai-generated"
-                    checked={showAIGenerated}
-                    onCheckedChange={setShowAIGenerated}
-                  />
-                  <Label htmlFor="ai-generated" className="cursor-pointer">
-                    Show AI-Generated Articles
-                  </Label>
-                </div>
-              </div>
-              
-              {isSemanticSearch && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Sparkles className="h-4 w-4" />
-                  Showing {semanticSearchResults.length} AI-powered search results
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+          </div>
 
-        {/* Articles Table */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Knowledge Articles</CardTitle>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <FileText className="h-4 w-4" />
-                {filteredArticles?.length || 0} articles
+          {/* Filters and Search */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Search className="h-5 w-5" />
+                Filter & Search
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <Label htmlFor="search">Search</Label>
+                  <Input
+                    id="search"
+                    placeholder="Search articles..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="category-filter">Category</Label>
+                  <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="All categories" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All categories</SelectItem>
+                      {knowledgeCategories.map((category) => (
+                        <SelectItem key={category} value={category}>
+                          <div className="flex items-center gap-2">
+                            {getCategoryIcon(category)}
+                            {category.charAt(0).toUpperCase() + category.slice(1).replace('-', ' ')}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="status-filter">Status</Label>
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="All statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All statuses</SelectItem>
+                      <SelectItem value="published">Published</SelectItem>
+                      <SelectItem value="draft">Draft</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-end">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => {
+                      setSearchQuery("");
+                      setCategoryFilter("");
+                      setStatusFilter("");
+                    }}
+                  >
+                    Clear Filters
+                  </Button>
+                </div>
               </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="text-center py-8">Loading articles...</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
+            </CardContent>
+          </Card>
+
+          {/* Articles Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Knowledge Articles ({filteredArticles.length})</CardTitle>
+              <CardDescription>
+                Manage manually created and AI-generated knowledge articles
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Usage</TableHead>
+                    <TableHead>Effectiveness</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {articlesLoading ? (
                     <TableRow>
-                      <TableHead>Title</TableHead>
-                      <TableHead className="w-28">Category</TableHead>
-                      <TableHead className="w-24">Status</TableHead>
-                      <TableHead className="w-32">Stats</TableHead>
-                      <TableHead className="w-32">Created</TableHead>
-                      <TableHead className="w-28">Effectiveness</TableHead>
-                      <TableHead className="w-24">Source</TableHead>
-                      <TableHead className="w-24">Actions</TableHead>
+                      <TableCell colSpan={7} className="text-center">
+                        <Loader2 className="h-4 w-4 animate-spin mx-auto" />
+                        Loading articles...
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {displayArticles?.map((article: KnowledgeArticle) => (
+                  ) : filteredArticles.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center">
+                        {searchQuery || categoryFilter || statusFilter 
+                          ? "No articles match your search criteria."
+                          : "No knowledge articles found. Create your first article!"
+                        }
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredArticles.map((article: KnowledgeArticle) => (
                       <TableRow key={article.id}>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <div className="font-medium">{article.title}</div>
-                            <div className="text-sm text-muted-foreground line-clamp-2">
-                              {article.summary}
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            {getCategoryIcon(article.category || 'general')}
+                            <div>
+                              <div className="font-medium">{article.title}</div>
+                              {article.summary && (
+                                <div className="text-sm text-muted-foreground">
+                                  {article.summary}
+                                </div>
+                              )}
                             </div>
-                            {article.tags.length > 0 && (
-                              <div className="flex items-center gap-1 flex-wrap">
-                                {article.tags.map((tag, index) => (
-                                  <Badge key={index} variant="outline" className="text-xs">
-                                    {tag}
-                                  </Badge>
-                                ))}
-                              </div>
-                            )}
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge className={getCategoryColor(article.category)}>
-                            {article.category}
+                          <Badge variant="outline">
+                            {article.category || 'general'}
                           </Badge>
                         </TableCell>
+                        <TableCell>{getStatusBadge(article)}</TableCell>
+                        <TableCell>{article.usageCount || 0}</TableCell>
                         <TableCell>
-                          <Badge className={getStatusColor(article.status)}>
-                            {article.status}
-                          </Badge>
+                          {article.effectivenessScore ? 
+                            `${Math.round(parseFloat(article.effectivenessScore) * 100)}%` : 
+                            'N/A'
+                          }
                         </TableCell>
                         <TableCell>
-                          <div className="space-y-1 text-sm">
-                            <div className="flex items-center gap-1">
-                              <BarChart className="h-3 w-3 text-muted-foreground" />
-                              {article.usageCount || 0} uses
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <ThumbsUp className="h-3 w-3 text-muted-foreground" />
-                              {article.helpfulCount} helpful
-                            </div>
-                          </div>
+                          {article.createdAt ? format(new Date(article.createdAt), "MMM d, yyyy") : "Unknown"}
                         </TableCell>
-                        <TableCell>
-                          <div className="space-y-1 text-sm">
-                            <div className="flex items-center gap-1">
-                              <User className="h-3 w-3 text-muted-foreground" />
-                              {article.createdByName || "System"}
-                            </div>
-                            <div className="flex items-center gap-1 text-muted-foreground">
-                              <Calendar className="h-3 w-3" />
-                              {format(new Date(article.createdAt), "MMM d")}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {article.resolutionFromTicketId ? (
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-1">
-                                <Sparkles className="h-4 w-4 text-primary" />
-                                <span className="text-xs font-medium">
-                                  {(article.effectivenessScore * 100).toFixed(0)}%
-                                </span>
-                              </div>
-                              <Progress 
-                                value={article.effectivenessScore * 100} 
-                                className="h-1 w-16"
-                              />
-                            </div>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">N/A</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {article.sourceTicketNumber ? (
-                            <div className="flex items-center gap-1">
-                              <Brain className="h-4 w-4 text-primary" />
-                              <span className="text-xs">{article.sourceTicketNumber}</span>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">Manual</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
                             <Button
+                              size="sm"
                               variant="ghost"
-                              size="icon"
-                              onClick={() => handleEdit(article)}
+                              onClick={() => togglePublishMutation.mutate(article)}
+                              disabled={togglePublishMutation.isPending}
+                            >
+                              {article.isPublished ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleEditArticle(article)}
                             >
                               <Edit className="h-4 w-4" />
                             </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => deleteArticle.mutate(article.id)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button size="sm" variant="ghost">
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Delete Knowledge Article</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Are you sure you want to delete "{article.title}"? This action cannot be undone.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    onClick={() => deleteArticleMutation.mutate(article.id)}
+                                    disabled={deleteArticleMutation.isPending}
+                                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                  >
+                                    {deleteArticleMutation.isPending && (
+                                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    )}
+                                    Delete
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
                           </div>
                         </TableCell>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                {displayArticles?.length === 0 && (
-                  <div className="text-center py-8 text-muted-foreground">
-                    {isSemanticSearch ? "No articles found matching your search query." : "No articles found matching your filters."}
-                  </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Edit Dialog */}
-        <Dialog open={!!editingArticle} onOpenChange={(open) => !open && setEditingArticle(null)}>
-          <DialogContent className="max-w-2xl">
-            <form onSubmit={handleSubmit}>
-              <DialogHeader>
-                <DialogTitle>Edit Knowledge Article</DialogTitle>
-                <DialogDescription>
-                  Update the knowledge article details.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-title">Title</Label>
-                  <Input
-                    id="edit-title"
-                    value={formData.title}
-                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                    placeholder="Enter article title"
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-summary">Summary</Label>
-                  <Textarea
-                    id="edit-summary"
-                    value={formData.summary}
-                    onChange={(e) => setFormData({ ...formData, summary: e.target.value })}
-                    placeholder="Brief summary of the article"
-                    rows={2}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-content">Content</Label>
-                  <Textarea
-                    id="edit-content"
-                    value={formData.content}
-                    onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                    placeholder="Detailed article content"
-                    rows={6}
-                    required
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-category">Category</Label>
-                    <Select
-                      value={formData.category}
-                      onValueChange={(value) => setFormData({ ...formData, category: value })}
-                    >
-                      <SelectTrigger id="edit-category">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="general">General</SelectItem>
-                        <SelectItem value="technical">Technical</SelectItem>
-                        <SelectItem value="troubleshooting">Troubleshooting</SelectItem>
-                        <SelectItem value="howto">How-To</SelectItem>
-                        <SelectItem value="faq">FAQ</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="edit-status">Status</Label>
-                    <Select
-                      value={formData.status}
-                      onValueChange={(value: "draft" | "published" | "archived") => 
-                        setFormData({ ...formData, status: value })
-                      }
-                    >
-                      <SelectTrigger id="edit-status">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="draft">Draft</SelectItem>
-                        <SelectItem value="published">Published</SelectItem>
-                        <SelectItem value="archived">Archived</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-tags">Tags (comma-separated)</Label>
-                  <Input
-                    id="edit-tags"
-                    value={formData.tags}
-                    onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
-                    placeholder="tag1, tag2, tag3"
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setEditingArticle(null)}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={updateArticle.isPending}>
-                  Update Article
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </div>
+      </main>
     </div>
   );
 }

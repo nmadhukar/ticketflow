@@ -64,6 +64,12 @@ import {
   companyPolicies,
   type CompanyPolicy,
   type InsertCompanyPolicy,
+  knowledgeArticles,
+  type KnowledgeArticle,
+  type InsertKnowledgeArticle,
+  learningQueue,
+  type LearningQueue,
+  type InsertLearningQueue,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, or, like, count, sql, isNotNull } from "drizzle-orm";
@@ -319,6 +325,32 @@ export interface IStorage {
   getCompanyPolicyById(id: number): Promise<CompanyPolicy | undefined>;
   getAllCompanyPolicies(includeInactive?: boolean): Promise<CompanyPolicy[]>;
   toggleCompanyPolicyStatus(id: number): Promise<CompanyPolicy>;
+
+  // Knowledge Base operations
+  createKnowledgeArticle(article: InsertKnowledgeArticle): Promise<KnowledgeArticle>;
+  updateKnowledgeArticle(id: number, article: Partial<InsertKnowledgeArticle>): Promise<KnowledgeArticle>;
+  deleteKnowledgeArticle(id: number): Promise<void>;
+  getKnowledgeArticle(id: number): Promise<KnowledgeArticle | undefined>;
+  getAllKnowledgeArticles(filters?: { category?: string; isPublished?: boolean; createdBy?: string }): Promise<KnowledgeArticle[]>;
+  getPublishedKnowledgeArticles(category?: string): Promise<KnowledgeArticle[]>;
+  searchKnowledgeBase(query: string, category?: string): Promise<KnowledgeArticle[]>;
+  findSimilarKnowledgeArticle(title: string): Promise<KnowledgeArticle | undefined>;
+  toggleKnowledgeArticleStatus(id: number): Promise<KnowledgeArticle>;
+  incrementKnowledgeArticleUsage(id: number): Promise<void>;
+  updateArticleEffectiveness(id: number, rating: number): Promise<void>;
+
+  // Learning Queue operations
+  addToLearningQueue(ticketId: number): Promise<LearningQueue>;
+  getLearningQueueItems(status?: string): Promise<LearningQueue[]>;
+  updateLearningQueueItem(id: number, updates: Partial<InsertLearningQueue>): Promise<LearningQueue>;
+
+  // AI Analysis and Learning Methods (legacy compatibility)
+  saveTicketAnalysis(userId: string, analysis: any): Promise<void>;
+  saveAutoResponse(data: any): Promise<void>;
+  saveComplexityScore(data: any): Promise<void>;
+  saveAIAnalytics(analytics: any): Promise<void>;
+  getRecentResolvedTickets(days: number): Promise<Task[]>;
+  updateKnowledgeLearningStats(stats: any): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1796,44 +1828,410 @@ export class DatabaseStorage implements IStorage {
     return [];
   }
 
-  async createKnowledgeArticle(article: any): Promise<any> {
-    // In production, implement proper database storage
-    console.log('Creating knowledge article:', article.title);
-    return { id: Date.now(), ...article };
+  // Knowledge Base operations
+  async createKnowledgeArticle(article: InsertKnowledgeArticle): Promise<KnowledgeArticle> {
+    const [result] = await db
+      .insert(knowledgeArticles)
+      .values({
+        ...article,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+    return result;
   }
 
-  async findSimilarKnowledgeArticle(title: string): Promise<any> {
-    // In production, implement similarity search
-    console.log('Searching for similar article:', title);
-    return null;
+  async updateKnowledgeArticle(id: number, article: Partial<InsertKnowledgeArticle>): Promise<KnowledgeArticle> {
+    const [result] = await db
+      .update(knowledgeArticles)
+      .set({
+        ...article,
+        updatedAt: new Date(),
+      })
+      .where(eq(knowledgeArticles.id, id))
+      .returning();
+    return result;
+  }
+
+  async deleteKnowledgeArticle(id: number): Promise<void> {
+    await db.delete(knowledgeArticles).where(eq(knowledgeArticles.id, id));
+  }
+
+  async getKnowledgeArticle(id: number): Promise<KnowledgeArticle | undefined> {
+    const [article] = await db
+      .select()
+      .from(knowledgeArticles)
+      .where(eq(knowledgeArticles.id, id));
+    return article;
+  }
+
+  async getAllKnowledgeArticles(filters?: { 
+    category?: string; 
+    isPublished?: boolean; 
+    createdBy?: string 
+  }): Promise<KnowledgeArticle[]> {
+    let query = db.select().from(knowledgeArticles);
+    
+    const conditions = [];
+    if (filters?.category) {
+      conditions.push(eq(knowledgeArticles.category, filters.category));
+    }
+    if (filters?.isPublished !== undefined) {
+      conditions.push(eq(knowledgeArticles.isPublished, filters.isPublished));
+    }
+    if (filters?.createdBy) {
+      conditions.push(eq(knowledgeArticles.createdBy, filters.createdBy));
+    }
+    
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as any;
+    }
+    
+    return await query.orderBy(desc(knowledgeArticles.createdAt));
+  }
+
+  async getPublishedKnowledgeArticles(category?: string): Promise<KnowledgeArticle[]> {
+    return await this.getAllKnowledgeArticles({
+      category,
+      isPublished: true,
+    });
+  }
+
+  async searchKnowledgeBase(query: string, category?: string): Promise<KnowledgeArticle[]> {
+    const searchTerms = query.toLowerCase().split(' ').filter(term => term.length > 2);
+    const conditions = [];
+    
+    // Add search conditions
+    if (searchTerms.length > 0) {
+      const searchConditions = searchTerms.map(term => 
+        or(
+          ilike(knowledgeArticles.title, `%${term}%`),
+          ilike(knowledgeArticles.content, `%${term}%`),
+          ilike(knowledgeArticles.summary, `%${term}%`)
+        )
+      );
+      conditions.push(or(...searchConditions));
+    }
+    
+    // Add category filter
+    if (category) {
+      conditions.push(eq(knowledgeArticles.category, category));
+    }
+    
+    // Only published articles
+    conditions.push(eq(knowledgeArticles.isPublished, true));
+    
+    let dbQuery = db.select().from(knowledgeArticles);
+    if (conditions.length > 0) {
+      dbQuery = dbQuery.where(and(...conditions)) as any;
+    }
+    
+    return await dbQuery
+      .orderBy(
+        desc(knowledgeArticles.effectivenessScore),
+        desc(knowledgeArticles.usageCount)
+      )
+      .limit(50);
+  }
+
+  async findSimilarKnowledgeArticle(title: string): Promise<KnowledgeArticle | undefined> {
+    // Simple similarity search - in production could use vector similarity
+    const normalizedTitle = title.toLowerCase();
+    const words = normalizedTitle.split(' ').filter(word => word.length > 3);
+    
+    if (words.length === 0) return undefined;
+    
+    const conditions = words.map(word => 
+      ilike(knowledgeArticles.title, `%${word}%`)
+    );
+    
+    const [article] = await db
+      .select()
+      .from(knowledgeArticles)
+      .where(or(...conditions))
+      .limit(1);
+    
+    return article;
+  }
+
+  async toggleKnowledgeArticleStatus(id: number): Promise<KnowledgeArticle> {
+    const article = await this.getKnowledgeArticle(id);
+    if (!article) {
+      throw new Error('Knowledge article not found');
+    }
+    
+    const [result] = await db
+      .update(knowledgeArticles)
+      .set({
+        isPublished: !article.isPublished,
+        updatedAt: new Date(),
+      })
+      .where(eq(knowledgeArticles.id, id))
+      .returning();
+    return result;
+  }
+
+  async incrementKnowledgeArticleUsage(id: number): Promise<void> {
+    await db
+      .update(knowledgeArticles)
+      .set({
+        usageCount: sql`${knowledgeArticles.usageCount} + 1`,
+      })
+      .where(eq(knowledgeArticles.id, id));
+  }
+
+  async updateArticleEffectiveness(id: number, rating: number): Promise<void> {
+    // Simple effectiveness calculation - in production could be more sophisticated
+    const article = await this.getKnowledgeArticle(id);
+    if (!article) return;
+    
+    const currentScore = article.effectivenessScore || 0;
+    const newScore = (currentScore + rating) / 2; // Simple average
+    
+    await db
+      .update(knowledgeArticles)
+      .set({
+        effectivenessScore: newScore.toString(),
+        updatedAt: new Date(),
+      })
+      .where(eq(knowledgeArticles.id, id));
+  }
+
+  // Learning Queue operations
+  async addToLearningQueue(ticketId: number): Promise<LearningQueue> {
+    const [result] = await db
+      .insert(learningQueue)
+      .values({
+        ticketId,
+        processStatus: 'pending',
+      })
+      .returning();
+    return result;
+  }
+
+  async getLearningQueueItems(status?: string): Promise<LearningQueue[]> {
+    let query = db.select().from(learningQueue);
+    
+    if (status) {
+      query = query.where(eq(learningQueue.processStatus, status)) as any;
+    }
+    
+    return await query.orderBy(learningQueue.createdAt);
+  }
+
+  async updateLearningQueueItem(id: number, updates: Partial<InsertLearningQueue>): Promise<LearningQueue> {
+    const [result] = await db
+      .update(learningQueue)
+      .set({
+        ...updates,
+        processedAt: updates.processStatus === 'completed' ? new Date() : undefined,
+      })
+      .where(eq(learningQueue.id, id))
+      .returning();
+    return result;
+  }
+
+  async getRecentResolvedTickets(days: number): Promise<Task[]> {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+    
+    return await db
+      .select()
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.status, 'resolved'),
+          sql`${tasks.updatedAt} >= ${cutoffDate}`
+        )
+      )
+      .orderBy(desc(tasks.updatedAt));
   }
 
   async updateKnowledgeLearningStats(stats: any): Promise<void> {
-    // In production, implement proper database storage
-    console.log('Updating knowledge learning stats:', stats);
+    // Store learning analytics - could be expanded to dedicated table
+    console.log('Knowledge learning stats updated:', stats);
   }
 
-  async getPublishedKnowledgeArticles(category?: string): Promise<any[]> {
-    // In production, implement proper database query
-    console.log('Getting published articles for category:', category);
-    return [];
+  // Legacy compatibility methods - these should be removed once new methods are implemented
+  async saveTicketAnalysis(userId: string, analysis: any): Promise<void> {
+    console.log('Saving ticket analysis:', userId, analysis);
   }
 
-  async getKnowledgeArticle(id: number): Promise<any> {
-    // In production, implement proper database query
-    console.log('Getting knowledge article:', id);
-    return null;
+  async saveAutoResponse(data: any): Promise<void> {
+    console.log('Saving auto response:', data);
   }
 
-  async updateKnowledgeArticle(id: number, updates: any): Promise<void> {
-    // In production, implement proper database update
-    console.log('Updating knowledge article:', id, updates);
+  async saveComplexityScore(data: any): Promise<void> {
+    console.log('Saving complexity score:', data);
   }
 
-  async searchKnowledgeBase(query: string, category?: string): Promise<any[]> {
-    // In production, implement proper search
-    console.log('Searching knowledge base:', query, category);
-    return [];
+  async saveAIAnalytics(analytics: any): Promise<void> {
+    console.log('Saving AI analytics:', analytics);
+  }
+
+  // Knowledge Base operations implementation
+  async createKnowledgeArticle(article: InsertKnowledgeArticle): Promise<KnowledgeArticle> {
+    const [created] = await db.insert(knowledgeArticles).values({
+      ...article,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      usageCount: 0,
+    }).returning();
+    return created;
+  }
+
+  async updateKnowledgeArticle(id: number, article: Partial<InsertKnowledgeArticle>): Promise<KnowledgeArticle> {
+    const [updated] = await db
+      .update(knowledgeArticles)
+      .set({
+        ...article,
+        updatedAt: new Date(),
+      })
+      .where(eq(knowledgeArticles.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteKnowledgeArticle(id: number): Promise<void> {
+    await db.delete(knowledgeArticles).where(eq(knowledgeArticles.id, id));
+  }
+
+  async getKnowledgeArticle(id: number): Promise<KnowledgeArticle | undefined> {
+    const [article] = await db
+      .select()
+      .from(knowledgeArticles)
+      .where(eq(knowledgeArticles.id, id));
+    return article;
+  }
+
+  async getAllKnowledgeArticles(filters?: { 
+    category?: string; 
+    isPublished?: boolean; 
+    createdBy?: string 
+  }): Promise<KnowledgeArticle[]> {
+    const conditions = [];
+    
+    if (filters?.category) {
+      conditions.push(eq(knowledgeArticles.category, filters.category));
+    }
+    
+    if (filters?.isPublished !== undefined) {
+      conditions.push(eq(knowledgeArticles.isPublished, filters.isPublished));
+    }
+    
+    if (filters?.createdBy) {
+      conditions.push(eq(knowledgeArticles.createdBy, filters.createdBy));
+    }
+    
+    return await db
+      .select()
+      .from(knowledgeArticles)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(knowledgeArticles.createdAt));
+  }
+
+  async getPublishedKnowledgeArticles(category?: string): Promise<KnowledgeArticle[]> {
+    const conditions = [eq(knowledgeArticles.isPublished, true)];
+    
+    if (category) {
+      conditions.push(eq(knowledgeArticles.category, category));
+    }
+    
+    return await db
+      .select()
+      .from(knowledgeArticles)
+      .where(and(...conditions))
+      .orderBy(desc(knowledgeArticles.usageCount));
+  }
+
+  async searchKnowledgeBase(query: string, category?: string): Promise<KnowledgeArticle[]> {
+    const conditions = [
+      eq(knowledgeArticles.isPublished, true),
+      or(
+        like(knowledgeArticles.title, `%${query}%`),
+        like(knowledgeArticles.content, `%${query}%`),
+        like(knowledgeArticles.summary, `%${query}%`)
+      )
+    ];
+    
+    if (category) {
+      conditions.push(eq(knowledgeArticles.category, category));
+    }
+    
+    return await db
+      .select()
+      .from(knowledgeArticles)
+      .where(and(...conditions))
+      .orderBy(desc(knowledgeArticles.usageCount));
+  }
+
+  async findSimilarKnowledgeArticle(title: string): Promise<KnowledgeArticle | undefined> {
+    const [article] = await db
+      .select()
+      .from(knowledgeArticles)
+      .where(
+        and(
+          eq(knowledgeArticles.isPublished, true),
+          like(knowledgeArticles.title, `%${title}%`)
+        )
+      )
+      .limit(1);
+    return article;
+  }
+
+  async toggleKnowledgeArticleStatus(id: number): Promise<KnowledgeArticle> {
+    const article = await this.getKnowledgeArticle(id);
+    if (!article) {
+      throw new Error('Article not found');
+    }
+    
+    const [updated] = await db
+      .update(knowledgeArticles)
+      .set({
+        isPublished: !article.isPublished,
+        updatedAt: new Date(),
+      })
+      .where(eq(knowledgeArticles.id, id))
+      .returning();
+    return updated;
+  }
+
+  async incrementKnowledgeArticleUsage(id: number): Promise<void> {
+    await db
+      .update(knowledgeArticles)
+      .set({
+        usageCount: sql`${knowledgeArticles.usageCount} + 1`,
+        lastUsed: new Date(),
+      })
+      .where(eq(knowledgeArticles.id, id));
+  }
+
+  async updateArticleEffectiveness(id: number, rating: number): Promise<void> {
+    const article = await this.getKnowledgeArticle(id);
+    if (!article) return;
+    
+    // Simple effectiveness calculation - could be enhanced with more sophisticated algorithms
+    const currentScore = parseFloat(article.effectivenessScore || '0');
+    const usageCount = article.usageCount || 1;
+    const newScore = ((currentScore * usageCount) + rating) / (usageCount + 1);
+    
+    await db
+      .update(knowledgeArticles)
+      .set({
+        effectivenessScore: newScore.toString(),
+        updatedAt: new Date(),
+      })
+      .where(eq(knowledgeArticles.id, id));
+  }
+
+  // Learning Queue operations implementation
+  async addToLearningQueue(ticketId: number): Promise<LearningQueue> {
+    const [queued] = await db.insert(learningQueue).values({
+      ticketId,
+      processStatus: 'pending',
+      createdAt: new Date(),
+    }).returning();
+    return queued;
   }
 }
 
