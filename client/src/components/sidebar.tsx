@@ -25,6 +25,22 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+function SignOutButton() {
+  const { logout, isLoggingOut } = useAuth();
+  
+  return (
+    <Button
+      variant="ghost"
+      className="w-full justify-start"
+      onClick={logout}
+      disabled={isLoggingOut}
+    >
+      <LogOut className="mr-3 h-4 w-4" />
+      {isLoggingOut ? "Signing Out..." : "Sign Out"}
+    </Button>
+  );
+}
+
 interface SidebarProps {
   className?: string;
 }
@@ -176,14 +192,7 @@ export function Sidebar({ className }: SidebarProps) {
           
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                className="w-full justify-start"
-                onClick={() => window.location.href = "/api/logout"}
-              >
-                <LogOut className="mr-3 h-4 w-4" />
-                Sign Out
-              </Button>
+              <SignOutButton />
             </TooltipTrigger>
             <TooltipContent>Sign out of your account</TooltipContent>
           </Tooltip>
