@@ -73,6 +73,11 @@ function Router() {
                   <AdminPanel />
                 </ProtectedRoute>
               </Route>
+              <Route path="/ai-settings">
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <AISettings />
+                </ProtectedRoute>
+              </Route>
               <Route path="/settings" component={Settings} />
               <Route path="/notifications" component={Notifications} />
               <Route path="/guides" component={UserGuides} />
@@ -98,11 +103,7 @@ function Router() {
                   <KnowledgeBase />
                 </ProtectedRoute>
               </Route>
-              <Route path="/admin/ai-settings">
-                <ProtectedRoute allowedRoles={["admin"]}>
-                  <AISettings />
-                </ProtectedRoute>
-              </Route>
+
               <Route path="/tickets/:id" component={(params) => (
                 <ProtectedRoute allowedRoles={["admin", "manager", "agent", "user", "customer"]}>
                   <Dashboard />

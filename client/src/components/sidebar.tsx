@@ -37,7 +37,7 @@ export function Sidebar({ className }: SidebarProps) {
     queryKey: ["/api/company-settings"],
   });
 
-  const navigation = user?.role === 'customer' 
+  const navigation = (user as any)?.role === 'customer' 
     ? [
         { name: "Dashboard", href: "/", icon: LayoutDashboard },
         { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
@@ -67,16 +67,16 @@ export function Sidebar({ className }: SidebarProps) {
       <div className="flex h-16 items-center px-6 border-b gradient-business-subtle">
         <Link href="/">
           <div className="flex items-center gap-2 font-semibold text-lg cursor-pointer">
-            {companySettings?.logoUrl ? (
+            {(companySettings as any)?.logoUrl ? (
               <img 
-                src={companySettings.logoUrl} 
-                alt={companySettings.companyName || "Company Logo"}
+                src={(companySettings as any).logoUrl} 
+                alt={(companySettings as any).companyName || "Company Logo"}
                 className="h-8 w-auto object-contain max-w-[120px]"
               />
             ) : (
               <TicketIcon className="h-6 w-6 text-primary" />
             )}
-            <span className="text-foreground">{companySettings?.companyName || "TicketFlow"}</span>
+            <span className="text-foreground">{(companySettings as any)?.companyName || "TicketFlow"}</span>
           </div>
         </Link>
       </div>
@@ -102,7 +102,7 @@ export function Sidebar({ className }: SidebarProps) {
             );
           })}
           
-          {user?.role === "admin" && (
+          {(user as any)?.role === "admin" && (
             <>
               <Separator className="my-4" />
               <div className="px-3 pb-2">
@@ -135,10 +135,10 @@ export function Sidebar({ className }: SidebarProps) {
       
       <div className="border-t p-4">
         <div className="flex items-center gap-3 px-2 mb-4">
-          {user?.profileImageUrl ? (
+          {(user as any)?.profileImageUrl ? (
             <img
-              src={user.profileImageUrl}
-              alt={user.firstName || "User"}
+              src={(user as any).profileImageUrl}
+              alt={(user as any).firstName || "User"}
               className="h-8 w-8 rounded-full object-cover"
             />
           ) : (
@@ -146,10 +146,10 @@ export function Sidebar({ className }: SidebarProps) {
           )}
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium truncate">
-              {user?.firstName} {user?.lastName}
+              {(user as any)?.firstName} {(user as any)?.lastName}
             </p>
             <p className="text-xs text-muted-foreground truncate">
-              {user?.email}
+              {(user as any)?.email}
             </p>
           </div>
         </div>
