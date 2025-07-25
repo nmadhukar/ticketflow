@@ -2130,73 +2130,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // User Guide routes
-  // Get all user guide categories
-  app.get('/api/guide-categories', isAuthenticated, async (req, res) => {
-    try {
-      const categories = await storage.getUserGuideCategories();
-      res.json(categories);
-    } catch (error) {
-      console.error("Error fetching guide categories:", error);
-      res.status(500).json({ message: "Failed to fetch guide categories" });
-    }
-  });
 
-  // Create user guide category (admin only)
-  app.post('/api/admin/guide-categories', isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
-      }
-
-      const category = await storage.createUserGuideCategory(req.body);
-      res.json(category);
-    } catch (error) {
-      console.error("Error creating guide category:", error);
-      res.status(500).json({ message: "Failed to create guide category" });
-    }
-  });
-
-  // Update user guide category (admin only)
-  app.put('/api/admin/guide-categories/:id', isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
-      }
-
-      const id = parseInt(req.params.id);
-      const category = await storage.updateUserGuideCategory(id, req.body);
-      res.json(category);
-    } catch (error) {
-      console.error("Error updating guide category:", error);
-      res.status(500).json({ message: "Failed to update guide category" });
-    }
-  });
-
-  // Delete user guide category (admin only)
-  app.delete('/api/admin/guide-categories/:id', isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
-      }
-
-      const id = parseInt(req.params.id);
-      await storage.deleteUserGuideCategory(id);
-      res.json({ message: "Category deleted successfully" });
-    } catch (error) {
-      console.error("Error deleting guide category:", error);
-      res.status(500).json({ message: "Failed to delete guide category" });
-    }
-  });
 
   // Get all user guides (filtered by query params)
   app.get('/api/guides', isAuthenticated, async (req, res) => {

@@ -51,7 +51,7 @@ export default function UserGuides() {
   });
 
   // Fetch categories
-  const { data: categories = [], isLoading: categoriesLoading } = useQuery({
+  const { data: categories = [], isLoading: categoriesLoading } = useQuery<UserGuideCategory[]>({
     queryKey: ['/api/guide-categories'],
     retry: false,
     enabled: isAuthenticated,
@@ -276,7 +276,7 @@ export default function UserGuides() {
                             </CardHeader>
                             <CardContent>
                               <div className="flex items-center justify-between text-sm text-muted-foreground">
-                                <span>{format(new Date(guide.createdAt), "MMM d, yyyy")}</span>
+                                <span>{guide.createdAt ? format(new Date(guide.createdAt), "MMM d, yyyy") : "Unknown"}</span>
                                 <div className="flex items-center gap-1">
                                   <Eye className="h-3 w-3" />
                                   {guide.viewCount}
@@ -331,7 +331,7 @@ export default function UserGuides() {
                               </CardHeader>
                               <CardContent>
                                 <div className="flex items-center justify-between text-sm text-muted-foreground">
-                                  <span>{format(new Date(guide.createdAt), "MMM d, yyyy")}</span>
+                                  <span>{guide.createdAt ? format(new Date(guide.createdAt), "MMM d, yyyy") : "Unknown"}</span>
                                   <div className="flex items-center gap-1">
                                     <Eye className="h-3 w-3" />
                                     {guide.viewCount}

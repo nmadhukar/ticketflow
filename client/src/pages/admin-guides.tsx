@@ -63,14 +63,14 @@ export default function AdminGuides() {
   }, [isAuthenticated, isLoading, toast]);
 
   // Fetch guides
-  const { data: guides = [], isLoading: guidesLoading } = useQuery({
+  const { data: guides = [], isLoading: guidesLoading } = useQuery<UserGuide[]>({
     queryKey: ['/api/guides'],
     retry: false,
     enabled: isAuthenticated,
   });
 
   // Fetch categories
-  const { data: categories = [], isLoading: categoriesLoading } = useQuery({
+  const { data: categories = [], isLoading: categoriesLoading } = useQuery<UserGuideCategory[]>({
     queryKey: ['/api/guide-categories'],
     retry: false,
     enabled: isAuthenticated,
@@ -83,11 +83,7 @@ export default function AdminGuides() {
         ? `/api/admin/guides/${selectedGuide.id}`
         : '/api/admin/guides';
       
-      return await apiRequest(url, {
-        method: selectedGuide ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
+      return await apiRequest(selectedGuide ? 'PUT' : 'POST', url, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/guides'] });
@@ -121,9 +117,7 @@ export default function AdminGuides() {
   // Delete guide mutation
   const deleteGuideMutation = useMutation({
     mutationFn: async (id: number) => {
-      return await apiRequest(`/api/admin/guides/${id}`, {
-        method: 'DELETE',
-      });
+      return await apiRequest('DELETE', `/api/admin/guides/${id}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/guides'] });
@@ -159,11 +153,7 @@ export default function AdminGuides() {
         ? `/api/admin/guide-categories/${selectedCategory.id}`
         : '/api/admin/guide-categories';
       
-      return await apiRequest(url, {
-        method: selectedCategory ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
+      return await apiRequest(selectedCategory ? 'PUT' : 'POST', url, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/guide-categories'] });
@@ -197,9 +187,7 @@ export default function AdminGuides() {
   // Delete category mutation
   const deleteCategoryMutation = useMutation({
     mutationFn: async (id: number) => {
-      return await apiRequest(`/api/admin/guide-categories/${id}`, {
-        method: 'DELETE',
-      });
+      return await apiRequest('DELETE', `/api/admin/guide-categories/${id}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/guide-categories'] });
@@ -259,7 +247,7 @@ export default function AdminGuides() {
     setScribehowUrl(guide.scribehowUrl || "");
     setVideoUrl(guide.videoUrl || "");
     setGuideTags(guide.tags?.join(", ") || "");
-    setIsPublished(guide.isPublished);
+    setIsPublished(guide.isPublished || false);
     setIsGuideDialogOpen(true);
   };
 
@@ -268,7 +256,7 @@ export default function AdminGuides() {
     setCategoryName(category.name);
     setCategoryDescription(category.description || "");
     setCategoryIcon(category.icon || "");
-    setCategoryOrder(category.displayOrder);
+    setCategoryOrder(category.displayOrder || 0);
     setIsCategoryDialogOpen(true);
   };
 
@@ -549,7 +537,7 @@ export default function AdminGuides() {
                           </TableCell>
                           <TableCell>{guide.viewCount}</TableCell>
                           <TableCell>
-                            {format(new Date(guide.createdAt), "MMM d, yyyy")}
+                            {guide.createdAt ? format(new Date(guide.createdAt), "MMM d, yyyy") : "Unknown"}
                           </TableCell>
                           <TableCell className="text-right">
                             <Button
