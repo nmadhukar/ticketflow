@@ -1,3 +1,24 @@
+/**
+ * TaskModal Component - Unified Ticket Creation and Editing Interface
+ * 
+ * This component provides a comprehensive modal for ticket management with:
+ * - Tabbed interface for ticket details, comments, and attachments
+ * - Real-time form validation and error handling
+ * - AI-powered auto-response integration
+ * - File attachment support with drag-and-drop
+ * - Dynamic assignment to users or teams
+ * - Status and priority management
+ * - Comment threading and history
+ * - Audit trail for all changes
+ * 
+ * Features modern UX/UI patterns:
+ * - Visual card-based form sections with color-coded borders
+ * - Contextual icons and improved visual hierarchy
+ * - Smart form validation with helpful error messages
+ * - Guided workflow for task creation and editing
+ * - In-ticket editing capabilities for status, assignment, and due dates
+ */
+
 import { useState, useEffect } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";

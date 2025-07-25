@@ -1,3 +1,34 @@
+/**
+ * TicketFlow Database Schema Definition
+ * 
+ * This module defines the complete database schema using Drizzle ORM with PostgreSQL.
+ * 
+ * The schema includes:
+ * - User management with authentication and roles
+ * - Ticket/task management with full workflow support
+ * - Team collaboration and department organization
+ * - AI-powered features (auto-responses, knowledge base)
+ * - Administrative features (settings, API keys, templates)
+ * - Security features (audit trails, session management)
+ * - Integration support (Microsoft Teams, email notifications)
+ * 
+ * Key Design Principles:
+ * - Strong typing with TypeScript integration
+ * - Referential integrity with foreign key constraints
+ * - Audit trails for all critical operations
+ * - Flexible role-based access control
+ * - Optimized indexes for performance
+ * - Support for future extensibility
+ * 
+ * Table Relationships:
+ * - Users belong to departments and teams
+ * - Tasks can be assigned to users or teams
+ * - Comments and attachments link to specific tasks
+ * - History tracks all changes with user attribution
+ * - AI features store analysis and responses
+ * - Settings control system behavior and configuration
+ */
+
 import {
   pgTable,
   text,

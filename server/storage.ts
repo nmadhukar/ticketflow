@@ -69,7 +69,17 @@ import { db } from "./db";
 import { eq, desc, and, or, like, count, sql, isNotNull } from "drizzle-orm";
 
 /**
- * Storage Interface for TicketFlow
+ * Database Storage Layer for TicketFlow
+ * 
+ * This module provides a comprehensive data access layer using Drizzle ORM.
+ * Key features:
+ * - Type-safe database operations with TypeScript
+ * - Transactional support for complex operations
+ * - Comprehensive error handling and logging
+ * - Support for all major entities: users, tasks, teams, comments, attachments
+ * - AI integration data management (auto-responses, knowledge articles)
+ * - Admin features (company settings, API keys, email templates)
+ * - Security features (audit trails, access control)
  * 
  * This interface defines all database operations for the application.
  * Implementations should handle database transactions, error handling,

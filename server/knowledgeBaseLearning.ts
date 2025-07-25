@@ -1,9 +1,23 @@
-// Knowledge base learning system that extracts insights from resolved tickets
+/**
+ * Knowledge Base Learning System
+ * 
+ * This module automatically learns from resolved tickets to build a smart knowledge base.
+ * Key features:
+ * - Analyzes patterns in resolved tickets to identify common issues
+ * - Generates knowledge articles from successful resolutions
+ * - Creates preventive guidance and best practices
+ * - Tracks resolution effectiveness and success rates
+ * - Provides insights for improving support processes
+ */
+
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { storage } from './storage';
 import { logSecurityEvent } from './security';
 
-// Initialize Bedrock client
+/**
+ * Initialize AWS Bedrock client for knowledge extraction
+ * Uses same credentials as ticket analysis but with separate error handling
+ */
 const getBedrockClient = () => {
   const region = process.env.AWS_REGION || 'us-east-1';
   const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
@@ -23,7 +37,10 @@ const getBedrockClient = () => {
   });
 };
 
-// Knowledge article structure
+/**
+ * Structure for AI-generated knowledge articles
+ * Created automatically from analysis of resolved tickets
+ */
 export interface KnowledgeArticle {
   title: string;
   content: string;
@@ -37,7 +54,10 @@ export interface KnowledgeArticle {
   createdBy: 'ai-learning' | string;
 }
 
-// Resolution pattern analysis
+/**
+ * Pattern analysis results from batch processing resolved tickets
+ * Identifies common problem types and their effective solutions
+ */
 export interface ResolutionPattern {
   problemType: string;
   commonSolutions: string[];
@@ -47,7 +67,19 @@ export interface ResolutionPattern {
   successRate: number;
 }
 
-// Analyze resolved tickets to extract knowledge
+/**
+ * Batch analysis of resolved tickets to identify resolution patterns
+ * 
+ * Processes multiple resolved tickets to:
+ * - Identify recurring problem types
+ * - Extract successful resolution strategies
+ * - Calculate success rates and resolution times
+ * - Generate preventive measures
+ * - Recommend process improvements
+ * 
+ * @param ticketBatch - Array of resolved tickets with their resolution data
+ * @returns Array of identified resolution patterns
+ */
 export const analyzeResolvedTickets = async (
   ticketBatch: Array<{
     id: number;

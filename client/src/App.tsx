@@ -1,3 +1,41 @@
+/**
+ * TicketFlow Application Root Component
+ * 
+ * This is the main application component that orchestrates the entire TicketFlow system.
+ * 
+ * Architecture Features:
+ * - Client-side routing using Wouter for SPA navigation
+ * - Authentication-based route protection and redirection
+ * - Role-based access control for different user types
+ * - Global state management with TanStack Query
+ * - Real-time WebSocket integration for live updates
+ * - Floating AI chatbot accessible from all pages
+ * 
+ * Authentication Flow:
+ * - Unauthenticated users see landing page and auth forms
+ * - Authenticated users access full application with role-based restrictions
+ * - Automatic redirection based on authentication state
+ * - Session persistence and automatic logout handling
+ * 
+ * Route Organization:
+ * - Public routes: landing, auth, API documentation
+ * - Protected routes: dashboard, tickets, teams, admin
+ * - Role-specific routes: admin panel (admin only), team management
+ * - Dynamic routes: ticket details, team details with parameters
+ * 
+ * Global Providers:
+ * - QueryClient for server state management and caching
+ * - WebSocket provider for real-time updates
+ * - Toast notifications for user feedback
+ * - Tooltip provider for enhanced UX
+ * 
+ * The app automatically handles:
+ * - Loading states during authentication
+ * - Error boundaries and fallback handling
+ * - Responsive design for all device types
+ * - Accessibility compliance and keyboard navigation
+ */
+
 import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";

@@ -1,6 +1,15 @@
 /**
  * Commercial Authentication System for TicketFlow
- * Handles user registration, login, password reset, and session management
+ * 
+ * This module provides enterprise-grade authentication with the following features:
+ * - Multi-strategy authentication (local email/password + Microsoft 365 SSO)
+ * - Secure password hashing using scrypt with salt
+ * - Account lockout protection after failed login attempts
+ * - Password reset functionality with secure tokens
+ * - Admin approval workflow for new registrations
+ * - Invitation-based user onboarding
+ * - Session management with PostgreSQL storage
+ * - Role-based access control (customer, user, manager, admin)
  */
 
 import passport from "passport";
@@ -24,7 +33,11 @@ declare global {
 const scryptAsync = promisify(scrypt);
 
 /**
- * Hash a password using scrypt
+ * Hash a password using scrypt with random salt
+ * 
+ * Uses Node.js crypto.scrypt for secure password hashing
+ * Salt is generated randomly for each password
+ * Returns format: "hash.salt" for storage
  */
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16).toString("hex");
@@ -34,6 +47,9 @@ export async function hashPassword(password: string): Promise<string> {
 
 /**
  * Compare a supplied password with a stored hash
+ * 
+ * Extracts salt from stored hash and compares using timing-safe comparison
+ * Prevents timing attacks by using crypto.timingSafeEqual
  */
 async function comparePasswords(supplied: string, stored: string): Promise<boolean> {
   const [hashed, salt] = stored.split(".");
@@ -50,7 +66,13 @@ function generateToken(): string {
 }
 
 /**
- * Validation schemas
+ * Input validation schemas using Zod
+ * 
+ * Provides client and server-side validation for:
+ * - User registration with email format and password complexity
+ * - Login credentials validation
+ * - Password reset token and new password validation
+ * - Ensures data integrity and security before database operations
  */
 const registerSchema = z.object({
   email: z.string().email("Invalid email address"),

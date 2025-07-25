@@ -1,3 +1,39 @@
+/**
+ * AI Settings Configuration Interface
+ * 
+ * Advanced configuration panel for fine-tuning AI-powered features using AWS Bedrock.
+ * This interface allows administrators to:
+ * 
+ * Auto-Response Configuration:
+ * - Enable/disable automatic response generation
+ * - Set confidence thresholds for when to send auto-responses
+ * - Configure response timeouts and length limits
+ * - Monitor response effectiveness and accuracy
+ * 
+ * Knowledge Base Learning:
+ * - Enable automatic learning from resolved tickets
+ * - Set minimum resolution scores for article creation
+ * - Configure approval workflows for AI-generated content
+ * - Monitor learning queue and processing status
+ * 
+ * Escalation Management:
+ * - Set complexity thresholds for automatic escalation
+ * - Configure escalation teams and workflows
+ * - Define escalation criteria and routing rules
+ * 
+ * Model Configuration:
+ * - Select between different Claude 3 Sonnet variants
+ * - Adjust temperature for response creativity/consistency
+ * - Set token limits for cost and performance optimization
+ * - Configure rate limiting for API usage control
+ * 
+ * Analytics and Monitoring:
+ * - Real-time usage statistics and metrics
+ * - Cost tracking and optimization recommendations
+ * - Performance monitoring and optimization
+ * - Error tracking and resolution guidance
+ */
+
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";

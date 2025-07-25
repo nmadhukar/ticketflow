@@ -1,8 +1,43 @@
 /**
- * TicketFlow API Routes
+ * TicketFlow API Routes - Complete REST API Implementation
  * 
- * This module defines all REST API endpoints for the TicketFlow application.
- * Routes are organized by feature area and protected by authentication middleware.
+ * This module defines all REST API endpoints for the TicketFlow application with:
+ * 
+ * Authentication & Authorization:
+ * - Multi-strategy authentication (local + Microsoft 365 SSO)
+ * - Role-based access control (customer, user, manager, admin)
+ * - Session management and security middleware
+ * 
+ * Core Ticket Management:
+ * - CRUD operations for tickets with full audit trails
+ * - Comment and attachment handling
+ * - Status tracking and assignment management
+ * - Real-time updates via WebSocket integration
+ * 
+ * AI-Powered Features:
+ * - Automatic ticket analysis and classification
+ * - Intelligent response generation with confidence scoring
+ * - Knowledge base learning from resolved tickets
+ * - FAQ cache management and semantic search
+ * 
+ * Team Collaboration:
+ * - Team management and member assignment
+ * - Department organization and workflows
+ * - User invitation and approval systems
+ * - Microsoft Teams integration for notifications
+ * 
+ * Administrative Features:
+ * - Company settings and branding management
+ * - Email template and notification configuration
+ * - API key management and security
+ * - User guide and documentation systems
+ * - Policy document management for AI training
+ * 
+ * Security & Monitoring:
+ * - Input validation using Zod schemas
+ * - Rate limiting and abuse protection
+ * - Audit logging and activity tracking
+ * - Error handling and recovery procedures
  * 
  * @module routes
  */

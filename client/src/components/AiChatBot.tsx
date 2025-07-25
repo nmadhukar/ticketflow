@@ -1,3 +1,23 @@
+/**
+ * AI Help Chatbot Component
+ * 
+ * Provides intelligent help assistance using AWS Bedrock Claude 3 Sonnet.
+ * Key features:
+ * - Floating chat interface accessible from all authenticated pages
+ * - Minimize/maximize functionality for non-intrusive access
+ * - Context-aware responses using uploaded help documentation
+ * - Session-based chat history with persistence
+ * - Real-time message streaming and response generation
+ * - Integration with knowledge base for contextual assistance
+ * - Auto-scroll to latest messages for optimal UX
+ * 
+ * The chatbot analyzes user questions and provides relevant answers by:
+ * - Searching through uploaded company policy documents
+ * - Referencing knowledge base articles
+ * - Providing step-by-step guidance for common issues
+ * - Escalating complex queries to human support when needed
+ */
+
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";

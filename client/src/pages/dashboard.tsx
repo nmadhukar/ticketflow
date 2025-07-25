@@ -1,3 +1,28 @@
+/**
+ * Dashboard Page - Main Hub for Ticket Management
+ * 
+ * Serves as the primary interface for users to:
+ * - View system statistics and key metrics
+ * - Access recent tickets and activity
+ * - Filter and search through assigned tickets
+ * - Navigate to detailed ticket views
+ * - Create new tickets with quick access
+ * - Monitor real-time updates via WebSocket connection
+ * 
+ * Features include:
+ * - Interactive dashboard filtering - clicking stats cards filters the tasks table
+ * - Visual indicators for active filters with badges and clear button
+ * - Stats cards show active state with ring highlight when filtering is applied
+ * - Role-based content display (different views for admin vs regular users)
+ * - Real-time notifications and updates
+ * - Responsive design for desktop and mobile devices
+ * 
+ * Navigation Support:
+ * - Direct ticket access via URL parameters
+ * - Breadcrumb navigation for deep-linked tickets
+ * - Back navigation from ticket detail views
+ */
+
 import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";

@@ -1,3 +1,29 @@
+/**
+ * Admin Panel - Comprehensive System Administration Interface
+ * 
+ * Provides full administrative control over the TicketFlow system with:
+ * - User Management: View, edit, approve, ban users with role assignments
+ * - System Settings: Company branding, ticket numbering, email configuration
+ * - API Key Management: Create, manage, and monitor API keys with proper security
+ * - AWS Integration: Separate configuration for SES (email) and Bedrock (AI)
+ * - Microsoft 365 SSO: Configure enterprise authentication integration
+ * - Help Documentation: Manage help documents and policy files for AI chatbot
+ * - Email Templates: Customize system email templates for various events
+ * - Audit and Monitoring: Track system usage and user activities
+ * 
+ * Security Features:
+ * - Role-based access control (admin-only access)
+ * - Secure API key generation and management
+ * - Input validation and sanitization
+ * - Audit logging for administrative actions
+ * 
+ * The panel uses a tabbed interface for organization and includes:
+ * - Real-time data updates and validation
+ * - Bulk operations for user management
+ * - Configuration testing and validation
+ * - Visual indicators for system status
+ */
+
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";

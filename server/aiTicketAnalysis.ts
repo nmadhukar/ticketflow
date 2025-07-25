@@ -1,9 +1,23 @@
-// AI-powered ticket analysis and auto-response system using AWS Bedrock Claude 3 Sonnet
+/**
+ * AI-Powered Ticket Analysis and Auto-Response System
+ * 
+ * This module provides intelligent ticket analysis using AWS Bedrock Claude 3 Sonnet model.
+ * Key features:
+ * - Automatic ticket classification and priority assessment
+ * - Intelligent response generation for common issues
+ * - Confidence scoring to determine when auto-responses should be sent
+ * - Knowledge base integration for contextual responses
+ * - Escalation detection for complex issues
+ */
+
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { storage } from './storage';
 import { logSecurityEvent } from './security';
 
-// Initialize Bedrock client
+/**
+ * Initialize AWS Bedrock client with security validation
+ * Returns null if credentials are not configured, allowing graceful degradation
+ */
 const getBedrockClient = () => {
   const region = process.env.AWS_REGION || 'us-east-1';
   const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
@@ -23,7 +37,10 @@ const getBedrockClient = () => {
   });
 };
 
-// AI analysis results interface
+/**
+ * Structure for AI ticket analysis results
+ * Provides comprehensive assessment of ticket complexity, categorization, and recommendations
+ */
 export interface TicketAnalysis {
   complexity: 'low' | 'medium' | 'high' | 'critical';
   category: 'bug' | 'feature' | 'support' | 'enhancement' | 'incident' | 'request';
@@ -35,6 +52,10 @@ export interface TicketAnalysis {
   reasoning: string;
 }
 
+/**
+ * Structure for AI-generated automatic responses
+ * Includes confidence scoring and escalation recommendations
+ */
 export interface AutoResponse {
   response: string;
   confidence: number;
@@ -43,7 +64,19 @@ export interface AutoResponse {
   escalationNeeded: boolean;
 }
 
-// Analyze ticket content using Claude 3 Sonnet
+/**
+ * Core AI analysis function using Claude 3 Sonnet
+ * 
+ * Analyzes ticket content to determine:
+ * - Complexity level (low/medium/high/critical)
+ * - Proper categorization and priority
+ * - Estimated resolution time
+ * - Suggested tags and assignee
+ * - Confidence score for the analysis
+ * 
+ * @param ticketData - Ticket information to analyze
+ * @returns TicketAnalysis object or null if AI is unavailable
+ */
 export const analyzeTicket = async (ticketData: {
   title: string;
   description: string;

@@ -1,3 +1,41 @@
+/**
+ * Microsoft Teams Integration Service
+ * 
+ * Provides seamless integration with Microsoft Teams for enhanced collaboration.
+ * 
+ * Features:
+ * - Automatic notifications for ticket creation, updates, and assignments
+ * - Rich adaptive cards with ticket information and action buttons
+ * - Direct links to tickets for quick access from Teams
+ * - Configurable webhook URLs for different teams/channels
+ * - Test notification functionality to verify configuration
+ * 
+ * Authentication:
+ * - Uses Microsoft Graph API with client credentials flow
+ * - Requires appropriate permissions for Teams messaging
+ * - Secure token management and renewal
+ * - Error handling for authentication failures
+ * 
+ * Notification Types:
+ * - New ticket creation alerts
+ * - Ticket assignment notifications
+ * - Status change updates
+ * - High-priority ticket escalations
+ * - Resolution confirmations
+ * 
+ * Configuration:
+ * - Team-specific webhook URLs
+ * - Customizable message templates
+ * - Conditional notification rules
+ * - User preference settings
+ * 
+ * The integration enhances team productivity by:
+ * - Reducing context switching between applications
+ * - Providing immediate awareness of important updates
+ * - Enabling quick actions directly from Teams
+ * - Maintaining audit trails of all notifications
+ */
+
 import { Client } from "@microsoft/microsoft-graph-client";
 import { ConfidentialClientApplication } from "@azure/msal-node";
 import { Task } from "@shared/schema";
