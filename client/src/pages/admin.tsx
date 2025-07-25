@@ -639,6 +639,22 @@ export default function AdminPanel() {
                 </nav>
               </div>
 
+              {/* Analytics & Insights Section */}
+              <div>
+                <h3 className="text-sm font-semibold text-muted-foreground mb-2 flex items-center gap-2">
+                  <Brain className="h-4 w-4" />
+                  ANALYTICS & INSIGHTS
+                </h3>
+                <nav className="space-y-1">
+                  <Link
+                    to="/admin/ai-analytics"
+                    className="block w-full text-left px-3 py-2 rounded-md text-sm transition-colors hover:bg-muted"
+                  >
+                    AI Performance Analytics
+                  </Link>
+                </nav>
+              </div>
+
               {/* Content & Documentation Section */}
               <div>
                 <h3 className="text-sm font-semibold text-muted-foreground mb-2 flex items-center gap-2">

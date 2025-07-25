@@ -23,6 +23,7 @@ import UserGuides from "@/pages/user-guides";
 import AdminGuides from "@/pages/admin-guides";
 import Departments from "@/pages/departments";
 import Invitations from "@/pages/invitations";
+import AiAnalytics from "@/pages/ai-analytics";
 import TeamsIntegration from "@/pages/teams-integration";
 
 function Router() {
@@ -81,6 +82,11 @@ function Router() {
               <Route path="/admin/invitations">
                 <ProtectedRoute allowedRoles={["admin"]}>
                   <Invitations />
+                </ProtectedRoute>
+              </Route>
+              <Route path="/admin/ai-analytics">
+                <ProtectedRoute allowedRoles={["admin", "manager"]}>
+                  <AiAnalytics />
                 </ProtectedRoute>
               </Route>
               <Route component={NotFound} />

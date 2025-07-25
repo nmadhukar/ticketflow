@@ -802,6 +802,235 @@ Retrieves chat history for a session.
 ]
 ```
 
+### Smart Helpdesk - AI Auto-Response
+
+#### Get AI Auto-Response for Ticket
+Retrieves the AI-generated auto-response for a specific ticket.
+
+**Endpoint:** `GET /api/tasks/:id/auto-response`  
+**Authentication:** Required  
+**Response:** `200 OK`
+```json
+{
+  "id": 1,
+  "ticketId": 123,
+  "response": "Based on your issue description, here's a solution...",
+  "confidenceScore": 0.85,
+  "wasApplied": true,
+  "wasHelpful": true,
+  "createdAt": "2024-01-20T10:00:00Z"
+}
+```
+
+#### Provide Auto-Response Feedback
+Records whether the AI auto-response was helpful.
+
+**Endpoint:** `POST /api/tasks/:id/auto-response/feedback`  
+**Authentication:** Required  
+**Request Body:**
+```json
+{
+  "wasHelpful": true
+}
+```
+**Response:** `200 OK`
+```json
+{
+  "message": "Feedback recorded"
+}
+```
+
+### Smart Helpdesk - Knowledge Base
+
+#### Search Knowledge Base
+Searches published knowledge articles.
+
+**Endpoint:** `GET /api/knowledge/search`  
+**Authentication:** Required  
+**Query Parameters:**
+- `query` - Search text
+- `category` - Filter by category
+- `limit` - Number of results (default: 10)
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "title": "How to Reset Your Password",
+    "summary": "Step-by-step guide for password reset",
+    "content": "Full article content...",
+    "category": "authentication",
+    "tags": ["password", "security", "login"],
+    "effectivenessScore": "0.92",
+    "usageCount": 45,
+    "createdAt": "2024-01-15T08:00:00Z"
+  }
+]
+```
+
+#### Get All Knowledge Articles (Admin)
+Retrieves all knowledge articles for management.
+
+**Endpoint:** `GET /api/admin/knowledge`  
+**Authentication:** Required (Admin role)  
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "title": "How to Reset Your Password",
+    "summary": "Step-by-step guide",
+    "isPublished": true,
+    "effectivenessScore": "0.92",
+    "usageCount": 45,
+    "sourceTicketIds": [123, 456],
+    "createdAt": "2024-01-15T08:00:00Z"
+  }
+]
+```
+
+#### Publish/Unpublish Knowledge Article
+Changes the publication status of a knowledge article.
+
+**Endpoint:** `PATCH /api/admin/knowledge/:id/publish`  
+**Authentication:** Required (Admin role)  
+**Request Body:**
+```json
+{
+  "isPublished": true
+}
+```
+**Response:** `200 OK`
+```json
+{
+  "message": "Article updated"
+}
+```
+
+#### Provide Knowledge Article Feedback
+Records whether a knowledge article was helpful.
+
+**Endpoint:** `POST /api/knowledge/:id/feedback`  
+**Authentication:** Required  
+**Request Body:**
+```json
+{
+  "wasHelpful": true
+}
+```
+**Response:** `200 OK`
+```json
+{
+  "message": "Feedback recorded"
+}
+```
+
+### Smart Helpdesk - AI Analytics
+
+#### Get AI Performance Metrics
+Retrieves comprehensive AI system performance analytics.
+
+**Endpoint:** `GET /api/analytics/ai-performance`  
+**Authentication:** Required (Manager or Admin role)  
+**Response:** `200 OK`
+```json
+{
+  "autoResponse": {
+    "total": 500,
+    "applied": 420,
+    "helpful": 350,
+    "avgConfidence": 0.78
+  },
+  "complexity": [
+    { "range": "Very Low", "count": 150 },
+    { "range": "Low", "count": 200 },
+    { "range": "Medium", "count": 100 },
+    { "range": "High", "count": 40 },
+    { "range": "Very High", "count": 10 }
+  ],
+  "knowledgeBase": {
+    "totalArticles": 85,
+    "publishedArticles": 72,
+    "avgEffectiveness": 0.85,
+    "totalUsage": 1250
+  }
+}
+```
+
+### Smart Helpdesk - Escalation Rules
+
+#### Get Escalation Rules
+Retrieves all configured escalation rules.
+
+**Endpoint:** `GET /api/admin/escalation-rules`  
+**Authentication:** Required (Admin role)  
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "ruleName": "High Complexity Escalation",
+    "conditions": {
+      "complexityThreshold": 80,
+      "categories": ["bug", "incident"],
+      "priority": ["high", "urgent"]
+    },
+    "actions": {
+      "assignToTeam": "senior-support",
+      "addTags": ["escalated", "priority"],
+      "notifyManagers": true
+    },
+    "priority": 100,
+    "isActive": true
+  }
+]
+```
+
+#### Create Escalation Rule
+Creates a new escalation rule.
+
+**Endpoint:** `POST /api/admin/escalation-rules`  
+**Authentication:** Required (Admin role)  
+**Request Body:**
+```json
+{
+  "ruleName": "Critical Bug Escalation",
+  "conditions": {
+    "complexityThreshold": 70,
+    "categories": ["bug"],
+    "severity": ["critical"]
+  },
+  "actions": {
+    "assignToTeam": "engineering",
+    "notifyManagers": true
+  },
+  "priority": 90,
+  "isActive": true
+}
+```
+**Response:** `201 Created`
+
+#### Update Escalation Rule
+Updates an existing escalation rule.
+
+**Endpoint:** `PUT /api/admin/escalation-rules/:id`  
+**Authentication:** Required (Admin role)  
+**Request Body:** Same as create  
+**Response:** `200 OK`
+
+#### Delete Escalation Rule
+Deletes an escalation rule.
+
+**Endpoint:** `DELETE /api/admin/escalation-rules/:id`  
+**Authentication:** Required (Admin role)  
+**Response:** `200 OK`
+```json
+{
+  "message": "Rule deleted successfully"
+}
+```
+
 ## Error Responses
 
 All endpoints return consistent error responses:

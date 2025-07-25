@@ -20,11 +20,17 @@ import {
   insertTaskCommentSchema,
   insertTaskAttachmentSchema,
   insertCompanySettingsSchema,
-  insertApiKeySchema 
+  insertApiKeySchema,
+  ticketAutoResponses,
+  ticketComplexityScores,
+  knowledgeArticles,
+  escalationRules
 } from "@shared/schema";
 import { z } from "zod";
 import { createHash } from 'crypto';
 import multer from 'multer';
+import { db } from "./db";
+import { eq, desc, and, or, ilike, count, avg, sum, sql } from "drizzle-orm";
 
 // Configure multer for file uploads
 const upload = multer({
@@ -153,6 +159,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       const task = await storage.createTask(taskData);
       
+      // Run AI analysis for auto-response
+      try {
+        const { aiAutoResponseService } = await import("./aiAutoResponse");
+        const analysis = await aiAutoResponseService.analyzeTicket(task);
+        
+        // Save complexity score
+        await aiAutoResponseService.saveComplexityScore(
+          task.id,
+          analysis.complexity,
+          analysis.factors,
+          `Complexity: ${analysis.complexity}/100. Should escalate: ${analysis.shouldEscalate}`
+        );
+        
+        // If confidence is high enough, save and apply auto-response
+        if (analysis.autoResponse && analysis.confidence >= 0.7) {
+          await aiAutoResponseService.saveAutoResponse(
+            task.id,
+            analysis.autoResponse,
+            analysis.confidence,
+            true // Applied automatically
+          );
+          
+          // Add the auto-response as a comment
+          await storage.createTaskComment({
+            taskId: task.id,
+            userId: 'system', // System-generated comment
+            content: `**AI Auto-Response** (Confidence: ${(analysis.confidence * 100).toFixed(0)}%):\n\n${analysis.autoResponse}`,
+          });
+        }
+        
+        // If should escalate, update assignment based on complexity
+        if (analysis.shouldEscalate && analysis.complexity > 70) {
+          // TODO: Implement escalation rules
+          console.log(`Ticket ${task.ticketNumber} should be escalated (complexity: ${analysis.complexity})`);
+        }
+      } catch (error) {
+        console.error("Error in AI analysis:", error);
+        // Continue without AI features if there's an error
+      }
+      
       // Send Teams notification for new task
       try {
         const user = await storage.getUser(userId);
@@ -207,6 +253,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const updates = insertTaskSchema.partial().parse(req.body);
       const updatedTask = await storage.updateTask(taskId, updates, userId);
+      
+      // If task was resolved, trigger knowledge base learning
+      if (updates.status === 'resolved' && task.status !== 'resolved') {
+        try {
+          const { knowledgeBaseService } = await import("./knowledgeBase");
+          await knowledgeBaseService.learnFromResolvedTicket(taskId);
+          console.log(`Knowledge base learning triggered for resolved ticket ${updatedTask.ticketNumber}`);
+        } catch (error) {
+          console.error("Error in knowledge base learning:", error);
+        }
+      }
       
       // Send Teams notification for task update
       try {
@@ -2599,6 +2656,276 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error sending test notification:", error);
       res.status(500).json({ message: "Failed to send test notification" });
+    }
+  });
+
+  // Smart Helpdesk API Routes
+  
+  // Get AI auto-response for a ticket
+  app.get('/api/tasks/:id/auto-response', isAuthenticated, async (req, res) => {
+    try {
+      const taskId = parseInt(req.params.id);
+      const [autoResponse] = await db
+        .select()
+        .from(ticketAutoResponses)
+        .where(eq(ticketAutoResponses.ticketId, taskId))
+        .orderBy(desc(ticketAutoResponses.createdAt))
+        .limit(1);
+      
+      res.json(autoResponse || null);
+    } catch (error) {
+      console.error("Error fetching auto-response:", error);
+      res.status(500).json({ message: "Failed to fetch auto-response" });
+    }
+  });
+  
+  // Update auto-response effectiveness
+  app.post('/api/tasks/:id/auto-response/feedback', isAuthenticated, async (req, res) => {
+    try {
+      const taskId = parseInt(req.params.id);
+      const { wasHelpful } = req.body;
+      
+      const { aiAutoResponseService } = await import("./aiAutoResponse");
+      await aiAutoResponseService.updateResponseEffectiveness(taskId, wasHelpful);
+      
+      res.json({ message: "Feedback recorded" });
+    } catch (error) {
+      console.error("Error recording feedback:", error);
+      res.status(500).json({ message: "Failed to record feedback" });
+    }
+  });
+  
+  // Knowledge Base Routes
+  
+  // Search knowledge base
+  app.get('/api/knowledge/search', isAuthenticated, async (req, res) => {
+    try {
+      const { query, category, limit = 10 } = req.query;
+      
+      const articles = await db
+        .select()
+        .from(knowledgeArticles)
+        .where(and(
+          eq(knowledgeArticles.isPublished, true),
+          query ? or(
+            ilike(knowledgeArticles.title, `%${query}%`),
+            ilike(knowledgeArticles.content, `%${query}%`)
+          ) : undefined,
+          category ? eq(knowledgeArticles.category, category as string) : undefined
+        ))
+        .orderBy(
+          desc(knowledgeArticles.effectivenessScore),
+          desc(knowledgeArticles.usageCount)
+        )
+        .limit(parseInt(limit as string));
+      
+      res.json(articles);
+    } catch (error) {
+      console.error("Error searching knowledge base:", error);
+      res.status(500).json({ message: "Failed to search knowledge base" });
+    }
+  });
+  
+  // Get knowledge articles (admin)
+  app.get('/api/admin/knowledge', isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(getUserId(req));
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const articles = await db
+        .select()
+        .from(knowledgeArticles)
+        .orderBy(desc(knowledgeArticles.createdAt));
+      
+      res.json(articles);
+    } catch (error) {
+      console.error("Error fetching knowledge articles:", error);
+      res.status(500).json({ message: "Failed to fetch knowledge articles" });
+    }
+  });
+  
+  // Publish/unpublish knowledge article
+  app.patch('/api/admin/knowledge/:id/publish', isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(getUserId(req));
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const articleId = parseInt(req.params.id);
+      const { isPublished } = req.body;
+      
+      const { knowledgeBaseService } = await import("./knowledgeBase");
+      if (isPublished) {
+        await knowledgeBaseService.publishArticle(articleId);
+      } else {
+        await knowledgeBaseService.unpublishArticle(articleId);
+      }
+      
+      res.json({ message: "Article updated" });
+    } catch (error) {
+      console.error("Error updating article:", error);
+      res.status(500).json({ message: "Failed to update article" });
+    }
+  });
+  
+  // Feedback on knowledge article
+  app.post('/api/knowledge/:id/feedback', isAuthenticated, async (req, res) => {
+    try {
+      const articleId = parseInt(req.params.id);
+      const { wasHelpful } = req.body;
+      
+      const { knowledgeBaseService } = await import("./knowledgeBase");
+      await knowledgeBaseService.updateArticleEffectiveness(articleId, wasHelpful);
+      
+      res.json({ message: "Feedback recorded" });
+    } catch (error) {
+      console.error("Error recording feedback:", error);
+      res.status(500).json({ message: "Failed to record feedback" });
+    }
+  });
+  
+  // AI Analytics Routes
+  
+  // Get AI performance metrics
+  app.get('/api/analytics/ai-performance', isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(getUserId(req));
+      if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
+        return res.status(403).json({ message: "Manager access required" });
+      }
+      
+      // Get auto-response statistics
+      const autoResponseStats = await db
+        .select({
+          total: count(),
+          applied: count(ticketAutoResponses.wasApplied),
+          helpful: count(ticketAutoResponses.wasHelpful),
+          avgConfidence: avg(ticketAutoResponses.confidenceScore),
+        })
+        .from(ticketAutoResponses);
+      
+      // Get complexity distribution
+      const complexityDist = await db
+        .select({
+          range: sql<string>`
+            CASE 
+              WHEN complexity_score < 20 THEN 'Very Low'
+              WHEN complexity_score < 40 THEN 'Low'
+              WHEN complexity_score < 60 THEN 'Medium'
+              WHEN complexity_score < 80 THEN 'High'
+              ELSE 'Very High'
+            END
+          `,
+          count: count(),
+        })
+        .from(ticketComplexityScores)
+        .groupBy(sql`1`);
+      
+      // Get knowledge base stats
+      const kbStats = await db
+        .select({
+          totalArticles: count(),
+          publishedArticles: count(knowledgeArticles.isPublished),
+          avgEffectiveness: avg(knowledgeArticles.effectivenessScore),
+          totalUsage: sum(knowledgeArticles.usageCount),
+        })
+        .from(knowledgeArticles);
+      
+      res.json({
+        autoResponse: autoResponseStats[0],
+        complexity: complexityDist,
+        knowledgeBase: kbStats[0],
+      });
+    } catch (error) {
+      console.error("Error fetching AI analytics:", error);
+      res.status(500).json({ message: "Failed to fetch AI analytics" });
+    }
+  });
+  
+  // Escalation Rules Management
+  
+  // Get escalation rules
+  app.get('/api/admin/escalation-rules', isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(getUserId(req));
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const rules = await db
+        .select()
+        .from(escalationRules)
+        .orderBy(desc(escalationRules.priority));
+      
+      res.json(rules);
+    } catch (error) {
+      console.error("Error fetching escalation rules:", error);
+      res.status(500).json({ message: "Failed to fetch escalation rules" });
+    }
+  });
+  
+  // Create escalation rule
+  app.post('/api/admin/escalation-rules', isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(getUserId(req));
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const rule = await db
+        .insert(escalationRules)
+        .values(req.body)
+        .returning();
+      
+      res.json(rule[0]);
+    } catch (error) {
+      console.error("Error creating escalation rule:", error);
+      res.status(500).json({ message: "Failed to create escalation rule" });
+    }
+  });
+  
+  // Update escalation rule
+  app.put('/api/admin/escalation-rules/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(getUserId(req));
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const ruleId = parseInt(req.params.id);
+      const rule = await db
+        .update(escalationRules)
+        .set(req.body)
+        .where(eq(escalationRules.id, ruleId))
+        .returning();
+      
+      res.json(rule[0]);
+    } catch (error) {
+      console.error("Error updating escalation rule:", error);
+      res.status(500).json({ message: "Failed to update escalation rule" });
+    }
+  });
+  
+  // Delete escalation rule
+  app.delete('/api/admin/escalation-rules/:id', isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(getUserId(req));
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const ruleId = parseInt(req.params.id);
+      await db
+        .delete(escalationRules)
+        .where(eq(escalationRules.id, ruleId));
+      
+      res.json({ message: "Rule deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting escalation rule:", error);
+      res.status(500).json({ message: "Failed to delete escalation rule" });
     }
   });
 

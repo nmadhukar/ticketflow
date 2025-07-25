@@ -609,3 +609,91 @@ export const insertCompanyPolicySchema = createInsertSchema(companyPolicies).omi
 
 export type InsertCompanyPolicy = z.infer<typeof insertCompanyPolicySchema>;
 export type CompanyPolicy = typeof companyPolicies.$inferSelect;
+
+// AI Auto-response system tables for smart helpdesk
+export const ticketAutoResponses = pgTable("ticket_auto_responses", {
+  id: serial("id").primaryKey(),
+  ticketId: integer("ticket_id").references(() => tasks.id).notNull(),
+  aiResponse: text("ai_response").notNull(),
+  confidenceScore: decimal("confidence_score", { precision: 3, scale: 2 }).notNull(),
+  wasHelpful: boolean("was_helpful"),
+  wasApplied: boolean("was_applied").default(false),
+  respondedBy: varchar("responded_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Knowledge articles from resolved tickets
+export const knowledgeArticles = pgTable("knowledge_articles", {
+  id: serial("id").primaryKey(),
+  title: varchar("title", { length: 255 }).notNull(),
+  content: text("content").notNull(),
+  summary: text("summary"),
+  sourceTicketIds: integer("source_ticket_ids").array(),
+  category: varchar("category", { length: 100 }),
+  tags: varchar("tags", { length: 100 }).array(),
+  usageCount: integer("usage_count").default(0),
+  effectivenessScore: decimal("effectiveness_score", { precision: 3, scale: 2 }),
+  isPublished: boolean("is_published").default(false),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Escalation rules for complex tickets
+export const escalationRules = pgTable("escalation_rules", {
+  id: serial("id").primaryKey(),
+  ruleName: varchar("rule_name", { length: 100 }).notNull(),
+  description: text("description"),
+  conditions: jsonb("conditions").notNull(), // JSON object with rule conditions
+  targetRole: varchar("target_role", { length: 50 }).notNull(),
+  targetUserId: varchar("target_user_id").references(() => users.id),
+  targetTeamId: integer("target_team_id").references(() => teams.id),
+  priority: integer("priority").default(0),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Ticket complexity scores
+export const ticketComplexityScores = pgTable("ticket_complexity_scores", {
+  id: serial("id").primaryKey(),
+  ticketId: integer("ticket_id").references(() => tasks.id).notNull().unique(),
+  complexityScore: integer("complexity_score").notNull(), // 0-100
+  factors: jsonb("factors").notNull(), // Breakdown of complexity factors
+  aiAnalysis: text("ai_analysis"),
+  calculatedAt: timestamp("calculated_at").defaultNow(),
+});
+
+// Schemas for new smart helpdesk tables
+export const insertTicketAutoResponseSchema = createInsertSchema(ticketAutoResponses).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertKnowledgeArticleSchema = createInsertSchema(knowledgeArticles).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  usageCount: true,
+});
+
+export const insertEscalationRuleSchema = createInsertSchema(escalationRules).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertTicketComplexityScoreSchema = createInsertSchema(ticketComplexityScores).omit({
+  id: true,
+  calculatedAt: true,
+});
+
+// Types for new smart helpdesk tables
+export type TicketAutoResponse = typeof ticketAutoResponses.$inferSelect;
+export type InsertTicketAutoResponse = z.infer<typeof insertTicketAutoResponseSchema>;
+export type KnowledgeArticle = typeof knowledgeArticles.$inferSelect;
+export type InsertKnowledgeArticle = z.infer<typeof insertKnowledgeArticleSchema>;
+export type EscalationRule = typeof escalationRules.$inferSelect;
+export type InsertEscalationRule = z.infer<typeof insertEscalationRuleSchema>;
+export type TicketComplexityScore = typeof ticketComplexityScores.$inferSelect;
+export type InsertTicketComplexityScore = z.infer<typeof insertTicketComplexityScoreSchema>;
