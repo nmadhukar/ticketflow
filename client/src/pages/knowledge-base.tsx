@@ -49,6 +49,7 @@ import {
   Book,
   Sparkles,
   BarChart,
+  ThumbsUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
@@ -94,7 +95,7 @@ export default function KnowledgeBase() {
     content: "",
     category: "general",
     tags: "",
-    status: "draft" as const,
+    status: "draft" as "draft" | "published" | "archived",
   });
 
   // Fetch knowledge articles
@@ -262,9 +263,10 @@ export default function KnowledgeBase() {
   };
 
   // Filter articles
+  const filteredArticles = articles || [];
   const displayArticles = isSemanticSearch 
     ? semanticSearchResults.map(result => result.article)
-    : articles?.filter((article: KnowledgeArticle) => {
+    : filteredArticles.filter((article: KnowledgeArticle) => {
         const matchesSearch = searchTerm === "" ||
           article.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
           article.summary.toLowerCase().includes(searchTerm.toLowerCase()) ||
