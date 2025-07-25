@@ -1,8 +1,8 @@
-import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { db } from "./db";
 import { tasks, ticketAutoResponses, knowledgeArticles, ticketComplexityScores, taskComments } from "@shared/schema";
 import { eq, desc, sql, and, or, ilike } from "drizzle-orm";
 import type { Task, InsertTicketAutoResponse, InsertTicketComplexityScore } from "@shared/schema";
+import { bedrockIntegration } from "./bedrockIntegration";
 
 interface ComplexityFactors {
   keywords: number;
@@ -13,36 +13,9 @@ interface ComplexityFactors {
 }
 
 export class AIAutoResponseService {
-  private bedrockClient: BedrockRuntimeClient | null = null;
-
   constructor() {
-    this.initializeBedrockClient();
-  }
-
-  private async initializeBedrockClient() {
-    try {
-      // Get AWS Bedrock configuration
-      const [bedrockConfig] = await db
-        .select()
-        .from(sql`api_keys`)
-        .where(sql`service = 'bedrock'`)
-        .limit(1);
-
-      if (!bedrockConfig?.key || !bedrockConfig?.secret || !bedrockConfig?.region) {
-        console.log('AWS Bedrock not configured');
-        return;
-      }
-
-      this.bedrockClient = new BedrockRuntimeClient({
-        region: bedrockConfig.region,
-        credentials: {
-          accessKeyId: bedrockConfig.key,
-          secretAccessKey: bedrockConfig.secret,
-        },
-      });
-    } catch (error) {
-      console.error('Failed to initialize Bedrock client:', error);
-    }
+    // Initialize Bedrock client on service creation
+    bedrockIntegration.initialize();
   }
 
   async analyzeTicket(ticket: Task): Promise<{
@@ -52,16 +25,6 @@ export class AIAutoResponseService {
     factors: ComplexityFactors;
     shouldEscalate: boolean;
   }> {
-    if (!this.bedrockClient) {
-      return {
-        autoResponse: null,
-        confidence: 0,
-        complexity: 50,
-        factors: { keywords: 0, urgency: 0, technical: 0, historical: 0, sentiment: 0 },
-        shouldEscalate: true,
-      };
-    }
-
     try {
       // Search for similar resolved tickets
       const similarTickets = await this.findSimilarResolvedTickets(ticket.title, ticket.description || '');
@@ -69,28 +32,38 @@ export class AIAutoResponseService {
       // Search knowledge base
       const relevantArticles = await this.searchKnowledgeBase(ticket.title, ticket.description || '');
       
-      // Calculate complexity
-      const complexityAnalysis = await this.calculateComplexity(ticket, similarTickets);
+      // Use Bedrock to analyze the ticket
+      const analysis = await bedrockIntegration.analyzeTicket(ticket);
       
-      // Generate AI response if confidence is high
-      let autoResponse = null;
-      let confidence = 0;
+      // Generate AI response using Bedrock
+      const responseResult = await bedrockIntegration.generateResponse(ticket, relevantArticles);
+      
+      // Calculate confidence using Bedrock
+      const confidenceResult = await bedrockIntegration.calculateConfidence(
+        ticket,
+        relevantArticles.length,
+        analysis.complexityScore
+      );
+      
+      // Calculate complexity factors
+      const factors = this.calculateComplexityFactors(ticket, similarTickets);
 
-      if (similarTickets.length > 0 || relevantArticles.length > 0) {
-        const response = await this.generateAutoResponse(ticket, similarTickets, relevantArticles);
-        autoResponse = response.response;
-        confidence = response.confidence;
+      // Store the AI response in the database
+      if (responseResult.response && confidenceResult.confidenceScore > 0) {
+        await this.storeAutoResponse(ticket.id, {
+          response: responseResult.response,
+          confidence: confidenceResult.confidenceScore,
+          suggestedArticles: responseResult.suggestedArticles,
+          applied: confidenceResult.shouldAutoRespond,
+        });
       }
 
-      // Determine if escalation is needed
-      const shouldEscalate = complexityAnalysis.score > 70 || confidence < 0.7;
-
       return {
-        autoResponse,
-        confidence,
-        complexity: complexityAnalysis.score,
-        factors: complexityAnalysis.factors,
-        shouldEscalate,
+        autoResponse: responseResult.response,
+        confidence: confidenceResult.confidenceScore,
+        complexity: analysis.complexityScore,
+        factors,
+        shouldEscalate: !confidenceResult.shouldAutoRespond,
       };
     } catch (error) {
       console.error('Error analyzing ticket:', error);
@@ -189,10 +162,7 @@ export class AIAutoResponseService {
     }
   }
 
-  private async calculateComplexity(ticket: Task, similarTickets: any[]): Promise<{
-    score: number;
-    factors: ComplexityFactors;
-  }> {
+  private calculateComplexityFactors(ticket: Task, similarTickets: any[]): ComplexityFactors {
     const factors: ComplexityFactors = {
       keywords: 0,
       urgency: 0,
@@ -225,94 +195,52 @@ export class AIAutoResponseService {
     const complexKeywords = ['complex', 'difficult', 'urgent', 'critical', 'broken', 'down'];
     factors.keywords = complexKeywords.filter(keyword => text.includes(keyword)).length * 15;
 
-    // Calculate total score
-    const score = Math.min(100, Object.values(factors).reduce((a, b) => a + b, 0));
-
-    return { score, factors };
+    return factors;
   }
 
-  private async generateAutoResponse(
-    ticket: Task,
-    similarTickets: any[],
-    articles: any[]
-  ): Promise<{ response: string; confidence: number }> {
-    if (!this.bedrockClient) {
-      return { response: '', confidence: 0 };
-    }
-
+  private async storeAutoResponse(ticketId: number, response: {
+    response: string;
+    confidence: number;
+    suggestedArticles: number[];
+    applied: boolean;
+  }): Promise<void> {
     try {
-      const context = {
-        ticket: {
-          title: ticket.title,
-          description: ticket.description,
-          category: ticket.category,
-          priority: ticket.priority,
-        },
-        similarTickets: similarTickets.map(t => ({
-          title: t.title,
-          resolution: t.resolution,
-          category: t.category,
-        })),
-        knowledgeArticles: articles.map(a => ({
-          title: a.title,
-          content: a.content,
-          summary: a.summary,
-        })),
+      const autoResponse: InsertTicketAutoResponse = {
+        ticketId,
+        response: response.response,
+        confidence: response.confidence,
+        suggestedArticles: response.suggestedArticles,
+        applied: response.applied,
+        createdAt: new Date(),
       };
 
-      const prompt = `You are an AI helpdesk assistant. Based on similar resolved tickets and knowledge articles, generate a helpful response for this ticket.
-
-Current Ticket:
-Title: ${ticket.title}
-Description: ${ticket.description}
-Category: ${ticket.category}
-Priority: ${ticket.priority}
-
-Similar Resolved Tickets:
-${similarTickets.map(t => `- ${t.title}: ${t.resolution}`).join('\n')}
-
-Relevant Knowledge Articles:
-${articles.map(a => `- ${a.title}: ${a.summary || a.content.substring(0, 200)}`).join('\n')}
-
-Generate a professional, helpful response that:
-1. Acknowledges the issue
-2. Provides relevant solutions based on similar tickets and knowledge articles
-3. Includes clear steps if applicable
-4. Offers to escalate if the solution doesn't work
-
-Also provide a confidence score (0-1) for this response based on how well the similar tickets and articles match the current issue.
-
-Format your response as JSON:
-{
-  "response": "Your helpful response here",
-  "confidence": 0.85
-}`;
-
-      const command = new InvokeModelCommand({
-        modelId: "anthropic.claude-3-sonnet-20240229-v1:0",
-        contentType: "application/json",
-        accept: "application/json",
-        body: JSON.stringify({
-          messages: [{
-            role: "user",
-            content: prompt,
-          }],
-          max_tokens: 1000,
-          temperature: 0.3,
-        }),
-      });
-
-      const response = await this.bedrockClient.send(command);
-      const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-      const aiResponse = JSON.parse(responseBody.content[0].text);
-
-      return {
-        response: aiResponse.response,
-        confidence: aiResponse.confidence,
-      };
+      await db.insert(ticketAutoResponses).values(autoResponse);
     } catch (error) {
-      console.error('Error generating auto response:', error);
-      return { response: '', confidence: 0 };
+      console.error('Error storing auto response:', error);
+    }
+  }
+
+  // Knowledge base learning method for resolved tickets
+  async updateKnowledgeBase(ticket: Task, resolution: string): Promise<void> {
+    try {
+      const knowledge = await bedrockIntegration.updateKnowledgeBase(ticket, resolution);
+      
+      // Store the extracted knowledge in the database
+      await db.insert(knowledgeArticles).values({
+        title: knowledge.title,
+        summary: knowledge.summary,
+        content: knowledge.content,
+        category: knowledge.category,
+        tags: knowledge.tags,
+        sourceTicketId: ticket.id,
+        status: 'draft',
+        createdBy: ticket.createdBy || 'system',
+        updatedBy: ticket.createdBy || 'system',
+      });
+      
+      console.log(`Knowledge article created from ticket #${ticket.ticketNumber}`);
+    } catch (error) {
+      console.error('Error updating knowledge base:', error);
     }
   }
 
