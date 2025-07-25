@@ -51,6 +51,8 @@ import {
   BarChart,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Progress } from "@/components/ui/progress";
+import { Switch } from "@/components/ui/switch";
 
 interface KnowledgeArticle {
   id: number;
@@ -67,6 +69,11 @@ interface KnowledgeArticle {
   createdByName?: string;
   createdAt: string;
   updatedAt: string;
+  isPublished: boolean;
+  effectivenessScore: number;
+  usageCount: number;
+  sourceTicketNumber?: string;
+  resolutionFromTicketId?: number;
 }
 
 export default function KnowledgeBase() {
@@ -76,6 +83,9 @@ export default function KnowledgeBase() {
   const [statusFilter, setStatusFilter] = useState<string>("published");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [editingArticle, setEditingArticle] = useState<KnowledgeArticle | null>(null);
+  const [showAIGenerated, setShowAIGenerated] = useState(true);
+  const [isSemanticSearch, setIsSemanticSearch] = useState(false);
+  const [semanticSearchResults, setSemanticSearchResults] = useState<any[]>([]);
   
   // Form state
   const [formData, setFormData] = useState({
@@ -95,8 +105,19 @@ export default function KnowledgeBase() {
   // Search knowledge base
   const searchArticles = useMutation({
     mutationFn: async (query: string) => {
-      const res = await apiRequest("POST", "/api/knowledge/search", { query });
+      const res = await apiRequest("POST", "/api/knowledge-base/search", { query, limit: 10 });
       return res.json();
+    },
+    onSuccess: (data) => {
+      setSemanticSearchResults(data);
+      setIsSemanticSearch(true);
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Search failed",
+        description: error.message,
+        variant: "destructive",
+      });
     },
   });
 
@@ -230,19 +251,32 @@ export default function KnowledgeBase() {
     }
   };
 
-  // Filter articles
-  const filteredArticles = articles?.filter((article: KnowledgeArticle) => {
-    const matchesSearch = 
-      article.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      article.summary.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      article.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      article.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
+  const handleSemanticSearch = async () => {
+    if (!searchTerm.trim()) {
+      setIsSemanticSearch(false);
+      setSemanticSearchResults([]);
+      return;
+    }
     
-    const matchesCategory = categoryFilter === "all" || article.category === categoryFilter;
-    const matchesStatus = statusFilter === "all" || article.status === statusFilter;
+    await searchArticles.mutateAsync(searchTerm);
+  };
 
-    return matchesSearch && matchesCategory && matchesStatus;
-  });
+  // Filter articles
+  const displayArticles = isSemanticSearch 
+    ? semanticSearchResults.map(result => result.article)
+    : articles?.filter((article: KnowledgeArticle) => {
+        const matchesSearch = searchTerm === "" ||
+          article.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          article.summary.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          article.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          article.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
+        
+        const matchesCategory = categoryFilter === "all" || article.category === categoryFilter;
+        const matchesStatus = statusFilter === "all" || article.isPublished;
+        const matchesAIFilter = !showAIGenerated || (showAIGenerated && article.resolutionFromTicketId);
+
+        return matchesSearch && matchesCategory && matchesStatus;
+      });
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -402,17 +436,32 @@ export default function KnowledgeBase() {
           <CardHeader>
             <CardTitle>Search & Filter</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <div className="flex items-center gap-4">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   placeholder="Search articles..."
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    if (!e.target.value.trim()) {
+                      setIsSemanticSearch(false);
+                      setSemanticSearchResults([]);
+                    }
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSemanticSearch()}
                   className="pl-9"
                 />
               </div>
+              <Button 
+                onClick={handleSemanticSearch}
+                disabled={searchArticles.isPending || !searchTerm.trim()}
+                variant={isSemanticSearch ? "default" : "outline"}
+              >
+                <Brain className="h-4 w-4 mr-2" />
+                {searchArticles.isPending ? "Searching..." : "AI Search"}
+              </Button>
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                 <SelectTrigger className="w-40">
                   <SelectValue placeholder="Category" />
@@ -437,6 +486,29 @@ export default function KnowledgeBase() {
                   <SelectItem value="archived">Archived</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            
+            {/* AI-Generated Filter and Search Info */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="ai-generated"
+                    checked={showAIGenerated}
+                    onCheckedChange={setShowAIGenerated}
+                  />
+                  <Label htmlFor="ai-generated" className="cursor-pointer">
+                    Show AI-Generated Articles
+                  </Label>
+                </div>
+              </div>
+              
+              {isSemanticSearch && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Sparkles className="h-4 w-4" />
+                  Showing {semanticSearchResults.length} AI-powered search results
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -465,12 +537,13 @@ export default function KnowledgeBase() {
                       <TableHead className="w-24">Status</TableHead>
                       <TableHead className="w-32">Stats</TableHead>
                       <TableHead className="w-32">Created</TableHead>
+                      <TableHead className="w-28">Effectiveness</TableHead>
                       <TableHead className="w-24">Source</TableHead>
                       <TableHead className="w-24">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredArticles?.map((article: KnowledgeArticle) => (
+                    {displayArticles?.map((article: KnowledgeArticle) => (
                       <TableRow key={article.id}>
                         <TableCell>
                           <div className="space-y-1">
@@ -503,7 +576,7 @@ export default function KnowledgeBase() {
                           <div className="space-y-1 text-sm">
                             <div className="flex items-center gap-1">
                               <BarChart className="h-3 w-3 text-muted-foreground" />
-                              {article.viewCount} views
+                              {article.usageCount || 0} uses
                             </div>
                             <div className="flex items-center gap-1">
                               <ThumbsUp className="h-3 w-3 text-muted-foreground" />
@@ -524,10 +597,28 @@ export default function KnowledgeBase() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          {article.sourceTicketId ? (
+                          {article.resolutionFromTicketId ? (
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1">
+                                <Sparkles className="h-4 w-4 text-primary" />
+                                <span className="text-xs font-medium">
+                                  {(article.effectivenessScore * 100).toFixed(0)}%
+                                </span>
+                              </div>
+                              <Progress 
+                                value={article.effectivenessScore * 100} 
+                                className="h-1 w-16"
+                              />
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">N/A</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {article.sourceTicketNumber ? (
                             <div className="flex items-center gap-1">
                               <Brain className="h-4 w-4 text-primary" />
-                              <span className="text-xs">AI</span>
+                              <span className="text-xs">{article.sourceTicketNumber}</span>
                             </div>
                           ) : (
                             <span className="text-xs text-muted-foreground">Manual</span>
@@ -555,9 +646,9 @@ export default function KnowledgeBase() {
                     ))}
                   </TableBody>
                 </Table>
-                {filteredArticles?.length === 0 && (
+                {displayArticles?.length === 0 && (
                   <div className="text-center py-8 text-muted-foreground">
-                    No articles found matching your filters.
+                    {isSemanticSearch ? "No articles found matching your search query." : "No articles found matching your filters."}
                   </div>
                 )}
               </div>

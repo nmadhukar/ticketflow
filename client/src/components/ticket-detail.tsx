@@ -34,6 +34,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AiResponseFeedback } from "@/components/ai-response-feedback";
 
 interface TicketDetailProps {
   ticketId: number;
@@ -287,7 +288,7 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
                   </div>
                 </div>
               )}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center justify-between mt-4">
                 <Button
                   onClick={() => applyAIResponse.mutate()}
                   disabled={applyAIResponse.isPending}
@@ -295,22 +296,11 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
                   <CheckCircle className="h-4 w-4 mr-2" />
                   Apply Response
                 </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => updateAIEffectiveness.mutate(true)}
-                  disabled={updateAIEffectiveness.isPending}
-                >
-                  <ThumbsUp className="h-4 w-4 mr-2" />
-                  Helpful
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => updateAIEffectiveness.mutate(false)}
-                  disabled={updateAIEffectiveness.isPending}
-                >
-                  <ThumbsDown className="h-4 w-4 mr-2" />
-                  Not Helpful
-                </Button>
+                <AiResponseFeedback
+                  responseId={aiResponse.id}
+                  ticketId={ticketId}
+                  feedbackType="auto_response"
+                />
               </div>
             </div>
           </CardContent>

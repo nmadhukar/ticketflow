@@ -1,8 +1,9 @@
 import { db } from "./db";
-import { tasks, ticketAutoResponses, knowledgeArticles, ticketComplexityScores, taskComments } from "@shared/schema";
+import { tasks, ticketAutoResponses, knowledgeArticles, ticketComplexityScores, taskComments, learningQueue } from "@shared/schema";
 import { eq, desc, sql, and, or, ilike } from "drizzle-orm";
 import type { Task, InsertTicketAutoResponse, InsertTicketComplexityScore } from "@shared/schema";
 import { bedrockIntegration } from "./bedrockIntegration";
+import { getKnowledgeLearningService } from "./knowledgeBaseLearning";
 
 interface ComplexityFactors {
   keywords: number;
@@ -127,6 +128,25 @@ export class AIAutoResponseService {
 
   private async searchKnowledgeBase(title: string, description: string, limit = 3): Promise<any[]> {
     try {
+      // First try semantic search for better results
+      const knowledgeService = getKnowledgeLearningService();
+      const semanticResults = await knowledgeService.semanticSearch(`${title} ${description}`, limit);
+      
+      if (semanticResults.length > 0) {
+        // Update usage count for accessed articles
+        for (const result of semanticResults) {
+          await db
+            .update(knowledgeArticles)
+            .set({
+              usageCount: sql`${knowledgeArticles.usageCount} + 1`,
+            })
+            .where(eq(knowledgeArticles.id, result.article.id));
+        }
+        
+        return semanticResults.map(r => r.article);
+      }
+      
+      // Fallback to keyword search if semantic search fails
       const searchTerms = `${title} ${description}`.toLowerCase().split(' ').filter(term => term.length > 3);
       
       const conditions = searchTerms.map(term => 

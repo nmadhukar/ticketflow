@@ -25,8 +25,12 @@ import {
   ticketAutoResponses,
   ticketComplexityScores,
   knowledgeArticles,
-  escalationRules
+  escalationRules,
+  aiFeedback,
+  learningQueue,
+  tasks
 } from "@shared/schema";
+import { getKnowledgeLearningService } from "./knowledgeBaseLearning";
 import { z } from "zod";
 import { createHash } from 'crypto';
 import multer from 'multer';
@@ -2927,6 +2931,190 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting escalation rule:", error);
       res.status(500).json({ message: "Failed to delete escalation rule" });
+    }
+  });
+
+  // Self-Learning Knowledge Base Endpoints
+  
+  // Submit feedback on AI response
+  app.post('/api/ai-feedback', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const { feedbackType, referenceId, rating, comment, ticketId } = req.body;
+      
+      // Validate rating
+      if (![1, 5].includes(rating)) {
+        return res.status(400).json({ message: "Rating must be 1 (thumbs down) or 5 (thumbs up)" });
+      }
+      
+      const feedback = await db
+        .insert(aiFeedback)
+        .values({
+          feedbackType,
+          referenceId,
+          userId,
+          rating,
+          comment,
+          ticketId,
+        })
+        .returning();
+      
+      // Update knowledge article effectiveness if applicable
+      if (feedbackType === 'knowledge_article') {
+        const knowledgeService = getKnowledgeLearningService();
+        await knowledgeService.updateArticleEffectiveness(referenceId);
+      }
+      
+      res.json(feedback[0]);
+    } catch (error) {
+      console.error("Error submitting AI feedback:", error);
+      res.status(500).json({ message: "Failed to submit feedback" });
+    }
+  });
+  
+  // Get AI feedback for a reference
+  app.get('/api/ai-feedback/:type/:referenceId', isAuthenticated, async (req: any, res) => {
+    try {
+      const { type, referenceId } = req.params;
+      
+      const feedback = await db
+        .select()
+        .from(aiFeedback)
+        .where(
+          and(
+            eq(aiFeedback.feedbackType, type),
+            eq(aiFeedback.referenceId, parseInt(referenceId))
+          )
+        )
+        .orderBy(desc(aiFeedback.createdAt));
+      
+      res.json(feedback);
+    } catch (error) {
+      console.error("Error fetching AI feedback:", error);
+      res.status(500).json({ message: "Failed to fetch feedback" });
+    }
+  });
+  
+  // Search knowledge base with semantic search
+  app.post('/api/knowledge-base/search', isAuthenticated, async (req: any, res) => {
+    try {
+      const { query, limit = 5 } = req.body;
+      
+      if (!query) {
+        return res.status(400).json({ message: "Search query is required" });
+      }
+      
+      const knowledgeService = getKnowledgeLearningService();
+      const results = await knowledgeService.semanticSearch(query, limit);
+      
+      res.json(results);
+    } catch (error) {
+      console.error("Error searching knowledge base:", error);
+      res.status(500).json({ message: "Failed to search knowledge base" });
+    }
+  });
+  
+  // Add ticket to learning queue when resolved
+  app.post('/api/tasks/:id/add-to-learning', isAuthenticated, async (req: any, res) => {
+    try {
+      const taskId = parseInt(req.params.id);
+      
+      // Check if ticket is resolved
+      const [task] = await db
+        .select()
+        .from(tasks)
+        .where(eq(tasks.id, taskId))
+        .limit(1);
+      
+      if (!task || task.status !== 'resolved') {
+        return res.status(400).json({ message: "Only resolved tickets can be added to learning queue" });
+      }
+      
+      // Check if already in queue
+      const existing = await db
+        .select()
+        .from(learningQueue)
+        .where(eq(learningQueue.ticketId, taskId))
+        .limit(1);
+      
+      if (existing.length > 0) {
+        return res.status(400).json({ message: "Ticket already in learning queue" });
+      }
+      
+      // Add to queue
+      const [queueItem] = await db
+        .insert(learningQueue)
+        .values({ ticketId: taskId })
+        .returning();
+      
+      res.json(queueItem);
+    } catch (error) {
+      console.error("Error adding to learning queue:", error);
+      res.status(500).json({ message: "Failed to add to learning queue" });
+    }
+  });
+  
+  // Process learning queue (admin only)
+  app.post('/api/admin/learning-queue/process', isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(getUserId(req));
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const knowledgeService = getKnowledgeLearningService();
+      
+      // Process queue asynchronously
+      knowledgeService.processLearningQueue().catch(console.error);
+      
+      res.json({ message: "Learning queue processing started" });
+    } catch (error) {
+      console.error("Error starting learning queue:", error);
+      res.status(500).json({ message: "Failed to start learning queue" });
+    }
+  });
+  
+  // Seed historical tickets for learning (admin only)
+  app.post('/api/admin/learning-queue/seed', isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(getUserId(req));
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const { daysBack = 90 } = req.body;
+      const knowledgeService = getKnowledgeLearningService();
+      
+      // Seed asynchronously
+      knowledgeService.seedHistoricalTickets(daysBack).catch(console.error);
+      
+      res.json({ message: `Started seeding historical tickets from the last ${daysBack} days` });
+    } catch (error) {
+      console.error("Error seeding historical tickets:", error);
+      res.status(500).json({ message: "Failed to seed historical tickets" });
+    }
+  });
+  
+  // Get learning queue status
+  app.get('/api/admin/learning-queue/status', isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(getUserId(req));
+      if (!user || user.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const status = await db
+        .select({
+          status: learningQueue.processStatus,
+          count: count(),
+        })
+        .from(learningQueue)
+        .groupBy(learningQueue.processStatus);
+      
+      res.json(status);
+    } catch (error) {
+      console.error("Error fetching learning queue status:", error);
+      res.status(500).json({ message: "Failed to fetch learning queue status" });
     }
   });
 

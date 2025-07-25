@@ -639,6 +639,50 @@ export const knowledgeArticles = pgTable("knowledge_articles", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Knowledge article embeddings for semantic search
+export const knowledgeEmbeddings = pgTable("knowledge_embeddings", {
+  id: serial("id").primaryKey(),
+  articleId: integer("article_id").references(() => knowledgeArticles.id).notNull().unique(),
+  embedding: jsonb("embedding").notNull(), // Store vector as JSON array
+  embeddingModel: varchar("embedding_model", { length: 100 }).default("amazon.titan-embed-text-v1"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Feedback on AI responses and knowledge articles
+export const aiFeedback = pgTable("ai_feedback", {
+  id: serial("id").primaryKey(),
+  feedbackType: varchar("feedback_type", { length: 50 }).notNull(), // 'auto_response', 'knowledge_article'
+  referenceId: integer("reference_id").notNull(), // ID of the auto_response or knowledge_article
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  rating: integer("rating").notNull(), // 1 (thumbs down) or 5 (thumbs up)
+  comment: text("comment"),
+  ticketId: integer("ticket_id").references(() => tasks.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Resolution patterns extracted from tickets
+export const resolutionPatterns = pgTable("resolution_patterns", {
+  id: serial("id").primaryKey(),
+  pattern: text("pattern").notNull(),
+  category: varchar("category", { length: 100 }),
+  frequency: integer("frequency").default(1),
+  successRate: decimal("success_rate", { precision: 3, scale: 2 }),
+  sourceTicketIds: integer("source_ticket_ids").array(),
+  extractedAt: timestamp("extracted_at").defaultNow(),
+  lastUsed: timestamp("last_used"),
+});
+
+// Knowledge base learning queue for batch processing
+export const learningQueue = pgTable("learning_queue", {
+  id: serial("id").primaryKey(),
+  ticketId: integer("ticket_id").references(() => tasks.id).notNull(),
+  processStatus: varchar("process_status", { length: 50 }).default("pending"), // pending, processing, completed, failed
+  processingAttempts: integer("processing_attempts").default(0),
+  processedAt: timestamp("processed_at"),
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Escalation rules for complex tickets
 export const escalationRules = pgTable("escalation_rules", {
   id: serial("id").primaryKey(),
@@ -697,3 +741,36 @@ export type EscalationRule = typeof escalationRules.$inferSelect;
 export type InsertEscalationRule = z.infer<typeof insertEscalationRuleSchema>;
 export type TicketComplexityScore = typeof ticketComplexityScores.$inferSelect;
 export type InsertTicketComplexityScore = z.infer<typeof insertTicketComplexityScoreSchema>;
+
+// Schemas for knowledge base tables
+export const insertKnowledgeEmbeddingSchema = createInsertSchema(knowledgeEmbeddings).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertAiFeedbackSchema = createInsertSchema(aiFeedback).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertResolutionPatternSchema = createInsertSchema(resolutionPatterns).omit({
+  id: true,
+  extractedAt: true,
+  lastUsed: true,
+});
+
+export const insertLearningQueueSchema = createInsertSchema(learningQueue).omit({
+  id: true,
+  createdAt: true,
+  processedAt: true,
+});
+
+// Types for knowledge base tables
+export type KnowledgeEmbedding = typeof knowledgeEmbeddings.$inferSelect;
+export type InsertKnowledgeEmbedding = z.infer<typeof insertKnowledgeEmbeddingSchema>;
+export type AiFeedback = typeof aiFeedback.$inferSelect;
+export type InsertAiFeedback = z.infer<typeof insertAiFeedbackSchema>;
+export type ResolutionPattern = typeof resolutionPatterns.$inferSelect;
+export type InsertResolutionPattern = z.infer<typeof insertResolutionPatternSchema>;
+export type LearningQueue = typeof learningQueue.$inferSelect;
+export type InsertLearningQueue = z.infer<typeof insertLearningQueueSchema>;

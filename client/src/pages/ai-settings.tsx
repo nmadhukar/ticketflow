@@ -33,6 +33,8 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { format } from "date-fns";
+import { Progress } from "@/components/ui/progress";
 
 interface AISettings {
   // AI Response Settings
@@ -59,6 +61,173 @@ interface AISettings {
   // Rate Limiting
   maxRequestsPerMinute: number;
   maxRequestsPerDay: number;
+}
+
+// Queue Status Display Component
+function QueueStatusDisplay() {
+  const { data: queueStatus, isLoading } = useQuery({
+    queryKey: ["/api/admin/learning-queue"],
+  });
+
+  if (isLoading) {
+    return <div className="text-sm text-muted-foreground">Loading queue status...</div>;
+  }
+
+  return (
+    <div className="grid grid-cols-3 gap-4">
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">Pending</p>
+              <p className="text-2xl font-bold">{queueStatus?.pending || 0}</p>
+            </div>
+            <Database className="h-8 w-8 text-muted-foreground" />
+          </div>
+        </CardContent>
+      </Card>
+      
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">Processing</p>
+              <p className="text-2xl font-bold">{queueStatus?.processing || 0}</p>
+            </div>
+            <RefreshCw className="h-8 w-8 text-primary animate-spin" />
+          </div>
+        </CardContent>
+      </Card>
+      
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">Completed Today</p>
+              <p className="text-2xl font-bold">{queueStatus?.completedToday || 0}</p>
+            </div>
+            <CheckCircle className="h-8 w-8 text-green-500" />
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// Batch Processing Controls Component
+function BatchProcessingControls() {
+  const { toast } = useToast();
+  const [dateRange, setDateRange] = useState({
+    start: format(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd'),
+    end: format(new Date(), 'yyyy-MM-dd'),
+  });
+  
+  const processBatch = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/batch-process", dateRange);
+      return res.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Batch processing started",
+        description: `Processing ${data.ticketCount} resolved tickets...`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to start batch processing",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="start-date">Start Date</Label>
+          <Input
+            id="start-date"
+            type="date"
+            value={dateRange.start}
+            onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="end-date">End Date</Label>
+          <Input
+            id="end-date"
+            type="date"
+            value={dateRange.end}
+            onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+          />
+        </div>
+      </div>
+      
+      <Button 
+        onClick={() => processBatch.mutate()}
+        disabled={processBatch.isPending}
+        className="w-full"
+      >
+        <Zap className="h-4 w-4 mr-2" />
+        {processBatch.isPending ? "Processing..." : "Start Batch Processing"}
+      </Button>
+    </div>
+  );
+}
+
+// Learning Analytics Component
+function LearningAnalytics() {
+  const { data: analytics, isLoading } = useQuery({
+    queryKey: ["/api/admin/ai-analytics"],
+  });
+
+  if (isLoading) {
+    return <div className="text-sm text-muted-foreground">Loading analytics...</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Articles Created</span>
+            <span className="font-medium">{analytics?.articlesCreated || 0}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Avg. Effectiveness</span>
+            <span className="font-medium">{((analytics?.avgEffectiveness || 0) * 100).toFixed(1)}%</span>
+          </div>
+        </div>
+        
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Auto-Responses Sent</span>
+            <span className="font-medium">{analytics?.autoResponsesSent || 0}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Tickets Resolved by AI</span>
+            <span className="font-medium">{analytics?.ticketsResolvedByAI || 0}</span>
+          </div>
+        </div>
+      </div>
+      
+      {analytics?.topCategories && analytics.topCategories.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium">Top Knowledge Categories</p>
+          <div className="space-y-1">
+            {analytics.topCategories.map((cat: any, index: number) => (
+              <div key={index} className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">{cat.category}</span>
+                <span>{cat.count} articles</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function AISettings() {
@@ -591,6 +760,76 @@ export default function AISettings() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Learning Queue Management */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Database className="h-5 w-5" />
+              Knowledge Base Learning Queue
+            </CardTitle>
+            <CardDescription>
+              Manage the self-learning knowledge base system
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Queue Status */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium">Learning Queue Status</h3>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => queryClient.invalidateQueries({ queryKey: ['/api/admin/learning-queue'] })}
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh
+                </Button>
+              </div>
+              
+              <QueueStatusDisplay />
+            </div>
+
+            <Separator />
+
+            {/* Batch Processing */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-medium">Historical Ticket Processing</h3>
+              <p className="text-sm text-muted-foreground">
+                Process resolved tickets from a specific date range to seed the knowledge base.
+              </p>
+              
+              <BatchProcessingControls />
+            </div>
+
+            <Separator />
+
+            {/* Learning Analytics */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-medium">Learning Analytics</h3>
+              <LearningAnalytics />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Footer with Save Button */}
+        <div className="flex items-center justify-between sticky bottom-6 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 p-4 rounded-lg border">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            {hasChanges && (
+              <>
+                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                You have unsaved changes
+              </>
+            )}
+          </div>
+          <Button
+            onClick={handleSave}
+            disabled={!hasChanges || updateSettings.isPending}
+          >
+            <Save className="h-4 w-4 mr-2" />
+            {updateSettings.isPending ? "Saving..." : "Save Settings"}
+          </Button>
+        </div>
       </div>
     </Layout>
   );
