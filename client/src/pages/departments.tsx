@@ -30,11 +30,11 @@ export default function Departments() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: departments, isLoading } = useQuery({
+  const { data: departments = [], isLoading } = useQuery({
     queryKey: ["/api/departments"],
   });
 
-  const { data: users } = useQuery({
+  const { data: users = [] } = useQuery({
     queryKey: ["/api/users"],
   });
 
@@ -53,10 +53,7 @@ export default function Departments() {
 
   const createMutation = useMutation({
     mutationFn: async (data: DepartmentFormData) => {
-      await apiRequest("/api/admin/departments", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
+      await apiRequest("POST", "/api/admin/departments", data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
@@ -78,10 +75,7 @@ export default function Departments() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: number; data: DepartmentFormData }) => {
-      await apiRequest(`/api/admin/departments/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(data),
-      });
+      await apiRequest("PUT", `/api/admin/departments/${id}`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
@@ -102,9 +96,7 @@ export default function Departments() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      await apiRequest(`/api/admin/departments/${id}`, {
-        method: "DELETE",
-      });
+      await apiRequest("DELETE", `/api/admin/departments/${id}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
@@ -215,7 +207,7 @@ export default function Departments() {
                         </FormControl>
                         <SelectContent>
                           <SelectItem value="">No Manager</SelectItem>
-                          {users?.filter((user: User) => user.role === 'admin' || user.role === 'manager').map((user: User) => (
+                          {users.filter((user: User) => user.role === 'admin' || user.role === 'manager').map((user: User) => (
                             <SelectItem key={user.id} value={user.id}>
                               {user.firstName} {user.lastName} ({user.email})
                             </SelectItem>
@@ -241,8 +233,8 @@ export default function Departments() {
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {departments?.map((department: Department) => {
-          const manager = users?.find((u: User) => u.id === department.managerId);
+        {departments.map((department: Department) => {
+          const manager = users.find((u: User) => u.id === department.managerId);
           return (
             <Card key={department.id} className="relative group">
               <CardHeader className="pb-4">
