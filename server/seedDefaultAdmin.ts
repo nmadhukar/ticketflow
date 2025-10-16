@@ -1,8 +1,11 @@
 import { db } from "./db";
 import { users } from "@shared/schema";
 import { eq } from "drizzle-orm";
-import bcrypt from "bcryptjs";
+import { scrypt, randomBytes } from "crypto";
+import { promisify } from "util";
 import { randomUUID } from "crypto";
+
+const scryptAsync = promisify(scrypt);
 
 const DEFAULT_ADMIN = {
   email: "admin@ticketflow.local",
@@ -11,6 +14,12 @@ const DEFAULT_ADMIN = {
   lastName: "Administrator",
   role: "admin" as const,
 };
+
+async function hashPassword(password: string): Promise<string> {
+  const salt = randomBytes(16).toString("hex");
+  const buf = (await scryptAsync(password, salt, 64)) as Buffer;
+  return `${buf.toString("hex")}.${salt}`;
+}
 
 export async function seedDefaultAdmin() {
   try {
@@ -24,8 +33,8 @@ export async function seedDefaultAdmin() {
       .limit(1);
     
     if (existing.length === 0) {
-      // Hash the password
-      const hashedPassword = await bcrypt.hash(DEFAULT_ADMIN.password, 12);
+      // Hash the password using scrypt (same as auth.ts)
+      const hashedPassword = await hashPassword(DEFAULT_ADMIN.password);
       
       // Create default admin user
       await db.insert(users).values({
