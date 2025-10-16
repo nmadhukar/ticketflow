@@ -49,6 +49,14 @@ app.use((req, res, next) => {
   } catch (error) {
     console.error("Failed to seed email templates:", error);
   }
+
+  // Seed default admin user on startup
+  try {
+    const { seedDefaultAdmin } = await import("./seedDefaultAdmin");
+    await seedDefaultAdmin();
+  } catch (error) {
+    console.error("Failed to seed default admin:", error);
+  }
   
   // Apply route-specific security
   applyRouteSpecificSecurity(app);
