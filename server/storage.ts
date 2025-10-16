@@ -19,6 +19,7 @@ import {
   teamsIntegrationSettings,
   type User,
   type UpsertUser,
+  type InsertUser,
   type Task,
   type InsertTask,
   type Team,

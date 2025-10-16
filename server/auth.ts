@@ -14,7 +14,7 @@
 
 import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
-import { Express } from "express";
+import { Express, RequestHandler } from "express";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
@@ -201,13 +201,24 @@ export function setupAuth(app: Express) {
         // If user exists but has no password (e.g., created through SSO), allow password setup
         if (!existingUser.password) {
           const hashedPassword = await hashPassword(validatedData.password);
-          await storage.updateUser(existingUser.id, {
+          
+          // Get department name if departmentId is provided
+          let departmentName = existingUser.department;
+          if (invitation.departmentId) {
+            const dept = await storage.getDepartmentById(invitation.departmentId);
+            departmentName = dept?.name || existingUser.department;
+          }
+          
+          await storage.upsertUser({
+            id: existingUser.id,
+            email: existingUser.email,
             password: hashedPassword,
             firstName: validatedData.firstName,
             lastName: validatedData.lastName,
             role: invitation.role,
             isApproved: true,
-            departmentId: invitation.departmentId || undefined,
+            isActive: existingUser.isActive,
+            department: departmentName,
           });
           
           await storage.markInvitationAccepted(invitation.id);
@@ -238,6 +249,13 @@ export function setupAuth(app: Express) {
       // Hash password
       const hashedPassword = await hashPassword(validatedData.password);
 
+      // Get department name if invitation has departmentId
+      let departmentName: string | null | undefined = undefined;
+      if (invitation?.departmentId) {
+        const dept = await storage.getDepartmentById(invitation.departmentId);
+        departmentName = dept?.name;
+      }
+
       // Create user
       const newUser: InsertUser = {
         id: randomUUID(),
@@ -248,7 +266,7 @@ export function setupAuth(app: Express) {
         role: invitation ? invitation.role : "customer", // Use invitation role if exists
         isActive: true,
         isApproved: invitation ? true : false, // Auto-approve if invited
-        departmentId: invitation?.departmentId || undefined,
+        department: departmentName,
       };
 
       const user = await storage.createUser(newUser);
