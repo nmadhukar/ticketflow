@@ -311,6 +311,7 @@ export function setupAuth(app: Express) {
       
       passport.authenticate("local", (err: any, user: any, info: any) => {
         if (err) {
+          console.error("Authentication error:", err);
           return res.status(500).json({ message: "Authentication error" });
         }
         
