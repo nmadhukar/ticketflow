@@ -81,6 +81,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   const queryClient = useQueryClient();
   const [currentTab, setCurrentTab] = useState("details");
   const [commentText, setCommentText] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   
   const [formData, setFormData] = useState({
     title: "",
@@ -146,22 +147,55 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         assigneeTeamId: "",
         dueDate: "",
       });
+      setPendingFiles([]);
       setCurrentTab("details");
     }
   }, [task, isOpen]);
 
   const createTaskMutation = useMutation({
     mutationFn: async (taskData: any) => {
-      return await apiRequest("POST", "/api/tasks", taskData);
+      const response = await apiRequest("POST", "/api/tasks", taskData);
+      return await response.json();
     },
-    onSuccess: () => {
+    onSuccess: async (newTask: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tasks/my"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+      
+      // Upload pending files if any
+      if (pendingFiles.length > 0 && newTask?.id) {
+        let uploadErrors = 0;
+        
+        for (const file of pendingFiles) {
+          const fakeUrl = `https://storage.example.com/${Date.now()}_${file.name}`;
+          try {
+            await apiRequest("POST", `/api/tasks/${newTask.id}/attachments`, {
+              fileName: file.name,
+              fileSize: file.size,
+              fileType: file.type,
+              fileUrl: fakeUrl,
+            });
+          } catch (error) {
+            console.error("Failed to upload attachment:", error);
+            uploadErrors++;
+          }
+        }
+        
+        if (uploadErrors > 0) {
+          toast({
+            title: "Warning",
+            description: `Ticket created but ${uploadErrors} of ${pendingFiles.length} file(s) failed to upload`,
+            variant: "destructive",
+          });
+        }
+        
+        setPendingFiles([]);
+      }
+      
       onClose();
       toast({
         title: "Success",
-        description: "Ticket created successfully",
+        description: `Ticket created successfully${pendingFiles.length > 0 ? ` with ${pendingFiles.length} attachment(s)` : ''}`,
       });
     },
     onError: (error) => {
@@ -400,21 +434,29 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !task?.id) return;
+    if (!file) return;
 
-    // In a real app, you would upload the file to a storage service
-    // For now, we'll simulate with a fake URL
-    const fakeUrl = `https://storage.example.com/${Date.now()}_${file.name}`;
-    
-    await addAttachmentMutation.mutateAsync({
-      fileName: file.name,
-      fileSize: file.size,
-      fileType: file.type,
-      fileUrl: fakeUrl,
-    });
+    // If editing existing task, upload immediately
+    if (task?.id) {
+      const fakeUrl = `https://storage.example.com/${Date.now()}_${file.name}`;
+      
+      await addAttachmentMutation.mutateAsync({
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+        fileUrl: fakeUrl,
+      });
+    } else {
+      // If creating new task, store file for later upload
+      setPendingFiles(prev => [...prev, file]);
+    }
 
     // Reset the input
     e.target.value = '';
+  };
+
+  const handleRemovePendingFile = (index: number) => {
+    setPendingFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   return (
@@ -813,6 +855,72 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                         />
                       </CardContent>
                     </Card>
+
+                    {/* File Attachments for New Tickets */}
+                    {!task && (
+                      <Card className="border-l-4 border-l-orange-500">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-lg flex items-center gap-2">
+                            <Paperclip className="h-5 w-5 text-orange-600" />
+                            Attachments (Optional)
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-orange-500 transition-colors">
+                            <input
+                              type="file"
+                              id="new-ticket-file-upload"
+                              className="hidden"
+                              onChange={handleFileUpload}
+                              data-testid="input-file-attachment"
+                            />
+                            <label
+                              htmlFor="new-ticket-file-upload"
+                              className="cursor-pointer"
+                            >
+                              <Upload className="h-8 w-8 mx-auto mb-2 text-slate-400" />
+                              <p className="text-sm text-slate-600">
+                                Click to upload files
+                              </p>
+                              <p className="text-xs text-slate-500 mt-1">
+                                PDF, DOC, DOCX, XLS, XLSX, PNG, JPG up to 10MB
+                              </p>
+                            </label>
+                          </div>
+
+                          {/* Pending Files List */}
+                          {pendingFiles.length > 0 && (
+                            <div className="space-y-2">
+                              <h4 className="text-sm font-medium text-slate-700">Selected Files ({pendingFiles.length})</h4>
+                              {pendingFiles.map((file, index) => (
+                                <div key={index} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                  <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-orange-100 rounded-full">
+                                      <Paperclip className="h-4 w-4 text-orange-600" />
+                                    </div>
+                                    <div>
+                                      <p className="font-medium text-slate-900 text-sm">{file.name}</p>
+                                      <p className="text-xs text-slate-500">
+                                        {(file.size / 1024).toFixed(2)} KB
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleRemovePendingFile(index)}
+                                    data-testid={`button-remove-file-${index}`}
+                                  >
+                                    <Trash2 className="h-4 w-4 text-red-500" />
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )}
                   </form>
                 </TabsContent>
 
