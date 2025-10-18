@@ -72,6 +72,7 @@ import { createHash } from 'crypto';
 import multer from 'multer';
 import { db } from "./db";
 import { eq, desc, and, or, ilike, count, avg, sum, sql } from "drizzle-orm";
+import { s3Service } from "./s3Service";
 
 // Configure multer for file uploads
 const upload = multer({
@@ -109,6 +110,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const getUserId = (req: any): string => {
     return req.user?.id || req.user?.claims?.sub;
   };
+
+  // S3 presigned URL endpoint for file uploads
+  app.post('/api/s3/presigned-url', isAuthenticated, async (req, res) => {
+    try {
+      const { fileType, folder, filename } = req.body;
+
+      if (!fileType || !folder) {
+        return res.status(400).json({ message: "fileType and folder are required" });
+      }
+
+      // Check if S3 is configured
+      if (!s3Service.isConfigured()) {
+        return res.status(503).json({ 
+          message: "S3 service is not configured. Please contact your administrator." 
+        });
+      }
+
+      const result = await s3Service.getPresignedUploadUrl(fileType, folder, filename);
+      
+      res.json(result);
+    } catch (error) {
+      console.error("Error generating presigned URL:", error);
+      res.status(500).json({ message: "Failed to generate presigned URL" });
+    }
+  });
 
   // Task routes
   app.get("/api/tasks", isAuthenticated, async (req: any, res) => {
@@ -1410,17 +1436,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
 
-      const { title, filename, content, fileData, category, tags } = req.body;
+      const { title, filename, content, fileUrl, s3Key, fileSize, mimeType, category, tags } = req.body;
       
-      if (!title || !filename || !content || !fileData) {
-        return res.status(400).json({ message: "Title, filename, content, and file data are required" });
+      if (!title || !filename || !content || !fileUrl || !s3Key) {
+        return res.status(400).json({ message: "Title, filename, content, fileUrl, and s3Key are required" });
       }
 
       const document = await storage.createHelpDocument({
         title,
         filename,
         content,
-        fileData,
+        fileUrl,
+        s3Key,
+        fileSize,
+        mimeType,
         category,
         tags,
         uploadedBy: userId,
@@ -1465,6 +1494,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const id = parseInt(req.params.id);
+      
+      // Get the document to retrieve S3 key
+      const document = await storage.getHelpDocument(id);
+      
+      if (document && document.s3Key) {
+        // Delete file from S3
+        try {
+          await s3Service.deleteFile(document.s3Key);
+        } catch (s3Error) {
+          console.error("Error deleting file from S3:", s3Error);
+          // Continue with database deletion even if S3 deletion fails
+        }
+      }
+      
       await storage.deleteHelpDocument(id);
       
       res.json({ message: "Help document deleted successfully" });
@@ -2000,7 +2043,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/admin/company-policies', isAuthenticated, upload.single('file'), async (req, res) => {
+  app.post('/api/admin/company-policies', isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
@@ -2009,26 +2052,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
 
-      if (!req.file) {
-        return res.status(400).json({ message: "File is required" });
+      const { title, description, content, fileUrl, s3Key, fileName, fileSize, mimeType } = req.body;
+      
+      if (!title || !fileUrl || !s3Key || !fileName) {
+        return res.status(400).json({ message: "Title, fileUrl, s3Key, and fileName are required" });
       }
-
-      const { description } = req.body;
-      
-      // Use filename (without extension) as title if not provided
-      const title = req.body.title || req.file.originalname.replace(/\.[^/.]+$/, '');
-      
-      // Convert file to Base64 for storage
-      const fileData = req.file.buffer.toString('base64');
       
       const policy = await storage.createCompanyPolicy({
         title,
         description,
-        content: null, // Will be extracted later if it's a text-based file
-        fileData,
-        fileName: req.file.originalname,
-        fileSize: req.file.size,
-        mimeType: req.file.mimetype,
+        content: content || null,
+        fileUrl,
+        s3Key,
+        fileName,
+        fileSize,
+        mimeType,
         uploadedBy: userId,
         isActive: true,
       });
@@ -2040,7 +2078,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put('/api/admin/company-policies/:id', isAuthenticated, upload.single('file'), async (req, res) => {
+  app.put('/api/admin/company-policies/:id', isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
@@ -2050,17 +2088,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const policyId = parseInt(req.params.id);
-      const { title, description } = req.body;
+      const { title, description, content, fileUrl, s3Key, fileName, fileSize, mimeType } = req.body;
       
       const updateData: any = { title, description };
       
-      if (req.file) {
-        const fileData = req.file.buffer.toString('base64');
-        updateData.fileData = fileData;
-        updateData.content = null; // Will be extracted later if it's a text-based file
-        updateData.fileName = req.file.originalname;
-        updateData.fileSize = req.file.size;
-        updateData.mimeType = req.file.mimetype;
+      // If new file uploaded via S3
+      if (fileUrl && s3Key) {
+        // Get old policy to delete old file from S3
+        const oldPolicy = await storage.getCompanyPolicyById(policyId);
+        
+        if (oldPolicy && oldPolicy.s3Key) {
+          try {
+            await s3Service.deleteFile(oldPolicy.s3Key);
+          } catch (s3Error) {
+            console.error("Error deleting old file from S3:", s3Error);
+          }
+        }
+        
+        updateData.fileUrl = fileUrl;
+        updateData.s3Key = s3Key;
+        updateData.content = content || null;
+        updateData.fileName = fileName;
+        updateData.fileSize = fileSize;
+        updateData.mimeType = mimeType;
       }
       
       const policy = await storage.updateCompanyPolicy(policyId, updateData);
@@ -2081,6 +2131,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const policyId = parseInt(req.params.id);
+      
+      // Get the policy to retrieve S3 key
+      const policy = await storage.getCompanyPolicyById(policyId);
+      
+      if (policy && policy.s3Key) {
+        // Delete file from S3
+        try {
+          await s3Service.deleteFile(policy.s3Key);
+        } catch (s3Error) {
+          console.error("Error deleting file from S3:", s3Error);
+          // Continue with database deletion even if S3 deletion fails
+        }
+      }
+      
       await storage.deleteCompanyPolicy(policyId);
       res.json({ message: "Company policy deleted successfully" });
     } catch (error) {
