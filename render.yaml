@@ -4,9 +4,7 @@ services:
     name: ticketflow-app
     env: node
     plan: free
-    buildCommand: npm ci && npm run build
-    preDeployCommand: npm run db:push
-    startCommand: bash -lc "npm run db:push && npm start"
+    buildCommand: npm ci --production=false && npm run build
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
