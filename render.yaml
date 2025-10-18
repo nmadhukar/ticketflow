@@ -1,0 +1,51 @@
+services:
+  # Web Service
+  - type: web
+    name: ticketflow-app
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/security/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 30d
+      - key: CORS_ENABLED
+        value: true
+      - key: CORS_ORIGIN
+        value: "*"
+      - key: RATE_LIMITING_ENABLED
+        value: true
+      - key: INPUT_VALIDATION_ENABLED
+        value: true
+      - key: VALIDATION_STRICT_MODE
+        value: true
+    # Add your AWS credentials here if you have them
+    # - key: AWS_ACCESS_KEY_ID
+    #   sync: false
+    # - key: AWS_SECRET_ACCESS_KEY
+    #   sync: false
+    # - key: AWS_REGION
+    #   value: us-east-1
+    # Add Microsoft SSO credentials if configured
+    # - key: MICROSOFT_CLIENT_ID
+    #   sync: false
+    # - key: MICROSOFT_CLIENT_SECRET
+    #   sync: false
+    # - key: MICROSOFT_TENANT_ID
+    #   sync: false
+
+  # PostgreSQL Database
+  - type: pserv
+    name: ticketflow-db
+    env: postgresql
+    plan: free
+    ipAllowList: []

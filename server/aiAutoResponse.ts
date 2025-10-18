@@ -3,7 +3,7 @@ import { tasks, ticketAutoResponses, knowledgeArticles, ticketComplexityScores, 
 import { eq, desc, sql, and, or, ilike } from "drizzle-orm";
 import type { Task, InsertTicketAutoResponse, InsertTicketComplexityScore } from "@shared/schema";
 import { bedrockIntegration } from "./bedrockIntegration";
-import { getKnowledgeLearningService } from "./knowledgeBaseLearning";
+// import { getKnowledgeLearningService } from "./knowledgeBaseLearning";
 
 interface ComplexityFactors {
   keywords: number;
