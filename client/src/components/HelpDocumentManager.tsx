@@ -25,7 +25,6 @@ export default function HelpDocumentManager() {
     tags: "",
     file: null as File | null,
     content: "",
-    fileData: "",
   });
   
   const [editingDocument, setEditingDocument] = useState<any>(null);
@@ -52,7 +51,6 @@ export default function HelpDocumentManager() {
         tags: "",
         file: null,
         content: "",
-        fileData: "",
       });
       toast({
         title: "Success",
@@ -125,26 +123,18 @@ export default function HelpDocumentManager() {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64String = reader.result?.toString().split(',')[1] || "";
-      setUploadData({
-        ...uploadData,
-        file,
-        fileData: base64String,
-      });
-      
-      // Extract text content from Word doc (simplified - in production you'd use a proper library)
-      // For now, we'll ask the admin to provide a summary
-      toast({
-        title: "File loaded",
-        description: "Please provide a summary of the document content",
-      });
-    };
-    reader.readAsDataURL(file);
+    setUploadData({
+      ...uploadData,
+      file,
+    });
+    
+    toast({
+      title: "File selected",
+      description: "Please provide a summary of the document content",
+    });
   };
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     if (!uploadData.title || !uploadData.file || !uploadData.content) {
       toast({
         title: "Error",
@@ -154,14 +144,49 @@ export default function HelpDocumentManager() {
       return;
     }
 
-    uploadMutation.mutate({
-      title: uploadData.title,
-      filename: uploadData.file.name,
-      content: uploadData.content,
-      fileData: uploadData.fileData,
-      category: uploadData.category || "General",
-      tags: uploadData.tags.split(',').map(t => t.trim()).filter(t => t),
-    });
+    try {
+      // Step 1: Get presigned URL from backend
+      const presignedResponse = await apiRequest("POST", "/api/s3/presigned-url", {
+        fileType: uploadData.file.type,
+        folder: "help-documents",
+        filename: uploadData.file.name,
+      });
+
+      const presignedData = await presignedResponse.json();
+      
+      // Step 2: Upload file directly to S3
+      const uploadResponse = await fetch(presignedData.uploadUrl, {
+        method: "PUT",
+        body: uploadData.file,
+        headers: {
+          "Content-Type": uploadData.file.type,
+        },
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error("Failed to upload file to S3");
+      }
+
+      // Step 3: Save metadata to database
+      uploadMutation.mutate({
+        title: uploadData.title,
+        filename: uploadData.file.name,
+        content: uploadData.content,
+        fileUrl: presignedData.url,
+        s3Key: presignedData.key,
+        fileSize: uploadData.file.size,
+        mimeType: uploadData.file.type,
+        category: uploadData.category || "General",
+        tags: uploadData.tags.split(',').map(t => t.trim()).filter(t => t),
+      });
+    } catch (error) {
+      console.error("Upload error:", error);
+      toast({
+        title: "Error",
+        description: "Failed to upload file to cloud storage",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleEdit = (document: any) => {
@@ -192,11 +217,11 @@ export default function HelpDocumentManager() {
     }
   };
 
-  const filteredDocuments = documents?.filter((doc: any) => 
+  const filteredDocuments = Array.isArray(documents) ? documents.filter((doc: any) => 
     doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     doc.category?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     doc.tags?.some((tag: string) => tag.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  ) : [];
 
   return (
     <div className="space-y-4">

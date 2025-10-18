@@ -33,23 +33,17 @@ export function CompanyPolicyManager() {
 
   // Upload policy mutation
   const uploadPolicyMutation = useMutation({
-    mutationFn: async ({ file, description }: { file: File; description: string }) => {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('description', description);
-
-      const response = await fetch('/api/admin/company-policies', {
-        method: 'POST',
-        credentials: 'include',
-        body: formData,
+    mutationFn: async ({ title, description, fileUrl, s3Key, fileName, fileSize, mimeType }: any) => {
+      return await apiRequest('POST', '/api/admin/company-policies', {
+        title,
+        description,
+        content: null,
+        fileUrl,
+        s3Key,
+        fileName,
+        fileSize,
+        mimeType,
       });
-
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error);
-      }
-
-      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/admin/company-policies'] });
@@ -118,8 +112,50 @@ export function CompanyPolicyManager() {
     }
 
     setUploading(true);
-    await uploadPolicyMutation.mutateAsync({ file: selectedFile, description });
-    setUploading(false);
+    
+    try {
+      // Step 1: Get presigned URL from backend
+      const presignedResponse = await apiRequest('POST', '/api/s3/presigned-url', {
+        fileType: selectedFile.type,
+        folder: 'company-policies',
+        filename: selectedFile.name,
+      });
+
+      const presignedData = await presignedResponse.json();
+      
+      // Step 2: Upload file directly to S3
+      const uploadResponse = await fetch(presignedData.uploadUrl, {
+        method: 'PUT',
+        body: selectedFile,
+        headers: {
+          'Content-Type': selectedFile.type,
+        },
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error('Failed to upload file to S3');
+      }
+
+      // Step 3: Save metadata to database
+      await uploadPolicyMutation.mutateAsync({
+        title: description,
+        description,
+        fileUrl: presignedData.url,
+        s3Key: presignedData.key,
+        fileName: selectedFile.name,
+        fileSize: selectedFile.size,
+        mimeType: selectedFile.type,
+      });
+    } catch (error) {
+      console.error('Upload error:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to upload file to cloud storage',
+        variant: 'destructive',
+      });
+    } finally {
+      setUploading(false);
+    }
   };
 
   const formatFileSize = (bytes: number) => {
@@ -217,13 +253,13 @@ export function CompanyPolicyManager() {
             <div className="text-center py-8 text-muted-foreground">
               Loading policies...
             </div>
-          ) : !policies || policies.length === 0 ? (
+          ) : !Array.isArray(policies) || policies.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               No policy documents uploaded yet
             </div>
           ) : (
             <div className="space-y-3">
-              {policies.map((policy: PolicyDocument) => (
+              {policies.map((policy: any) => (
                 <div
                   key={policy.id}
                   className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"

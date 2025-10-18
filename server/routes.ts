@@ -2180,14 +2180,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Company policy not found" });
       }
       
-      // Check if fileData exists (new format) or fall back to content (old format)
-      const fileBuffer = policy.fileData 
-        ? Buffer.from(policy.fileData, 'base64')
-        : Buffer.from(policy.content || '', 'utf-8');
-      
-      res.setHeader('Content-Type', policy.mimeType);
-      res.setHeader('Content-Disposition', `attachment; filename="${policy.fileName}"`);
-      res.send(fileBuffer);
+      // Stream file from S3
+      if (policy.s3Key) {
+        await s3Service.streamFileToResponse(policy.s3Key, res);
+      } else {
+        // Fallback for legacy records (should not happen with new implementation)
+        return res.status(404).json({ message: "File not found in storage" });
+      }
     } catch (error) {
       console.error("Error downloading company policy:", error);
       res.status(500).json({ message: "Failed to download company policy" });
