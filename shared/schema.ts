@@ -395,7 +395,10 @@ export const helpDocuments = pgTable("help_documents", {
   title: varchar("title").notNull(),
   filename: varchar("filename").notNull(),
   content: text("content").notNull(), // Extracted text content for search
-  fileData: text("file_data").notNull(), // Base64 encoded file data
+  fileUrl: text("file_url").notNull(), // S3 URL to the file
+  s3Key: text("s3_key").notNull(), // S3 object key for management
+  fileSize: integer("file_size"), // File size in bytes
+  mimeType: varchar("mime_type", { length: 100 }), // MIME type
   uploadedBy: varchar("uploaded_by").references(() => users.id),
   category: varchar("category"),
   tags: text("tags").array(),
@@ -478,7 +481,8 @@ export const companyPolicies = pgTable("company_policies", {
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description"),
   content: text("content"), // Extracted text content for search (nullable for binary files)
-  fileData: text("file_data").notNull(), // Base64 encoded file data
+  fileUrl: text("file_url").notNull(), // S3 URL to the file
+  s3Key: text("s3_key").notNull(), // S3 object key for management
   fileName: varchar("file_name", { length: 255 }).notNull(),
   fileSize: integer("file_size").notNull(),
   mimeType: varchar("mime_type", { length: 100 }).notNull(),
