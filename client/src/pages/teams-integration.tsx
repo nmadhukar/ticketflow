@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, AlertCircle, CheckCircle2, Users, Key, TestTube, ExternalLink } from "lucide-react";
 import { Link } from "wouter";
+import MainWrapper from "@/components/main-wrapper";
 
 const notificationTypes = [
   { id: "ticket_created", label: "New Ticket Created" },
@@ -132,14 +133,7 @@ export default function TeamsIntegration() {
   }
 
   return (
-    <div className="container mx-auto py-8 max-w-4xl">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold">Microsoft Teams Integration</h1>
-        <p className="text-muted-foreground mt-2">
-          Connect TicketFlow with Microsoft Teams to receive real-time notifications about tickets.
-        </p>
-      </div>
-
+    <MainWrapper title="Microsoft Teams Integration" subTitle=" Connect TicketFlow with Microsoft Teams to receive real-time notifications about tickets.">
       {settings?.enabled ? (
         <Alert className="mb-6">
           <CheckCircle2 className="h-4 w-4" />
@@ -333,6 +327,6 @@ export default function TeamsIntegration() {
           </Button>
         </CardContent>
       </Card>
-    </div>
+    </MainWrapper>
   );
 }

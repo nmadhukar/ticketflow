@@ -1,7 +1,12 @@
+import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
-import { applySecurity, applyRouteSpecificSecurity, securityHealthCheck } from './security';
+import {
+  applySecurity,
+  applyRouteSpecificSecurity,
+  securityHealthCheck,
+} from "./security";
 
 const app = express();
 
@@ -43,12 +48,12 @@ app.use((req, res, next) => {
 
 (async () => {
   // Seed email templates on startup
-  try {
-    const { seedEmailTemplates } = await import("./seedEmailTemplates");
-    await seedEmailTemplates();
-  } catch (error) {
-    console.error("Failed to seed email templates:", error);
-  }
+  // try {
+  //   const { seedEmailTemplates } = await import("./seedEmailTemplates");
+  //   await seedEmailTemplates();
+  // } catch (error) {
+  //   console.error("Failed to seed email templates:", error);
+  // }
 
   // Seed default admin user on startup
   try {
@@ -57,14 +62,14 @@ app.use((req, res, next) => {
   } catch (error) {
     console.error("Failed to seed default admin:", error);
   }
-  
+
   // Apply route-specific security
   applyRouteSpecificSecurity(app);
-  
+
   const server = await registerRoutes(app);
 
   // Security health check endpoint
-  app.get('/api/security/health', (req, res) => {
+  app.get("/api/security/health", (req, res) => {
     res.json(securityHealthCheck());
   });
 
@@ -89,12 +94,11 @@ app.use((req, res, next) => {
   // Other ports are firewalled. Default to 5000 if not specified.
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || '5000', 10);
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
+  const port = parseInt(process.env.PORT || "5000", 10);
+  const isWindows = process.platform === "win32";
+  const listenOptions: any = { port, host: "0.0.0.0" };
+  if (!isWindows) listenOptions.reusePort = true;
+  server.listen(listenOptions, () => {
     log(`serving on port ${port}`);
   });
 })();

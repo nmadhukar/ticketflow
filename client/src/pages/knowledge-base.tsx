@@ -20,6 +20,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Plus, Edit, Trash2, BookOpen, Search, Eye, EyeOff, Brain, FileText, HelpCircle, Lightbulb, AlertCircle, CheckCircle, Clock, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import type { KnowledgeArticle } from "@shared/schema";
+import MainWrapper from "@/components/main-wrapper";
 
 /**
  * Knowledge Base Management Page
@@ -303,163 +304,65 @@ export default function KnowledgeBase() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <Header title="Knowledge Base" />
-      <main className="container mx-auto px-4 py-8">
-        <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-3xl font-bold">Knowledge Base Management</h1>
-              <p className="text-muted-foreground mt-2">
-                Manage knowledge articles for common issues and resolutions
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                onClick={() => triggerLearningMutation.mutate()}
-                disabled={triggerLearningMutation.isPending}
-                variant="outline"
-              >
-                {triggerLearningMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Brain className="h-4 w-4 mr-2" />
-                )}
-                AI Learning
+    <MainWrapper title="Knowledge Base Management" subTitle="Manage knowledge articles for common issues and resolutions">
+      <div className="flex justify-end items-center py-4 gap-4">
+          <Button
+            onClick={() => triggerLearningMutation.mutate()}
+            disabled={triggerLearningMutation.isPending}
+            variant="outline"
+          >
+            {triggerLearningMutation.isPending ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Brain className="h-4 w-4 mr-2" />
+            )}
+            AI Learning
+          </Button>
+          <Dialog open={isArticleDialogOpen} onOpenChange={setIsArticleDialogOpen}>
+            <DialogTrigger asChild>
+              <Button onClick={() => resetArticleForm()}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Article
               </Button>
-              <Dialog open={isArticleDialogOpen} onOpenChange={setIsArticleDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button onClick={() => resetArticleForm()}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Article
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                  <DialogHeader>
-                    <DialogTitle>
-                      {selectedArticle ? 'Edit Knowledge Article' : 'Create Knowledge Article'}
-                    </DialogTitle>
-                    <DialogDescription>
-                      {selectedArticle 
-                        ? 'Update the knowledge article details below.'
-                        : 'Create a new knowledge article for common issues and their resolutions.'
-                      }
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <div>
-                      <Label htmlFor="title">Title *</Label>
-                      <Input
-                        id="title"
-                        value={articleTitle}
-                        onChange={(e) => setArticleTitle(e.target.value)}
-                        placeholder="e.g., How to reset password"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="summary">Summary</Label>
-                      <Input
-                        id="summary"
-                        value={articleSummary}
-                        onChange={(e) => setArticleSummary(e.target.value)}
-                        placeholder="Brief description of the solution"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="category">Category</Label>
-                      <Select value={articleCategory} onValueChange={setArticleCategory}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select category" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {knowledgeCategories.map((category) => (
-                            <SelectItem key={category} value={category}>
-                              <div className="flex items-center gap-2">
-                                {getCategoryIcon(category)}
-                                {category.charAt(0).toUpperCase() + category.slice(1).replace('-', ' ')}
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label htmlFor="tags">Tags</Label>
-                      <Input
-                        id="tags"
-                        value={articleTags}
-                        onChange={(e) => setArticleTags(e.target.value)}
-                        placeholder="Comma-separated tags (e.g., password, authentication, login)"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="content">Content *</Label>
-                      <Textarea
-                        id="content"
-                        value={articleContent}
-                        onChange={(e) => setArticleContent(e.target.value)}
-                        placeholder="Detailed step-by-step resolution..."
-                        className="min-h-[200px]"
-                      />
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        id="published"
-                        checked={isPublished}
-                        onCheckedChange={setIsPublished}
-                      />
-                      <Label htmlFor="published">Publish immediately</Label>
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button
-                      variant="outline"
-                      onClick={() => setIsArticleDialogOpen(false)}
-                    >
-                      Cancel
-                    </Button>
-                    <Button 
-                      onClick={handleSaveArticle}
-                      disabled={saveArticleMutation.isPending}
-                    >
-                      {saveArticleMutation.isPending && (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      )}
-                      {selectedArticle ? 'Update' : 'Create'} Article
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-            </div>
-          </div>
-
-          {/* Filters and Search */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Search className="h-5 w-5" />
-                Filter & Search
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>
+                  {selectedArticle ? 'Edit Knowledge Article' : 'Create Knowledge Article'}
+                </DialogTitle>
+                <DialogDescription>
+                  {selectedArticle 
+                    ? 'Update the knowledge article details below.'
+                    : 'Create a new knowledge article for common issues and their resolutions.'
+                  }
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
                 <div>
-                  <Label htmlFor="search">Search</Label>
+                  <Label htmlFor="title">Title *</Label>
                   <Input
-                    id="search"
-                    placeholder="Search articles..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    id="title"
+                    value={articleTitle}
+                    onChange={(e) => setArticleTitle(e.target.value)}
+                    placeholder="e.g., How to reset password"
                   />
                 </div>
                 <div>
-                  <Label htmlFor="category-filter">Category</Label>
-                  <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <Label htmlFor="summary">Summary</Label>
+                  <Input
+                    id="summary"
+                    value={articleSummary}
+                    onChange={(e) => setArticleSummary(e.target.value)}
+                    placeholder="Brief description of the solution"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="category">Category</Label>
+                  <Select value={articleCategory} onValueChange={setArticleCategory}>
                     <SelectTrigger>
-                      <SelectValue placeholder="All categories" />
+                      <SelectValue placeholder="Select category" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All categories</SelectItem>
                       {knowledgeCategories.map((category) => (
                         <SelectItem key={category} value={category}>
                           <div className="flex items-center gap-2">
@@ -472,160 +375,245 @@ export default function KnowledgeBase() {
                   </Select>
                 </div>
                 <div>
-                  <Label htmlFor="status-filter">Status</Label>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="All statuses" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All statuses</SelectItem>
-                      <SelectItem value="published">Published</SelectItem>
-                      <SelectItem value="draft">Draft</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Label htmlFor="tags">Tags</Label>
+                  <Input
+                    id="tags"
+                    value={articleTags}
+                    onChange={(e) => setArticleTags(e.target.value)}
+                    placeholder="Comma-separated tags (e.g., password, authentication, login)"
+                  />
                 </div>
-                <div className="flex items-end">
-                  <Button 
-                    variant="outline" 
-                    onClick={() => {
-                      setSearchQuery("");
-                      setCategoryFilter("all");
-                      setStatusFilter("all");
-                    }}
-                  >
-                    Clear Filters
-                  </Button>
+                <div>
+                  <Label htmlFor="content">Content *</Label>
+                  <Textarea
+                    id="content"
+                    value={articleContent}
+                    onChange={(e) => setArticleContent(e.target.value)}
+                    placeholder="Detailed step-by-step resolution..."
+                    className="min-h-[200px]"
+                  />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="published"
+                    checked={isPublished}
+                    onCheckedChange={setIsPublished}
+                  />
+                  <Label htmlFor="published">Publish immediately</Label>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-
-          {/* Articles Table */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Knowledge Articles ({filteredArticles.length})</CardTitle>
-              <CardDescription>
-                Manage manually created and AI-generated knowledge articles
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Usage</TableHead>
-                    <TableHead>Effectiveness</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {articlesLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center">
-                        <Loader2 className="h-4 w-4 animate-spin mx-auto" />
-                        Loading articles...
-                      </TableCell>
-                    </TableRow>
-                  ) : filteredArticles.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center">
-                        {searchQuery || categoryFilter || statusFilter 
-                          ? "No articles match your search criteria."
-                          : "No knowledge articles found. Create your first article!"
-                        }
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredArticles.map((article: KnowledgeArticle) => (
-                      <TableRow key={article.id}>
-                        <TableCell className="font-medium">
-                          <div className="flex items-center gap-2">
-                            {getCategoryIcon(article.category || 'general')}
-                            <div>
-                              <div className="font-medium">{article.title}</div>
-                              {article.summary && (
-                                <div className="text-sm text-muted-foreground">
-                                  {article.summary}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">
-                            {article.category || 'general'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{getStatusBadge(article)}</TableCell>
-                        <TableCell>{article.usageCount || 0}</TableCell>
-                        <TableCell>
-                          {article.effectivenessScore ? 
-                            `${Math.round(parseFloat(article.effectivenessScore) * 100)}%` : 
-                            'N/A'
-                          }
-                        </TableCell>
-                        <TableCell>
-                          {article.createdAt ? format(new Date(article.createdAt), "MMM d, yyyy") : "Unknown"}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => togglePublishMutation.mutate(article)}
-                              disabled={togglePublishMutation.isPending}
-                            >
-                              {article.isPublished ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleEditArticle(article)}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button size="sm" variant="ghost">
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Delete Knowledge Article</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    Are you sure you want to delete "{article.title}"? This action cannot be undone.
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction
-                                    onClick={() => deleteArticleMutation.mutate(article.id)}
-                                    disabled={deleteArticleMutation.isPending}
-                                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                  >
-                                    {deleteArticleMutation.isPending && (
-                                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                    )}
-                                    Delete
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setIsArticleDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={handleSaveArticle}
+                  disabled={saveArticleMutation.isPending}
+                >
+                  {saveArticleMutation.isPending && (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                   )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </div>
-      </main>
-    </div>
+                  {selectedArticle ? 'Update' : 'Create'} Article
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+      </div>
+
+      {/* Filters and Search */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Search className="h-5 w-5" />
+            Filter & Search
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div>
+              <Label htmlFor="search">Search</Label>
+              <Input
+                id="search"
+                placeholder="Search articles..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="category-filter">Category</Label>
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All categories" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All categories</SelectItem>
+                  {knowledgeCategories.map((category) => (
+                    <SelectItem key={category} value={category}>
+                      <div className="flex items-center gap-2">
+                        {getCategoryIcon(category)}
+                        {category.charAt(0).toUpperCase() + category.slice(1).replace('-', ' ')}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="status-filter">Status</Label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="published">Published</SelectItem>
+                  <SelectItem value="draft">Draft</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-end">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setSearchQuery("");
+                  setCategoryFilter("all");
+                  setStatusFilter("all");
+                }}
+              >
+                Clear Filters
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Articles Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Knowledge Articles ({filteredArticles.length})</CardTitle>
+          <CardDescription>
+            Manage manually created and AI-generated knowledge articles
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Title</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Usage</TableHead>
+                <TableHead>Effectiveness</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {articlesLoading ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center">
+                    <Loader2 className="h-4 w-4 animate-spin mx-auto" />
+                    Loading articles...
+                  </TableCell>
+                </TableRow>
+              ) : filteredArticles.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center">
+                    {searchQuery || categoryFilter || statusFilter 
+                      ? "No articles match your search criteria."
+                      : "No knowledge articles found. Create your first article!"
+                    }
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filteredArticles.map((article: KnowledgeArticle) => (
+                  <TableRow key={article.id}>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2">
+                        {getCategoryIcon(article.category || 'general')}
+                        <div>
+                          <div className="font-medium">{article.title}</div>
+                          {article.summary && (
+                            <div className="text-sm text-muted-foreground">
+                              {article.summary}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">
+                        {article.category || 'general'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{getStatusBadge(article)}</TableCell>
+                    <TableCell>{article.usageCount || 0}</TableCell>
+                    <TableCell>
+                      {article.effectivenessScore ? 
+                        `${Math.round(parseFloat(article.effectivenessScore) * 100)}%` : 
+                        'N/A'
+                      }
+                    </TableCell>
+                    <TableCell>
+                      {article.createdAt ? format(new Date(article.createdAt), "MMM d, yyyy") : "Unknown"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => togglePublishMutation.mutate(article)}
+                          disabled={togglePublishMutation.isPending}
+                        >
+                          {article.isPublished ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleEditArticle(article)}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button size="sm" variant="ghost">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Delete Knowledge Article</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Are you sure you want to delete "{article.title}"? This action cannot be undone.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => deleteArticleMutation.mutate(article.id)}
+                                disabled={deleteArticleMutation.isPending}
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                              >
+                                {deleteArticleMutation.isPending && (
+                                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                )}
+                                Delete
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </MainWrapper>
   );
 }

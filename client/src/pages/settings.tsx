@@ -1,18 +1,31 @@
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { User, Bell, Shield, Palette } from "lucide-react";
 import { useState } from "react";
+import MainWrapper from "@/components/main-wrapper";
 
 export default function Settings() {
   const { user } = useAuth();
-  
+
   const [notifications, setNotifications] = useState({
     email: true,
     push: false,
@@ -29,21 +42,20 @@ export default function Settings() {
   });
 
   return (
-    <div className="container mx-auto p-6 max-w-4xl">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">Settings</h1>
-        <p className="text-muted-foreground">
-          Manage your account settings and preferences
-        </p>
-      </div>
-
+    <MainWrapper
+      title="Settings"
+      subTitle="Manage your account settings and preferences"
+    >
       <Tabs defaultValue="profile" className="space-y-6">
         <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="profile" className="flex items-center gap-2">
             <User className="h-4 w-4" />
             Profile
           </TabsTrigger>
-          <TabsTrigger value="notifications" className="flex items-center gap-2">
+          <TabsTrigger
+            value="notifications"
+            className="flex items-center gap-2"
+          >
             <Bell className="h-4 w-4" />
             Notifications
           </TabsTrigger>
@@ -121,7 +133,9 @@ export default function Settings() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
-                    <Label htmlFor="email-notifications">Email Notifications</Label>
+                    <Label htmlFor="email-notifications">
+                      Email Notifications
+                    </Label>
                     <p className="text-sm text-muted-foreground">
                       Receive notifications via email
                     </p>
@@ -130,14 +144,16 @@ export default function Settings() {
                     id="email-notifications"
                     checked={notifications.email}
                     onCheckedChange={(checked) =>
-                      setNotifications(prev => ({ ...prev, email: checked }))
+                      setNotifications((prev) => ({ ...prev, email: checked }))
                     }
                   />
                 </div>
 
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
-                    <Label htmlFor="push-notifications">Push Notifications</Label>
+                    <Label htmlFor="push-notifications">
+                      Push Notifications
+                    </Label>
                     <p className="text-sm text-muted-foreground">
                       Receive browser push notifications
                     </p>
@@ -146,7 +162,7 @@ export default function Settings() {
                     id="push-notifications"
                     checked={notifications.push}
                     onCheckedChange={(checked) =>
-                      setNotifications(prev => ({ ...prev, push: checked }))
+                      setNotifications((prev) => ({ ...prev, push: checked }))
                     }
                   />
                 </div>
@@ -164,7 +180,10 @@ export default function Settings() {
                     id="task-updates"
                     checked={notifications.taskUpdates}
                     onCheckedChange={(checked) =>
-                      setNotifications(prev => ({ ...prev, taskUpdates: checked }))
+                      setNotifications((prev) => ({
+                        ...prev,
+                        taskUpdates: checked,
+                      }))
                     }
                   />
                 </div>
@@ -180,7 +199,10 @@ export default function Settings() {
                     id="team-updates"
                     checked={notifications.teamUpdates}
                     onCheckedChange={(checked) =>
-                      setNotifications(prev => ({ ...prev, teamUpdates: checked }))
+                      setNotifications((prev) => ({
+                        ...prev,
+                        teamUpdates: checked,
+                      }))
                     }
                   />
                 </div>
@@ -196,7 +218,10 @@ export default function Settings() {
                     id="mentions"
                     checked={notifications.mentions}
                     onCheckedChange={(checked) =>
-                      setNotifications(prev => ({ ...prev, mentions: checked }))
+                      setNotifications((prev) => ({
+                        ...prev,
+                        mentions: checked,
+                      }))
                     }
                   />
                 </div>
@@ -222,7 +247,7 @@ export default function Settings() {
                   <Select
                     value={preferences.theme}
                     onValueChange={(value) =>
-                      setPreferences(prev => ({ ...prev, theme: value }))
+                      setPreferences((prev) => ({ ...prev, theme: value }))
                     }
                   >
                     <SelectTrigger>
@@ -241,7 +266,7 @@ export default function Settings() {
                   <Select
                     value={preferences.language}
                     onValueChange={(value) =>
-                      setPreferences(prev => ({ ...prev, language: value }))
+                      setPreferences((prev) => ({ ...prev, language: value }))
                     }
                   >
                     <SelectTrigger>
@@ -262,7 +287,7 @@ export default function Settings() {
                   <Select
                     value={preferences.timezone}
                     onValueChange={(value) =>
-                      setPreferences(prev => ({ ...prev, timezone: value }))
+                      setPreferences((prev) => ({ ...prev, timezone: value }))
                     }
                   >
                     <SelectTrigger>
@@ -283,7 +308,7 @@ export default function Settings() {
                   <Select
                     value={preferences.dateFormat}
                     onValueChange={(value) =>
-                      setPreferences(prev => ({ ...prev, dateFormat: value }))
+                      setPreferences((prev) => ({ ...prev, dateFormat: value }))
                     }
                   >
                     <SelectTrigger>
@@ -317,7 +342,10 @@ export default function Settings() {
                 <div>
                   <h4 className="text-sm font-medium">Authentication</h4>
                   <p className="text-sm text-muted-foreground">
-                    Your account is secured through {user?.password ? 'email/password authentication' : 'Microsoft SSO'}
+                    Your account is secured through{" "}
+                    {user?.password
+                      ? "email/password authentication"
+                      : "Microsoft SSO"}
                   </p>
                 </div>
 
@@ -343,26 +371,30 @@ export default function Settings() {
                 <div>
                   <h4 className="text-sm font-medium">Account Status</h4>
                   <div className="mt-2 flex items-center gap-2">
-                    <Badge variant="default">
-                      Active
-                    </Badge>
+                    <Badge variant="default">Active</Badge>
                     <span className="text-sm text-muted-foreground">
-                      {user?.createdAt ? 
-                        `Account created: ${new Date(user.createdAt).toLocaleDateString()}` :
-                        `Authenticated via ${user?.email ? 'Email/Password' : 'Microsoft SSO'}`
-                      }
+                      {user?.createdAt
+                        ? `Account created: ${new Date(
+                            user.createdAt
+                          ).toLocaleDateString()}`
+                        : `Authenticated via ${
+                            user?.email ? "Email/Password" : "Microsoft SSO"
+                          }`}
                     </span>
                   </div>
                 </div>
               </div>
 
-              <Button variant="outline" onClick={() => window.location.href = "/api/logout"}>
+              <Button
+                variant="outline"
+                onClick={() => (window.location.href = "/api/logout")}
+              >
                 Sign Out
               </Button>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
-    </div>
+    </MainWrapper>
   );
 }

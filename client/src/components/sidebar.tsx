@@ -60,12 +60,12 @@ export function Sidebar({ className }: SidebarProps) {
     ? [
         { name: "Dashboard", href: "/", icon: LayoutDashboard },
         { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
+        // { name: "Teams", href: "/teams", icon: Users },
       ]
     : [
         { name: "Dashboard", href: "/", icon: LayoutDashboard },
         { name: "All Tickets", href: "/tasks", icon: FolderOpen },
         { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
-        { name: "Teams", href: "/teams", icon: Users },
         { name: "Knowledge Base", href: "/knowledge-base", icon: BookOpen },
       ];
 
@@ -75,11 +75,11 @@ export function Sidebar({ className }: SidebarProps) {
     { name: "AI Settings", href: "/ai-settings", icon: Brain },
   ];
 
-  const bottomNavigation = [
-    { name: "User Guides", href: "/guides", icon: BookOpen },
-    { name: "Teams Integration", href: "/teams-integration", icon: MessageSquare },
-    { name: "Settings", href: "/settings", icon: Settings },
-  ];
+  // const bottomNavigation = [
+  //   { name: "User Guides", href: "/guides", icon: BookOpen },
+  //   { name: "Teams Integration", href: "/teams-integration", icon: MessageSquare },
+  //   { name: "Settings", href: "/settings", icon: Settings },
+  // ];
 
   return (
     <div className={cn("flex h-full w-64 flex-col border-r bg-background", className)}>
@@ -124,7 +124,7 @@ export function Sidebar({ className }: SidebarProps) {
           {(user as any)?.role === "admin" && (
             <>
               <Separator className="my-4" />
-              <div className="px-3 pb-2">
+              <div className="px-3 pt-4 pb-2">
                 <h3 className="mb-1 text-xs font-semibold text-muted-foreground uppercase">
                   Administration
                 </h3>
@@ -152,7 +152,7 @@ export function Sidebar({ className }: SidebarProps) {
         </nav>
       </div>
       
-      <div className="border-t p-4">
+      {/* <div className="border-t p-4">
         <div className="flex items-center gap-3 px-2 mb-4">
           {(user as any)?.profileImageUrl ? (
             <img
@@ -200,7 +200,7 @@ export function Sidebar({ className }: SidebarProps) {
             <TooltipContent>Sign out of your account</TooltipContent>
           </Tooltip>
         </nav>
-      </div>
+      </div> */}
     </div>
   );
 }

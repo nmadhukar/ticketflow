@@ -68,6 +68,7 @@ import {
   Trash2,
   Upload
 } from "lucide-react";
+import generateShortId from "@/lib/generateShortId";
 
 interface TaskModalProps {
   isOpen: boolean;
@@ -278,6 +279,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     }
 
     const taskData = {
+      ticketNumber: generateShortId(), // Prevents validation errors in shared/schema line 110
       title: formData.title.trim(),
       description: formData.description.trim(),
       category: formData.category,
@@ -485,15 +487,15 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                         <Send className="h-4 w-4 mr-2" />
                         Comments {taskComments?.length ? `(${taskComments.length})` : ''}
                       </TabsTrigger>
-                      <TabsTrigger 
-                        value="attachments" 
-                        className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
-                      >
-                        <Paperclip className="h-4 w-4 mr-2" />
-                        Attachments {taskAttachments?.length ? `(${taskAttachments.length})` : ''}
-                      </TabsTrigger>
                     </>
                   )}
+                  <TabsTrigger 
+                    value="attachments" 
+                    className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
+                  >
+                    <Paperclip className="h-4 w-4 mr-2" />
+                    Attachments {taskAttachments?.length ? `(${taskAttachments.length})` : ''}
+                  </TabsTrigger>
                 </TabsList>
               </div>
 
@@ -883,96 +885,96 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                   </TabsContent>
                 )}
 
-                {task && (
-                  <TabsContent value="attachments" className="mt-0 p-6">
-                    <div className="space-y-4">
-                      {/* Upload Attachment */}
-                      <Card>
-                        <CardHeader className="pb-3">
-                          <CardTitle className="text-base flex items-center gap-2">
-                            <Upload className="h-4 w-4" />
-                            Upload Attachment
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-blue-500 transition-colors">
-                            <input
-                              type="file"
-                              id="file-upload"
-                              className="hidden"
-                              onChange={handleFileUpload}
-                              disabled={addAttachmentMutation.isPending}
-                            />
-                            <label
-                              htmlFor="file-upload"
-                              className="cursor-pointer"
-                            >
-                              <Paperclip className="h-8 w-8 mx-auto mb-2 text-slate-400" />
-                              <p className="text-sm text-slate-600">
-                                Click to upload or drag and drop
-                              </p>
-                              <p className="text-xs text-slate-500 mt-1">
-                                PDF, DOC, DOCX, XLS, XLSX, PNG, JPG up to 10MB
-                              </p>
-                            </label>
-                          </div>
-                        </CardContent>
-                      </Card>
+          
+                <TabsContent value="attachments" className="mt-0 p-6">
+                  <div className="space-y-4">
+                    {/* Upload Attachment */}
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <Upload className="h-4 w-4" />
+                          Upload Attachment
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-blue-500 transition-colors">
+                          <input
+                            type="file"
+                            id="file-upload"
+                            className="hidden"
+                            onChange={handleFileUpload}
+                            disabled={addAttachmentMutation.isPending}
+                          />
+                          <label
+                            htmlFor="file-upload"
+                            className="cursor-pointer"
+                          >
+                            <Paperclip className="h-8 w-8 mx-auto mb-2 text-slate-400" />
+                            <p className="text-sm text-slate-600">
+                              Click to upload or drag and drop
+                            </p>
+                            <p className="text-xs text-slate-500 mt-1">
+                              PDF, DOC, DOCX, XLS, XLSX, PNG, JPG up to 10MB
+                            </p>
+                          </label>
+                        </div>
+                      </CardContent>
+                    </Card>
 
-                      {/* Attachments List */}
-                      <div className="space-y-3">
-                        <h3 className="font-medium text-slate-900">Attached Files</h3>
-                        {taskAttachments?.length > 0 ? (
-                          taskAttachments.map((attachment: any) => (
-                            <Card key={attachment.id} className="border-l-4 border-l-purple-200">
-                              <CardContent className="pt-4">
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-purple-100 rounded-full">
-                                      <Paperclip className="h-4 w-4 text-purple-600" />
-                                    </div>
-                                    <div>
-                                      <p className="font-medium text-slate-900">
-                                        {attachment.fileName}
-                                      </p>
-                                      <p className="text-xs text-slate-500">
-                                        {(attachment.fileSize / 1024).toFixed(2)} KB • 
-                                        Uploaded by {attachment.userName} on{' '}
-                                        {new Date(attachment.createdAt).toLocaleDateString()}
-                                      </p>
-                                    </div>
+                    {/* Attachments List */}
+                    <div className="space-y-3">
+                      <h3 className="font-medium text-slate-900">Attached Files</h3>
+                      {taskAttachments?.length > 0 ? (
+                        taskAttachments.map((attachment: any) => (
+                          <Card key={attachment.id} className="border-l-4 border-l-purple-200">
+                            <CardContent className="pt-4">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  <div className="p-2 bg-purple-100 rounded-full">
+                                    <Paperclip className="h-4 w-4 text-purple-600" />
                                   </div>
-                                  <div className="flex items-center gap-2">
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => window.open(attachment.fileUrl, '_blank')}
-                                    >
-                                      <Download className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => deleteAttachmentMutation.mutate(attachment.id)}
-                                      disabled={deleteAttachmentMutation.isPending}
-                                    >
-                                      <Trash2 className="h-4 w-4 text-red-500" />
-                                    </Button>
+                                  <div>
+                                    <p className="font-medium text-slate-900">
+                                      {attachment.fileName}
+                                    </p>
+                                    <p className="text-xs text-slate-500">
+                                      {(attachment.fileSize / 1024).toFixed(2)} KB • 
+                                      Uploaded by {attachment.userName} on{' '}
+                                      {new Date(attachment.createdAt).toLocaleDateString()}
+                                    </p>
                                   </div>
                                 </div>
-                              </CardContent>
-                            </Card>
-                          ))
-                        ) : (
-                          <div className="text-center py-8 text-slate-500">
-                            <Paperclip className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                            <p>No attachments yet. Upload a file to get started!</p>
-                          </div>
-                        )}
-                      </div>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => window.open(attachment.fileUrl, '_blank')}
+                                  >
+                                    <Download className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => deleteAttachmentMutation.mutate(attachment.id)}
+                                    disabled={deleteAttachmentMutation.isPending}
+                                  >
+                                    <Trash2 className="h-4 w-4 text-red-500" />
+                                  </Button>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))
+                      ) : (
+                        <div className="text-center py-8 text-slate-500">
+                          <Paperclip className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                          <p>No attachments yet. Upload a file to get started!</p>
+                        </div>
+                      )}
                     </div>
-                  </TabsContent>
-                )}
+                  </div>
+                </TabsContent>
+                
               </div>
             </Tabs>
           </div>

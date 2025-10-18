@@ -1,8 +1,8 @@
 /**
  * TicketFlow Application Root Component
- * 
+ *
  * This is the main application component that orchestrates the entire TicketFlow system.
- * 
+ *
  * Architecture Features:
  * - Client-side routing using Wouter for SPA navigation
  * - Authentication-based route protection and redirection
@@ -10,25 +10,25 @@
  * - Global state management with TanStack Query
  * - Real-time WebSocket integration for live updates
  * - Floating AI chatbot accessible from all pages
- * 
+ *
  * Authentication Flow:
  * - Unauthenticated users see landing page and auth forms
  * - Authenticated users access full application with role-based restrictions
  * - Automatic redirection based on authentication state
  * - Session persistence and automatic logout handling
- * 
+ *
  * Route Organization:
  * - Public routes: landing, auth, API documentation
  * - Protected routes: dashboard, tickets, teams, admin
  * - Role-specific routes: admin panel (admin only), team management
  * - Dynamic routes: ticket details, team details with parameters
- * 
+ *
  * Global Providers:
  * - QueryClient for server state management and caching
  * - WebSocket provider for real-time updates
  * - Toast notifications for user feedback
  * - Tooltip provider for enhanced UX
- * 
+ *
  * The app automatically handles:
  * - Loading states during authentication
  * - Error boundaries and fallback handling
@@ -79,7 +79,7 @@ function Router() {
       <Switch>
         <Route path="/auth" component={AuthPage} />
         <Route path="/api-docs" component={ApiDocs} />
-        
+
         {!isAuthenticated ? (
           <>
             <Route path="/" component={Landing} />
@@ -89,65 +89,87 @@ function Router() {
           <WebSocketProvider>
             <Layout>
               <Switch>
-              <Route path="/" component={Dashboard} />
-              <Route path="/tasks">
-                <ProtectedRoute allowedRoles={["admin", "manager", "agent", "user"]}>
-                  <Tasks />
-                </ProtectedRoute>
-              </Route>
-              <Route path="/my-tasks" component={MyTasks} />
-              <Route path="/teams">
-                <ProtectedRoute allowedRoles={["admin", "manager", "agent", "user"]}>
-                  <Teams />
-                </ProtectedRoute>
-              </Route>
-              <Route path="/teams/:id" component={(params) => (
-                <ProtectedRoute allowedRoles={["admin", "manager", "agent", "user"]}>
-                  <TeamDetail />
-                </ProtectedRoute>
-              )} />
-              <Route path="/admin">
-                <ProtectedRoute allowedRoles={["admin"]}>
-                  <AdminPanel />
-                </ProtectedRoute>
-              </Route>
-              <Route path="/ai-settings">
-                <ProtectedRoute allowedRoles={["admin"]}>
-                  <AISettings />
-                </ProtectedRoute>
-              </Route>
-              <Route path="/settings" component={Settings} />
-              <Route path="/notifications" component={Notifications} />
-              <Route path="/guides" component={UserGuides} />
-              <Route path="/teams-integration" component={TeamsIntegration} />
-              <Route path="/admin/guides" component={AdminGuides} />
-              <Route path="/admin/departments">
-                <ProtectedRoute allowedRoles={["admin"]}>
-                  <Departments />
-                </ProtectedRoute>
-              </Route>
-              <Route path="/admin/invitations">
-                <ProtectedRoute allowedRoles={["admin"]}>
-                  <Invitations />
-                </ProtectedRoute>
-              </Route>
-              <Route path="/admin/ai-analytics">
-                <ProtectedRoute allowedRoles={["admin", "manager"]}>
-                  <AiAnalytics />
-                </ProtectedRoute>
-              </Route>
-              <Route path="/knowledge-base">
-                <ProtectedRoute allowedRoles={["admin", "manager", "agent", "user"]}>
-                  <KnowledgeBase />
-                </ProtectedRoute>
-              </Route>
+                <Route path="/" component={Dashboard} />
+                <Route path="/tasks">
+                  <ProtectedRoute
+                    allowedRoles={["admin", "manager", "agent", "user"]}
+                  >
+                    <Tasks />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/my-tasks" component={MyTasks} />
+                <Route path="/teams">
+                  <ProtectedRoute
+                    allowedRoles={["admin", "manager", "agent", "user"]}
+                  >
+                    <Teams />
+                  </ProtectedRoute>
+                </Route>
+                <Route
+                  path="/teams/:id"
+                  component={(params) => (
+                    <ProtectedRoute
+                      allowedRoles={["admin", "manager", "agent", "user"]}
+                    >
+                      <TeamDetail />
+                    </ProtectedRoute>
+                  )}
+                />
+                <Route path="/admin">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <AdminPanel />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/ai-settings">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <AISettings />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/settings" component={Settings} />
+                <Route path="/notifications" component={Notifications} />
+                <Route path="/guides" component={UserGuides} />
+                <Route path="/teams-integration" component={TeamsIntegration} />
+                <Route path="/admin/guides" component={AdminGuides} />
+                <Route path="/admin/departments">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <Departments />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/admin/invitations">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <Invitations />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/admin/ai-analytics">
+                  <ProtectedRoute allowedRoles={["admin", "manager"]}>
+                    <AiAnalytics />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/knowledge-base">
+                  <ProtectedRoute
+                    allowedRoles={["admin", "manager", "agent", "user"]}
+                  >
+                    <KnowledgeBase />
+                  </ProtectedRoute>
+                </Route>
 
-              <Route path="/tickets/:id" component={(params) => (
-                <ProtectedRoute allowedRoles={["admin", "manager", "agent", "user", "customer"]}>
-                  <Dashboard />
-                </ProtectedRoute>
-              )} />
-              <Route component={NotFound} />
+                <Route
+                  path="/tickets/:id"
+                  component={(params) => (
+                    <ProtectedRoute
+                      allowedRoles={[
+                        "admin",
+                        "manager",
+                        "agent",
+                        "user",
+                        "customer",
+                      ]}
+                    >
+                      <Dashboard />
+                    </ProtectedRoute>
+                  )}
+                />
+                <Route component={NotFound} />
               </Switch>
             </Layout>
           </WebSocketProvider>

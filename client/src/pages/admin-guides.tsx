@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Edit, Trash2, BookOpen, Video, FileText, FolderPlus, Eye, EyeOff } from "lucide-react";
 import { format } from "date-fns";
 import type { UserGuide, UserGuideCategory } from "@shared/schema";
+import MainWrapper from "@/components/main-wrapper";
 
 export default function AdminGuides() {
   const { toast } = useToast();
@@ -305,363 +306,239 @@ export default function AdminGuides() {
   }
 
   return (
-    <div className="flex-1 flex flex-col">
-      <Header 
-        title="User Guide Management" 
-        subtitle="Create and manage user guides, tutorials, and help documentation"
-      />
-      
-      <main className="flex-1 p-6 overflow-y-auto">
-        <Tabs defaultValue="guides" className="space-y-6">
-          <TabsList>
-            <TabsTrigger value="guides">Guides</TabsTrigger>
-            <TabsTrigger value="categories">Categories</TabsTrigger>
-          </TabsList>
+    <MainWrapper title="User Guide Management" subTitle="Create and manage user guides, tutorials, and help documentation">
+      <Tabs defaultValue="guides" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="guides">Guides</TabsTrigger>
+          <TabsTrigger value="categories">Categories</TabsTrigger>
+        </TabsList>
 
-          <TabsContent value="guides" className="space-y-6">
-            <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold">User Guides</h2>
-              <Dialog open={isGuideDialogOpen} onOpenChange={setIsGuideDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button onClick={resetGuideForm}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Guide
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-                  <DialogHeader>
-                    <DialogTitle>
-                      {selectedGuide ? 'Edit Guide' : 'Create New Guide'}
-                    </DialogTitle>
-                    <DialogDescription>
-                      Add helpful documentation for your users
-                    </DialogDescription>
-                  </DialogHeader>
+        <TabsContent value="guides" className="space-y-6">
+          <div className="flex justify-between items-center">
+            <h2 className="text-2xl font-bold">User Guides</h2>
+            <Dialog open={isGuideDialogOpen} onOpenChange={setIsGuideDialogOpen}>
+              <DialogTrigger asChild>
+                <Button onClick={resetGuideForm}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Guide
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>
+                    {selectedGuide ? 'Edit Guide' : 'Create New Guide'}
+                  </DialogTitle>
+                  <DialogDescription>
+                    Add helpful documentation for your users
+                  </DialogDescription>
+                </DialogHeader>
+                
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="title">Title</Label>
+                    <Input
+                      id="title"
+                      value={guideTitle}
+                      onChange={(e) => setGuideTitle(e.target.value)}
+                      placeholder="Guide title"
+                    />
+                  </div>
                   
-                  <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="description">Description</Label>
+                    <Textarea
+                      id="description"
+                      value={guideDescription}
+                      onChange={(e) => setGuideDescription(e.target.value)}
+                      placeholder="Brief description of the guide"
+                      rows={3}
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="title">Title</Label>
-                      <Input
-                        id="title"
-                        value={guideTitle}
-                        onChange={(e) => setGuideTitle(e.target.value)}
-                        placeholder="Guide title"
-                      />
+                      <Label htmlFor="category">Category</Label>
+                      <Select value={guideCategory} onValueChange={setGuideCategory}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select category" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {categories.map((cat) => (
+                            <SelectItem key={cat.id} value={cat.name}>
+                              {cat.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     
                     <div className="space-y-2">
-                      <Label htmlFor="description">Description</Label>
+                      <Label htmlFor="type">Type</Label>
+                      <Select value={guideType} onValueChange={(value) => setGuideType(value as any)}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="html">HTML Content</SelectItem>
+                          <SelectItem value="scribehow">Scribehow Guide</SelectItem>
+                          <SelectItem value="video">Video Tutorial</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  
+                  {guideType === "html" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="content">HTML Content</Label>
                       <Textarea
-                        id="description"
-                        value={guideDescription}
-                        onChange={(e) => setGuideDescription(e.target.value)}
-                        placeholder="Brief description of the guide"
-                        rows={3}
+                        id="content"
+                        value={guideContent}
+                        onChange={(e) => setGuideContent(e.target.value)}
+                        placeholder="Enter HTML content or paste from Scribehow export"
+                        rows={10}
+                        className="font-mono text-sm"
                       />
                     </div>
-                    
-                    <div className="grid grid-cols-2 gap-4">
+                  )}
+                  
+                  {guideType === "scribehow" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="scribehowUrl">Scribehow URL</Label>
+                      <Input
+                        id="scribehowUrl"
+                        type="url"
+                        value={scribehowUrl}
+                        onChange={(e) => setScribehowUrl(e.target.value)}
+                        placeholder="https://scribehow.com/shared/..."
+                      />
                       <div className="space-y-2">
-                        <Label htmlFor="category">Category</Label>
-                        <Select value={guideCategory} onValueChange={setGuideCategory}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select category" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {categories.map((cat) => (
-                              <SelectItem key={cat.id} value={cat.name}>
-                                {cat.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      
-                      <div className="space-y-2">
-                        <Label htmlFor="type">Type</Label>
-                        <Select value={guideType} onValueChange={(value) => setGuideType(value as any)}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="html">HTML Content</SelectItem>
-                            <SelectItem value="scribehow">Scribehow Guide</SelectItem>
-                            <SelectItem value="video">Video Tutorial</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    
-                    {guideType === "html" && (
-                      <div className="space-y-2">
-                        <Label htmlFor="content">HTML Content</Label>
+                        <Label htmlFor="embedCode">Embed Code</Label>
                         <Textarea
-                          id="content"
+                          id="embedCode"
                           value={guideContent}
                           onChange={(e) => setGuideContent(e.target.value)}
-                          placeholder="Enter HTML content or paste from Scribehow export"
-                          rows={10}
+                          placeholder="Paste Scribehow embed code here"
+                          rows={6}
                           className="font-mono text-sm"
                         />
                       </div>
-                    )}
-                    
-                    {guideType === "scribehow" && (
-                      <div className="space-y-2">
-                        <Label htmlFor="scribehowUrl">Scribehow URL</Label>
-                        <Input
-                          id="scribehowUrl"
-                          type="url"
-                          value={scribehowUrl}
-                          onChange={(e) => setScribehowUrl(e.target.value)}
-                          placeholder="https://scribehow.com/shared/..."
-                        />
-                        <div className="space-y-2">
-                          <Label htmlFor="embedCode">Embed Code</Label>
-                          <Textarea
-                            id="embedCode"
-                            value={guideContent}
-                            onChange={(e) => setGuideContent(e.target.value)}
-                            placeholder="Paste Scribehow embed code here"
-                            rows={6}
-                            className="font-mono text-sm"
-                          />
-                        </div>
-                      </div>
-                    )}
-                    
-                    {guideType === "video" && (
-                      <div className="space-y-2">
-                        <Label htmlFor="videoUrl">Video URL</Label>
-                        <Input
-                          id="videoUrl"
-                          type="url"
-                          value={videoUrl}
-                          onChange={(e) => setVideoUrl(e.target.value)}
-                          placeholder="YouTube, Vimeo, or other video URL"
-                        />
-                        <div className="space-y-2">
-                          <Label htmlFor="videoEmbed">Video Embed Code</Label>
-                          <Textarea
-                            id="videoEmbed"
-                            value={guideContent}
-                            onChange={(e) => setGuideContent(e.target.value)}
-                            placeholder="Paste video embed code here"
-                            rows={6}
-                            className="font-mono text-sm"
-                          />
-                        </div>
-                      </div>
-                    )}
-                    
+                    </div>
+                  )}
+                  
+                  {guideType === "video" && (
                     <div className="space-y-2">
-                      <Label htmlFor="tags">Tags (comma-separated)</Label>
+                      <Label htmlFor="videoUrl">Video URL</Label>
                       <Input
-                        id="tags"
-                        value={guideTags}
-                        onChange={(e) => setGuideTags(e.target.value)}
-                        placeholder="tutorial, getting-started, advanced"
+                        id="videoUrl"
+                        type="url"
+                        value={videoUrl}
+                        onChange={(e) => setVideoUrl(e.target.value)}
+                        placeholder="YouTube, Vimeo, or other video URL"
                       />
+                      <div className="space-y-2">
+                        <Label htmlFor="videoEmbed">Video Embed Code</Label>
+                        <Textarea
+                          id="videoEmbed"
+                          value={guideContent}
+                          onChange={(e) => setGuideContent(e.target.value)}
+                          placeholder="Paste video embed code here"
+                          rows={6}
+                          className="font-mono text-sm"
+                        />
+                      </div>
                     </div>
-                    
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        id="published"
-                        checked={isPublished}
-                        onCheckedChange={setIsPublished}
-                      />
-                      <Label htmlFor="published">Published</Label>
-                    </div>
+                  )}
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="tags">Tags (comma-separated)</Label>
+                    <Input
+                      id="tags"
+                      value={guideTags}
+                      onChange={(e) => setGuideTags(e.target.value)}
+                      placeholder="tutorial, getting-started, advanced"
+                    />
                   </div>
                   
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setIsGuideDialogOpen(false)}>
-                      Cancel
-                    </Button>
-                    <Button onClick={handleSaveGuide}>
-                      {selectedGuide ? 'Update' : 'Create'} Guide
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-            </div>
-
-            <Card>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Title</TableHead>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Views</TableHead>
-                      <TableHead>Created</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {guidesLoading ? (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center">
-                          Loading guides...
-                        </TableCell>
-                      </TableRow>
-                    ) : guides.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center">
-                          No guides found. Create your first guide!
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      guides.map((guide: UserGuide) => (
-                        <TableRow key={guide.id}>
-                          <TableCell className="font-medium">
-                            <div className="flex items-center gap-2">
-                              {getTypeIcon(guide.type)}
-                              {guide.title}
-                            </div>
-                          </TableCell>
-                          <TableCell>{guide.category}</TableCell>
-                          <TableCell>
-                            <Badge variant="secondary">{guide.type}</Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={guide.isPublished ? "default" : "secondary"}>
-                              {guide.isPublished ? (
-                                <><Eye className="h-3 w-3 mr-1" /> Published</>
-                              ) : (
-                                <><EyeOff className="h-3 w-3 mr-1" /> Draft</>
-                              )}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>{guide.viewCount}</TableCell>
-                          <TableCell>
-                            {guide.createdAt ? format(new Date(guide.createdAt), "MMM d, yyyy") : "Unknown"}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleEditGuide(guide)}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                if (confirm("Are you sure you want to delete this guide?")) {
-                                  deleteGuideMutation.mutate(guide.id);
-                                }
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="categories" className="space-y-6">
-            <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold">Guide Categories</h2>
-              <Dialog open={isCategoryDialogOpen} onOpenChange={setIsCategoryDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button onClick={resetCategoryForm}>
-                    <FolderPlus className="h-4 w-4 mr-2" />
-                    Add Category
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>
-                      {selectedCategory ? 'Edit Category' : 'Create New Category'}
-                    </DialogTitle>
-                    <DialogDescription>
-                      Organize your guides into categories
-                    </DialogDescription>
-                  </DialogHeader>
-                  
-                  <div className="space-y-4 py-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="categoryName">Name</Label>
-                      <Input
-                        id="categoryName"
-                        value={categoryName}
-                        onChange={(e) => setCategoryName(e.target.value)}
-                        placeholder="Category name"
-                      />
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label htmlFor="categoryDescription">Description</Label>
-                      <Textarea
-                        id="categoryDescription"
-                        value={categoryDescription}
-                        onChange={(e) => setCategoryDescription(e.target.value)}
-                        placeholder="Brief description of the category"
-                        rows={3}
-                      />
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label htmlFor="categoryIcon">Icon Name (Lucide)</Label>
-                      <Input
-                        id="categoryIcon"
-                        value={categoryIcon}
-                        onChange={(e) => setCategoryIcon(e.target.value)}
-                        placeholder="e.g., BookOpen, HelpCircle"
-                      />
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label htmlFor="categoryOrder">Display Order</Label>
-                      <Input
-                        id="categoryOrder"
-                        type="number"
-                        value={categoryOrder}
-                        onChange={(e) => setCategoryOrder(parseInt(e.target.value) || 0)}
-                        placeholder="0"
-                      />
-                    </div>
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="published"
+                      checked={isPublished}
+                      onCheckedChange={setIsPublished}
+                    />
+                    <Label htmlFor="published">Published</Label>
                   </div>
-                  
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setIsCategoryDialogOpen(false)}>
-                      Cancel
-                    </Button>
-                    <Button onClick={handleSaveCategory}>
-                      {selectedCategory ? 'Update' : 'Create'} Category
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {categoriesLoading ? (
-                <div className="col-span-full text-center">Loading categories...</div>
-              ) : categories.length === 0 ? (
-                <div className="col-span-full text-center">
-                  No categories found. Create your first category!
                 </div>
-              ) : (
-                categories.map((category: UserGuideCategory) => (
-                  <Card key={category.id}>
-                    <CardHeader>
-                      <CardTitle className="flex items-center justify-between">
-                        {category.name}
-                        <div className="flex items-center gap-2">
+                
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsGuideDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleSaveGuide}>
+                    {selectedGuide ? 'Update' : 'Create'} Guide
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Views</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {guidesLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center">
+                        Loading guides...
+                      </TableCell>
+                    </TableRow>
+                  ) : guides.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center">
+                        No guides found. Create your first guide!
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    guides.map((guide: UserGuide) => (
+                      <TableRow key={guide.id}>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            {getTypeIcon(guide.type)}
+                            {guide.title}
+                          </div>
+                        </TableCell>
+                        <TableCell>{guide.category}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">{guide.type}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={guide.isPublished ? "default" : "secondary"}>
+                            {guide.isPublished ? (
+                              <><Eye className="h-3 w-3 mr-1" /> Published</>
+                            ) : (
+                              <><EyeOff className="h-3 w-3 mr-1" /> Draft</>
+                            )}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{guide.viewCount}</TableCell>
+                        <TableCell>
+                          {guide.createdAt ? format(new Date(guide.createdAt), "MMM d, yyyy") : "Unknown"}
+                        </TableCell>
+                        <TableCell className="text-right">
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => handleEditCategory(category)}
+                            onClick={() => handleEditGuide(guide)}
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
@@ -669,31 +546,148 @@ export default function AdminGuides() {
                             size="sm"
                             variant="ghost"
                             onClick={() => {
-                              if (confirm("Are you sure you want to delete this category?")) {
-                                deleteCategoryMutation.mutate(category.id);
+                              if (confirm("Are you sure you want to delete this guide?")) {
+                                deleteGuideMutation.mutate(guide.id);
                               }
                             }}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
-                        </div>
-                      </CardTitle>
-                      {category.description && (
-                        <CardDescription>{category.description}</CardDescription>
-                      )}
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-sm text-muted-foreground">
-                        Order: {category.displayOrder}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="categories" className="space-y-6">
+          <div className="flex justify-between items-center">
+            <h2 className="text-2xl font-bold">Guide Categories</h2>
+            <Dialog open={isCategoryDialogOpen} onOpenChange={setIsCategoryDialogOpen}>
+              <DialogTrigger asChild>
+                <Button onClick={resetCategoryForm}>
+                  <FolderPlus className="h-4 w-4 mr-2" />
+                  Add Category
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>
+                    {selectedCategory ? 'Edit Category' : 'Create New Category'}
+                  </DialogTitle>
+                  <DialogDescription>
+                    Organize your guides into categories
+                  </DialogDescription>
+                </DialogHeader>
+                
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="categoryName">Name</Label>
+                    <Input
+                      id="categoryName"
+                      value={categoryName}
+                      onChange={(e) => setCategoryName(e.target.value)}
+                      placeholder="Category name"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="categoryDescription">Description</Label>
+                    <Textarea
+                      id="categoryDescription"
+                      value={categoryDescription}
+                      onChange={(e) => setCategoryDescription(e.target.value)}
+                      placeholder="Brief description of the category"
+                      rows={3}
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="categoryIcon">Icon Name (Lucide)</Label>
+                    <Input
+                      id="categoryIcon"
+                      value={categoryIcon}
+                      onChange={(e) => setCategoryIcon(e.target.value)}
+                      placeholder="e.g., BookOpen, HelpCircle"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="categoryOrder">Display Order</Label>
+                    <Input
+                      id="categoryOrder"
+                      type="number"
+                      value={categoryOrder}
+                      onChange={(e) => setCategoryOrder(parseInt(e.target.value) || 0)}
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+                
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsCategoryDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleSaveCategory}>
+                    {selectedCategory ? 'Update' : 'Create'} Category
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {categoriesLoading ? (
+              <div className="col-span-full text-center">Loading categories...</div>
+            ) : categories.length === 0 ? (
+              <div className="col-span-full text-center">
+                No categories found. Create your first category!
+              </div>
+            ) : (
+              categories.map((category: UserGuideCategory) => (
+                <Card key={category.id}>
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                      {category.name}
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleEditCategory(category)}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            if (confirm("Are you sure you want to delete this category?")) {
+                              deleteCategoryMutation.mutate(category.id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
-                    </CardContent>
-                  </Card>
-                ))
-              )}
-            </div>
-          </TabsContent>
-        </Tabs>
-      </main>
-    </div>
+                    </CardTitle>
+                    {category.description && (
+                      <CardDescription>{category.description}</CardDescription>
+                    )}
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-sm text-muted-foreground">
+                      Order: {category.displayOrder}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
+        </TabsContent>
+      </Tabs>
+    </MainWrapper>
   );
 }
