@@ -47,26 +47,47 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Seed email templates on startup
-  // try {
-  //   const { seedEmailTemplates } = await import("./seedEmailTemplates");
-  //   await seedEmailTemplates();
-  // } catch (error) {
-  //   console.error("Failed to seed email templates:", error);
-  // }
-
-  // Seed default admin user on startup
   try {
-    const { seedDefaultAdmin } = await import("./seedDefaultAdmin");
-    await seedDefaultAdmin();
+    // Log environment info for debugging
+    console.log("Starting TicketFlow application...");
+    console.log("NODE_ENV:", process.env.NODE_ENV);
+    console.log("PORT:", process.env.PORT);
+    console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
+    
+    // Seed email templates on startup
+    // try {
+    //   const { seedEmailTemplates } = await import("./seedEmailTemplates");
+    //   await seedEmailTemplates();
+    // } catch (error) {
+    //   console.error("Failed to seed email templates:", error);
+    // }
+
+    // Seed default admin user on startup
+    try {
+      const { seedDefaultAdmin } = await import("./seedDefaultAdmin");
+      await seedDefaultAdmin();
+    } catch (error) {
+      console.error("Failed to seed default admin:", error);
+    }
   } catch (error) {
-    console.error("Failed to seed default admin:", error);
+    console.error("Startup error:", error);
+    process.exit(1);
   }
 
   // Apply route-specific security
   applyRouteSpecificSecurity(app);
 
   const server = await registerRoutes(app);
+
+  // Simple health check endpoint (no database required)
+  app.get("/health", (req, res) => {
+    res.json({ 
+      status: "ok", 
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV,
+      port: process.env.PORT
+    });
+  });
 
   // Security health check endpoint
   app.get("/api/security/health", (req, res) => {
@@ -98,7 +119,11 @@ app.use((req, res, next) => {
   const isWindows = process.platform === "win32";
   const listenOptions: any = { port, host: "0.0.0.0" };
   if (!isWindows) listenOptions.reusePort = true;
+  
   server.listen(listenOptions, () => {
     log(`serving on port ${port}`);
+  }).on('error', (error) => {
+    console.error('Server startup error:', error);
+    process.exit(1);
   });
 })();
