@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.848.0",
+    "@aws-sdk/client-s3": "^3.913.0",
     "@aws-sdk/client-ses": "^3.848.0",
+    "@aws-sdk/s3-request-presigner": "^3.913.0",
     "@azure/msal-node": "^3.6.3",
     "@faker-js/faker": "^9.9.0",
     "@hookform/resolvers": "^3.10.0",
