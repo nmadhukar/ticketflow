@@ -6,7 +6,7 @@ services:
     plan: free
     buildCommand: npm ci && npm run build
     preDeployCommand: npm run db:push
-    startCommand: npm start
+    startCommand: bash -lc "npm run db:push && npm start"
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
