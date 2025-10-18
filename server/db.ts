@@ -22,15 +22,24 @@ try {
 let pool: NeonPool | PgPool;
 export let db: ReturnType<typeof drizzleNeon> | ReturnType<typeof drizzlePg>;
 
-if (/^(localhost|127\.0\.0\.1)$/i.test(hostname)) {
-  // Local PostgreSQL via native driver (no websockets)
+// Decide which driver to use:
+// - Always use native Postgres for localhost
+// - Use Neon only if explicitly requested or hostname ends with .neon.tech
+const isLocal = /^(localhost|127\.0\.0\.1)$/i.test(hostname);
+const isExplicitNeon = (process.env.DB_DRIVER || "").toLowerCase() === "neon";
+const isNeonHost = /\.neon\.tech$/i.test(hostname);
+
+if (isLocal || (!isExplicitNeon && !isNeonHost)) {
+  // Native PostgreSQL driver (recommended for Render and most deployments)
   pool = new PgPool({ connectionString });
   db = drizzlePg(pool as PgPool, { schema });
+  console.log("Database driver: pg (node-postgres)");
 } else {
-  // Neon serverless for remote URLs
+  // Neon serverless driver (only when using a Neon database)
   neonConfig.webSocketConstructor = ws;
   pool = new NeonPool({ connectionString });
   db = drizzleNeon({ client: pool as NeonPool, schema });
+  console.log("Database driver: neon-serverless (WebSocket)");
 }
 
 export { pool };
