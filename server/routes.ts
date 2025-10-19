@@ -1973,7 +1973,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       res.json({
-        message: aiMessage,
+        message: {
+          ...aiMessage,
+          citations: citations.length > 0 ? citations : undefined,
+          fromCache: !!cachedAnswer,
+        },
         relatedDocuments: [],
         usageData: usageData ? {
           inputTokens: usageData.inputTokens,
