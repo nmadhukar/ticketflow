@@ -308,16 +308,100 @@ The system gracefully falls back to manual RAG if:
 - Manual context building
 - Still provides AI responses, just without semantic search
 
+## Security Considerations
+
+### OpenSearch Network Access
+
+**⚠️ IMPORTANT**: The setup script creates an OpenSearch Serverless collection with public network access by default. This is convenient for testing but **NOT recommended for production**.
+
+**For Production:**
+
+1. **Use VPC-only access** instead of public access:
+
+```typescript
+// In setup-knowledge-base.ts, replace network policy with:
+const networkPolicy = [
+  {
+    Rules: [
+      {
+        ResourceType: 'collection',
+        Resource: [`collection/${collectionName}`],
+      }
+    ],
+    AllowFromPublic: false,
+    SourceVPCs: ['vpc-12345678'], // Your VPC ID
+  },
+];
+```
+
+2. **Deploy application in VPC**: Ensure your Replit/EC2 instance is in the same VPC
+3. **Use Security Groups**: Restrict access to only necessary services
+4. **Enable CloudTrail**: Audit all API calls to Bedrock and OpenSearch
+
+### IAM Best Practices
+
+**Development:**
+- Use IAM user with scoped permissions (current approach)
+- Rotate access keys every 90 days
+- Enable MFA for IAM users
+
+**Production:**
+- Use IAM roles instead of access keys (if on EC2)
+- Apply principle of least privilege
+- Separate roles for different environments
+
+**Minimal IAM Policy:**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:Retrieve",
+        "bedrock:RetrieveAndGenerate"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:*:*:knowledge-base/KB123456",
+        "arn:aws:bedrock:*::foundation-model/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::your-bucket-name",
+        "arn:aws:s3:::your-bucket-name/*"
+      ]
+    }
+  ]
+}
+```
+
+### Data Protection
+
+1. **Encryption at Rest**: OpenSearch Serverless encrypts data automatically with AWS KMS
+2. **Encryption in Transit**: All API calls use TLS 1.2+
+3. **Document Access Control**: Only authenticated admins can upload documents
+4. **PII Handling**: Be cautious about uploading documents with sensitive customer data
+
 ## Production Deployment
 
 For production deployment:
 
-1. **Use IAM Roles** instead of access keys (if on EC2)
-2. **Enable CloudWatch Alarms** for sync failures
-3. **Monitor Costs** via AWS Cost Explorer
-4. **Set Up Alerts** for quota limits
-5. **Backup Strategy** for OpenSearch (automatic snapshots)
-6. **Test Failover** to ensure fallback works
+1. **Network Security**: Use VPC-only access for OpenSearch (see Security section above)
+2. **Use IAM Roles** instead of access keys (if on EC2)
+3. **Enable CloudWatch Alarms** for sync failures
+4. **Monitor Costs** via AWS Cost Explorer
+5. **Set Up Alerts** for quota limits
+6. **Backup Strategy** for OpenSearch (automatic snapshots)
+7. **Test Failover** to ensure fallback works
+8. **Rotate Credentials** regularly (every 90 days minimum)
+9. **Enable CloudTrail** for audit logging
 
 ## Support
 

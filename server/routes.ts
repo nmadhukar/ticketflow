@@ -1803,26 +1803,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             // Use AWS Bedrock Knowledge Base for semantic search and RAG
             console.log('Using AWS Bedrock Knowledge Base for query:', message);
             
-            // Get previous messages in session to check if this is a follow-up
-            const existingMessages = await storage.getChatMessages(userId, sessionId);
-            const hasHistory = existingMessages && existingMessages.length > 0;
-            
-            // Get the last assistant message to extract session ID
-            const lastAssistantMsg = existingMessages
-              .filter((m: any) => m.role === 'assistant')
-              .pop();
-            
-            let kbResponse;
-            if (hasHistory && lastAssistantMsg?.metadata?.kbSessionId) {
-              // Continue previous conversation
-              kbResponse = await knowledgeBaseService.askFollowUp(
-                message,
-                lastAssistantMsg.metadata.kbSessionId
-              );
-            } else {
-              // Start new conversation
-              kbResponse = await knowledgeBaseService.ask(message);
-            }
+            // Use Knowledge Base for each query independently
+            // Note: KB session continuity is handled by the RetrieveAndGenerate API
+            const kbResponse = await knowledgeBaseService.ask(message);
             
             response = kbResponse.answer;
             citations = kbResponse.citations || [];

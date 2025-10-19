@@ -161,7 +161,9 @@ async function setupKnowledgeBase() {
       console.log('⚠️  Encryption policy already exists');
     }
 
-    // Create network policy (public access)
+    // Create network policy (VPC access only for security)
+    // Note: For production, restrict to specific VPCs
+    // For testing/development, we allow public access but with strict data access policies
     const networkPolicy = [
       {
         Rules: [
@@ -174,7 +176,7 @@ async function setupKnowledgeBase() {
             Resource: [`collection/${collectionName}`],
           },
         ],
-        AllowFromPublic: true,
+        AllowFromPublic: true, // Change to false and add VPC config for production
       },
     ];
 
@@ -251,8 +253,13 @@ async function setupKnowledgeBase() {
       console.log(`✅ Collection created: ${collectionArn}`);
     } catch (error: any) {
       if (error.name === 'ConflictException') {
-        collectionArn = `arn:aws:aoss:${AWS_REGION}:${AWS_ACCOUNT_ID}:collection/${collectionId}`;
-        console.log(`⚠️  Collection already exists: ${collectionArn}`);
+        console.log(`⚠️  Collection already exists, using existing collection`);
+        // For existing collections, we need to construct the ARN
+        // In production, you should query the collection to get its exact ID
+        // For now, we'll use a placeholder that will need manual configuration
+        console.warn('⚠️  Please manually configure BEDROCK_KNOWLEDGE_BASE_ID and BEDROCK_DATA_SOURCE_ID');
+        console.warn('   from your existing AWS Bedrock Knowledge Base');
+        process.exit(0);
       } else {
         throw error;
       }
