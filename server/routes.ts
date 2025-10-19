@@ -1665,6 +1665,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...req.body,
         createdBy: userId,
       });
+      
+      // Trigger Knowledge Base sync if configured and guide is published
+      if (knowledgeBaseService.isConfigured() && req.body.isPublished) {
+        try {
+          await knowledgeBaseService.sync();
+          console.log('Knowledge Base sync triggered after user guide creation');
+        } catch (kbError) {
+          console.error('Error syncing Knowledge Base:', kbError);
+        }
+      }
+      
       res.json(guide);
     } catch (error) {
       console.error("Error creating guide:", error);
@@ -1684,6 +1695,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const id = parseInt(req.params.id);
       const guide = await storage.updateUserGuide(id, req.body);
+      
+      // Trigger Knowledge Base sync if configured
+      if (knowledgeBaseService.isConfigured()) {
+        try {
+          await knowledgeBaseService.sync();
+          console.log('Knowledge Base sync triggered after user guide update');
+        } catch (kbError) {
+          console.error('Error syncing Knowledge Base:', kbError);
+        }
+      }
+      
       res.json(guide);
     } catch (error) {
       console.error("Error updating guide:", error);
@@ -1703,6 +1725,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const id = parseInt(req.params.id);
       await storage.deleteUserGuide(id);
+      
+      // Trigger Knowledge Base sync if configured
+      if (knowledgeBaseService.isConfigured()) {
+        try {
+          await knowledgeBaseService.sync();
+          console.log('Knowledge Base sync triggered after user guide deletion');
+        } catch (kbError) {
+          console.error('Error syncing Knowledge Base:', kbError);
+        }
+      }
+      
       res.json({ message: "Guide deleted successfully" });
     } catch (error) {
       console.error("Error deleting guide:", error);
@@ -2442,6 +2475,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...req.body,
         createdBy: userId,
       });
+      
+      // Trigger Knowledge Base sync if configured and guide is published
+      if (knowledgeBaseService.isConfigured() && req.body.isPublished) {
+        try {
+          await knowledgeBaseService.sync();
+          console.log('Knowledge Base sync triggered after user guide creation');
+        } catch (kbError) {
+          console.error('Error syncing Knowledge Base:', kbError);
+        }
+      }
+      
       res.json(guide);
     } catch (error) {
       console.error("Error creating guide:", error);
@@ -2461,6 +2505,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const id = parseInt(req.params.id);
       const guide = await storage.updateUserGuide(id, req.body);
+      
+      // Trigger Knowledge Base sync if configured
+      if (knowledgeBaseService.isConfigured()) {
+        try {
+          await knowledgeBaseService.sync();
+          console.log('Knowledge Base sync triggered after user guide update');
+        } catch (kbError) {
+          console.error('Error syncing Knowledge Base:', kbError);
+        }
+      }
+      
       res.json(guide);
     } catch (error) {
       console.error("Error updating guide:", error);
@@ -2480,6 +2535,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const id = parseInt(req.params.id);
       await storage.deleteUserGuide(id);
+      
+      // Trigger Knowledge Base sync if configured
+      if (knowledgeBaseService.isConfigured()) {
+        try {
+          await knowledgeBaseService.sync();
+          console.log('Knowledge Base sync triggered after user guide deletion');
+        } catch (kbError) {
+          console.error('Error syncing Knowledge Base:', kbError);
+        }
+      }
+      
       res.json({ message: "Guide deleted successfully" });
     } catch (error) {
       console.error("Error deleting guide:", error);
