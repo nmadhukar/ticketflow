@@ -1793,100 +1793,161 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let response = "";
       const relevantDocIds: number[] = [];
       let usageData = null;
+      let citations: any[] = [];
       
       if (hasBedrockCredentials) {
         // Use AWS Bedrock for intelligent responses
         try {
-          // Import AWS Bedrock client
-          const { BedrockRuntimeClient, InvokeModelCommand } = await import('@aws-sdk/client-bedrock-runtime');
-          
-          // Get help documents for context
-          const helpDocs = await storage.searchHelpDocuments(message);
-          let context = "";
-          
-          if (helpDocs.length > 0) {
-            context = "\n\nRelevant documentation context:\n";
-            const topDocs = helpDocs.slice(0, 3);
-            for (const doc of topDocs) {
-              relevantDocIds.push(doc.id);
-              context += `- ${doc.title}: ${doc.content.substring(0, 200)}...\n`;
+          // Check if Knowledge Base is configured
+          if (knowledgeBaseService.isConfigured()) {
+            // Use AWS Bedrock Knowledge Base for semantic search and RAG
+            console.log('Using AWS Bedrock Knowledge Base for query:', message);
+            
+            // Get previous messages in session to check if this is a follow-up
+            const existingMessages = await storage.getChatMessages(userId, sessionId);
+            const hasHistory = existingMessages && existingMessages.length > 0;
+            
+            // Get the last assistant message to extract session ID
+            const lastAssistantMsg = existingMessages
+              .filter((m: any) => m.role === 'assistant')
+              .pop();
+            
+            let kbResponse;
+            if (hasHistory && lastAssistantMsg?.metadata?.kbSessionId) {
+              // Continue previous conversation
+              kbResponse = await knowledgeBaseService.askFollowUp(
+                message,
+                lastAssistantMsg.metadata.kbSessionId
+              );
+            } else {
+              // Start new conversation
+              kbResponse = await knowledgeBaseService.ask(message);
             }
-          }
-          
-          // Configure AWS Bedrock client - use Bedrock-specific credentials if available, otherwise fall back to SES credentials
-          const bedrockClient = new BedrockRuntimeClient({
-            region: smtpSettings.bedrockRegion || smtpSettings.awsRegion || 'us-east-1',
-            credentials: {
-              accessKeyId: smtpSettings.bedrockAccessKeyId || smtpSettings.awsAccessKeyId || '',
-              secretAccessKey: smtpSettings.bedrockSecretAccessKey || smtpSettings.awsSecretAccessKey || '',
-            },
-          });
-          
-          // Prepare the system message and user message
-          const systemMessage = "You are a helpful assistant for TicketFlow, a ticketing system. Answer questions based on the provided context when available. Be concise and helpful.";
-          
-          let userMessage = message;
-          if (context) {
-            userMessage = `Context:\n${context}\n\nUser question: ${message}`;
-          }
-          
-          // Try different models based on availability
-          // Using Claude Instant v1 which has broader availability
-          let modelId = "anthropic.claude-instant-v1";
-          let modelPayload: any = {
-            anthropic_version: "bedrock-2023-05-31",
-            max_tokens: 1000,
-            temperature: 0.2,
-            system: systemMessage,
-            messages: [{
-              role: "user",
-              content: userMessage
-            }]
-          };
-          
-          // Check if we should use a different model based on settings or fallback
-          const companySettings = await storage.getCompanySettings();
-          if (companySettings?.bedrockModelId) {
-            modelId = companySettings.bedrockModelId;
-          }
-          
-          // Create the request payload based on model type
-          const command = new InvokeModelCommand({
-            modelId,
-            contentType: "application/json",
-            accept: "application/json",
-            body: JSON.stringify(modelPayload),
-          });
-          
-          // Invoke the model
-          const bedrockResponse = await bedrockClient.send(command);
-          const responseBody = JSON.parse(new TextDecoder().decode(bedrockResponse.body));
-          response = responseBody.content[0].text;
-          
-          // Track usage
-          const inputTokens = estimateTokenCount(systemMessage + userMessage);
-          const outputTokens = estimateTokenCount(response);
-          const totalTokens = inputTokens + outputTokens;
-          const cost = calculateBedrockCost(inputTokens, outputTokens, modelId);
-          
-          usageData = await storage.trackBedrockUsage({
-            userId,
-            sessionId,
-            inputTokens,
-            outputTokens,
-            totalTokens,
-            modelId,
-            cost: cost.toFixed(6),
-          });
-          
-          // Cache the response if it's a straightforward Q&A (not context-dependent)
-          if (!context && response.length > 50) {
-            await storage.createFaqCacheEntry({
-              questionHash,
-              originalQuestion: message,
-              normalizedQuestion,
-              answer: response,
+            
+            response = kbResponse.answer;
+            citations = kbResponse.citations || [];
+            
+            // Track usage - estimate tokens (KB doesn't provide exact counts)
+            const inputTokens = estimateTokenCount(message);
+            const outputTokens = estimateTokenCount(response);
+            const totalTokens = inputTokens + outputTokens;
+            const cost = calculateBedrockCost(inputTokens, outputTokens, "anthropic.claude-3-sonnet-20240229-v1:0");
+            
+            usageData = await storage.trackBedrockUsage({
+              userId,
+              sessionId,
+              inputTokens,
+              outputTokens,
+              totalTokens,
+              modelId: "anthropic.claude-3-sonnet-20240229-v1:0",
+              cost: cost.toFixed(6),
             });
+            
+            // Cache the response
+            if (response.length > 50) {
+              await storage.createFaqCacheEntry({
+                questionHash,
+                originalQuestion: message,
+                normalizedQuestion,
+                answer: response,
+              });
+            }
+            
+          } else {
+            // Fallback to manual RAG with direct Bedrock API
+            console.log('Knowledge Base not configured, using manual RAG');
+            
+            // Import AWS Bedrock client
+            const { BedrockRuntimeClient, InvokeModelCommand } = await import('@aws-sdk/client-bedrock-runtime');
+            
+            // Get help documents for context
+            const helpDocs = await storage.searchHelpDocuments(message);
+            let context = "";
+            
+            if (helpDocs.length > 0) {
+              context = "\n\nRelevant documentation context:\n";
+              const topDocs = helpDocs.slice(0, 3);
+              for (const doc of topDocs) {
+                relevantDocIds.push(doc.id);
+                context += `- ${doc.title}: ${doc.content.substring(0, 200)}...\n`;
+              }
+            }
+            
+            // Configure AWS Bedrock client - use Bedrock-specific credentials if available, otherwise fall back to SES credentials
+            const bedrockClient = new BedrockRuntimeClient({
+              region: smtpSettings.bedrockRegion || smtpSettings.awsRegion || 'us-east-1',
+              credentials: {
+                accessKeyId: smtpSettings.bedrockAccessKeyId || smtpSettings.awsAccessKeyId || '',
+                secretAccessKey: smtpSettings.bedrockSecretAccessKey || smtpSettings.awsSecretAccessKey || '',
+              },
+            });
+            
+            // Prepare the system message and user message
+            const systemMessage = "You are a helpful assistant for TicketFlow, a ticketing system. Answer questions based on the provided context when available. Be concise and helpful.";
+            
+            let userMessage = message;
+            if (context) {
+              userMessage = `Context:\n${context}\n\nUser question: ${message}`;
+            }
+            
+            // Try different models based on availability
+            // Using Claude Instant v1 which has broader availability
+            let modelId = "anthropic.claude-instant-v1";
+            let modelPayload: any = {
+              anthropic_version: "bedrock-2023-05-31",
+              max_tokens: 1000,
+              temperature: 0.2,
+              system: systemMessage,
+              messages: [{
+                role: "user",
+                content: userMessage
+              }]
+            };
+            
+            // Check if we should use a different model based on settings or fallback
+            const companySettings = await storage.getCompanySettings();
+            if (companySettings?.bedrockModelId) {
+              modelId = companySettings.bedrockModelId;
+            }
+            
+            // Create the request payload based on model type
+            const command = new InvokeModelCommand({
+              modelId,
+              contentType: "application/json",
+              accept: "application/json",
+              body: JSON.stringify(modelPayload),
+            });
+            
+            // Invoke the model
+            const bedrockResponse = await bedrockClient.send(command);
+            const responseBody = JSON.parse(new TextDecoder().decode(bedrockResponse.body));
+            response = responseBody.content[0].text;
+            
+            // Track usage
+            const inputTokens = estimateTokenCount(systemMessage + userMessage);
+            const outputTokens = estimateTokenCount(response);
+            const totalTokens = inputTokens + outputTokens;
+            const cost = calculateBedrockCost(inputTokens, outputTokens, modelId);
+            
+            usageData = await storage.trackBedrockUsage({
+              userId,
+              sessionId,
+              inputTokens,
+              outputTokens,
+              totalTokens,
+              modelId,
+              cost: cost.toFixed(6),
+            });
+            
+            // Cache the response if it's a straightforward Q&A (not context-dependent)
+            if (!context && response.length > 50) {
+              await storage.createFaqCacheEntry({
+                questionHash,
+                originalQuestion: message,
+                normalizedQuestion,
+                answer: response,
+              });
+            }
           }
           
         } catch (error: any) {
@@ -2045,6 +2106,90 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error clearing FAQ cache:", error);
       res.status(500).json({ message: "Failed to clear FAQ cache" });
+    }
+  });
+
+  // Knowledge Base Management endpoints
+  app.get('/api/admin/knowledge-base/status', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const isConfigured = knowledgeBaseService.isConfigured();
+      res.json({ 
+        configured: isConfigured,
+        knowledgeBaseId: process.env.BEDROCK_KNOWLEDGE_BASE_ID || null,
+        dataSourceId: process.env.BEDROCK_DATA_SOURCE_ID || null,
+      });
+    } catch (error) {
+      console.error("Error checking Knowledge Base status:", error);
+      res.status(500).json({ message: "Failed to check Knowledge Base status" });
+    }
+  });
+
+  app.post('/api/admin/knowledge-base/sync', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      if (!knowledgeBaseService.isConfigured()) {
+        return res.status(400).json({ 
+          message: "Knowledge Base not configured. Please set BEDROCK_KNOWLEDGE_BASE_ID and BEDROCK_DATA_SOURCE_ID environment variables." 
+        });
+      }
+      
+      const result = await knowledgeBaseService.sync();
+      res.json({ 
+        message: "Knowledge Base sync started successfully",
+        jobId: result.jobId,
+        status: result.status,
+      });
+    } catch (error) {
+      console.error("Error syncing Knowledge Base:", error);
+      res.status(500).json({ message: "Failed to sync Knowledge Base" });
+    }
+  });
+
+  app.get('/api/admin/knowledge-base/sync/:jobId', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const { jobId } = req.params;
+      const status = await knowledgeBaseService.getJobStatus(jobId);
+      res.json(status);
+    } catch (error) {
+      console.error("Error getting sync job status:", error);
+      res.status(500).json({ message: "Failed to get sync job status" });
+    }
+  });
+
+  app.get('/api/admin/knowledge-base/data-sources', isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      
+      if (user?.role !== 'admin') {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      
+      const dataSources = await knowledgeBaseService.listDataSources();
+      res.json(dataSources);
+    } catch (error) {
+      console.error("Error listing data sources:", error);
+      res.status(500).json({ message: "Failed to list data sources" });
     }
   });
 
