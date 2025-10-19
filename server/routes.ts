@@ -67,6 +67,7 @@ import {
 } from "@shared/schema";
 import { processTicketWithAI, analyzeTicket, generateAutoResponse } from "./aiTicketAnalysis";
 import { processKnowledgeLearning, intelligentKnowledgeSearch, scheduleKnowledgeLearning } from "./knowledgeBaseLearning";
+import { knowledgeBaseService } from "./awsKnowledgeBase";
 import { z } from "zod";
 import { createHash } from 'crypto';
 import multer from 'multer';
@@ -1455,6 +1456,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         uploadedBy: userId,
       });
 
+      // Trigger Knowledge Base sync if configured
+      if (knowledgeBaseService.isConfigured()) {
+        try {
+          await knowledgeBaseService.sync();
+          console.log('Knowledge Base sync triggered after help document upload');
+        } catch (kbError) {
+          console.error('Error syncing Knowledge Base:', kbError);
+          // Don't fail the request if KB sync fails
+        }
+      }
+
       res.json(document);
     } catch (error) {
       console.error("Error creating help document:", error);
@@ -1476,6 +1488,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updates = req.body;
       
       const document = await storage.updateHelpDocument(id, updates);
+      
+      // Trigger Knowledge Base sync if configured
+      if (knowledgeBaseService.isConfigured()) {
+        try {
+          await knowledgeBaseService.sync();
+          console.log('Knowledge Base sync triggered after help document update');
+        } catch (kbError) {
+          console.error('Error syncing Knowledge Base:', kbError);
+        }
+      }
+      
       res.json(document);
     } catch (error) {
       console.error("Error updating help document:", error);
@@ -1509,6 +1532,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       await storage.deleteHelpDocument(id);
+      
+      // Trigger Knowledge Base sync if configured
+      if (knowledgeBaseService.isConfigured()) {
+        try {
+          await knowledgeBaseService.sync();
+          console.log('Knowledge Base sync triggered after help document deletion');
+        } catch (kbError) {
+          console.error('Error syncing Knowledge Base:', kbError);
+        }
+      }
       
       res.json({ message: "Help document deleted successfully" });
     } catch (error) {
@@ -2071,6 +2104,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isActive: true,
       });
       
+      // Trigger Knowledge Base sync if configured
+      if (knowledgeBaseService.isConfigured()) {
+        try {
+          await knowledgeBaseService.sync();
+          console.log('Knowledge Base sync triggered after company policy upload');
+        } catch (kbError) {
+          console.error('Error syncing Knowledge Base:', kbError);
+        }
+      }
+      
       res.json(policy);
     } catch (error) {
       console.error("Error creating company policy:", error);
@@ -2114,6 +2157,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const policy = await storage.updateCompanyPolicy(policyId, updateData);
+      
+      // Trigger Knowledge Base sync if configured
+      if (knowledgeBaseService.isConfigured()) {
+        try {
+          await knowledgeBaseService.sync();
+          console.log('Knowledge Base sync triggered after company policy update');
+        } catch (kbError) {
+          console.error('Error syncing Knowledge Base:', kbError);
+        }
+      }
+      
       res.json(policy);
     } catch (error) {
       console.error("Error updating company policy:", error);
@@ -2146,6 +2200,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       await storage.deleteCompanyPolicy(policyId);
+      
+      // Trigger Knowledge Base sync if configured
+      if (knowledgeBaseService.isConfigured()) {
+        try {
+          await knowledgeBaseService.sync();
+          console.log('Knowledge Base sync triggered after company policy deletion');
+        } catch (kbError) {
+          console.error('Error syncing Knowledge Base:', kbError);
+        }
+      }
+      
       res.json({ message: "Company policy deleted successfully" });
     } catch (error) {
       console.error("Error deleting company policy:", error);
@@ -2801,6 +2866,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       const article = await storage.createKnowledgeArticle(articleData);
+      
+      // Trigger Knowledge Base sync if configured and article is published
+      if (knowledgeBaseService.isConfigured() && articleData.isPublished) {
+        try {
+          await knowledgeBaseService.sync();
+          console.log('Knowledge Base sync triggered after knowledge article creation');
+        } catch (kbError) {
+          console.error('Error syncing Knowledge Base:', kbError);
+        }
+      }
+      
       res.status(201).json(article);
     } catch (error) {
       console.error("Error creating knowledge article:", error);
@@ -2818,6 +2894,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const articleId = parseInt(req.params.id);
       const article = await storage.updateKnowledgeArticle(articleId, req.body);
+      
+      // Trigger Knowledge Base sync if configured
+      if (knowledgeBaseService.isConfigured()) {
+        try {
+          await knowledgeBaseService.sync();
+          console.log('Knowledge Base sync triggered after knowledge article update');
+        } catch (kbError) {
+          console.error('Error syncing Knowledge Base:', kbError);
+        }
+      }
+      
       res.json(article);
     } catch (error) {
       console.error("Error updating knowledge article:", error);
@@ -2835,6 +2922,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const articleId = parseInt(req.params.id);
       await storage.deleteKnowledgeArticle(articleId);
+      
+      // Trigger Knowledge Base sync if configured
+      if (knowledgeBaseService.isConfigured()) {
+        try {
+          await knowledgeBaseService.sync();
+          console.log('Knowledge Base sync triggered after knowledge article deletion');
+        } catch (kbError) {
+          console.error('Error syncing Knowledge Base:', kbError);
+        }
+      }
+      
       res.json({ message: "Knowledge article deleted successfully" });
     } catch (error) {
       console.error("Error deleting knowledge article:", error);
