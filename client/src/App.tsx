@@ -115,34 +115,25 @@ function Router() {
                     </ProtectedRoute>
                   )}
                 />
-                <Route path="/admin">
-                  <ProtectedRoute allowedRoles={["admin"]}>
-                    <AdminPanel />
-                  </ProtectedRoute>
-                </Route>
-                <Route path="/ai-settings">
-                  <ProtectedRoute allowedRoles={["admin"]}>
-                    <AISettings />
-                  </ProtectedRoute>
-                </Route>
+                <Route
+                  path="/departments"
+                  component={(params) => (
+                    <ProtectedRoute allowedRoles={["admin", "manager"]}>
+                      <Departments />
+                    </ProtectedRoute>
+                  )}
+                />
                 <Route path="/settings" component={Settings} />
                 <Route path="/notifications" component={Notifications} />
                 <Route path="/guides" component={UserGuides} />
-                <Route path="/teams-integration" component={TeamsIntegration} />
-                <Route path="/admin/guides" component={AdminGuides} />
-                <Route path="/admin/departments">
+                <Route
+                  path="/ms-teams-integration"
+                  component={TeamsIntegration}
+                />
+                <Route path="/admin-guides" component={AdminGuides} />
+                <Route path="/admin/:tab">
                   <ProtectedRoute allowedRoles={["admin"]}>
-                    <Departments />
-                  </ProtectedRoute>
-                </Route>
-                <Route path="/admin/invitations">
-                  <ProtectedRoute allowedRoles={["admin"]}>
-                    <Invitations />
-                  </ProtectedRoute>
-                </Route>
-                <Route path="/admin/ai-analytics">
-                  <ProtectedRoute allowedRoles={["admin", "manager"]}>
-                    <AiAnalytics />
+                    <AdminPanel />
                   </ProtectedRoute>
                 </Route>
                 <Route path="/knowledge-base">
@@ -152,7 +143,6 @@ function Router() {
                     <KnowledgeBase />
                   </ProtectedRoute>
                 </Route>
-
                 <Route
                   path="/tickets/:id"
                   component={(params) => (

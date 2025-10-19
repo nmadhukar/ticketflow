@@ -2,12 +2,40 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
@@ -15,6 +43,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Loader2, Plus, Pencil, Trash2, Building, Users } from "lucide-react";
 import type { Department, User } from "@shared/schema";
+import MainWrapper from "@/components/main-wrapper";
 
 const departmentSchema = z.object({
   name: z.string().min(2, "Department name must be at least 2 characters"),
@@ -26,7 +55,9 @@ type DepartmentFormData = z.infer<typeof departmentSchema>;
 
 export default function Departments() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [editingDepartment, setEditingDepartment] = useState<Department | null>(null);
+  const [editingDepartment, setEditingDepartment] = useState<Department | null>(
+    null
+  );
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -74,7 +105,13 @@ export default function Departments() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: number; data: DepartmentFormData }) => {
+    mutationFn: async ({
+      id,
+      data,
+    }: {
+      id: number;
+      data: DepartmentFormData;
+    }) => {
       await apiRequest("PUT", `/api/admin/departments/${id}`, data);
     },
     onSuccess: () => {
@@ -142,12 +179,11 @@ export default function Departments() {
   }
 
   return (
-    <div className="container mx-auto py-8">
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Department Management</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-2">Organize users into departments</p>
-        </div>
+    <MainWrapper
+      title="Department Management"
+      subTitle="Organize users into departments"
+    >
+      <div className="flex justify-end items-center mb-8">
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
           <DialogTrigger asChild>
             <Button className="gap-2">
@@ -163,7 +199,10 @@ export default function Departments() {
               </DialogDescription>
             </DialogHeader>
             <Form {...createForm}>
-              <form onSubmit={createForm.handleSubmit(handleCreateSubmit)} className="space-y-4">
+              <form
+                onSubmit={createForm.handleSubmit(handleCreateSubmit)}
+                className="space-y-4"
+              >
                 <FormField
                   control={createForm.control}
                   name="name"
@@ -184,9 +223,9 @@ export default function Departments() {
                     <FormItem>
                       <FormLabel>Description</FormLabel>
                       <FormControl>
-                        <Textarea 
-                          placeholder="Department description..." 
-                          {...field} 
+                        <Textarea
+                          placeholder="Department description..."
+                          {...field}
                         />
                       </FormControl>
                       <FormMessage />
@@ -199,7 +238,10 @@ export default function Departments() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Department Manager</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value}
+                      >
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Select a manager" />
@@ -207,11 +249,16 @@ export default function Departments() {
                         </FormControl>
                         <SelectContent>
                           <SelectItem value="none">No Manager</SelectItem>
-                          {users.filter((user: User) => user.role === 'admin' || user.role === 'manager').map((user: User) => (
-                            <SelectItem key={user.id} value={user.id}>
-                              {user.firstName} {user.lastName} ({user.email})
-                            </SelectItem>
-                          ))}
+                          {users
+                            .filter(
+                              (user: User) =>
+                                user.role === "admin" || user.role === "manager"
+                            )
+                            .map((user: User) => (
+                              <SelectItem key={user.id} value={user.id}>
+                                {user.firstName} {user.lastName} ({user.email})
+                              </SelectItem>
+                            ))}
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -233,8 +280,10 @@ export default function Departments() {
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {departments.map((department: Department) => {
-          const manager = users.find((u: User) => u.id === department.managerId);
+        {departments?.map((department: Department) => {
+          const manager = users.find(
+            (u: User) => u.id === department.managerId
+          );
           return (
             <Card key={department.id} className="relative group">
               <CardHeader className="pb-4">
@@ -242,11 +291,17 @@ export default function Departments() {
                   <div className="flex items-center gap-3">
                     <Building className="w-8 h-8 text-primary" />
                     <div>
-                      <CardTitle className="text-lg">{department.name}</CardTitle>
+                      <CardTitle className="text-lg">
+                        {department.name}
+                      </CardTitle>
                       {department.isActive ? (
-                        <Badge variant="secondary" className="mt-1">Active</Badge>
+                        <Badge variant="secondary" className="mt-1">
+                          Active
+                        </Badge>
                       ) : (
-                        <Badge variant="destructive" className="mt-1">Inactive</Badge>
+                        <Badge variant="destructive" className="mt-1">
+                          Inactive
+                        </Badge>
                       )}
                     </div>
                   </div>
@@ -275,7 +330,9 @@ export default function Departments() {
                 {manager && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Users className="w-4 h-4" />
-                    <span>Manager: {manager.firstName} {manager.lastName}</span>
+                    <span>
+                      Manager: {manager.firstName} {manager.lastName}
+                    </span>
                   </div>
                 )}
               </CardContent>
@@ -283,18 +340,25 @@ export default function Departments() {
           );
         })}
       </div>
+      {!departments?.length && (
+        <p className="w-full text-center">No department found!</p>
+      )}
 
       {/* Edit Dialog */}
-      <Dialog open={!!editingDepartment} onOpenChange={(open) => !open && setEditingDepartment(null)}>
+      <Dialog
+        open={!!editingDepartment}
+        onOpenChange={(open) => !open && setEditingDepartment(null)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Department</DialogTitle>
-            <DialogDescription>
-              Update department information
-            </DialogDescription>
+            <DialogDescription>Update department information</DialogDescription>
           </DialogHeader>
           <Form {...editForm}>
-            <form onSubmit={editForm.handleSubmit(handleEditSubmit)} className="space-y-4">
+            <form
+              onSubmit={editForm.handleSubmit(handleEditSubmit)}
+              className="space-y-4"
+            >
               <FormField
                 control={editForm.control}
                 name="name"
@@ -335,11 +399,16 @@ export default function Departments() {
                       </FormControl>
                       <SelectContent>
                         <SelectItem value="none">No Manager</SelectItem>
-                        {users?.filter((user: User) => user.role === 'admin' || user.role === 'manager').map((user: User) => (
-                          <SelectItem key={user.id} value={user.id}>
-                            {user.firstName} {user.lastName} ({user.email})
-                          </SelectItem>
-                        ))}
+                        {users
+                          ?.filter(
+                            (user: User) =>
+                              user.role === "admin" || user.role === "manager"
+                          )
+                          .map((user: User) => (
+                            <SelectItem key={user.id} value={user.id}>
+                              {user.firstName} {user.lastName} ({user.email})
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -358,6 +427,6 @@ export default function Departments() {
           </Form>
         </DialogContent>
       </Dialog>
-    </div>
+    </MainWrapper>
   );
 }

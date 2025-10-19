@@ -62,15 +62,18 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
   const userDropdownActions = useMemo(() => {
     return (user as any)?.role === "admin"
       ? [
-          { name: "Admin Guides", href: "/admin/guides", icon: BookOpen },
+          { name: "Admin Guides", href: "/admin-guides", icon: BookOpen },
           {
-            name: "Teams Integration",
-            href: "/teams-integration",
+            name: "Microsoft Teams Integration",
+            href: "/ms-teams-integration",
             icon: MessageSquare,
           },
           { name: "Settings", href: "/settings", icon: Settings },
         ]
-      : [{ name: "User Guides", href: "/guides", icon: BookOpen }];
+      : [
+          { name: "User Guides", href: "/guides", icon: BookOpen },
+          { name: "Settings", href: "/settings", icon: Settings },
+        ];
   }, [user]);
 
   return (
