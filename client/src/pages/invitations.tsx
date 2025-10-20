@@ -212,248 +212,244 @@ export default function Invitations() {
   }
 
   return (
-    <div className="container mx-auto p-6">
-      <Card className="flex items-center justify-between">
-        <CardHeader>
-          <CardTitle>User Invitations</CardTitle>
-          <CardDescription>
-            Invite new users to join your organization
-          </CardDescription>
-        </CardHeader>
-        <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-          <DialogTrigger asChild>
-            <Button className="gap-2">
+    <>
+      <Card>
+        <div className="flex items-center justify-between">
+          <CardHeader>
+            <CardTitle>User Invitations</CardTitle>
+            <CardDescription>
+              Invite new users to join your organization
+            </CardDescription>
+          </CardHeader>
+          <CardHeader>
+            <Button className="gap-2" onClick={() => setIsCreateOpen(true)}>
               <UserPlus className="w-4 h-4" />
               Send Invitation
             </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Send User Invitation</DialogTitle>
-              <DialogDescription>
-                Invite a new user to join TicketFlow
-              </DialogDescription>
-            </DialogHeader>
-            <Form {...form}>
-              <form
-                onSubmit={form.handleSubmit(handleSubmit)}
-                className="space-y-4"
-              >
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email Address</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="email"
-                          placeholder="user@example.com"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        An invitation email will be sent to this address
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="role"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>User Role</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        value={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a role" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="admin">Admin</SelectItem>
-                          <SelectItem value="manager">Manager</SelectItem>
-                          <SelectItem value="user">User</SelectItem>
-                          <SelectItem value="customer">Customer</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormDescription>
-                        Choose the role for the invited user
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="departmentId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Department (Optional)</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        value={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a department" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="none">No Department</SelectItem>
-                          {departments?.map((dept: Department) => (
-                            <SelectItem
-                              key={dept.id}
-                              value={dept.id.toString()}
+          </CardHeader>
+        </div>
+        <CardContent className="space-y-4">
+          {invitations?.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
+                <Mail className="w-12 h-12 text-muted-foreground mb-4" />
+                <p className="text-lg text-muted-foreground">
+                  No invitations sent yet
+                </p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Send your first invitation to get started
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            invitations?.map((invitation: UserInvitation) => {
+              const department = departments?.find(
+                (d: Department) => d.id === invitation.departmentId
+              );
+              return (
+                <Card key={invitation.id}>
+                  <CardHeader>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <CardTitle className="text-lg flex items-center gap-2">
+                          <Mail className="w-5 h-5" />
+                          {invitation.email}
+                        </CardTitle>
+                        <CardDescription className="mt-2 flex items-center gap-4">
+                          <span className="flex items-center gap-1">
+                            <Calendar className="w-4 h-4" />
+                            Sent{" "}
+                            {invitation.createdAt
+                              ? format(new Date(invitation.createdAt), "PPP")
+                              : "Unknown"}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-4 h-4" />
+                            Expires{" "}
+                            {format(new Date(invitation.expiresAt), "PPP")}
+                          </span>
+                        </CardDescription>
+                      </div>
+                      <div className="flex gap-2">
+                        {getRoleBadge(invitation.role)}
+                        {getStatusBadge(invitation)}
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex justify-between items-center">
+                      <div className="text-sm text-muted-foreground">
+                        {department && (
+                          <span>Department: {department.name}</span>
+                        )}
+                      </div>
+                      {invitation.status === "pending" &&
+                        new Date(invitation.expiresAt) > new Date() && (
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                resendMutation.mutate(invitation.id)
+                              }
+                              disabled={resendMutation.isPending}
                             >
-                              {dept.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="expiresAt"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Expiration Date</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="datetime-local"
-                          {...field}
-                          value={
-                            field.value
-                              ? new Date(field.value).toISOString().slice(0, 16)
-                              : ""
-                          }
-                          onChange={(e) =>
-                            field.onChange(
-                              new Date(e.target.value).toISOString()
-                            )
-                          }
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        The invitation will expire after this date
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <DialogFooter>
-                  <Button type="submit" disabled={createMutation.isPending}>
-                    {createMutation.isPending && (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    )}
-                    Send Invitation
-                  </Button>
-                </DialogFooter>
-              </form>
-            </Form>
-          </DialogContent>
-        </Dialog>
-        <CardContent className="space-y-4"></CardContent>
+                              {resendMutation.isPending ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Mail className="w-4 h-4" />
+                              )}
+                              <span className="ml-2">Resend</span>
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() =>
+                                cancelMutation.mutate(invitation.id)
+                              }
+                              disabled={cancelMutation.isPending}
+                            >
+                              {cancelMutation.isPending ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <X className="w-4 h-4" />
+                              )}
+                              <span className="ml-2">Cancel</span>
+                            </Button>
+                          </div>
+                        )}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })
+          )}
+        </CardContent>
       </Card>
 
-      <div className="space-y-4 mt-5">
-        {invitations?.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <Mail className="w-12 h-12 text-muted-foreground mb-4" />
-              <p className="text-lg text-muted-foreground">
-                No invitations sent yet
-              </p>
-              <p className="text-sm text-muted-foreground mt-2">
-                Send your first invitation to get started
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          invitations?.map((invitation: UserInvitation) => {
-            const department = departments?.find(
-              (d: Department) => d.id === invitation.departmentId
-            );
-            return (
-              <Card key={invitation.id}>
-                <CardHeader>
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        <Mail className="w-5 h-5" />
-                        {invitation.email}
-                      </CardTitle>
-                      <CardDescription className="mt-2 flex items-center gap-4">
-                        <span className="flex items-center gap-1">
-                          <Calendar className="w-4 h-4" />
-                          Sent{" "}
-                          {invitation.createdAt
-                            ? format(new Date(invitation.createdAt), "PPP")
-                            : "Unknown"}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-4 h-4" />
-                          Expires{" "}
-                          {format(new Date(invitation.expiresAt), "PPP")}
-                        </span>
-                      </CardDescription>
-                    </div>
-                    <div className="flex gap-2">
-                      {getRoleBadge(invitation.role)}
-                      {getStatusBadge(invitation)}
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex justify-between items-center">
-                    <div className="text-sm text-muted-foreground">
-                      {department && <span>Department: {department.name}</span>}
-                    </div>
-                    {invitation.status === "pending" &&
-                      new Date(invitation.expiresAt) > new Date() && (
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => resendMutation.mutate(invitation.id)}
-                            disabled={resendMutation.isPending}
-                          >
-                            {resendMutation.isPending ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <Mail className="w-4 h-4" />
-                            )}
-                            <span className="ml-2">Resend</span>
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => cancelMutation.mutate(invitation.id)}
-                            disabled={cancelMutation.isPending}
-                          >
-                            {cancelMutation.isPending ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <X className="w-4 h-4" />
-                            )}
-                            <span className="ml-2">Cancel</span>
-                          </Button>
-                        </div>
-                      )}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })
-        )}
-      </div>
-    </div>
+      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Send User Invitation</DialogTitle>
+            <DialogDescription>
+              Invite a new user to join TicketFlow
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...form}>
+            <form
+              onSubmit={form.handleSubmit(handleSubmit)}
+              className="space-y-4"
+            >
+              <FormField
+                control={form.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Email Address</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="email"
+                        placeholder="user@example.com"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      An invitation email will be sent to this address
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="role"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>User Role</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a role" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="manager">Manager</SelectItem>
+                        <SelectItem value="user">User</SelectItem>
+                        <SelectItem value="customer">Customer</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      Choose the role for the invited user
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="departmentId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Department (Optional)</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a department" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="none">No Department</SelectItem>
+                        {departments?.map((dept: Department) => (
+                          <SelectItem key={dept.id} value={dept.id.toString()}>
+                            {dept.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="expiresAt"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Expiration Date</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="datetime-local"
+                        {...field}
+                        value={
+                          field.value
+                            ? new Date(field.value).toISOString().slice(0, 16)
+                            : ""
+                        }
+                        onChange={(e) =>
+                          field.onChange(new Date(e.target.value).toISOString())
+                        }
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      The invitation will expire after this date
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <DialogFooter>
+                <Button type="submit" disabled={createMutation.isPending}>
+                  {createMutation.isPending && (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  )}
+                  Send Invitation
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

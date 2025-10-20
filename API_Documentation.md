@@ -1,963 +1,1133 @@
 # TicketFlow API Documentation
 
-## Overview
-
-TicketFlow is a comprehensive ticketing system designed for small business use. This documentation covers all available API endpoints, authentication methods, request/response formats, and example usage.
-
-**Base URL:** `https://your-replit-app.replit.app`
-
-## Table of Contents
-
-1. [Authentication](#authentication)
-2. [API Endpoints](#api-endpoints)
-   - [Authentication Endpoints](#authentication-endpoints)
-   - [Task Management](#task-management)
-   - [Task Comments](#task-comments)
-   - [User Management](#user-management)
-   - [Team Management](#team-management)
-   - [Statistics](#statistics)
-   - [Activity Tracking](#activity-tracking)
-   - [Admin Operations](#admin-operations)
-3. [Data Models](#data-models)
-4. [Error Handling](#error-handling)
-5. [Rate Limiting](#rate-limiting)
-6. [Postman Collection](#postman-collection)
+## Base URL
+```
+Development: http://localhost:5000/api
+Production: https://your-domain.com/api
+```
 
 ## Authentication
 
-TicketFlow uses Replit's OpenID Connect (OIDC) for authentication. The application handles authentication through session-based cookies.
+All API endpoints require authentication unless specified otherwise. The API uses session-based authentication with cookies.
 
-### Authentication Flow
-
-1. **Login**: Navigate to `/api/login` to initiate OAuth flow
-2. **Callback**: Replit redirects to `/api/callback` after successful authentication
-3. **Session**: Authenticated sessions are stored server-side with PostgreSQL
-4. **Logout**: Navigate to `/api/logout` to clear session and redirect
-
-### Session Management
-
-- Sessions are stored in PostgreSQL for reliability
-- Session TTL: 7 days
-- Automatic token refresh for expired sessions
-- Secure cookies with HTTPOnly flag
-
----
+### Authentication Headers
+```http
+Cookie: connect.sid=s%3ASessionID.Signature
+```
 
 ## API Endpoints
 
 ### Authentication Endpoints
 
-#### Get Current User
-```http
-GET /api/auth/user
-```
+#### Register User
+Creates a new user account. Users require admin approval unless invited.
 
-**Description:** Retrieve the current authenticated user's profile information.
-
-**Authentication:** Required
-
-**Response:**
+**Endpoint:** `POST /api/auth/register`  
+**Authentication:** Not required  
+**Request Body:**
 ```json
 {
-  "id": "38849441",
   "email": "user@example.com",
+  "password": "SecurePassword123",
   "firstName": "John",
-  "lastName": "Doe",
-  "profileImageUrl": "https://replit.com/public/images/profile.png",
-  "role": "user",
-  "department": "Engineering",
-  "phone": "+1-555-123-4567",
-  "isActive": true,
-  "createdAt": "2024-01-15T10:30:00Z",
-  "updatedAt": "2024-01-15T10:30:00Z"
+  "lastName": "Doe"
+}
+```
+**Response:** `201 Created`
+```json
+{
+  "message": "Registration successful! Your account is pending admin approval.",
+  "user": {
+    "id": "uuid",
+    "email": "user@example.com",
+    "firstName": "John",
+    "lastName": "Doe",
+    "role": "customer",
+    "isApproved": false
+  }
 }
 ```
 
 #### Login
-```http
-GET /api/login
+Authenticates a user and creates a session.
+
+**Endpoint:** `POST /api/auth/login`  
+**Authentication:** Not required  
+**Request Body:**
+```json
+{
+  "email": "user@example.com",
+  "password": "SecurePassword123"
+}
 ```
-
-**Description:** Redirect to Replit OAuth login page.
-
-**Authentication:** None
-
-**Response:** Redirect to Replit OAuth
+**Response:** `200 OK`
+```json
+{
+  "id": "uuid",
+  "email": "user@example.com",
+  "firstName": "John",
+  "lastName": "Doe",
+  "role": "user",
+  "isActive": true,
+  "isApproved": true
+}
+```
 
 #### Logout
-```http
-GET /api/logout
+Ends the current user session.
+
+**Endpoint:** `POST /api/auth/logout`  
+**Authentication:** Required  
+**Response:** `200 OK`
+```json
+{
+  "message": "Logged out successfully"
+}
 ```
 
-**Description:** Clear session and redirect to home page.
+#### Get Current User
+Returns the authenticated user's information.
 
-**Authentication:** Required
-
-**Response:** Redirect to home page
-
----
-
-### Task Management
-
-#### Get All Tasks
-```http
-GET /api/tasks
+**Endpoint:** `GET /api/auth/user`  
+**Authentication:** Required  
+**Response:** `200 OK`
+```json
+{
+  "id": "uuid",
+  "email": "user@example.com",
+  "firstName": "John",
+  "lastName": "Doe",
+  "role": "admin",
+  "departmentId": 1,
+  "isActive": true,
+  "isApproved": true,
+  "profileImageUrl": "https://example.com/profile.jpg",
+  "createdAt": "2024-01-01T00:00:00Z",
+  "updatedAt": "2024-01-01T00:00:00Z"
+}
 ```
 
-**Description:** Retrieve all tasks with optional filtering and pagination.
+#### Forgot Password
+Sends a password reset email to the user.
 
-**Authentication:** Required
+**Endpoint:** `POST /api/auth/forgot-password`  
+**Authentication:** Not required  
+**Request Body:**
+```json
+{
+  "email": "user@example.com"
+}
+```
+**Response:** `200 OK`
+```json
+{
+  "message": "If an account exists with this email, a password reset link has been sent."
+}
+```
 
+#### Reset Password
+Resets the user's password using a reset token.
+
+**Endpoint:** `POST /api/auth/reset-password`  
+**Authentication:** Not required  
+**Request Body:**
+```json
+{
+  "token": "reset-token-from-email",
+  "password": "NewSecurePassword123"
+}
+```
+**Response:** `200 OK`
+```json
+{
+  "message": "Password reset successfully"
+}
+```
+
+### Ticket Management
+
+#### Create Ticket
+Creates a new ticket in the system.
+
+**Endpoint:** `POST /api/tasks`  
+**Authentication:** Required  
+**Request Body:**
+```json
+{
+  "title": "Bug in login system",
+  "description": "Users cannot login with special characters in password",
+  "priority": "high",
+  "severity": "major",
+  "category": "bug",
+  "assignedTo": "user-uuid",
+  "teamId": 1,
+  "tags": ["login", "authentication", "urgent"],
+  "estimatedHours": 4,
+  "dueDate": "2024-12-31T23:59:59Z"
+}
+```
+**Response:** `201 Created`
+```json
+{
+  "id": 1,
+  "ticketNumber": "TKT-2024-0001",
+  "title": "Bug in login system",
+  "description": "Users cannot login with special characters in password",
+  "status": "open",
+  "priority": "high",
+  "severity": "major",
+  "category": "bug",
+  "createdBy": "user-uuid",
+  "assignedTo": "user-uuid",
+  "teamId": 1,
+  "tags": ["login", "authentication", "urgent"],
+  "estimatedHours": 4,
+  "actualHours": null,
+  "dueDate": "2024-12-31T23:59:59Z",
+  "createdAt": "2024-01-01T00:00:00Z",
+  "updatedAt": "2024-01-01T00:00:00Z"
+}
+```
+
+#### Get Tickets
+Retrieves tickets with optional filters.
+
+**Endpoint:** `GET /api/tasks`  
+**Authentication:** Required  
 **Query Parameters:**
 - `status` (optional): Filter by status (open, in_progress, resolved, closed, on_hold)
-- `category` (optional): Filter by category (bug, feature, support, enhancement, incident, request)
-- `assigneeId` (optional): Filter by assignee user ID
+- `priority` (optional): Filter by priority (low, medium, high, urgent)
+- `severity` (optional): Filter by severity (minor, normal, major, critical)
+- `assignedTo` (optional): Filter by assigned user ID
+- `teamId` (optional): Filter by team ID
+- `category` (optional): Filter by category
 - `search` (optional): Search in title and description
-- `limit` (optional): Number of results to return (default: no limit)
-- `offset` (optional): Number of results to skip for pagination (default: 0)
+- `page` (optional): Page number (default: 1)
+- `limit` (optional): Items per page (default: 20)
 
-**Example Request:**
-```http
-GET /api/tasks?status=open&category=bug&limit=10&offset=0
-```
-
-**Response:**
+**Response:** `200 OK`
 ```json
 [
   {
     "id": 1,
     "ticketNumber": "TKT-2024-0001",
-    "title": "Fix login issue",
-    "description": "Users unable to login with correct credentials",
-    "category": "bug",
+    "title": "Bug in login system",
     "status": "open",
     "priority": "high",
     "severity": "major",
-    "notes": null,
-    "assigneeId": "user123",
-    "assigneeType": "user",
-    "assigneeTeamId": null,
-    "createdBy": "admin123",
-    "dueDate": "2024-12-31T23:59:59Z",
-    "resolvedAt": null,
-    "closedAt": null,
-    "estimatedHours": 8,
-    "actualHours": null,
-    "tags": ["authentication", "urgent"],
-    "createdAt": "2024-01-15T10:30:00Z",
-    "updatedAt": "2024-01-15T10:30:00Z"
+    "assignedUser": {
+      "id": "uuid",
+      "firstName": "John",
+      "lastName": "Doe"
+    },
+    "team": {
+      "id": 1,
+      "name": "Development Team"
+    },
+    "createdBy": "user-uuid",
+    "createdAt": "2024-01-01T00:00:00Z",
+    "dueDate": "2024-12-31T23:59:59Z"
   }
 ]
 ```
 
-#### Get My Tasks
-```http
-GET /api/tasks/my
-```
+#### Get Single Ticket
+Retrieves detailed information about a specific ticket.
 
-**Description:** Retrieve tasks assigned to the current user.
-
-**Authentication:** Required
-
-**Query Parameters:** Same as "Get All Tasks"
-
-**Response:** Same format as "Get All Tasks"
-
-#### Get Task by ID
-```http
-GET /api/tasks/{id}
-```
-
-**Description:** Retrieve a specific task by its ID.
-
-**Authentication:** Required
-
-**Path Parameters:**
-- `id` (required): Task ID
-
-**Response:** Single task object (same format as array item above)
-
-#### Create Task
-```http
-POST /api/tasks
-```
-
-**Description:** Create a new task.
-
-**Authentication:** Required
-
-**Request Body:**
+**Endpoint:** `GET /api/tasks/:id`  
+**Authentication:** Required  
+**Response:** `200 OK`
 ```json
 {
-  "title": "Fix login issue",
-  "description": "Users are unable to login with their credentials",
-  "category": "bug",
-  "status": "open",
+  "id": 1,
+  "ticketNumber": "TKT-2024-0001",
+  "title": "Bug in login system",
+  "description": "Full description...",
+  "status": "in_progress",
   "priority": "high",
   "severity": "major",
-  "assigneeId": "user123",
-  "assigneeType": "user",
-  "assigneeTeamId": null,
-  "dueDate": "2024-12-31T23:59:59.999Z",
-  "estimatedHours": 8,
-  "tags": ["authentication", "urgent"]
+  "category": "bug",
+  "createdBy": {
+    "id": "uuid",
+    "firstName": "Jane",
+    "lastName": "Smith"
+  },
+  "assignedTo": {
+    "id": "uuid",
+    "firstName": "John",
+    "lastName": "Doe"
+  },
+  "team": {
+    "id": 1,
+    "name": "Development Team"
+  },
+  "tags": ["login", "authentication"],
+  "estimatedHours": 4,
+  "actualHours": 2,
+  "createdAt": "2024-01-01T00:00:00Z",
+  "updatedAt": "2024-01-02T00:00:00Z",
+  "lastUpdatedBy": {
+    "id": "uuid",
+    "firstName": "John",
+    "lastName": "Doe"
+  }
 }
 ```
 
-**Required Fields:**
-- `title`: String (max 255 characters)
-- `category`: String (bug, feature, support, enhancement, incident, request)
+#### Update Ticket
+Updates an existing ticket.
 
-**Optional Fields:**
-- `description`: Text
-- `status`: String (default: "open")
-- `priority`: String (default: "medium") - low, medium, high, urgent
-- `severity`: String (default: "normal") - minor, normal, major, critical
-- `notes`: Text
-- `assigneeId`: String (user ID)
-- `assigneeType`: String (default: "user") - user, team
-- `assigneeTeamId`: Integer (team ID)
-- `dueDate`: ISO 8601 datetime
-- `estimatedHours`: Integer
-- `tags`: Array of strings
-
-**Response:** Created task object
-
-#### Update Task
-```http
-PATCH /api/tasks/{id}
-```
-
-**Description:** Update an existing task.
-
-**Authentication:** Required
-
-**Path Parameters:**
-- `id` (required): Task ID
-
-**Request Body:** Same as Create Task (all fields optional)
-
-**Example Request:**
+**Endpoint:** `PUT /api/tasks/:id`  
+**Authentication:** Required  
+**Request Body:** (all fields optional)
 ```json
 {
+  "title": "Updated title",
+  "description": "Updated description",
   "status": "in_progress",
   "priority": "urgent",
-  "notes": "Started investigating the issue",
-  "actualHours": 2
+  "severity": "critical",
+  "assignedTo": "user-uuid",
+  "teamId": 2,
+  "tags": ["updated", "tags"],
+  "actualHours": 3
+}
+```
+**Response:** `200 OK`
+```json
+{
+  "id": 1,
+  "ticketNumber": "TKT-2024-0001",
+  // ... updated ticket data
 }
 ```
 
-**Response:** Updated task object
+#### Delete Ticket
+Deletes a ticket (admin only).
 
-#### Delete Task
-```http
-DELETE /api/tasks/{id}
-```
-
-**Description:** Delete a task.
-
-**Authentication:** Required
-
-**Path Parameters:**
-- `id` (required): Task ID
-
-**Response:** `204 No Content`
-
----
-
-### Task Comments
-
-#### Get Task Comments
-```http
-GET /api/tasks/{id}/comments
-```
-
-**Description:** Retrieve all comments for a specific task.
-
-**Authentication:** Required
-
-**Path Parameters:**
-- `id` (required): Task ID
-
-**Response:**
+**Endpoint:** `DELETE /api/tasks/:id`  
+**Authentication:** Required (Admin role)  
+**Response:** `200 OK`
 ```json
-[
-  {
-    "id": 1,
-    "taskId": 1,
-    "userId": "user123",
-    "userName": "John Doe",
-    "content": "I'm working on this issue and will provide an update soon.",
-    "createdAt": "2024-01-15T11:00:00Z"
-  }
-]
+{
+  "message": "Task deleted successfully"
+}
 ```
 
-#### Add Task Comment
-```http
-POST /api/tasks/{id}/comments
-```
+### Comments
 
-**Description:** Add a comment to a task.
+#### Add Comment
+Adds a comment to a ticket.
 
-**Authentication:** Required
-
-**Path Parameters:**
-- `id` (required): Task ID
-
+**Endpoint:** `POST /api/tasks/:taskId/comments`  
+**Authentication:** Required  
 **Request Body:**
 ```json
 {
-  "content": "I'm working on this issue and will provide an update soon."
+  "content": "I've started working on this issue. Found the problem in the authentication module."
 }
 ```
-
-**Required Fields:**
-- `content`: String (non-empty)
-
-**Response:** Created comment object
-
----
-
-### User Management
-
-#### Get All Users
-```http
-GET /api/users
-```
-
-**Description:** Retrieve all users in the system.
-
-**Authentication:** Required
-
-**Response:**
-```json
-[
-  {
-    "id": "user123",
-    "email": "john@example.com",
-    "firstName": "John",
-    "lastName": "Doe",
-    "profileImageUrl": "https://replit.com/public/images/profile.png",
-    "role": "user",
-    "department": "Engineering",
-    "phone": "+1-555-123-4567",
-    "isActive": true,
-    "createdAt": "2024-01-15T10:30:00Z",
-    "updatedAt": "2024-01-15T10:30:00Z"
-  }
-]
-```
-
----
-
-### Team Management
-
-#### Get All Teams
-```http
-GET /api/teams
-```
-
-**Description:** Retrieve all teams.
-
-**Authentication:** Required
-
-**Response:**
-```json
-[
-  {
-    "id": 1,
-    "name": "Frontend Development Team",
-    "description": "Team responsible for frontend development and UI/UX",
-    "createdAt": "2024-01-15T10:30:00Z",
-    "createdBy": "admin123"
-  }
-]
-```
-
-#### Get My Teams
-```http
-GET /api/teams/my
-```
-
-**Description:** Retrieve teams that the current user is a member of.
-
-**Authentication:** Required
-
-**Response:** Same format as "Get All Teams"
-
-#### Get Team by ID
-```http
-GET /api/teams/{id}
-```
-
-**Description:** Retrieve a specific team by its ID.
-
-**Authentication:** Required
-
-**Path Parameters:**
-- `id` (required): Team ID
-
-**Response:** Single team object
-
-#### Create Team
-```http
-POST /api/teams
-```
-
-**Description:** Create a new team.
-
-**Authentication:** Required
-
-**Request Body:**
+**Response:** `201 Created`
 ```json
 {
-  "name": "Frontend Development Team",
-  "description": "Team responsible for frontend development and UI/UX"
+  "id": 1,
+  "taskId": 1,
+  "userId": "uuid",
+  "content": "I've started working on this issue. Found the problem in the authentication module.",
+  "createdAt": "2024-01-01T10:00:00Z"
 }
 ```
 
-**Required Fields:**
-- `name`: String (max 255 characters)
+#### Get Comments
+Retrieves all comments for a ticket.
 
-**Optional Fields:**
-- `description`: Text
-
-**Response:** Created team object
-
-#### Get Team Members
-```http
-GET /api/teams/{id}/members
-```
-
-**Description:** Retrieve all members of a specific team.
-
-**Authentication:** Required
-
-**Path Parameters:**
-- `id` (required): Team ID
-
-**Response:**
+**Endpoint:** `GET /api/tasks/:taskId/comments`  
+**Authentication:** Required  
+**Response:** `200 OK`
 ```json
 [
   {
     "id": 1,
-    "teamId": 1,
-    "userId": "user123",
-    "role": "member",
-    "joinedAt": "2024-01-15T10:30:00Z",
+    "content": "Started investigation",
+    "createdAt": "2024-01-01T10:00:00Z",
     "user": {
-      "id": "user123",
-      "email": "john@example.com",
       "firstName": "John",
-      "lastName": "Doe",
-      "profileImageUrl": "https://replit.com/public/images/profile.png",
-      "role": "user",
-      "department": "Engineering",
-      "isActive": true
+      "lastName": "Doe"
     }
   }
 ]
 ```
 
-#### Update Team Member Role
-```http
-PATCH /api/teams/{teamId}/members/{userId}
+### Teams
+
+#### Create Team
+Creates a new team.
+
+**Endpoint:** `POST /api/teams`  
+**Authentication:** Required  
+**Request Body:**
+```json
+{
+  "name": "Frontend Team",
+  "description": "Responsible for UI/UX development"
+}
+```
+**Response:** `201 Created`
+```json
+{
+  "id": 1,
+  "name": "Frontend Team",
+  "description": "Responsible for UI/UX development",
+  "createdBy": "uuid",
+  "createdAt": "2024-01-01T00:00:00Z"
+}
 ```
 
-**Description:** Update a team member's role (admin only).
+#### Get Teams
+Retrieves all teams.
 
-**Authentication:** Required (Admin role)
+**Endpoint:** `GET /api/teams`  
+**Authentication:** Required  
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "name": "Frontend Team",
+    "description": "Responsible for UI/UX development",
+    "memberCount": 5
+  }
+]
+```
 
-**Path Parameters:**
-- `teamId` (required): Team ID
-- `userId` (required): User ID
+#### Get My Teams
+Retrieves teams the current user is a member of.
 
+**Endpoint:** `GET /api/teams/my`  
+**Authentication:** Required  
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "name": "Frontend Team",
+    "role": "admin"
+  }
+]
+```
+
+#### Add Team Member
+Adds a user to a team.
+
+**Endpoint:** `POST /api/teams/:teamId/members`  
+**Authentication:** Required  
+**Request Body:**
+```json
+{
+  "userId": "user-uuid",
+  "role": "member"
+}
+```
+**Response:** `200 OK`
+```json
+{
+  "message": "User added to team successfully"
+}
+```
+
+#### Update Team Member Role
+Updates a team member's role.
+
+**Endpoint:** `PUT /api/teams/:teamId/members/:userId`  
+**Authentication:** Required (Team admin)  
 **Request Body:**
 ```json
 {
   "role": "admin"
 }
 ```
-
-**Available Roles:**
-- `member`: Regular team member
-- `admin`: Team administrator
-
-**Response:** Updated team member object
-
----
-
-### Statistics
-
-#### Get User Statistics
-```http
-GET /api/stats
-```
-
-**Description:** Get task statistics for the current user.
-
-**Authentication:** Required
-
-**Response:**
+**Response:** `200 OK`
 ```json
 {
-  "total": 25,
-  "open": 8,
-  "inProgress": 5,
-  "resolved": 10,
-  "closed": 2,
-  "highPriority": 3
+  "message": "Member role updated successfully"
 }
 ```
 
-#### Get Global Statistics
-```http
-GET /api/stats/global
+### File Attachments
+
+#### Upload Attachment
+Uploads a file attachment for a ticket.
+
+**Endpoint:** `POST /api/tasks/:taskId/attachments`  
+**Authentication:** Required  
+**Content-Type:** `multipart/form-data`  
+**Form Data:**
+- `file`: The file to upload (max 10MB)
+
+**Response:** `201 Created`
+```json
+{
+  "id": 1,
+  "taskId": 1,
+  "fileName": "screenshot.png",
+  "fileType": "image/png",
+  "fileSize": 245632,
+  "uploadedBy": "uuid",
+  "createdAt": "2024-01-01T00:00:00Z"
+}
 ```
 
-**Description:** Get global task statistics.
+#### Get Attachments
+Retrieves all attachments for a ticket.
 
-**Authentication:** Required
+**Endpoint:** `GET /api/tasks/:taskId/attachments`  
+**Authentication:** Required  
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "fileName": "screenshot.png",
+    "fileType": "image/png",
+    "fileSize": 245632,
+    "uploadedBy": {
+      "firstName": "John",
+      "lastName": "Doe"
+    },
+    "createdAt": "2024-01-01T00:00:00Z"
+  }
+]
+```
 
-**Response:** Same format as "Get User Statistics"
+#### Download Attachment
+Downloads a specific attachment.
 
----
+**Endpoint:** `GET /api/attachments/:id`  
+**Authentication:** Required  
+**Response:** Binary file data with appropriate Content-Type header
 
-### Activity Tracking
+#### Delete Attachment
+Deletes an attachment.
+
+**Endpoint:** `DELETE /api/attachments/:id`  
+**Authentication:** Required (Uploader or Admin)  
+**Response:** `200 OK`
+```json
+{
+  "message": "Attachment deleted successfully"
+}
+```
+
+### Admin Endpoints
+
+#### Get All Users
+Retrieves all users in the system.
+
+**Endpoint:** `GET /api/admin/users`  
+**Authentication:** Required (Admin role)  
+**Query Parameters:**
+- `role` (optional): Filter by role
+- `isApproved` (optional): Filter by approval status
+- `departmentId` (optional): Filter by department
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": "uuid",
+    "email": "user@example.com",
+    "firstName": "John",
+    "lastName": "Doe",
+    "role": "user",
+    "isActive": true,
+    "isApproved": true,
+    "department": {
+      "id": 1,
+      "name": "Engineering"
+    },
+    "createdAt": "2024-01-01T00:00:00Z"
+  }
+]
+```
+
+#### Update User
+Updates user information.
+
+**Endpoint:** `PUT /api/admin/users/:id`  
+**Authentication:** Required (Admin role)  
+**Request Body:**
+```json
+{
+  "role": "manager",
+  "isActive": true,
+  "isApproved": true,
+  "departmentId": 2
+}
+```
+**Response:** `200 OK`
+```json
+{
+  "id": "uuid",
+  "email": "user@example.com",
+  // ... updated user data
+}
+```
+
+#### Create Department
+Creates a new department.
+
+**Endpoint:** `POST /api/admin/departments`  
+**Authentication:** Required (Admin role)  
+**Request Body:**
+```json
+{
+  "name": "Engineering",
+  "description": "Software development department",
+  "managerId": "manager-uuid"
+}
+```
+**Response:** `201 Created`
+```json
+{
+  "id": 1,
+  "name": "Engineering",
+  "description": "Software development department",
+  "managerId": "manager-uuid",
+  "isActive": true
+}
+```
+
+#### Send User Invitation
+Sends an invitation email to a new user.
+
+**Endpoint:** `POST /api/admin/invitations`  
+**Authentication:** Required (Admin role)  
+**Request Body:**
+```json
+{
+  "email": "newuser@example.com",
+  "role": "user",
+  "departmentId": 1,
+  "expiresAt": "2024-12-31T23:59:59Z"
+}
+```
+**Response:** `201 Created`
+```json
+{
+  "id": 1,
+  "email": "newuser@example.com",
+  "role": "user",
+  "status": "pending",
+  "invitationToken": "token-string",
+  "expiresAt": "2024-12-31T23:59:59Z"
+}
+```
+
+### Statistics & Activity
+
+#### Get Dashboard Statistics
+Retrieves statistics for the dashboard.
+
+**Endpoint:** `GET /api/stats`  
+**Authentication:** Required  
+**Response:** `200 OK`
+```json
+{
+  "total": 150,
+  "open": 45,
+  "inProgress": 30,
+  "resolved": 60,
+  "closed": 15,
+  "myTickets": {
+    "total": 25,
+    "open": 10,
+    "inProgress": 8
+  },
+  "overdue": 5,
+  "dueSoon": 12
+}
+```
 
 #### Get Recent Activity
-```http
-GET /api/activity
-```
+Retrieves recent activity across the system.
 
-**Description:** Retrieve recent activity across all tasks.
-
-**Authentication:** Required
-
+**Endpoint:** `GET /api/activity`  
+**Authentication:** Required  
 **Query Parameters:**
-- `limit` (optional): Number of activity items to return (default: 10)
+- `limit` (optional): Number of activities to return (default: 10)
 
-**Response:**
+**Response:** `200 OK`
 ```json
 [
   {
     "id": 1,
     "taskId": 1,
-    "userId": "user123",
+    "userId": "uuid",
     "action": "status_changed",
-    "oldValue": "open",
-    "newValue": "in_progress",
-    "field": "status",
-    "createdAt": "2024-01-15T11:00:00Z"
+    "description": "Status changed from open to in_progress",
+    "createdAt": "2024-01-01T10:00:00Z",
+    "task": {
+      "ticketNumber": "TKT-2024-0001",
+      "title": "Bug in login system"
+    },
+    "user": {
+      "firstName": "John",
+      "lastName": "Doe"
+    }
   }
 ]
 ```
 
----
+### Company Settings
 
-### Admin Operations
+#### Get Company Settings
+Retrieves company settings and branding.
 
-All admin endpoints require the authenticated user to have the "admin" role.
-
-#### Get All Users (Admin)
-```http
-GET /api/admin/users
-```
-
-**Description:** Get all users with admin privileges.
-
-**Authentication:** Required (Admin role)
-
-**Response:** Same format as "Get All Users"
-
-#### Get Admin Statistics
-```http
-GET /api/admin/stats
-```
-
-**Description:** Get comprehensive system statistics.
-
-**Authentication:** Required (Admin role)
-
-**Response:**
+**Endpoint:** `GET /api/company-settings`  
+**Authentication:** Required  
+**Response:** `200 OK`
 ```json
 {
-  "totalUsers": 45,
-  "activeUsers": 42,
-  "totalTeams": 8,
-  "openTickets": 23,
-  "urgentTickets": 5,
-  "avgResolutionTime": 12
+  "id": 1,
+  "companyName": "TicketFlow Inc",
+  "logo": "base64-encoded-image-data",
+  "ticketPrefix": "TKT"
 }
 ```
 
-#### Update User Profile
-```http
-PATCH /api/admin/users/{userId}
-```
+#### Update Company Settings
+Updates company settings (admin only).
 
-**Description:** Update a user's profile.
-
-**Authentication:** Required (Admin role)
-
-**Path Parameters:**
-- `userId` (required): User ID to update
-
+**Endpoint:** `PUT /api/company-settings`  
+**Authentication:** Required (Admin role)  
 **Request Body:**
 ```json
 {
-  "firstName": "John",
-  "lastName": "Doe",
-  "email": "john.doe@example.com",
-  "role": "manager",
-  "department": "Engineering",
-  "phone": "+1-555-123-4567",
-  "isActive": true
+  "companyName": "New Company Name",
+  "ticketPrefix": "TCK"
 }
 ```
-
-**Available Roles:**
-- `user`: Regular user
-- `agent`: Support agent
-- `manager`: Team manager
-- `admin`: System administrator
-
-**Response:** Updated user object
-
-#### Toggle User Status
-```http
-POST /api/admin/users/{userId}/toggle-status
-```
-
-**Description:** Toggle a user's active/inactive status.
-
-**Authentication:** Required (Admin role)
-
-**Path Parameters:**
-- `userId` (required): User ID
-
-**Response:** Updated user object
-
-#### Assign User to Team
-```http
-POST /api/admin/users/{userId}/assign-team
-```
-
-**Description:** Assign a user to a team.
-
-**Authentication:** Required (Admin role)
-
-**Path Parameters:**
-- `userId` (required): User ID
-
-**Request Body:**
+**Response:** `200 OK`
 ```json
 {
-  "teamId": 1,
-  "role": "member"
+  "id": 1,
+  "companyName": "New Company Name",
+  "ticketPrefix": "TCK"
 }
 ```
 
-**Response:** Created team member object
+### Email Templates
 
-#### Remove User from Team
-```http
-DELETE /api/admin/users/{userId}/remove-team/{teamId}
-```
+#### Get Email Templates
+Retrieves all email templates.
 
-**Description:** Remove a user from a team.
-
-**Authentication:** Required (Admin role)
-
-**Path Parameters:**
-- `userId` (required): User ID
-- `teamId` (required): Team ID
-
-**Response:** `204 No Content`
-
-#### Get Departments
-```http
-GET /api/admin/departments
-```
-
-**Description:** Get all departments.
-
-**Authentication:** Required (Admin role)
-
-**Response:**
+**Endpoint:** `GET /api/email-templates`  
+**Authentication:** Required (Admin role)  
+**Response:** `200 OK`
 ```json
 [
-  "Engineering",
-  "Product",
-  "Sales",
-  "Marketing",
-  "Support",
-  "HR",
-  "Finance"
+  {
+    "id": 1,
+    "name": "user_invitation",
+    "subject": "You're invited to join {{companyName}}",
+    "body": "HTML template content...",
+    "variables": ["companyName", "inviterName", "registrationUrl"]
+  }
 ]
 ```
 
-#### Reset User Password
-```http
-POST /api/admin/users/{userId}/reset-password
-```
+#### Update Email Template
+Updates an email template.
 
-**Description:** Reset a user's password.
-
-**Authentication:** Required (Admin role)
-
-**Path Parameters:**
-- `userId` (required): User ID
-
-**Response:**
+**Endpoint:** `PUT /api/email-templates/:id`  
+**Authentication:** Required (Admin role)  
+**Request Body:**
 ```json
 {
-  "tempPassword": "temp123abc"
+  "subject": "Updated subject line",
+  "body": "Updated HTML content"
 }
 ```
+**Response:** `200 OK`
 
----
+### AI Chat
 
-## Data Models
+#### Send AI Message
+Sends a message to the AI assistant.
 
-### User
-```typescript
-interface User {
-  id: string;
-  email: string | null;
-  firstName: string | null;
-  lastName: string | null;
-  profileImageUrl: string | null;
-  role: string; // user, agent, manager, admin
-  department: string | null;
-  phone: string | null;
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}
-```
-
-### Task
-```typescript
-interface Task {
-  id: number;
-  ticketNumber: string; // TKT-YYYY-XXXX format
-  title: string;
-  description: string | null;
-  category: string; // bug, feature, support, enhancement, incident, request
-  status: string; // open, in_progress, resolved, closed, on_hold
-  priority: string; // low, medium, high, urgent
-  severity: string; // minor, normal, major, critical
-  notes: string | null;
-  assigneeId: string | null;
-  assigneeType: string; // user, team
-  assigneeTeamId: number | null;
-  createdBy: string;
-  dueDate: Date | null;
-  resolvedAt: Date | null;
-  closedAt: Date | null;
-  estimatedHours: number | null;
-  actualHours: number | null;
-  tags: string[] | null;
-  createdAt: Date;
-  updatedAt: Date;
-}
-```
-
-### Team
-```typescript
-interface Team {
-  id: number;
-  name: string;
-  description: string | null;
-  createdAt: Date;
-  createdBy: string;
-}
-```
-
-### TeamMember
-```typescript
-interface TeamMember {
-  id: number;
-  teamId: number;
-  userId: string;
-  role: string; // admin, member
-  joinedAt: Date;
-}
-```
-
-### TaskComment
-```typescript
-interface TaskComment {
-  id: number;
-  taskId: number;
-  userId: string;
-  content: string;
-  createdAt: Date;
-}
-```
-
-### TaskHistory
-```typescript
-interface TaskHistory {
-  id: number;
-  taskId: number;
-  userId: string;
-  action: string; // created, updated, assigned, status_changed, etc.
-  oldValue: string | null;
-  newValue: string | null;
-  field: string | null; // status, assignee, priority, etc.
-  createdAt: Date;
-}
-```
-
----
-
-## Error Handling
-
-The API uses standard HTTP status codes and returns consistent error responses.
-
-### HTTP Status Codes
-
-- `200 OK`: Request successful
-- `201 Created`: Resource created successfully
-- `204 No Content`: Request successful, no content returned
-- `400 Bad Request`: Invalid request data
-- `401 Unauthorized`: Authentication required or failed
-- `403 Forbidden`: Insufficient permissions
-- `404 Not Found`: Resource not found
-- `500 Internal Server Error`: Server error
-
-### Error Response Format
-
+**Endpoint:** `POST /api/ai/chat`  
+**Authentication:** Required  
+**Request Body:**
 ```json
 {
-  "message": "Error description",
-  "errors": [
+  "message": "How do I reset my password?",
+  "sessionId": "optional-session-id"
+}
+```
+**Response:** `200 OK`
+```json
+{
+  "response": "To reset your password, click on...",
+  "sessionId": "session-id",
+  "sources": [
     {
-      "field": "fieldName",
-      "message": "Field-specific error message"
+      "title": "Password Reset Guide",
+      "type": "help_document",
+      "id": 5
     }
   ]
 }
 ```
 
-### Common Error Scenarios
+#### Get Chat History
+Retrieves chat history for a session.
 
-#### Authentication Errors
+**Endpoint:** `GET /api/ai/chat/history/:sessionId`  
+**Authentication:** Required  
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "role": "user",
+    "content": "How do I reset my password?",
+    "timestamp": "2024-01-01T10:00:00Z"
+  },
+  {
+    "id": 2,
+    "role": "assistant",
+    "content": "To reset your password...",
+    "timestamp": "2024-01-01T10:00:05Z"
+  }
+]
+```
+
+### Smart Helpdesk - AI Auto-Response
+
+#### Get AI Auto-Response for Ticket
+Retrieves the AI-generated auto-response for a specific ticket.
+
+**Endpoint:** `GET /api/tasks/:id/auto-response`  
+**Authentication:** Required  
+**Response:** `200 OK`
 ```json
 {
-  "message": "Unauthorized"
+  "id": 1,
+  "ticketId": 123,
+  "response": "Based on your issue description, here's a solution...",
+  "confidenceScore": 0.85,
+  "wasApplied": true,
+  "wasHelpful": true,
+  "createdAt": "2024-01-20T10:00:00Z"
 }
 ```
 
-#### Validation Errors
+#### Provide Auto-Response Feedback
+Records whether the AI auto-response was helpful.
+
+**Endpoint:** `POST /api/tasks/:id/auto-response/feedback`  
+**Authentication:** Required  
+**Request Body:**
 ```json
 {
-  "message": "Invalid task data",
-  "errors": [
-    {
-      "field": "title",
-      "message": "Title is required"
+  "wasHelpful": true
+}
+```
+**Response:** `200 OK`
+```json
+{
+  "message": "Feedback recorded"
+}
+```
+
+### Smart Helpdesk - Knowledge Base
+
+#### Search Knowledge Base
+Searches published knowledge articles.
+
+**Endpoint:** `GET /api/knowledge/search`  
+**Authentication:** Required  
+**Query Parameters:**
+- `query` - Search text
+- `category` - Filter by category
+- `limit` - Number of results (default: 10)
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "title": "How to Reset Your Password",
+    "summary": "Step-by-step guide for password reset",
+    "content": "Full article content...",
+    "category": "authentication",
+    "tags": ["password", "security", "login"],
+    "effectivenessScore": "0.92",
+    "usageCount": 45,
+    "createdAt": "2024-01-15T08:00:00Z"
+  }
+]
+```
+
+#### Get All Knowledge Articles (Admin)
+Retrieves all knowledge articles for management.
+
+**Endpoint:** `GET /api/admin/knowledge`  
+**Authentication:** Required (Admin role)  
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "title": "How to Reset Your Password",
+    "summary": "Step-by-step guide",
+    "isPublished": true,
+    "effectivenessScore": "0.92",
+    "usageCount": 45,
+    "sourceTicketIds": [123, 456],
+    "createdAt": "2024-01-15T08:00:00Z"
+  }
+]
+```
+
+#### Publish/Unpublish Knowledge Article
+Changes the publication status of a knowledge article.
+
+**Endpoint:** `PATCH /api/admin/knowledge/:id/publish`  
+**Authentication:** Required (Admin role)  
+**Request Body:**
+```json
+{
+  "isPublished": true
+}
+```
+**Response:** `200 OK`
+```json
+{
+  "message": "Article updated"
+}
+```
+
+#### Provide Knowledge Article Feedback
+Records whether a knowledge article was helpful.
+
+**Endpoint:** `POST /api/knowledge/:id/feedback`  
+**Authentication:** Required  
+**Request Body:**
+```json
+{
+  "wasHelpful": true
+}
+```
+**Response:** `200 OK`
+```json
+{
+  "message": "Feedback recorded"
+}
+```
+
+### Smart Helpdesk - AI Analytics
+
+#### Get AI Performance Metrics
+Retrieves comprehensive AI system performance analytics.
+
+**Endpoint:** `GET /api/analytics/ai-performance`  
+**Authentication:** Required (Manager or Admin role)  
+**Response:** `200 OK`
+```json
+{
+  "autoResponse": {
+    "total": 500,
+    "applied": 420,
+    "helpful": 350,
+    "avgConfidence": 0.78
+  },
+  "complexity": [
+    { "range": "Very Low", "count": 150 },
+    { "range": "Low", "count": 200 },
+    { "range": "Medium", "count": 100 },
+    { "range": "High", "count": 40 },
+    { "range": "Very High", "count": 10 }
+  ],
+  "knowledgeBase": {
+    "totalArticles": 85,
+    "publishedArticles": 72,
+    "avgEffectiveness": 0.85,
+    "totalUsage": 1250
+  }
+}
+```
+
+### Smart Helpdesk - Escalation Rules
+
+#### Get Escalation Rules
+Retrieves all configured escalation rules.
+
+**Endpoint:** `GET /api/admin/escalation-rules`  
+**Authentication:** Required (Admin role)  
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": 1,
+    "ruleName": "High Complexity Escalation",
+    "conditions": {
+      "complexityThreshold": 80,
+      "categories": ["bug", "incident"],
+      "priority": ["high", "urgent"]
     },
-    {
-      "field": "category",
-      "message": "Invalid category value"
-    }
-  ]
-}
+    "actions": {
+      "assignToTeam": "senior-support",
+      "addTags": ["escalated", "priority"],
+      "notifyManagers": true
+    },
+    "priority": 100,
+    "isActive": true
+  }
+]
 ```
 
-#### Permission Errors
+#### Create Escalation Rule
+Creates a new escalation rule.
+
+**Endpoint:** `POST /api/admin/escalation-rules`  
+**Authentication:** Required (Admin role)  
+**Request Body:**
 ```json
 {
-  "message": "Forbidden"
+  "ruleName": "Critical Bug Escalation",
+  "conditions": {
+    "complexityThreshold": 70,
+    "categories": ["bug"],
+    "severity": ["critical"]
+  },
+  "actions": {
+    "assignToTeam": "engineering",
+    "notifyManagers": true
+  },
+  "priority": 90,
+  "isActive": true
 }
 ```
+**Response:** `201 Created`
 
-#### Not Found Errors
+#### Update Escalation Rule
+Updates an existing escalation rule.
+
+**Endpoint:** `PUT /api/admin/escalation-rules/:id`  
+**Authentication:** Required (Admin role)  
+**Request Body:** Same as create  
+**Response:** `200 OK`
+
+#### Delete Escalation Rule
+Deletes an escalation rule.
+
+**Endpoint:** `DELETE /api/admin/escalation-rules/:id`  
+**Authentication:** Required (Admin role)  
+**Response:** `200 OK`
 ```json
 {
-  "message": "Task not found"
+  "message": "Rule deleted successfully"
 }
 ```
 
----
+## Error Responses
+
+All endpoints return consistent error responses:
+
+### 400 Bad Request
+```json
+{
+  "message": "Validation error: Invalid email format"
+}
+```
+
+### 401 Unauthorized
+```json
+{
+  "message": "Not authenticated"
+}
+```
+
+### 403 Forbidden
+```json
+{
+  "message": "Admin access required"
+}
+```
+
+### 404 Not Found
+```json
+{
+  "message": "Resource not found"
+}
+```
+
+### 500 Internal Server Error
+```json
+{
+  "message": "An unexpected error occurred"
+}
+```
 
 ## Rate Limiting
 
-Currently, there are no rate limits implemented. However, the application is designed to handle reasonable traffic loads through:
+API endpoints are rate-limited to prevent abuse:
+- Authentication endpoints: 5 requests per minute per IP
+- Other endpoints: 100 requests per minute per user
 
-- Efficient database queries with proper indexing
-- Session-based authentication to reduce authentication overhead
-- Optimized API responses with minimal data transfer
+## Pagination
 
----
+List endpoints support pagination using query parameters:
+- `page`: Page number (starts at 1)
+- `limit`: Items per page (max 100)
 
-## Postman Collection
+Response includes pagination metadata in headers:
+- `X-Total-Count`: Total number of items
+- `X-Page-Count`: Total number of pages
 
-A complete Postman collection is provided with this documentation (`TicketFlow_API_Collection.postman_collection.json`). The collection includes:
+## WebSocket Events
 
-### Features
-- **Environment Variables**: Configurable base URL and authentication
-- **Pre-configured Requests**: All endpoints with sample data
-- **Example Responses**: Expected response formats
-- **Authorization**: Automatic session-based authentication
-- **Variables**: Reusable IDs for testing different resources
+The API supports WebSocket connections for real-time updates at `/ws`.
 
-### Setup Instructions
+### Connection
+```javascript
+const ws = new WebSocket('ws://localhost:5000/ws');
+```
 
-1. **Import Collection**: Import `TicketFlow_API_Collection.postman_collection.json` into Postman
-2. **Set Base URL**: Update the `baseUrl` variable to your Replit app URL
-3. **Authentication**: 
-   - Navigate to your app in a browser and log in
-   - Copy session cookies to Postman if needed
-   - Alternatively, use Postman's built-in browser for automatic cookie handling
+### Events
 
-### Collection Structure
+#### Ticket Updated
+```json
+{
+  "type": "ticket:updated",
+  "data": {
+    "id": 1,
+    "ticketNumber": "TKT-2024-0001",
+    "changes": ["status", "assignedTo"]
+  }
+}
+```
 
-- **Authentication**: Login, logout, and user profile endpoints
-- **Tasks**: Complete CRUD operations with filtering and pagination
-- **Task Comments**: Comment management for tasks
-- **Users**: User information retrieval
-- **Teams**: Team management and membership operations
-- **Statistics**: User and global statistics
-- **Activity**: Recent activity tracking
-- **Admin**: Administrative operations (requires admin role)
+#### New Comment
+```json
+{
+  "type": "comment:added",
+  "data": {
+    "taskId": 1,
+    "commentId": 5,
+    "userId": "uuid"
+  }
+}
+```
 
-### Variables
-
-The collection includes these variables for easy testing:
-- `baseUrl`: Your application's base URL
-- `taskId`: Sample task ID (1)
-- `teamId`: Sample team ID (1)
-- `userId`: Sample user ID (user123)
-
-Update these variables based on your actual data for testing.
-
----
-
-## Additional Notes
-
-### Database Schema
-The application uses PostgreSQL with Drizzle ORM. The schema includes:
-- Proper foreign key relationships
-- Indexed columns for performance
-- Audit trails for all task changes
-- Session storage for authentication
-
-### Security Features
-- Session-based authentication with secure cookies
-- Role-based access control (RBAC)
-- SQL injection prevention through ORM
-- Input validation using Zod schemas
-- HTTPS enforcement in production
-
-### Performance Considerations
-- Database connection pooling
-- Efficient query patterns with proper joins
-- Pagination support for large datasets
-- Indexed columns for frequently queried fields
-
-This documentation covers all available API endpoints in the TicketFlow application. For additional support or questions, please refer to the application's source code or contact the development team.
+#### Team Member Added
+```json
+{
+  "type": "team:member:added",
+  "data": {
+    "teamId": 1,
+    "userId": "uuid"
+  }
+}
+```

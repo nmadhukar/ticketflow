@@ -45,8 +45,8 @@ export function Sidebar({ className }: SidebarProps) {
         { name: "Dashboard", href: "/", icon: LayoutDashboard },
         { name: "All Tickets", href: "/tasks", icon: FolderOpen },
         { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
-        { name: "Teams", href: "/teams", icon: Users },
         { name: "Departments", href: "/departments", icon: Building },
+        { name: "Teams", href: "/teams", icon: Users },
       ];
     }
     if (role === "agent") {
@@ -61,6 +61,7 @@ export function Sidebar({ className }: SidebarProps) {
       return [
         { name: "Dashboard", href: "/", icon: LayoutDashboard },
         { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
+        { name: "Teams", href: "/teams", icon: Users },
       ];
     }
 

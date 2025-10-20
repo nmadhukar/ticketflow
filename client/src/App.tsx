@@ -99,9 +99,7 @@ function Router() {
                 </Route>
                 <Route path="/my-tasks" component={MyTasks} />
                 <Route path="/teams">
-                  <ProtectedRoute
-                    allowedRoles={["admin", "manager", "agent", "user"]}
-                  >
+                  <ProtectedRoute allowedRoles={["manager", "agent", "user"]}>
                     <Teams />
                   </ProtectedRoute>
                 </Route>

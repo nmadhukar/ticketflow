@@ -9,14 +9,51 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Edit, Trash2, BookOpen, Video, FileText, FolderPlus, Eye, EyeOff } from "lucide-react";
+import {
+  Plus,
+  Edit,
+  Trash2,
+  BookOpen,
+  Video,
+  FileText,
+  FolderPlus,
+  Eye,
+  EyeOff,
+} from "lucide-react";
 import { format } from "date-fns";
 import type { UserGuide, UserGuideCategory } from "@shared/schema";
 import MainWrapper from "@/components/main-wrapper";
@@ -25,23 +62,26 @@ export default function AdminGuides() {
   const { toast } = useToast();
   const { isAuthenticated, isLoading } = useAuth();
   const queryClient = useQueryClient();
-  
+
   const [isGuideDialogOpen, setIsGuideDialogOpen] = useState(false);
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [selectedGuide, setSelectedGuide] = useState<UserGuide | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<UserGuideCategory | null>(null);
-  
+  const [selectedCategory, setSelectedCategory] =
+    useState<UserGuideCategory | null>(null);
+
   // Form states for guide
   const [guideTitle, setGuideTitle] = useState("");
   const [guideDescription, setGuideDescription] = useState("");
   const [guideCategory, setGuideCategory] = useState("");
-  const [guideType, setGuideType] = useState<"scribehow" | "html" | "video">("html");
+  const [guideType, setGuideType] = useState<"scribehow" | "html" | "video">(
+    "html"
+  );
   const [guideContent, setGuideContent] = useState("");
   const [scribehowUrl, setScribehowUrl] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [guideTags, setGuideTags] = useState("");
   const [isPublished, setIsPublished] = useState(true);
-  
+
   // Form states for category
   const [categoryName, setCategoryName] = useState("");
   const [categoryDescription, setCategoryDescription] = useState("");
@@ -64,15 +104,19 @@ export default function AdminGuides() {
   }, [isAuthenticated, isLoading, toast]);
 
   // Fetch guides
-  const { data: guides = [], isLoading: guidesLoading } = useQuery<UserGuide[]>({
-    queryKey: ['/api/guides'],
-    retry: false,
-    enabled: isAuthenticated,
-  });
+  const { data: guides = [], isLoading: guidesLoading } = useQuery<UserGuide[]>(
+    {
+      queryKey: ["/api/guides"],
+      retry: false,
+      enabled: isAuthenticated,
+    }
+  );
 
   // Fetch categories
-  const { data: categories = [], isLoading: categoriesLoading } = useQuery<UserGuideCategory[]>({
-    queryKey: ['/api/guide-categories'],
+  const { data: categories = [], isLoading: categoriesLoading } = useQuery<
+    UserGuideCategory[]
+  >({
+    queryKey: ["/api/guide-categories"],
     retry: false,
     enabled: isAuthenticated,
   });
@@ -80,19 +124,21 @@ export default function AdminGuides() {
   // Create/Update guide mutation
   const saveGuideMutation = useMutation({
     mutationFn: async (data: any) => {
-      const url = selectedGuide 
+      const url = selectedGuide
         ? `/api/admin/guides/${selectedGuide.id}`
-        : '/api/admin/guides';
-      
-      return await apiRequest(selectedGuide ? 'PUT' : 'POST', url, data);
+        : "/api/admin/guides";
+
+      return await apiRequest(selectedGuide ? "PUT" : "POST", url, data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/guides'] });
+      queryClient.invalidateQueries({ queryKey: ["/api/guides"] });
       resetGuideForm();
       setIsGuideDialogOpen(false);
       toast({
         title: "Success",
-        description: `Guide ${selectedGuide ? 'updated' : 'created'} successfully`,
+        description: `Guide ${
+          selectedGuide ? "updated" : "created"
+        } successfully`,
       });
     },
     onError: (error: Error) => {
@@ -118,10 +164,10 @@ export default function AdminGuides() {
   // Delete guide mutation
   const deleteGuideMutation = useMutation({
     mutationFn: async (id: number) => {
-      return await apiRequest('DELETE', `/api/admin/guides/${id}`);
+      return await apiRequest("DELETE", `/api/admin/guides/${id}`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/guides'] });
+      queryClient.invalidateQueries({ queryKey: ["/api/guides"] });
       toast({
         title: "Success",
         description: "Guide deleted successfully",
@@ -150,19 +196,21 @@ export default function AdminGuides() {
   // Create/Update category mutation
   const saveCategoryMutation = useMutation({
     mutationFn: async (data: any) => {
-      const url = selectedCategory 
+      const url = selectedCategory
         ? `/api/admin/guide-categories/${selectedCategory.id}`
-        : '/api/admin/guide-categories';
-      
-      return await apiRequest(selectedCategory ? 'PUT' : 'POST', url, data);
+        : "/api/admin/guide-categories";
+
+      return await apiRequest(selectedCategory ? "PUT" : "POST", url, data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/guide-categories'] });
+      queryClient.invalidateQueries({ queryKey: ["/api/guide-categories"] });
       resetCategoryForm();
       setIsCategoryDialogOpen(false);
       toast({
         title: "Success",
-        description: `Category ${selectedCategory ? 'updated' : 'created'} successfully`,
+        description: `Category ${
+          selectedCategory ? "updated" : "created"
+        } successfully`,
       });
     },
     onError: (error: Error) => {
@@ -188,10 +236,10 @@ export default function AdminGuides() {
   // Delete category mutation
   const deleteCategoryMutation = useMutation({
     mutationFn: async (id: number) => {
-      return await apiRequest('DELETE', `/api/admin/guide-categories/${id}`);
+      return await apiRequest("DELETE", `/api/admin/guide-categories/${id}`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/guide-categories'] });
+      queryClient.invalidateQueries({ queryKey: ["/api/guide-categories"] });
       toast({
         title: "Success",
         description: "Category deleted successfully",
@@ -270,10 +318,10 @@ export default function AdminGuides() {
       content: guideContent,
       scribehowUrl: guideType === "scribehow" ? scribehowUrl : undefined,
       videoUrl: guideType === "video" ? videoUrl : undefined,
-      tags: guideTags ? guideTags.split(",").map(tag => tag.trim()) : [],
+      tags: guideTags ? guideTags.split(",").map((tag) => tag.trim()) : [],
       isPublished,
     };
-    
+
     saveGuideMutation.mutate(data);
   };
 
@@ -284,7 +332,7 @@ export default function AdminGuides() {
       icon: categoryIcon,
       displayOrder: categoryOrder,
     };
-    
+
     saveCategoryMutation.mutate(data);
   };
 
@@ -302,11 +350,18 @@ export default function AdminGuides() {
   };
 
   if (isLoading || !isAuthenticated) {
-    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        Loading...
+      </div>
+    );
   }
 
   return (
-    <MainWrapper title="User Guide Management" subTitle="Create and manage user guides, tutorials, and help documentation">
+    <MainWrapper
+      title="Admin Guide Management"
+      subTitle="Create and manage user guides, tutorials, and help documentation"
+    >
       <Tabs defaultValue="guides" className="space-y-6">
         <TabsList>
           <TabsTrigger value="guides">Guides</TabsTrigger>
@@ -316,7 +371,10 @@ export default function AdminGuides() {
         <TabsContent value="guides" className="space-y-6">
           <div className="flex justify-between items-center">
             <h2 className="text-2xl font-bold">User Guides</h2>
-            <Dialog open={isGuideDialogOpen} onOpenChange={setIsGuideDialogOpen}>
+            <Dialog
+              open={isGuideDialogOpen}
+              onOpenChange={setIsGuideDialogOpen}
+            >
               <DialogTrigger asChild>
                 <Button onClick={resetGuideForm}>
                   <Plus className="h-4 w-4 mr-2" />
@@ -326,13 +384,13 @@ export default function AdminGuides() {
               <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>
-                    {selectedGuide ? 'Edit Guide' : 'Create New Guide'}
+                    {selectedGuide ? "Edit Guide" : "Create New Guide"}
                   </DialogTitle>
                   <DialogDescription>
                     Add helpful documentation for your users
                   </DialogDescription>
                 </DialogHeader>
-                
+
                 <div className="space-y-4 py-4">
                   <div className="space-y-2">
                     <Label htmlFor="title">Title</Label>
@@ -343,7 +401,7 @@ export default function AdminGuides() {
                       placeholder="Guide title"
                     />
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="description">Description</Label>
                     <Textarea
@@ -354,11 +412,14 @@ export default function AdminGuides() {
                       rows={3}
                     />
                   </div>
-                  
+
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="category">Category</Label>
-                      <Select value={guideCategory} onValueChange={setGuideCategory}>
+                      <Select
+                        value={guideCategory}
+                        onValueChange={setGuideCategory}
+                      >
                         <SelectTrigger>
                           <SelectValue placeholder="Select category" />
                         </SelectTrigger>
@@ -371,22 +432,27 @@ export default function AdminGuides() {
                         </SelectContent>
                       </Select>
                     </div>
-                    
+
                     <div className="space-y-2">
                       <Label htmlFor="type">Type</Label>
-                      <Select value={guideType} onValueChange={(value) => setGuideType(value as any)}>
+                      <Select
+                        value={guideType}
+                        onValueChange={(value) => setGuideType(value as any)}
+                      >
                         <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="html">HTML Content</SelectItem>
-                          <SelectItem value="scribehow">Scribehow Guide</SelectItem>
+                          <SelectItem value="scribehow">
+                            Scribehow Guide
+                          </SelectItem>
                           <SelectItem value="video">Video Tutorial</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                   </div>
-                  
+
                   {guideType === "html" && (
                     <div className="space-y-2">
                       <Label htmlFor="content">HTML Content</Label>
@@ -400,7 +466,7 @@ export default function AdminGuides() {
                       />
                     </div>
                   )}
-                  
+
                   {guideType === "scribehow" && (
                     <div className="space-y-2">
                       <Label htmlFor="scribehowUrl">Scribehow URL</Label>
@@ -424,7 +490,7 @@ export default function AdminGuides() {
                       </div>
                     </div>
                   )}
-                  
+
                   {guideType === "video" && (
                     <div className="space-y-2">
                       <Label htmlFor="videoUrl">Video URL</Label>
@@ -448,7 +514,7 @@ export default function AdminGuides() {
                       </div>
                     </div>
                   )}
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="tags">Tags (comma-separated)</Label>
                     <Input
@@ -458,7 +524,7 @@ export default function AdminGuides() {
                       placeholder="tutorial, getting-started, advanced"
                     />
                   </div>
-                  
+
                   <div className="flex items-center space-x-2">
                     <Switch
                       id="published"
@@ -468,13 +534,16 @@ export default function AdminGuides() {
                     <Label htmlFor="published">Published</Label>
                   </div>
                 </div>
-                
+
                 <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsGuideDialogOpen(false)}>
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsGuideDialogOpen(false)}
+                  >
                     Cancel
                   </Button>
                   <Button onClick={handleSaveGuide}>
-                    {selectedGuide ? 'Update' : 'Create'} Guide
+                    {selectedGuide ? "Update" : "Create"} Guide
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -522,17 +591,27 @@ export default function AdminGuides() {
                           <Badge variant="secondary">{guide.type}</Badge>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={guide.isPublished ? "default" : "secondary"}>
+                          <Badge
+                            variant={
+                              guide.isPublished ? "default" : "secondary"
+                            }
+                          >
                             {guide.isPublished ? (
-                              <><Eye className="h-3 w-3 mr-1" /> Published</>
+                              <>
+                                <Eye className="h-3 w-3 mr-1" /> Published
+                              </>
                             ) : (
-                              <><EyeOff className="h-3 w-3 mr-1" /> Draft</>
+                              <>
+                                <EyeOff className="h-3 w-3 mr-1" /> Draft
+                              </>
                             )}
                           </Badge>
                         </TableCell>
                         <TableCell>{guide.viewCount}</TableCell>
                         <TableCell>
-                          {guide.createdAt ? format(new Date(guide.createdAt), "MMM d, yyyy") : "Unknown"}
+                          {guide.createdAt
+                            ? format(new Date(guide.createdAt), "MMM d, yyyy")
+                            : "Unknown"}
                         </TableCell>
                         <TableCell className="text-right">
                           <Button
@@ -546,7 +625,11 @@ export default function AdminGuides() {
                             size="sm"
                             variant="ghost"
                             onClick={() => {
-                              if (confirm("Are you sure you want to delete this guide?")) {
+                              if (
+                                confirm(
+                                  "Are you sure you want to delete this guide?"
+                                )
+                              ) {
                                 deleteGuideMutation.mutate(guide.id);
                               }
                             }}
@@ -566,7 +649,10 @@ export default function AdminGuides() {
         <TabsContent value="categories" className="space-y-6">
           <div className="flex justify-between items-center">
             <h2 className="text-2xl font-bold">Guide Categories</h2>
-            <Dialog open={isCategoryDialogOpen} onOpenChange={setIsCategoryDialogOpen}>
+            <Dialog
+              open={isCategoryDialogOpen}
+              onOpenChange={setIsCategoryDialogOpen}
+            >
               <DialogTrigger asChild>
                 <Button onClick={resetCategoryForm}>
                   <FolderPlus className="h-4 w-4 mr-2" />
@@ -576,13 +662,13 @@ export default function AdminGuides() {
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>
-                    {selectedCategory ? 'Edit Category' : 'Create New Category'}
+                    {selectedCategory ? "Edit Category" : "Create New Category"}
                   </DialogTitle>
                   <DialogDescription>
                     Organize your guides into categories
                   </DialogDescription>
                 </DialogHeader>
-                
+
                 <div className="space-y-4 py-4">
                   <div className="space-y-2">
                     <Label htmlFor="categoryName">Name</Label>
@@ -593,7 +679,7 @@ export default function AdminGuides() {
                       placeholder="Category name"
                     />
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="categoryDescription">Description</Label>
                     <Textarea
@@ -604,7 +690,7 @@ export default function AdminGuides() {
                       rows={3}
                     />
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="categoryIcon">Icon Name (Lucide)</Label>
                     <Input
@@ -614,25 +700,30 @@ export default function AdminGuides() {
                       placeholder="e.g., BookOpen, HelpCircle"
                     />
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="categoryOrder">Display Order</Label>
                     <Input
                       id="categoryOrder"
                       type="number"
                       value={categoryOrder}
-                      onChange={(e) => setCategoryOrder(parseInt(e.target.value) || 0)}
+                      onChange={(e) =>
+                        setCategoryOrder(parseInt(e.target.value) || 0)
+                      }
                       placeholder="0"
                     />
                   </div>
                 </div>
-                
+
                 <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsCategoryDialogOpen(false)}>
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsCategoryDialogOpen(false)}
+                  >
                     Cancel
                   </Button>
                   <Button onClick={handleSaveCategory}>
-                    {selectedCategory ? 'Update' : 'Create'} Category
+                    {selectedCategory ? "Update" : "Create"} Category
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -641,7 +732,9 @@ export default function AdminGuides() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {categoriesLoading ? (
-              <div className="col-span-full text-center">Loading categories...</div>
+              <div className="col-span-full text-center">
+                Loading categories...
+              </div>
             ) : categories.length === 0 ? (
               <div className="col-span-full text-center">
                 No categories found. Create your first category!
@@ -664,7 +757,11 @@ export default function AdminGuides() {
                           size="sm"
                           variant="ghost"
                           onClick={() => {
-                            if (confirm("Are you sure you want to delete this category?")) {
+                            if (
+                              confirm(
+                                "Are you sure you want to delete this category?"
+                              )
+                            ) {
                               deleteCategoryMutation.mutate(category.id);
                             }
                           }}

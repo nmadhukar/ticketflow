@@ -53,7 +53,7 @@ app.use((req, res, next) => {
     console.log("NODE_ENV:", process.env.NODE_ENV);
     console.log("PORT:", process.env.PORT);
     console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
-    
+
     // Seed email templates on startup
     // try {
     //   const { seedEmailTemplates } = await import("./seedEmailTemplates");
@@ -62,12 +62,15 @@ app.use((req, res, next) => {
     //   console.error("Failed to seed email templates:", error);
     // }
 
-    // Seed default admin user on startup
+    // Seed default users, departments, and teams on startup
     try {
-      const { seedDefaultAdmin } = await import("./seedDefaultAdmin");
-      await seedDefaultAdmin();
+      const { seedDefaultUsers, seedDepartments, seedDefaultTeams } =
+        await import("./seed");
+      await seedDefaultUsers();
+      await seedDepartments();
+      await seedDefaultTeams();
     } catch (error) {
-      console.error("Failed to seed default admin:", error);
+      console.error("Failed to run seeders:", error);
     }
   } catch (error) {
     console.error("Startup error:", error);
@@ -81,11 +84,11 @@ app.use((req, res, next) => {
 
   // Simple health check endpoint (no database required)
   app.get("/health", (req, res) => {
-    res.json({ 
-      status: "ok", 
+    res.json({
+      status: "ok",
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV,
-      port: process.env.PORT
+      port: process.env.PORT,
     });
   });
 
@@ -119,11 +122,13 @@ app.use((req, res, next) => {
   const isWindows = process.platform === "win32";
   const listenOptions: any = { port, host: "0.0.0.0" };
   if (!isWindows) listenOptions.reusePort = true;
-  
-  server.listen(listenOptions, () => {
-    log(`serving on port ${port}`);
-  }).on('error', (error) => {
-    console.error('Server startup error:', error);
-    process.exit(1);
-  });
+
+  server
+    .listen(listenOptions, () => {
+      log(`serving on port ${port}`);
+    })
+    .on("error", (error) => {
+      console.error("Server startup error:", error);
+      process.exit(1);
+    });
 })();

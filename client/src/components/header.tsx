@@ -77,97 +77,94 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
   }, [user]);
 
   return (
-    <header className="bg-card shadow-business border-b border-border p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">{title}</h2>
-          {subtitle && <p className="text-muted-foreground">{subtitle}</p>}
-        </div>
-        <div className="flex items-center space-x-4">
-          {/* Language Selector */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex items-center space-x-2"
-              >
-                <Globe className="h-4 w-4" />
-                <span>EN</span>
-                <ChevronDown className="h-3 w-3" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem>English</DropdownMenuItem>
-              <DropdownMenuItem>Español</DropdownMenuItem>
-              <DropdownMenuItem>Français</DropdownMenuItem>
-              <DropdownMenuItem>Deutsch</DropdownMenuItem>
-              <DropdownMenuItem>中文</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+    <header className="bg-card shadow-business p-5 sticky top-0 backdrop-blur-md flex items-center justify-between z-50">
+      <div className="flex flex-col gap-0.5">
+        <h2 className="text-2xl font-bold">{title}</h2>
+        {subtitle && <p className="text-muted-foreground">{subtitle}</p>}
+      </div>
+      <div className="flex items-center space-x-4">
+        {/* Action Button */}
+        {action}
 
-          {/* Notifications */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="relative"
-            onClick={() => (window.location.href = "/notifications")}
-          >
-            <Bell className="h-4 w-4" />
-            <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
-              3
-            </span>
-          </Button>
+        {/* Language Selector */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex items-center space-x-2"
+            >
+              <Globe className="h-4 w-4" />
+              <span>EN</span>
+              <ChevronDown className="h-3 w-3" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem>English</DropdownMenuItem>
+            <DropdownMenuItem>Español</DropdownMenuItem>
+            <DropdownMenuItem>Français</DropdownMenuItem>
+            <DropdownMenuItem>Deutsch</DropdownMenuItem>
+            <DropdownMenuItem>中文</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
-          {/* Action Button */}
-          {action}
-
-          <Menubar className="items-center border-none">
-            <MenubarMenu>
-              <MenubarTrigger
-                aria-label="User menu"
-                className="px-0 cursor-pointer"
-              >
-                <UserCircle className="h-8 w-8 text-muted-foreground" />
-              </MenubarTrigger>
-              <MenubarContent className="w-[18rem]">
-                <div className="px-4 py-3">
-                  <p className="text-sm font-medium truncate">
-                    {(user as any)?.firstName} {(user as any)?.lastName}
-                  </p>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {(user as any)?.email}
-                  </p>
-                </div>
-                <MenubarSeparator />
-                {userDropdownActions.map((item) => {
-                  const isActive = location === item.href;
-                  return (
-                    <MenubarItem key={item.name}>
-                      <Link href={item.href}>
-                        <div
-                          className={cn(
-                            "w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
-                            isActive
-                              ? "bg-primary text-primary-foreground"
-                              : "hover:bg-accent hover:text-accent-foreground"
-                          )}
-                        >
-                          <item.icon className="h-4 w-4" />
-                          {item.name}
-                        </div>
-                      </Link>
-                    </MenubarItem>
-                  );
-                })}
-                <MenubarSeparator />
-                <MenubarItem>
-                  <SignOutButton />
-                </MenubarItem>
-              </MenubarContent>
-            </MenubarMenu>
-          </Menubar>
-        </div>
+        {/* Notifications */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="relative"
+          onClick={() => (window.location.href = "/notifications")}
+        >
+          <Bell className="h-4 w-4" />
+          <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+            3
+          </span>
+        </Button>
+        <Menubar className="items-center border-none">
+          <MenubarMenu>
+            <MenubarTrigger
+              aria-label="User menu"
+              className="px-0 cursor-pointer"
+            >
+              <UserCircle className="h-8 w-8 text-muted-foreground" />
+            </MenubarTrigger>
+            <MenubarContent className="w-[18rem]">
+              <div className="px-4 py-3">
+                <p className="text-sm font-medium truncate">
+                  {(user as any)?.firstName} {(user as any)?.lastName}
+                </p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {(user as any)?.email}
+                </p>
+              </div>
+              <MenubarSeparator />
+              {userDropdownActions.map((item) => {
+                const isActive = location === item.href;
+                return (
+                  <MenubarItem key={item.name}>
+                    <Link href={item.href}>
+                      <div
+                        className={cn(
+                          "w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                          isActive
+                            ? "bg-primary text-primary-foreground"
+                            : "hover:bg-accent hover:text-accent-foreground"
+                        )}
+                      >
+                        <item.icon className="h-4 w-4" />
+                        {item.name}
+                      </div>
+                    </Link>
+                  </MenubarItem>
+                );
+              })}
+              <MenubarSeparator />
+              <MenubarItem>
+                <SignOutButton />
+              </MenubarItem>
+            </MenubarContent>
+          </MenubarMenu>
+        </Menubar>
       </div>
     </header>
   );

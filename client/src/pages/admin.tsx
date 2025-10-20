@@ -65,14 +65,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Shield,
   Users,
   Settings,
   BarChart3,
   UserCog,
   Ban,
   CheckCircle,
-  Home,
   Palette,
   Upload,
   BookOpen,
@@ -81,12 +79,12 @@ import {
   Building,
   UserPlus,
   AlertCircle,
-  Mail,
   FileEdit,
   Key,
   Eye,
   EyeOff,
   Copy,
+  Plus,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { useLocation, Link, useRoute } from "wouter";
@@ -156,6 +154,11 @@ export default function AdminPanel() {
 
   // Company branding state
   const [companyName, setCompanyName] = useState("");
+
+  // Create Team dialog state
+  const [isCreateTeamOpen, setIsCreateTeamOpen] = useState(false);
+  const [teamName, setTeamName] = useState("");
+  const [teamDescription, setTeamDescription] = useState("");
 
   // Check if user is admin
   if ((user as any)?.role !== "admin") {
@@ -358,6 +361,45 @@ export default function AdminPanel() {
       });
     },
   });
+
+  // Create Team
+  const createTeamMutation = useMutation({
+    mutationFn: async (teamData: { name: string; description: string }) => {
+      return await apiRequest("POST", "/api/teams", teamData);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
+      setIsCreateTeamOpen(false);
+      setTeamName("");
+      setTeamDescription("");
+      toast({
+        title: "Success",
+        description: "Team created successfully",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to create team",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleCreateTeam = () => {
+    if (!teamName.trim()) {
+      toast({
+        title: "Error",
+        description: "Team name is required",
+        variant: "destructive",
+      });
+      return;
+    }
+    createTeamMutation.mutate({
+      name: teamName.trim(),
+      description: teamDescription.trim(),
+    });
+  };
 
   const resetPasswordMutation = useMutation({
     mutationFn: async (userId: string) => {
@@ -679,6 +721,7 @@ export default function AdminPanel() {
               <TabsTrigger value="ai-analytics">AI Analytics</TabsTrigger>
             </TabsList>
 
+            {/* Users Tab */}
             <TabsContent value="users" className="space-y-4">
               <Card>
                 <CardHeader>
@@ -874,13 +917,22 @@ export default function AdminPanel() {
               </Card>
             </TabsContent>
 
+            {/* Teams Tab */}
             <TabsContent value="teams" className="space-y-4">
               <Card>
                 <CardHeader>
-                  <CardTitle>Team Management</CardTitle>
-                  <CardDescription>
-                    View and manage teams across the organization
-                  </CardDescription>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Team Management</CardTitle>
+                      <CardDescription>
+                        View and manage teams across the organization
+                      </CardDescription>
+                    </div>
+                    <Button onClick={() => setIsCreateTeamOpen(true)}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Create Team
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <Table>
@@ -917,6 +969,7 @@ export default function AdminPanel() {
               </Card>
             </TabsContent>
 
+            {/* API Tab */}
             <TabsContent value="api" className="space-y-6">
               <Card>
                 <CardHeader>
@@ -1136,6 +1189,7 @@ export default function AdminPanel() {
               </Card>
             </TabsContent>
 
+            {/* System Settings Tab */}
             <TabsContent value="system-settings" className="space-y-4">
               <Card>
                 <CardHeader>
@@ -1205,6 +1259,7 @@ export default function AdminPanel() {
               </Card>
             </TabsContent>
 
+            {/* Branding Tab */}
             <TabsContent value="branding" className="space-y-4">
               <Card>
                 <CardHeader>
@@ -1295,6 +1350,7 @@ export default function AdminPanel() {
               </Card>
             </TabsContent>
 
+            {/* Help Tab */}
             <TabsContent value="help" className="space-y-4">
               <Card>
                 <CardHeader>
@@ -1379,6 +1435,7 @@ export default function AdminPanel() {
               </Card>
             </TabsContent>
 
+            {/* Policies Tab */}
             <TabsContent value="policies" className="space-y-4">
               <Card>
                 <CardHeader>
@@ -1398,6 +1455,7 @@ export default function AdminPanel() {
               </Card>
             </TabsContent>
 
+            {/* SSO Tab */}
             <TabsContent value="sso" className="space-y-4">
               <Card>
                 <CardHeader>
@@ -1600,6 +1658,7 @@ export default function AdminPanel() {
               </Card>
             </TabsContent>
 
+            {/* Email Tab */}
             <TabsContent value="email" className="space-y-4">
               <Card>
                 <CardHeader>
@@ -2269,6 +2328,52 @@ export default function AdminPanel() {
                 Save Changes
               </Button>
             </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Team Dialog */}
+      <Dialog open={isCreateTeamOpen} onOpenChange={setIsCreateTeamOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Team</DialogTitle>
+            <DialogDescription>
+              Create a new team to collaborate on tasks and projects.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="team-name">Team Name</Label>
+              <Input
+                id="team-name"
+                placeholder="Enter team name..."
+                value={teamName}
+                onChange={(e) => setTeamName(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="team-description">Description</Label>
+              <Textarea
+                id="team-description"
+                placeholder="Describe your team's purpose..."
+                value={teamDescription}
+                onChange={(e) => setTeamDescription(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsCreateTeamOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateTeam}
+              disabled={createTeamMutation.isPending}
+            >
+              {createTeamMutation.isPending ? "Creating..." : "Create Team"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

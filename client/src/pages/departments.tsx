@@ -61,11 +61,11 @@ export default function Departments() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: departments = [], isLoading } = useQuery({
+  const { data: departments = [], isLoading } = useQuery<Department[]>({
     queryKey: ["/api/departments"],
   });
 
-  const { data: users = [] } = useQuery({
+  const { data: users = [] } = useQuery<User[]>({
     queryKey: ["/api/users"],
   });
 
@@ -182,103 +182,15 @@ export default function Departments() {
     <MainWrapper
       title="Department Management"
       subTitle="Organize users into departments"
+      action={
+        departments.length ? (
+          <Button className="gap-2" onClick={() => setIsCreateOpen(true)}>
+            <Plus className="w-4 h-4" />
+            Add Department
+          </Button>
+        ) : null
+      }
     >
-      <div className="flex justify-end items-center mb-8">
-        <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-          <DialogTrigger asChild>
-            <Button className="gap-2">
-              <Plus className="w-4 h-4" />
-              Add Department
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create New Department</DialogTitle>
-              <DialogDescription>
-                Add a new department to organize your team
-              </DialogDescription>
-            </DialogHeader>
-            <Form {...createForm}>
-              <form
-                onSubmit={createForm.handleSubmit(handleCreateSubmit)}
-                className="space-y-4"
-              >
-                <FormField
-                  control={createForm.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Department Name</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g., Engineering" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={createForm.control}
-                  name="description"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Description</FormLabel>
-                      <FormControl>
-                        <Textarea
-                          placeholder="Department description..."
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={createForm.control}
-                  name="managerId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Department Manager</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        value={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a manager" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="none">No Manager</SelectItem>
-                          {users
-                            .filter(
-                              (user: User) =>
-                                user.role === "admin" || user.role === "manager"
-                            )
-                            .map((user: User) => (
-                              <SelectItem key={user.id} value={user.id}>
-                                {user.firstName} {user.lastName} ({user.email})
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <DialogFooter>
-                  <Button type="submit" disabled={createMutation.isPending}>
-                    {createMutation.isPending && (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    )}
-                    Create Department
-                  </Button>
-                </DialogFooter>
-              </form>
-            </Form>
-          </DialogContent>
-        </Dialog>
-      </div>
-
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {departments?.map((department: Department) => {
           const manager = users.find(
@@ -341,7 +253,25 @@ export default function Departments() {
         })}
       </div>
       {!departments?.length && (
-        <p className="w-full text-center">No department found!</p>
+        <Card className="p-12 text-center bg-white rounded-2xl border">
+          <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
+            <Building className="h-8 w-8 text-slate-400" />
+          </div>
+          <h3 className="text-2xl font-semibold text-slate-900 mb-2">
+            No departments yet
+          </h3>
+          <p className="text-slate-500 mb-6 max-w-xl mx-auto">
+            You don't have any departments created yet. Create one to organize
+            users and route tickets.
+          </p>
+          <Button
+            onClick={() => setIsCreateOpen(true)}
+            className="gap-2 bg-blue-600 hover:bg-blue-700"
+          >
+            <Plus className="h-4 w-4" />
+            Create New Department
+          </Button>
+        </Card>
       )}
 
       {/* Edit Dialog */}
@@ -421,6 +351,91 @@ export default function Departments() {
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   )}
                   Update Department
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Department</DialogTitle>
+            <DialogDescription>
+              Add a new department to organize your team
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...createForm}>
+            <form
+              onSubmit={createForm.handleSubmit(handleCreateSubmit)}
+              className="space-y-4"
+            >
+              <FormField
+                control={createForm.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Department Name</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g., Engineering" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={createForm.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Description</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Department description..."
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={createForm.control}
+                name="managerId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Department Manager</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a manager" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="none">No Manager</SelectItem>
+                        {users
+                          .filter(
+                            (user: User) =>
+                              user.role === "admin" || user.role === "manager"
+                          )
+                          .map((user: User) => (
+                            <SelectItem key={user.id} value={user.id}>
+                              {user.firstName} {user.lastName} ({user.email})
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <DialogFooter>
+                <Button type="submit" disabled={createMutation.isPending}>
+                  {createMutation.isPending && (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  )}
+                  Create Department
                 </Button>
               </DialogFooter>
             </form>
