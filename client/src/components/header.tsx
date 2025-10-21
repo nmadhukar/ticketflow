@@ -1,22 +1,26 @@
 import { Button } from "@/components/ui/button";
 import {
-  Bell,
-  Globe,
-  ChevronDown,
-  UserCircle,
-  LogOut,
-  User,
-  MessageSquare,
-  Settings,
-  BookOpen,
-  LogOutIcon,
-} from "lucide-react";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useAuth } from "@/hooks/useAuth";
+import { cn } from "@/lib/utils";
+import {
+  Bell,
+  BookOpen,
+  ChevronDown,
+  Globe,
+  MessageSquare,
+  Settings,
+  TicketIcon,
+  UserCircle,
+} from "lucide-react";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Link, useLocation } from "wouter";
+import SignOutButton from "./signOutButton";
 import {
   Menubar,
   MenubarContent,
@@ -25,11 +29,6 @@ import {
   MenubarSeparator,
   MenubarTrigger,
 } from "./ui/menubar";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
-import React, { useMemo } from "react";
-import { useAuth } from "@/hooks/useAuth";
-import { cn } from "@/lib/utils";
-import { Link, useLocation } from "wouter";
 
 interface HeaderProps {
   title: string;
@@ -37,27 +36,12 @@ interface HeaderProps {
   action?: React.ReactNode;
 }
 
-const SignOutButton = React.forwardRef<HTMLButtonElement>((props, ref) => {
-  const { logout, isLoggingOut } = useAuth();
-
-  return (
-    <Button
-      ref={ref}
-      variant="ghost"
-      className="w-full justify-start"
-      onClick={logout}
-      disabled={isLoggingOut}
-      {...props}
-    >
-      <LogOut className="h-4 w-4" />
-      {isLoggingOut ? "Signing Out..." : "Sign Out"}
-    </Button>
-  );
-});
-
 export default function Header({ title, subtitle, action }: HeaderProps) {
   const { user } = useAuth();
   const [location] = useLocation();
+  const { data: companySettings } = useQuery({
+    queryKey: ["/api/company-settings"],
+  });
 
   const userDropdownActions = useMemo(() => {
     return (user as any)?.role === "admin"
@@ -78,9 +62,19 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
 
   return (
     <header className="bg-card shadow-business p-5 sticky top-0 backdrop-blur-md flex items-center justify-between z-50">
-      <div className="flex flex-col gap-0.5">
-        <h2 className="text-2xl font-bold">{title}</h2>
-        {subtitle && <p className="text-muted-foreground">{subtitle}</p>}
+      <div className="flex items-center gap-3 ml-2">
+        {(companySettings as any)?.logoUrl ? (
+          <img
+            src={(companySettings as any).logoUrl}
+            alt={(companySettings as any).companyName || "Company Logo"}
+            className="h-8 w-auto object-contain max-w-[120px]"
+          />
+        ) : (
+          <TicketIcon className="h-10 w-auto text-primary" />
+        )}
+        <span className="text-foreground text-lg">
+          {(companySettings as any)?.companyName || "TicketFlow"}
+        </span>
       </div>
       <div className="flex items-center space-x-4">
         {/* Action Button */}

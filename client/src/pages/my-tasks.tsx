@@ -46,7 +46,7 @@ import MainWrapper from "@/components/main-wrapper";
 
 export default function MyTasks() {
   const { toast } = useToast();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [filters, setFilters] = useState({
@@ -71,10 +71,12 @@ export default function MyTasks() {
     }
   }, [isAuthenticated, isLoading, toast]);
 
-  const { data: tasks, isLoading: tasksLoading } = useQuery({
+  const { data: tasks, isLoading: tasksLoading } = useQuery<any[]>({
     queryKey: ["/api/tasks/my"],
     retry: false,
     enabled: isAuthenticated,
+    initialData: [],
+    refetchOnMount: "always",
   });
 
   if (isLoading || !isAuthenticated) {
@@ -237,342 +239,353 @@ export default function MyTasks() {
     return diffInDays <= 3 && diffInDays >= 0;
   };
 
+  const isUserRole = (user as any)?.role === "user";
+
   return (
-    <MainWrapper
-      title="My Tickets"
-      subTitle="Track your assigned tickets and personal work items"
-      action={
-        !tasksLoading &&
-        !!tasks?.length && (
-          <Button
-            onClick={() => {
-              setEditingTask(null);
-              setIsTaskModalOpen(true);
-            }}
-            className="bg-blue-600 hover:bg-blue-700"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            New Ticket
-          </Button>
-        )
-      }
-    >
-      {/* Enhanced Filters Bar */}
-      <Card className="mb-6 border-0 shadow-sm">
-        <CardContent className="p-4">
-          <div className="flex flex-col lg:flex-row gap-4">
-            {/* Search */}
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
-              <Input
-                placeholder="Search your tickets..."
-                value={filters.search}
-                onChange={(e) =>
-                  setFilters((prev) => ({ ...prev, search: e.target.value }))
-                }
-                className="pl-10 h-10"
-              />
-            </div>
-
-            {/* Filter Controls */}
-            <div className="flex gap-3">
-              <Select
-                value={filters.status}
-                onValueChange={(value) =>
-                  setFilters((prev) => ({ ...prev, status: value }))
-                }
-              >
-                <SelectTrigger className="w-[140px] h-10">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="open">Open</SelectItem>
-                  <SelectItem value="in_progress">In Progress</SelectItem>
-                  <SelectItem value="resolved">Resolved</SelectItem>
-                  <SelectItem value="closed">Closed</SelectItem>
-                  <SelectItem value="on_hold">On Hold</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Select
-                value={filters.category}
-                onValueChange={(value) =>
-                  setFilters((prev) => ({ ...prev, category: value }))
-                }
-              >
-                <SelectTrigger className="w-[140px] h-10">
-                  <SelectValue placeholder="Category" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Categories</SelectItem>
-                  <SelectItem value="bug">Bug</SelectItem>
-                  <SelectItem value="feature">Feature</SelectItem>
-                  <SelectItem value="support">Support</SelectItem>
-                  <SelectItem value="enhancement">Enhancement</SelectItem>
-                  <SelectItem value="incident">Incident</SelectItem>
-                  <SelectItem value="request">Request</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Select
-                value={filters.priority}
-                onValueChange={(value) =>
-                  setFilters((prev) => ({ ...prev, priority: value }))
-                }
-              >
-                <SelectTrigger className="w-[140px] h-10">
-                  <SelectValue placeholder="Priority" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Priorities</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="low">Low</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Active Filters & Stats */}
-          <div className="flex items-center justify-between mt-4 pt-4 border-t">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-slate-600">
-                {filteredTasks?.length || 0} of {tasks?.length || 0} tickets
-              </span>
-              {(filters.search ||
-                filters.status !== "all" ||
-                filters.category !== "all" ||
-                filters.priority !== "all") && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    setFilters({
-                      search: "",
-                      status: "all",
-                      category: "all",
-                      priority: "all",
-                    })
+    <>
+      <MainWrapper
+        title="My Tickets"
+        subTitle="Track your assigned tickets and personal work items"
+        action={
+          !tasksLoading &&
+          !!tasks?.length && (
+            <Button
+              onClick={() => {
+                setEditingTask(null);
+                setIsTaskModalOpen(true);
+              }}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              New Ticket
+            </Button>
+          )
+        }
+      >
+        {/* Enhanced Filters Bar */}
+        <Card className="mb-6 border-0 shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex flex-col lg:flex-row gap-4">
+              {/* Search */}
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                <Input
+                  placeholder="Search your tickets..."
+                  value={filters.search}
+                  onChange={(e) =>
+                    setFilters((prev) => ({ ...prev, search: e.target.value }))
                   }
-                  className="h-7 px-2 text-slate-500 hover:text-slate-700"
-                >
-                  Clear filters
-                </Button>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+                  className="pl-10 h-10"
+                />
+              </div>
 
-      {/* Tasks Table */}
-      <Card className="border-0 shadow-sm">
-        <CardContent className="p-0">
-          {tasksLoading ? (
-            <div className="animate-pulse p-6">
-              <div className="space-y-3">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-12 bg-slate-100 rounded"></div>
-                ))}
+              {/* Filter Controls */}
+              <div className="flex gap-3">
+                <Select
+                  value={filters.status}
+                  onValueChange={(value) =>
+                    setFilters((prev) => ({ ...prev, status: value }))
+                  }
+                >
+                  <SelectTrigger className="w-[140px] h-10">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="open">Open</SelectItem>
+                    <SelectItem value="in_progress">In Progress</SelectItem>
+                    <SelectItem value="resolved">Resolved</SelectItem>
+                    <SelectItem value="closed">Closed</SelectItem>
+                    <SelectItem value="on_hold">On Hold</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={filters.category}
+                  onValueChange={(value) =>
+                    setFilters((prev) => ({ ...prev, category: value }))
+                  }
+                >
+                  <SelectTrigger className="w-[140px] h-10">
+                    <SelectValue placeholder="Category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    <SelectItem value="bug">Bug</SelectItem>
+                    <SelectItem value="feature">Feature</SelectItem>
+                    <SelectItem value="support">Support</SelectItem>
+                    <SelectItem value="enhancement">Enhancement</SelectItem>
+                    <SelectItem value="incident">Incident</SelectItem>
+                    <SelectItem value="request">Request</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={filters.priority}
+                  onValueChange={(value) =>
+                    setFilters((prev) => ({ ...prev, priority: value }))
+                  }
+                >
+                  <SelectTrigger className="w-[140px] h-10">
+                    <SelectValue placeholder="Priority" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Priorities</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="low">Low</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
-          ) : filteredTasks?.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-slate-50 border-b">
-                  <tr>
-                    <th className="text-left p-4 font-medium text-slate-900">
-                      Ticket
-                    </th>
-                    <th className="text-left p-4 font-medium text-slate-900">
-                      Title
-                    </th>
-                    <th className="text-left p-4 font-medium text-slate-900">
-                      Priority
-                    </th>
-                    <th className="text-left p-4 font-medium text-slate-900">
-                      Status
-                    </th>
-                    <th className="text-left p-4 font-medium text-slate-900">
-                      Category
-                    </th>
-                    <th className="text-left p-4 font-medium text-slate-900">
-                      Due Date
-                    </th>
-                    <th className="text-left p-4 font-medium text-slate-900">
-                      Created
-                    </th>
-                    <th className="text-left p-4 font-medium text-slate-900">
-                      Updated
-                    </th>
-                    <th className="text-center p-4 font-medium text-slate-900">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredTasks.map((task: any) => (
-                    <tr
-                      key={task.id}
-                      className="hover:bg-slate-50 transition-colors"
-                    >
-                      <td className="p-4">
-                        <Badge variant="outline" className="font-mono text-xs">
-                          {task.ticketNumber}
-                        </Badge>
-                      </td>
-                      <td className="p-4">
-                        <div>
-                          <p
-                            className="font-medium text-slate-900 line-clamp-1 cursor-pointer hover:text-primary hover:underline"
-                            onClick={() => handleEditTask(task)}
-                          >
-                            {task.title}
-                          </p>
-                          {task.description && (
-                            <p className="text-sm text-slate-600 line-clamp-1 mt-1">
-                              {task.description}
-                            </p>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <Badge
-                          className={`${getPriorityColor(
-                            task.priority
-                          )} border`}
-                        >
-                          <span className="flex items-center gap-1">
-                            {getPriorityIcon(task.priority)}
-                            {task.priority?.toUpperCase()}
-                          </span>
-                        </Badge>
-                      </td>
-                      <td className="p-4">
-                        <Badge
-                          className={`${getStatusColor(task.status)} border`}
-                        >
-                          {task.status?.replace("_", " ").toUpperCase()}
-                        </Badge>
-                      </td>
-                      <td className="p-4">
-                        <Badge
-                          className={`${getCategoryColor(
-                            task.category
-                          )} border`}
-                        >
-                          <span className="flex items-center gap-1">
-                            {getCategoryIcon(task.category)}
-                            {task.category?.toUpperCase()}
-                          </span>
-                        </Badge>
-                      </td>
-                      <td className="p-4">
-                        {task.dueDate ? (
-                          <div
-                            className={`text-sm flex items-center gap-1 ${
-                              isOverdue(task.dueDate)
-                                ? "text-red-600 font-medium"
-                                : isDueSoon(task.dueDate)
-                                ? "text-orange-600 font-medium"
-                                : "text-slate-600"
-                            }`}
-                          >
-                            {isOverdue(task.dueDate) && (
-                              <AlertTriangle className="h-3 w-3" />
-                            )}
-                            {formatDate(task.dueDate)}
-                          </div>
-                        ) : (
-                          <span className="text-sm text-slate-400">
-                            No due date
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        <div className="text-sm text-slate-600">
-                          <div>{task.creatorName || "Unknown"}</div>
-                          <div className="text-xs">
-                            {getTimeAgo(task.createdAt)}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <div className="text-sm text-slate-600">
-                          {getTimeAgo(task.updatedAt)}
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex items-center justify-center gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleEditTask(task)}
-                            className="h-8 w-8 p-0"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleEditTask(task)}
-                            className="h-8 w-8 p-0"
-                          >
-                            <Edit3 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="text-center py-12">
-              <div className="max-w-md mx-auto">
-                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Star className="h-8 w-8 text-slate-400" />
-                </div>
-                <h3 className="text-lg font-medium text-slate-900 mb-2">
-                  No tickets assigned
-                </h3>
-                <p className="text-slate-500 mb-6">
-                  {filters.search ||
+
+            {/* Active Filters & Stats */}
+            <div className="flex items-center justify-between mt-4 pt-4 border-t">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-slate-600">
+                  {filteredTasks?.length || 0} of {tasks?.length || 0} tickets
+                </span>
+                {(filters.search ||
                   filters.status !== "all" ||
                   filters.category !== "all" ||
-                  filters.priority !== "all"
-                    ? "Try adjusting your filters to see more tickets."
-                    : "You don't have any tickets assigned yet. Create one or get assigned to existing tickets."}
-                </p>
-                {!filters.search &&
-                  filters.status === "all" &&
-                  filters.category === "all" &&
-                  filters.priority === "all" && (
-                    <Button
-                      onClick={() => {
-                        setEditingTask(null);
-                        setIsTaskModalOpen(true);
-                      }}
-                      className="bg-blue-600 hover:bg-blue-700"
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Create New Ticket
-                    </Button>
-                  )}
+                  filters.priority !== "all") && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      setFilters({
+                        search: "",
+                        status: "all",
+                        category: "all",
+                        priority: "all",
+                      })
+                    }
+                    className="h-7 px-2 text-slate-500 hover:text-slate-700"
+                  >
+                    Clear filters
+                  </Button>
+                )}
               </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
 
-      <TaskModal
+        {/* Tasks Table */}
+        <Card className="border-0 shadow-sm">
+          <CardContent className="p-0">
+            {tasksLoading ? (
+              <div className="animate-pulse p-6">
+                <div className="space-y-3">
+                  {[...Array(5)].map((_, i) => (
+                    <div key={i} className="h-12 bg-slate-100 rounded"></div>
+                  ))}
+                </div>
+              </div>
+            ) : filteredTasks?.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-slate-50 border-b">
+                    <tr>
+                      <th className="text-left p-4 font-medium text-slate-900">
+                        Ticket
+                      </th>
+                      <th className="text-left p-4 font-medium text-slate-900">
+                        Title
+                      </th>
+                      <th className="text-left p-4 font-medium text-slate-900">
+                        Priority
+                      </th>
+                      <th className="text-left p-4 font-medium text-slate-900">
+                        Status
+                      </th>
+                      <th className="text-left p-4 font-medium text-slate-900">
+                        Category
+                      </th>
+                      <th className="text-left p-4 font-medium text-slate-900">
+                        Due Date
+                      </th>
+                      <th className="text-left p-4 font-medium text-slate-900">
+                        Created
+                      </th>
+                      <th className="text-left p-4 font-medium text-slate-900">
+                        Updated
+                      </th>
+                      <th className="text-center p-4 font-medium text-slate-900">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredTasks.map((task: any) => (
+                      <tr
+                        key={task.id}
+                        className="hover:bg-slate-50 transition-colors"
+                      >
+                        <td className="p-4">
+                          <Badge
+                            variant="outline"
+                            className="font-mono text-xs"
+                          >
+                            {task.ticketNumber}
+                          </Badge>
+                        </td>
+                        <td className="p-4">
+                          <div>
+                            <p
+                              className="font-medium text-slate-900 line-clamp-1 cursor-pointer hover:text-primary hover:underline"
+                              onClick={() => handleEditTask(task)}
+                            >
+                              {task.title}
+                            </p>
+                            {task.description && (
+                              <p className="text-sm text-slate-600 line-clamp-2 mt-1 w-44">
+                                {task.description}
+                              </p>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <Badge
+                            className={`${getPriorityColor(
+                              task.priority
+                            )} border`}
+                          >
+                            <span className="flex items-center gap-1">
+                              {getPriorityIcon(task.priority)}
+                              {task.priority?.toUpperCase()}
+                            </span>
+                          </Badge>
+                        </td>
+                        <td className="p-4">
+                          <Badge
+                            className={`${getStatusColor(task.status)} border`}
+                          >
+                            {task.status?.replace("_", " ").toUpperCase()}
+                          </Badge>
+                        </td>
+                        <td className="p-4">
+                          <Badge
+                            className={`${getCategoryColor(
+                              task.category
+                            )} border`}
+                          >
+                            <span className="flex items-center gap-1">
+                              {getCategoryIcon(task.category)}
+                              {task.category?.toUpperCase()}
+                            </span>
+                          </Badge>
+                        </td>
+                        <td className="p-4">
+                          {task.dueDate ? (
+                            <div
+                              className={`text-sm flex items-center gap-1 ${
+                                isOverdue(task.dueDate)
+                                  ? "text-red-600 font-medium"
+                                  : isDueSoon(task.dueDate)
+                                  ? "text-orange-600 font-medium"
+                                  : "text-slate-600"
+                              }`}
+                            >
+                              {isOverdue(task.dueDate) && (
+                                <AlertTriangle className="h-3 w-3" />
+                              )}
+                              {formatDate(task.dueDate)}
+                            </div>
+                          ) : (
+                            <span className="text-sm text-slate-400">
+                              No due date
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-4">
+                          <div className="text-sm text-slate-600">
+                            <div>{task.creatorName || "Unknown"}</div>
+                            <div className="text-xs">
+                              {getTimeAgo(task.createdAt)}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <div className="text-sm text-slate-600">
+                            {getTimeAgo(task.updatedAt)}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center justify-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEditTask(task)}
+                              className="h-8 w-8 p-0"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEditTask(task)}
+                              className="h-8 w-8 p-0"
+                            >
+                              <Edit3 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <div className="max-w-md mx-auto">
+                  <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Star className="h-8 w-8 text-slate-400" />
+                  </div>
+                  <h3 className="text-lg font-medium text-slate-900 mb-2">
+                    No tickets assigned
+                  </h3>
+                  <p className="text-slate-500 mb-6">
+                    {filters.search ||
+                    filters.status !== "all" ||
+                    filters.category !== "all" ||
+                    filters.priority !== "all"
+                      ? "Try adjusting your filters to see more tickets."
+                      : `You don't have any tickets assigned yet.${
+                          !isUserRole
+                            ? "Create one or get assigned to existing tickets."
+                            : ""
+                        }`}
+                  </p>
+                  {!isUserRole &&
+                    !filters.search &&
+                    filters.status === "all" &&
+                    filters.category === "all" &&
+                    filters.priority === "all" && (
+                      <Button
+                        onClick={() => {
+                          setEditingTask(null);
+                          setIsTaskModalOpen(true);
+                        }}
+                        className="bg-blue-600 hover:bg-blue-700"
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Create New Ticket
+                      </Button>
+                    )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </MainWrapper>
+      {/* <TaskModal
         isOpen={isTaskModalOpen}
         onClose={() => {
           setIsTaskModalOpen(false);
           setEditingTask(null);
         }}
         task={editingTask}
-      />
-    </MainWrapper>
+      /> */}
+    </>
   );
 }

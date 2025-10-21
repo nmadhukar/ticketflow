@@ -73,11 +73,21 @@ import {
   type InsertLearningQueue,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, or, like, count, sql, isNotNull } from "drizzle-orm";
+import {
+  eq,
+  desc,
+  and,
+  or,
+  like,
+  count,
+  sql,
+  isNotNull,
+  inArray,
+} from "drizzle-orm";
 
 /**
  * Database Storage Layer for TicketFlow
- * 
+ *
  * This module provides a comprehensive data access layer using Drizzle ORM.
  * Key features:
  * - Type-safe database operations with TypeScript
@@ -87,78 +97,82 @@ import { eq, desc, and, or, like, count, sql, isNotNull } from "drizzle-orm";
  * - AI integration data management (auto-responses, knowledge articles)
  * - Admin features (company settings, API keys, email templates)
  * - Security features (audit trails, access control)
- * 
+ *
  * This interface defines all database operations for the application.
  * Implementations should handle database transactions, error handling,
  * and maintain data integrity across all operations.
- * 
+ *
  * @interface IStorage
  */
 export interface IStorage {
   // User operations (mandatory for Replit Auth)
-  
+
   /**
    * Retrieves a user by their unique identifier
    * @param id - User ID (from authentication provider)
    * @returns User object or undefined if not found
    */
   getUser(id: string): Promise<User | undefined>;
-  
+
   /**
    * Creates or updates a user record
    * @param user - User data to insert or update
    * @returns Updated user object
    */
   upsertUser(user: UpsertUser): Promise<User>;
-  
+
   /**
    * Retrieves all users in the system
    * @returns Array of all users
    */
   getAllUsers(): Promise<User[]>;
-  
+
   /**
    * Creates a new user
    * @param user - User data to insert
    * @returns Created user object
    */
   createUser(user: InsertUser): Promise<User>;
-  
+
   /**
    * Retrieves a user by email
    * @param email - User email address
    * @returns User object or undefined if not found
    */
   getUserByEmail(email: string): Promise<User | undefined>;
-  
+
   /**
    * Sets password reset token for a user
    * @param userId - User ID
    * @param token - Reset token
    * @param expires - Token expiration date
    */
-  setPasswordResetToken(userId: string, token: string, expires: Date): Promise<void>;
-  
+  setPasswordResetToken(
+    userId: string,
+    token: string,
+    expires: Date
+  ): Promise<void>;
+
   /**
    * Retrieves a user by password reset token
    * @param token - Reset token
    * @returns User object or undefined if not found or token expired
    */
   getUserByResetToken(token: string): Promise<User | undefined>;
-  
+
   /**
    * Updates user password
    * @param userId - User ID
    * @param hashedPassword - New hashed password
    */
   updateUserPassword(userId: string, hashedPassword: string): Promise<void>;
-  
+
   /**
    * Clears password reset token for a user
    * @param userId - User ID
    */
   clearPasswordResetToken(userId: string): Promise<void>;
-  
+
   // Task operations
   createTask(task: InsertTask): Promise<Task>;
   getTask(id: number): Promise<Task | undefined>;
@@ -171,9 +185,13 @@ export interface IStorage {
     limit?: number;
     offset?: number;
   }): Promise<Task[]>;
-  updateTask(id: number, updates: Partial<InsertTask>, userId: string): Promise<Task>;
+  updateTask(
+    id: number,
+    updates: Partial<InsertTask>,
+    userId: string
+  ): Promise<Task>;
   deleteTask(id: number): Promise<void>;
-  
+
   // Team operations
   createTeam(team: InsertTeam): Promise<Team>;
   getTeam(id: number): Promise<Team | undefined>;
@@ -182,11 +200,13 @@ export interface IStorage {
   addTeamMember(teamMember: InsertTeamMember): Promise<TeamMember>;
   removeTeamMember(teamId: number, userId: string): Promise<void>;
   getTeamMembers(teamId: number): Promise<(TeamMember & { user: User })[]>;
-  
+
   // Comment operations
   addTaskComment(comment: InsertTaskComment): Promise<TaskComment>;
-  getTaskComments(taskId: number): Promise<(TaskComment & { userName?: string })[]>;
-  
+  getTaskComments(
+    taskId: number
+  ): Promise<(TaskComment & { userName?: string })[]>;
+
   // Statistics
   getTaskStats(userId?: string): Promise<{
     total: number;
@@ -196,10 +216,10 @@ export interface IStorage {
     closed: number;
     highPriority: number;
   }>;
-  
+
   // Activity
   getRecentActivity(limit?: number): Promise<TaskHistory[]>;
-  
+
   // Admin operations
   getAdminStats(): Promise<{
     totalUsers: number;
@@ -209,109 +229,167 @@ export interface IStorage {
     urgentTickets: number;
     avgResolutionTime: number | null;
   }>;
-  updateUserProfile(userId: string, updates: {
-    firstName?: string;
-    lastName?: string;
-    email?: string;
-    role?: string;
-    department?: string;
-    phone?: string;
-    isActive?: boolean;
-  }): Promise<User>;
+  updateUserProfile(
+    userId: string,
+    updates: {
+      firstName?: string;
+      lastName?: string;
+      email?: string;
+      role?: string;
+      department?: string;
+      phone?: string;
+      isActive?: boolean;
+    }
+  ): Promise<User>;
   toggleUserStatus(userId: string): Promise<User>;
   approveUser(userId: string): Promise<User>;
-  assignUserToTeam(userId: string, teamId: number, role?: string): Promise<TeamMember>;
+  assignUserToTeam(
+    userId: string,
+    teamId: number,
+    role?: string
+  ): Promise<TeamMember>;
   removeUserFromTeam(userId: string, teamId: number): Promise<void>;
-  updateTeamMemberRole(userId: string, teamId: number, role: string): Promise<TeamMember>;
+  updateTeamMemberRole(
+    userId: string,
+    teamId: number,
+    role: string
+  ): Promise<TeamMember>;
   getDepartments(): Promise<string[]>;
   resetUserPassword(userId: string): Promise<{ tempPassword: string }>;
-  
+
   // Attachment operations
   addTaskAttachment(attachment: InsertTaskAttachment): Promise<TaskAttachment>;
   getTaskAttachments(taskId: number): Promise<TaskAttachment[]>;
   deleteTaskAttachment(id: number): Promise<void>;
-  
+
   // Company settings operations
   getCompanySettings(): Promise<CompanySettings | undefined>;
-  updateCompanySettings(settings: Partial<InsertCompanySettings>, userId: string): Promise<CompanySettings>;
-  
+  updateCompanySettings(
+    settings: Partial<InsertCompanySettings>,
+    userId: string
+  ): Promise<CompanySettings>;
+
   // API key operations
-  createApiKey(apiKey: InsertApiKey): Promise<{ apiKey: ApiKey; plainKey: string }>;
+  createApiKey(
+    apiKey: InsertApiKey
+  ): Promise<{ apiKey: ApiKey; plainKey: string }>;
   getApiKeys(userId: string): Promise<ApiKey[]>;
   getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined>;
   updateApiKeyLastUsed(id: number): Promise<void>;
   revokeApiKey(id: number): Promise<void>;
-  
+
   // SMTP settings operations
   getSmtpSettings(): Promise<SmtpSettings | undefined>;
-  updateSmtpSettings(settings: InsertSmtpSettings, userId: string): Promise<SmtpSettings>;
-  
+  updateSmtpSettings(
+    settings: InsertSmtpSettings,
+    userId: string
+  ): Promise<SmtpSettings>;
+
   // Email template operations
   getEmailTemplates(): Promise<EmailTemplate[]>;
   getEmailTemplate(name: string): Promise<EmailTemplate | undefined>;
-  updateEmailTemplate(name: string, template: Partial<InsertEmailTemplate>, userId: string): Promise<EmailTemplate>;
-  
+  updateEmailTemplate(
+    name: string,
+    template: Partial<InsertEmailTemplate>,
+    userId: string
+  ): Promise<EmailTemplate>;
+
   // Help Document operations
   createHelpDocument(doc: InsertHelpDocument): Promise<HelpDocument>;
   getHelpDocuments(): Promise<HelpDocument[]>;
   getHelpDocument(id: number): Promise<HelpDocument | undefined>;
-  updateHelpDocument(id: number, doc: Partial<InsertHelpDocument>): Promise<HelpDocument>;
+  updateHelpDocument(
+    id: number,
+    doc: Partial<InsertHelpDocument>
+  ): Promise<HelpDocument>;
   deleteHelpDocument(id: number): Promise<void>;
   incrementViewCount(id: number): Promise<void>;
   searchHelpDocuments(query: string): Promise<HelpDocument[]>;
-  
+
   // AI Chat operations
   createChatMessage(message: InsertAiChatMessage): Promise<AiChatMessage>;
   getChatMessages(userId: string, sessionId: string): Promise<AiChatMessage[]>;
-  getChatSessions(userId: string): Promise<{ sessionId: string; lastMessage: string; createdAt: Date }[]>;
-  
+  getChatSessions(
+    userId: string
+  ): Promise<{ sessionId: string; lastMessage: string; createdAt: Date }[]>;
+
   // User Guide operations
   createUserGuide(guide: InsertUserGuide): Promise<UserGuide>;
-  updateUserGuide(id: number, guide: Partial<InsertUserGuide>): Promise<UserGuide>;
+  updateUserGuide(
+    id: number,
+    guide: Partial<InsertUserGuide>
+  ): Promise<UserGuide>;
   deleteUserGuide(id: number): Promise<void>;
-  getUserGuides(filters?: { category?: string; type?: string; isPublished?: boolean }): Promise<UserGuide[]>;
+  getUserGuides(filters?: {
+    category?: string;
+    type?: string;
+    isPublished?: boolean;
+  }): Promise<UserGuide[]>;
   getUserGuideById(id: number): Promise<UserGuide | undefined>;
   incrementGuideViewCount(id: number): Promise<void>;
-  
+
   // User Guide Category operations
-  createUserGuideCategory(category: InsertUserGuideCategory): Promise<UserGuideCategory>;
-  updateUserGuideCategory(id: number, category: Partial<InsertUserGuideCategory>): Promise<UserGuideCategory>;
+  createUserGuideCategory(
+    category: InsertUserGuideCategory
+  ): Promise<UserGuideCategory>;
+  updateUserGuideCategory(
+    id: number,
+    category: Partial<InsertUserGuideCategory>
+  ): Promise<UserGuideCategory>;
   deleteUserGuideCategory(id: number): Promise<void>;
   getUserGuideCategories(): Promise<UserGuideCategory[]>;
-  
+
   // Department operations
   createDepartment(department: InsertDepartment): Promise<Department>;
-  updateDepartment(id: number, department: Partial<InsertDepartment>): Promise<Department>;
+  updateDepartment(
+    id: number,
+    department: Partial<InsertDepartment>
+  ): Promise<Department>;
   deleteDepartment(id: number): Promise<void>;
   getAllDepartments(): Promise<Department[]>;
   getDepartmentById(id: number): Promise<Department | undefined>;
-  
+
   // User Invitation operations
-  createUserInvitation(invitation: InsertUserInvitation): Promise<UserInvitation>;
+  createUserInvitation(
+    invitation: InsertUserInvitation
+  ): Promise<UserInvitation>;
   getUserInvitations(filters?: { status?: string }): Promise<UserInvitation[]>;
   getUserInvitationByToken(token: string): Promise<UserInvitation | undefined>;
   markInvitationAccepted(id: number): Promise<UserInvitation>;
   deleteExpiredInvitations(): Promise<void>;
-  
+
   // Teams Integration operations
-  getTeamsIntegrationSettings(userId: string): Promise<TeamsIntegrationSettings | undefined>;
-  upsertTeamsIntegrationSettings(settings: InsertTeamsIntegrationSettings): Promise<TeamsIntegrationSettings>;
+  getTeamsIntegrationSettings(
+    userId: string
+  ): Promise<TeamsIntegrationSettings | undefined>;
+  upsertTeamsIntegrationSettings(
+    settings: InsertTeamsIntegrationSettings
+  ): Promise<TeamsIntegrationSettings>;
   deleteTeamsIntegrationSettings(userId: string): Promise<void>;
-  
+
   // SSO Configuration operations
   getSsoConfiguration(): Promise<SsoConfiguration | undefined>;
-  upsertSsoConfiguration(config: InsertSsoConfiguration): Promise<SsoConfiguration>;
-  
+  upsertSsoConfiguration(
+    config: InsertSsoConfiguration
+  ): Promise<SsoConfiguration>;
+
   // Bedrock usage tracking
   trackBedrockUsage(usage: InsertBedrockUsage): Promise<BedrockUsage>;
-  getBedrockUsageByUser(userId: string, startDate?: Date, endDate?: Date): Promise<BedrockUsage[]>;
-  getBedrockUsageSummary(startDate?: Date, endDate?: Date): Promise<{
+  getBedrockUsageByUser(
+    userId: string,
+    startDate?: Date,
+    endDate?: Date
+  ): Promise<BedrockUsage[]>;
+  getBedrockUsageSummary(
+    startDate?: Date,
+    endDate?: Date
+  ): Promise<{
     totalCost: number;
     totalTokens: number;
     userCount: number;
     requestCount: number;
   }>;
-  
+
   // FAQ cache operations
   getFaqCacheEntry(questionHash: string): Promise<FaqCache | undefined>;
   createFaqCacheEntry(entry: InsertFaqCache): Promise<FaqCache>;
@@ -321,21 +399,38 @@ export interface IStorage {
 
   // Company Policy operations
   createCompanyPolicy(policy: InsertCompanyPolicy): Promise<CompanyPolicy>;
-  updateCompanyPolicy(id: number, policy: Partial<InsertCompanyPolicy>): Promise<CompanyPolicy>;
+  updateCompanyPolicy(
+    id: number,
+    policy: Partial<InsertCompanyPolicy>
+  ): Promise<CompanyPolicy>;
   deleteCompanyPolicy(id: number): Promise<void>;
   getCompanyPolicyById(id: number): Promise<CompanyPolicy | undefined>;
   getAllCompanyPolicies(includeInactive?: boolean): Promise<CompanyPolicy[]>;
   toggleCompanyPolicyStatus(id: number): Promise<CompanyPolicy>;
 
   // Knowledge Base operations
-  createKnowledgeArticle(article: InsertKnowledgeArticle): Promise<KnowledgeArticle>;
-  updateKnowledgeArticle(id: number, article: Partial<InsertKnowledgeArticle>): Promise<KnowledgeArticle>;
+  createKnowledgeArticle(
+    article: InsertKnowledgeArticle
+  ): Promise<KnowledgeArticle>;
+  updateKnowledgeArticle(
+    id: number,
+    article: Partial<InsertKnowledgeArticle>
+  ): Promise<KnowledgeArticle>;
   deleteKnowledgeArticle(id: number): Promise<void>;
   getKnowledgeArticle(id: number): Promise<KnowledgeArticle | undefined>;
-  getAllKnowledgeArticles(filters?: { category?: string; isPublished?: boolean; createdBy?: string }): Promise<KnowledgeArticle[]>;
+  getAllKnowledgeArticles(filters?: {
+    category?: string;
+    isPublished?: boolean;
+    createdBy?: string;
+  }): Promise<KnowledgeArticle[]>;
   getPublishedKnowledgeArticles(category?: string): Promise<KnowledgeArticle[]>;
-  searchKnowledgeBase(query: string, category?: string): Promise<KnowledgeArticle[]>;
-  findSimilarKnowledgeArticle(title: string): Promise<KnowledgeArticle | undefined>;
+  searchKnowledgeBase(
+    query: string,
+    category?: string
+  ): Promise<KnowledgeArticle[]>;
+  findSimilarKnowledgeArticle(
+    title: string
+  ): Promise<KnowledgeArticle | undefined>;
   toggleKnowledgeArticleStatus(id: number): Promise<KnowledgeArticle>;
   incrementKnowledgeArticleUsage(id: number): Promise<void>;
   updateArticleEffectiveness(id: number, rating: number): Promise<void>;
@@ -343,7 +438,10 @@ export interface IStorage {
   // Learning Queue operations
   addToLearningQueue(ticketId: number): Promise<LearningQueue>;
   getLearningQueueItems(status?: string): Promise<LearningQueue[]>;
-  updateLearningQueueItem(id: number, updates: Partial<InsertLearningQueue>): Promise<LearningQueue>;
+  updateLearningQueueItem(
+    id: number,
+    updates: Partial<InsertLearningQueue>
+  ): Promise<LearningQueue>;
 
   // AI Analysis and Learning Methods (legacy compatibility)
   saveTicketAnalysis(userId: string, analysis: any): Promise<void>;
@@ -390,7 +488,11 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async setPasswordResetToken(userId: string, token: string, expires: Date): Promise<void> {
+  async setPasswordResetToken(
+    userId: string,
+    token: string,
+    expires: Date
+  ): Promise<void> {
     await db
       .update(users)
       .set({
@@ -414,7 +516,10 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async updateUserPassword(userId: string, hashedPassword: string): Promise<void> {
+  async updateUserPassword(
+    userId: string,
+    hashedPassword: string
+  ): Promise<void> {
     await db
       .update(users)
       .set({
@@ -440,10 +545,10 @@ export class DatabaseStorage implements IStorage {
     // Get company settings for the prefix
     const settings = await this.getCompanySettings();
     const prefix = settings?.ticketPrefix || "TKT";
-    
+
     // Get the current year
     const year = new Date().getFullYear();
-    
+
     // Find the highest ticket number for this year
     const pattern = `${prefix}-${year}-%`;
     const [highestTicket] = await db
@@ -452,25 +557,25 @@ export class DatabaseStorage implements IStorage {
       .where(sql`${tasks.ticketNumber} LIKE ${pattern}`)
       .orderBy(desc(tasks.ticketNumber))
       .limit(1);
-    
+
     let nextNumber = 1;
     if (highestTicket) {
       // Extract the number part from the ticket number
-      const parts = highestTicket.ticketNumber.split('-');
+      const parts = highestTicket.ticketNumber.split("-");
       if (parts.length === 3) {
         nextNumber = parseInt(parts[2]) + 1;
       }
     }
-    
+
     // Format the ticket number with zero padding
-    return `${prefix}-${year}-${nextNumber.toString().padStart(4, '0')}`;
+    return `${prefix}-${year}-${nextNumber.toString().padStart(4, "0")}`;
   }
 
   // Task operations
   async createTask(task: InsertTask): Promise<Task> {
     // Generate ticket number
     const ticketNumber = await this.getNextTicketNumber();
-    
+
     // Convert string date to Date object if needed
     const taskData = {
       ...task,
@@ -478,7 +583,7 @@ export class DatabaseStorage implements IStorage {
       dueDate: task.dueDate ? new Date(task.dueDate) : null,
     };
     const [createdTask] = await db.insert(tasks).values(taskData).returning();
-    
+
     // Add history entry
     await db.insert(taskHistory).values({
       taskId: createdTask.id,
@@ -486,7 +591,7 @@ export class DatabaseStorage implements IStorage {
       action: "created",
       newValue: createdTask.title,
     });
-    
+
     return createdTask;
   }
 
@@ -503,6 +608,7 @@ export class DatabaseStorage implements IStorage {
         severity: tasks.severity,
         assigneeId: tasks.assigneeId,
         assigneeType: tasks.assigneeType,
+        assigneeTeamId: tasks.assigneeTeamId,
         createdBy: tasks.createdBy,
         notes: tasks.notes,
         dueDate: tasks.dueDate,
@@ -518,6 +624,15 @@ export class DatabaseStorage implements IStorage {
           WHEN ${tasks.assigneeType} = 'team' THEN ${teams.name}
           ELSE COALESCE(assignee.first_name || ' ' || assignee.last_name, assignee.email)
         END`,
+        // Fields used by frontend detail/list components
+        createdByName: sql<string>`COALESCE(creator.first_name || ' ' || creator.last_name, creator.email, 'Unknown')`,
+        assignedToName: sql<string>`CASE 
+          WHEN ${tasks.assigneeType} = 'team' THEN NULL
+          ELSE COALESCE(assignee.first_name || ' ' || assignee.last_name, assignee.email)
+        END`,
+        teamName: sql<
+          string | null
+        >`CASE WHEN ${tasks.assigneeType} = 'team' THEN ${teams.name} ELSE NULL END`,
         lastUpdatedBy: sql<string>`(
           SELECT COALESCE(u.first_name || ' ' || u.last_name, u.email)
           FROM ${taskHistory} th
@@ -529,39 +644,48 @@ export class DatabaseStorage implements IStorage {
       })
       .from(tasks)
       .leftJoin(sql`${users} as creator`, sql`creator.id = ${tasks.createdBy}`)
-      .leftJoin(sql`${users} as assignee`, sql`assignee.id = ${tasks.assigneeId} AND ${tasks.assigneeType} = 'user'`)
-      .leftJoin(teams, sql`${teams.id}::varchar = ${tasks.assigneeId} AND ${tasks.assigneeType} = 'team'`)
+      .leftJoin(
+        sql`${users} as assignee`,
+        sql`assignee.id = ${tasks.assigneeId} AND ${tasks.assigneeType} = 'user'`
+      )
+      .leftJoin(teams, eq(teams.id, tasks.assigneeTeamId))
       .where(eq(tasks.id, id));
     return task;
   }
 
-  async getTasks(filters: {
-    status?: string;
-    category?: string;
-    assigneeId?: string;
-    createdBy?: string;
-    search?: string;
-    limit?: number;
-    offset?: number;
-  } = {}): Promise<any[]> {
+  async getTasks(
+    filters: {
+      status?: string;
+      category?: string;
+      assigneeId?: string;
+      createdBy?: string;
+      assigneeTeamIds?: number[]; // visibility scope for team queues
+      search?: string;
+      limit?: number;
+      offset?: number;
+    } = {}
+  ): Promise<any[]> {
     const conditions = [];
-    
+
     if (filters.status) {
       conditions.push(eq(tasks.status, filters.status));
     }
-    
+
     if (filters.category) {
       conditions.push(eq(tasks.category, filters.category));
     }
-    
+
     if (filters.assigneeId) {
       conditions.push(eq(tasks.assigneeId, filters.assigneeId));
     }
-    
+    if (filters?.assigneeTeamIds?.length) {
+      conditions.push(inArray(tasks.assigneeTeamId, filters.assigneeTeamIds));
+    }
+
     if (filters.createdBy) {
       conditions.push(eq(tasks.createdBy, filters.createdBy));
     }
-    
+
     if (filters.search) {
       conditions.push(
         or(
@@ -570,59 +694,68 @@ export class DatabaseStorage implements IStorage {
         )
       );
     }
-    
+
     // First get the tasks
     let taskQuery = db.select().from(tasks);
-    
+
     if (conditions.length > 0) {
       taskQuery = taskQuery.where(and(...conditions));
     }
-    
+
     taskQuery = taskQuery.orderBy(desc(tasks.createdAt));
-    
+
     if (filters.limit) {
       taskQuery = taskQuery.limit(filters.limit);
     }
-    
+
     if (filters.offset) {
       taskQuery = taskQuery.offset(filters.offset);
     }
-    
+
     const taskResults = await taskQuery;
-    
+
     // Now enhance with creator and assignee names
     const enhancedTasks = [];
     for (const task of taskResults) {
-      let creatorName = 'Unknown';
-      let assigneeName = '';
-      
+      let creatorName = "Unknown";
+      let assigneeName = "";
+
       // Get creator name
       if (task.createdBy) {
-        const [creator] = await db.select().from(users).where(eq(users.id, task.createdBy));
+        const [creator] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, task.createdBy));
         if (creator) {
-          creatorName = creator.firstName && creator.lastName 
-            ? `${creator.firstName} ${creator.lastName}` 
-            : creator.email || 'Unknown';
+          creatorName =
+            creator.firstName && creator.lastName
+              ? `${creator.firstName} ${creator.lastName}`
+              : creator.email || "Unknown";
         }
       }
-      
-      // Get assignee name
-      if (task.assigneeId) {
-        if (task.assigneeType === 'team') {
-          const [team] = await db.select().from(teams).where(eq(teams.id, parseInt(task.assigneeId)));
-          if (team) {
-            assigneeName = team.name;
-          }
-        } else {
-          const [assignee] = await db.select().from(users).where(eq(users.id, task.assigneeId));
-          if (assignee) {
-            assigneeName = assignee.firstName && assignee.lastName 
-              ? `${assignee.firstName} ${assignee.lastName}` 
-              : assignee.email || '';
-          }
+
+      // Get assignee name (team via assigneeTeamId, user via assigneeId)
+      if (task.assigneeType === "team" && (task as any).assigneeTeamId) {
+        const [team] = await db
+          .select()
+          .from(teams)
+          .where(eq(teams.id, (task as any).assigneeTeamId));
+        if (team) {
+          assigneeName = team.name;
+        }
+      } else if (task.assigneeId) {
+        const [assignee] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, task.assigneeId));
+        if (assignee) {
+          assigneeName =
+            assignee.firstName && assignee.lastName
+              ? `${assignee.firstName} ${assignee.lastName}`
+              : assignee.email || "";
         }
       }
-      
+
       // Get last updated by info
       let lastUpdatedBy = null;
       const [lastUpdate] = await db
@@ -634,41 +767,45 @@ export class DatabaseStorage implements IStorage {
         .where(eq(taskHistory.taskId, task.id))
         .orderBy(desc(taskHistory.createdAt))
         .limit(1);
-      
+
       if (lastUpdate) {
         lastUpdatedBy = lastUpdate.userName;
       }
-      
+
       enhancedTasks.push({
         ...task,
         creatorName,
         assigneeName,
-        lastUpdatedBy
+        lastUpdatedBy,
       });
     }
-    
+
     return enhancedTasks;
   }
 
-  async updateTask(id: number, updates: Partial<InsertTask>, userId: string): Promise<Task> {
+  async updateTask(
+    id: number,
+    updates: Partial<InsertTask>,
+    userId: string
+  ): Promise<Task> {
     const currentTask = await this.getTask(id);
     if (!currentTask) {
       throw new Error("Task not found");
     }
-    
+
     // Convert date if needed
     const updateData = {
       ...updates,
       dueDate: updates.dueDate ? new Date(updates.dueDate) : undefined,
       updatedAt: new Date(),
     };
-    
+
     const [updatedTask] = await db
       .update(tasks)
       .set(updateData)
       .where(eq(tasks.id, id))
       .returning();
-    
+
     // Add history entries for changes
     for (const [field, newValue] of Object.entries(updates)) {
       if (newValue !== undefined && newValue !== (currentTask as any)[field]) {
@@ -682,7 +819,7 @@ export class DatabaseStorage implements IStorage {
         });
       }
     }
-    
+
     return updatedTask;
   }
 
@@ -693,7 +830,7 @@ export class DatabaseStorage implements IStorage {
   // Team operations
   async createTeam(team: InsertTeam): Promise<Team> {
     const [createdTeam] = await db.insert(teams).values(team).returning();
-    
+
     // Add creator as admin
     if (team.createdBy) {
       await db.insert(teamMembers).values({
@@ -702,7 +839,7 @@ export class DatabaseStorage implements IStorage {
         role: "admin",
       });
     }
-    
+
     return createdTeam;
   }
 
@@ -723,9 +860,15 @@ export class DatabaseStorage implements IStorage {
       })
       .from(teams)
       .leftJoin(teamMembers, eq(teams.id, teamMembers.teamId))
-      .groupBy(teams.id, teams.name, teams.description, teams.createdAt, teams.createdBy)
+      .groupBy(
+        teams.id,
+        teams.name,
+        teams.description,
+        teams.createdAt,
+        teams.createdBy
+      )
       .orderBy(desc(teams.createdAt));
-    
+
     return teamsWithMembers;
   }
 
@@ -735,22 +878,29 @@ export class DatabaseStorage implements IStorage {
       .from(teamMembers)
       .innerJoin(teams, eq(teamMembers.teamId, teams.id))
       .where(eq(teamMembers.userId, userId));
-    
-    return userTeams.map(row => row.team);
+
+    return userTeams.map((row) => row.team);
   }
 
   async addTeamMember(teamMember: InsertTeamMember): Promise<TeamMember> {
-    const [member] = await db.insert(teamMembers).values(teamMember).returning();
+    const [member] = await db
+      .insert(teamMembers)
+      .values(teamMember)
+      .returning();
     return member;
   }
 
   async removeTeamMember(teamId: number, userId: string): Promise<void> {
-    await db.delete(teamMembers).where(
-      and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId))
-    );
+    await db
+      .delete(teamMembers)
+      .where(
+        and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId))
+      );
   }
 
-  async getTeamMembers(teamId: number): Promise<(TeamMember & { user: User })[]> {
+  async getTeamMembers(
+    teamId: number
+  ): Promise<(TeamMember & { user: User })[]> {
     const members = await db
       .select({
         id: teamMembers.id,
@@ -763,14 +913,17 @@ export class DatabaseStorage implements IStorage {
       .from(teamMembers)
       .innerJoin(users, eq(teamMembers.userId, users.id))
       .where(eq(teamMembers.teamId, teamId));
-    
+
     return members;
   }
 
   // Comment operations
   async addTaskComment(comment: InsertTaskComment): Promise<TaskComment> {
-    const [createdComment] = await db.insert(taskComments).values(comment).returning();
-    
+    const [createdComment] = await db
+      .insert(taskComments)
+      .values(comment)
+      .returning();
+
     // Add history entry
     await db.insert(taskHistory).values({
       taskId: comment.taskId,
@@ -778,11 +931,13 @@ export class DatabaseStorage implements IStorage {
       action: "commented",
       newValue: "Added a comment",
     });
-    
+
     return createdComment;
   }
 
-  async getTaskComments(taskId: number): Promise<(TaskComment & { userName?: string })[]> {
+  async getTaskComments(
+    taskId: number
+  ): Promise<(TaskComment & { userName?: string })[]> {
     const comments = await db
       .select({
         id: taskComments.id,
@@ -798,7 +953,7 @@ export class DatabaseStorage implements IStorage {
       .where(eq(taskComments.taskId, taskId))
       .orderBy(desc(taskComments.createdAt));
 
-    return comments.map(comment => ({
+    return comments.map((comment) => ({
       id: comment.id,
       taskId: comment.taskId,
       userId: comment.userId,
@@ -822,36 +977,34 @@ export class DatabaseStorage implements IStorage {
       .select({ count: count() })
       .from(users)
       .where(eq(users.isActive, true));
-    
+
     const [teamCount] = await db.select({ count: count() }).from(teams);
-    
+
     const [openTicketCount] = await db
       .select({ count: count() })
       .from(tasks)
       .where(eq(tasks.status, "open"));
-    
+
     const [urgentTicketCount] = await db
       .select({ count: count() })
       .from(tasks)
-      .where(and(
-        eq(tasks.status, "open"),
-        eq(tasks.priority, "high")
-      ));
+      .where(and(eq(tasks.status, "open"), eq(tasks.priority, "high")));
 
     // Calculate average resolution time (in hours)
     const resolvedTasks = await db
       .select({
-        resolutionTime: sql<number>`EXTRACT(EPOCH FROM (${tasks.resolvedAt} - ${tasks.createdAt})) / 3600`
+        resolutionTime: sql<number>`EXTRACT(EPOCH FROM (${tasks.resolvedAt} - ${tasks.createdAt})) / 3600`,
       })
       .from(tasks)
-      .where(and(
-        isNotNull(tasks.resolvedAt),
-        sql`${tasks.resolvedAt} IS NOT NULL`
-      ));
+      .where(
+        and(isNotNull(tasks.resolvedAt), sql`${tasks.resolvedAt} IS NOT NULL`)
+      );
 
-    const avgResolutionTime = resolvedTasks.length > 0
-      ? resolvedTasks.reduce((acc, task) => acc + task.resolutionTime, 0) / resolvedTasks.length
-      : null;
+    const avgResolutionTime =
+      resolvedTasks.length > 0
+        ? resolvedTasks.reduce((acc, task) => acc + task.resolutionTime, 0) /
+          resolvedTasks.length
+        : null;
 
     return {
       totalUsers: userCount.count,
@@ -859,39 +1012,48 @@ export class DatabaseStorage implements IStorage {
       totalTeams: teamCount.count,
       openTickets: openTicketCount.count,
       urgentTickets: urgentTicketCount.count,
-      avgResolutionTime: avgResolutionTime ? Math.round(avgResolutionTime) : null,
+      avgResolutionTime: avgResolutionTime
+        ? Math.round(avgResolutionTime)
+        : null,
     };
   }
 
-  async updateUserProfile(userId: string, updates: {
-    firstName?: string;
-    lastName?: string;
-    email?: string;
-    role?: string;
-    department?: string;
-    phone?: string;
-    isActive?: boolean;
-  }): Promise<User> {
+  async updateUserProfile(
+    userId: string,
+    updates: {
+      firstName?: string;
+      lastName?: string;
+      email?: string;
+      role?: string;
+      department?: string;
+      phone?: string;
+      isActive?: boolean;
+    }
+  ): Promise<User> {
     // Filter out undefined values and convert boolean properly
     const cleanUpdates: any = {};
-    
-    if (updates.firstName !== undefined) cleanUpdates.firstName = updates.firstName;
-    if (updates.lastName !== undefined) cleanUpdates.lastName = updates.lastName;
+
+    if (updates.firstName !== undefined)
+      cleanUpdates.firstName = updates.firstName;
+    if (updates.lastName !== undefined)
+      cleanUpdates.lastName = updates.lastName;
     if (updates.email !== undefined) cleanUpdates.email = updates.email;
     if (updates.role !== undefined) cleanUpdates.role = updates.role;
-    if (updates.department !== undefined) cleanUpdates.department = updates.department;
+    if (updates.department !== undefined)
+      cleanUpdates.department = updates.department;
     if (updates.phone !== undefined) cleanUpdates.phone = updates.phone;
-    if (updates.isActive !== undefined) cleanUpdates.isActive = updates.isActive;
-    
+    if (updates.isActive !== undefined)
+      cleanUpdates.isActive = updates.isActive;
+
     // Always update the timestamp
     cleanUpdates.updatedAt = new Date();
-    
+
     const [updatedUser] = await db
       .update(users)
       .set(cleanUpdates)
       .where(eq(users.id, userId))
       .returning();
-    
+
     return updatedUser;
   }
 
@@ -900,7 +1062,7 @@ export class DatabaseStorage implements IStorage {
       .select({ isActive: users.isActive })
       .from(users)
       .where(eq(users.id, userId));
-    
+
     const [updatedUser] = await db
       .update(users)
       .set({
@@ -909,7 +1071,7 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(users.id, userId))
       .returning();
-    
+
     return updatedUser;
   }
 
@@ -922,29 +1084,31 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(users.id, userId))
       .returning();
-    
+
     return updatedUser;
   }
 
-  async assignUserToTeam(userId: string, teamId: number, role: string = "member"): Promise<TeamMember> {
+  async assignUserToTeam(
+    userId: string,
+    teamId: number,
+    role: string = "member"
+  ): Promise<TeamMember> {
     // Check if the user is already a team member
     const existingMember = await db
       .select()
       .from(teamMembers)
-      .where(and(
-        eq(teamMembers.userId, userId),
-        eq(teamMembers.teamId, teamId)
-      ));
-    
+      .where(
+        and(eq(teamMembers.userId, userId), eq(teamMembers.teamId, teamId))
+      );
+
     if (existingMember.length > 0) {
       // Update existing member
       const [updatedMember] = await db
         .update(teamMembers)
         .set({ role })
-        .where(and(
-          eq(teamMembers.userId, userId),
-          eq(teamMembers.teamId, teamId)
-        ))
+        .where(
+          and(eq(teamMembers.userId, userId), eq(teamMembers.teamId, teamId))
+        )
         .returning();
       return updatedMember;
     } else {
@@ -964,26 +1128,28 @@ export class DatabaseStorage implements IStorage {
   async removeUserFromTeam(userId: string, teamId: number): Promise<void> {
     await db
       .delete(teamMembers)
-      .where(and(
-        eq(teamMembers.userId, userId),
-        eq(teamMembers.teamId, teamId)
-      ));
+      .where(
+        and(eq(teamMembers.userId, userId), eq(teamMembers.teamId, teamId))
+      );
   }
 
-  async updateTeamMemberRole(userId: string, teamId: number, role: string): Promise<TeamMember> {
+  async updateTeamMemberRole(
+    userId: string,
+    teamId: number,
+    role: string
+  ): Promise<TeamMember> {
     const [updatedMember] = await db
       .update(teamMembers)
       .set({ role })
-      .where(and(
-        eq(teamMembers.userId, userId),
-        eq(teamMembers.teamId, teamId)
-      ))
+      .where(
+        and(eq(teamMembers.userId, userId), eq(teamMembers.teamId, teamId))
+      )
       .returning();
-    
+
     if (!updatedMember) {
       throw new Error("Team member not found");
     }
-    
+
     return updatedMember;
   }
 
@@ -992,25 +1158,25 @@ export class DatabaseStorage implements IStorage {
       .selectDistinct({ department: users.department })
       .from(users)
       .where(isNotNull(users.department));
-    
+
     const validDepartments = departments
-      .map(d => d.department)
+      .map((d) => d.department)
       .filter((dept): dept is string => dept !== null && dept !== undefined)
       .sort();
-    
+
     // If no departments exist, return some common ones
     if (validDepartments.length === 0) {
       return [
-        "Engineering", 
-        "Product", 
-        "Sales", 
-        "Marketing", 
-        "Support", 
-        "HR", 
-        "Finance"
+        "Engineering",
+        "Product",
+        "Sales",
+        "Marketing",
+        "Support",
+        "HR",
+        "Finance",
       ];
     }
-    
+
     return validDepartments;
   }
 
@@ -1024,16 +1190,16 @@ export class DatabaseStorage implements IStorage {
     highPriority: number;
   }> {
     let baseQuery = db.select({ count: count() }).from(tasks);
-    
+
     if (userId) {
       baseQuery = baseQuery.where(
         or(eq(tasks.assigneeId, userId), eq(tasks.createdBy, userId))
       ) as any;
     }
-    
+
     const [totalResult] = await baseQuery;
     const total = totalResult.count;
-    
+
     let statusQuery = db
       .select({
         status: tasks.status,
@@ -1041,33 +1207,33 @@ export class DatabaseStorage implements IStorage {
       })
       .from(tasks)
       .groupBy(tasks.status);
-    
+
     if (userId) {
       statusQuery = statusQuery.where(
         or(eq(tasks.assigneeId, userId), eq(tasks.createdBy, userId))
       ) as any;
     }
-    
+
     const statuses = await statusQuery;
-    
+
     let highPriorityQuery = db
       .select({ count: count() })
       .from(tasks)
       .where(eq(tasks.priority, "high"));
-    
+
     if (userId) {
       highPriorityQuery = highPriorityQuery.where(
         or(eq(tasks.assigneeId, userId), eq(tasks.createdBy, userId))
       ) as any;
     }
-    
+
     const [highPriorityResult] = await highPriorityQuery;
-    
+
     const statusCounts = statuses.reduce((acc, { status, count }) => {
       acc[status] = count;
       return acc;
     }, {} as Record<string, number>);
-    
+
     return {
       total,
       open: statusCounts.open || 0,
@@ -1098,14 +1264,14 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(users, eq(taskHistory.userId, users.id))
       .orderBy(desc(taskHistory.createdAt))
       .limit(limit);
-    
+
     return history;
   }
 
   async resetUserPassword(userId: string): Promise<{ tempPassword: string }> {
     // Generate a temporary password (8 characters)
     const tempPassword = Math.random().toString(36).slice(-8);
-    
+
     // In a real app, you would hash the password and store it
     // For this demo, we'll just return the temp password
     // Note: In production, you'd want to:
@@ -1113,19 +1279,21 @@ export class DatabaseStorage implements IStorage {
     // 2. Store it in the database
     // 3. Send it via secure email
     // 4. Force password change on next login
-    
+
     return { tempPassword };
   }
-  
+
   // Attachment operations
-  async addTaskAttachment(attachment: InsertTaskAttachment): Promise<TaskAttachment> {
+  async addTaskAttachment(
+    attachment: InsertTaskAttachment
+  ): Promise<TaskAttachment> {
     const [newAttachment] = await db
       .insert(taskAttachments)
       .values(attachment)
       .returning();
     return newAttachment;
   }
-  
+
   async getTaskAttachments(taskId: number): Promise<TaskAttachment[]> {
     return await db
       .select()
@@ -1133,20 +1301,23 @@ export class DatabaseStorage implements IStorage {
       .where(eq(taskAttachments.taskId, taskId))
       .orderBy(desc(taskAttachments.createdAt));
   }
-  
+
   async deleteTaskAttachment(id: number): Promise<void> {
     await db.delete(taskAttachments).where(eq(taskAttachments.id, id));
   }
-  
+
   // Company settings operations
   async getCompanySettings(): Promise<CompanySettings | undefined> {
     const [settings] = await db.select().from(companySettings).limit(1);
     return settings;
   }
-  
-  async updateCompanySettings(settings: Partial<InsertCompanySettings>, userId: string): Promise<CompanySettings> {
+
+  async updateCompanySettings(
+    settings: Partial<InsertCompanySettings>,
+    userId: string
+  ): Promise<CompanySettings> {
     const existingSettings = await this.getCompanySettings();
-    
+
     if (existingSettings) {
       const [updated] = await db
         .update(companySettings)
@@ -1169,16 +1340,20 @@ export class DatabaseStorage implements IStorage {
       return created;
     }
   }
-  
+
   // API key operations
-  async createApiKey(apiKey: InsertApiKey): Promise<{ apiKey: ApiKey; plainKey: string }> {
+  async createApiKey(
+    apiKey: InsertApiKey
+  ): Promise<{ apiKey: ApiKey; plainKey: string }> {
     // Generate a secure API key
-    const plainKey = `tfk_${Math.random().toString(36).substring(2)}${Date.now().toString(36)}`;
+    const plainKey = `tfk_${Math.random()
+      .toString(36)
+      .substring(2)}${Date.now().toString(36)}`;
     const keyPrefix = plainKey.substring(0, 8);
-    
+
     // In production, you'd hash the key before storing
     const keyHash = plainKey; // TODO: Use bcrypt or similar
-    
+
     const [newApiKey] = await db
       .insert(apiKeys)
       .values({
@@ -1187,10 +1362,10 @@ export class DatabaseStorage implements IStorage {
         keyPrefix: keyPrefix,
       })
       .returning();
-      
+
     return { apiKey: newApiKey, plainKey };
   }
-  
+
   async getApiKeys(userId: string): Promise<ApiKey[]> {
     return await db
       .select()
@@ -1198,7 +1373,7 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(apiKeys.userId, userId), eq(apiKeys.isActive, true)))
       .orderBy(desc(apiKeys.createdAt));
   }
-  
+
   async getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined> {
     const [apiKey] = await db
       .select()
@@ -1206,39 +1381,43 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(apiKeys.keyHash, keyHash), eq(apiKeys.isActive, true)));
     return apiKey;
   }
-  
+
   async updateApiKeyLastUsed(id: number): Promise<void> {
     await db
       .update(apiKeys)
       .set({ lastUsedAt: new Date() })
       .where(eq(apiKeys.id, id));
   }
-  
+
   async revokeApiKey(id: number): Promise<void> {
-    await db
-      .update(apiKeys)
-      .set({ isActive: false })
-      .where(eq(apiKeys.id, id));
+    await db.update(apiKeys).set({ isActive: false }).where(eq(apiKeys.id, id));
   }
-  
-  async updateApiKey(id: number, updates: { keyHash?: string; isActive?: boolean }): Promise<void> {
-    await db
-      .update(apiKeys)
-      .set(updates)
-      .where(eq(apiKeys.id, id));
+
+  async updateApiKey(
+    id: number,
+    updates: { keyHash?: string; isActive?: boolean }
+  ): Promise<void> {
+    await db.update(apiKeys).set(updates).where(eq(apiKeys.id, id));
   }
 
   // SMTP settings operations
   async getSmtpSettings(): Promise<SmtpSettings | undefined> {
-    const [settings] = await db.select().from(smtpSettings).where(eq(smtpSettings.isActive, true));
+    const [settings] = await db
+      .select()
+      .from(smtpSettings)
+      .where(eq(smtpSettings.isActive, true));
     return settings;
   }
 
-  async updateSmtpSettings(settings: InsertSmtpSettings, userId: string): Promise<SmtpSettings> {
+  async updateSmtpSettings(
+    settings: InsertSmtpSettings,
+    userId: string
+  ): Promise<SmtpSettings> {
     const existingSettings = await this.getSmtpSettings();
-    
+
     if (existingSettings) {
-      const [updated] = await db.update(smtpSettings)
+      const [updated] = await db
+        .update(smtpSettings)
         .set({
           ...settings,
           updatedBy: userId,
@@ -1248,7 +1427,8 @@ export class DatabaseStorage implements IStorage {
         .returning();
       return updated;
     } else {
-      const [created] = await db.insert(smtpSettings)
+      const [created] = await db
+        .insert(smtpSettings)
         .values({
           ...settings,
           updatedBy: userId,
@@ -1264,15 +1444,23 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getEmailTemplate(name: string): Promise<EmailTemplate | undefined> {
-    const [template] = await db.select().from(emailTemplates).where(eq(emailTemplates.name, name));
+    const [template] = await db
+      .select()
+      .from(emailTemplates)
+      .where(eq(emailTemplates.name, name));
     return template;
   }
 
-  async updateEmailTemplate(name: string, template: Partial<InsertEmailTemplate>, userId: string): Promise<EmailTemplate> {
+  async updateEmailTemplate(
+    name: string,
+    template: Partial<InsertEmailTemplate>,
+    userId: string
+  ): Promise<EmailTemplate> {
     const existingTemplate = await this.getEmailTemplate(name);
-    
+
     if (existingTemplate) {
-      const [updated] = await db.update(emailTemplates)
+      const [updated] = await db
+        .update(emailTemplates)
         .set({
           ...template,
           updatedBy: userId,
@@ -1282,11 +1470,12 @@ export class DatabaseStorage implements IStorage {
         .returning();
       return updated;
     } else {
-      const [created] = await db.insert(emailTemplates)
+      const [created] = await db
+        .insert(emailTemplates)
         .values({
           name,
-          subject: template.subject || 'Default Subject',
-          body: template.body || 'Default Body',
+          subject: template.subject || "Default Subject",
+          body: template.body || "Default Body",
           variables: template.variables || [],
           isActive: template.isActive ?? true,
           updatedBy: userId,
@@ -1303,15 +1492,24 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getHelpDocuments(): Promise<HelpDocument[]> {
-    return await db.select().from(helpDocuments).orderBy(desc(helpDocuments.createdAt));
+    return await db
+      .select()
+      .from(helpDocuments)
+      .orderBy(desc(helpDocuments.createdAt));
   }
 
   async getHelpDocument(id: number): Promise<HelpDocument | undefined> {
-    const [doc] = await db.select().from(helpDocuments).where(eq(helpDocuments.id, id));
+    const [doc] = await db
+      .select()
+      .from(helpDocuments)
+      .where(eq(helpDocuments.id, id));
     return doc;
   }
 
-  async updateHelpDocument(id: number, doc: Partial<InsertHelpDocument>): Promise<HelpDocument> {
+  async updateHelpDocument(
+    id: number,
+    doc: Partial<InsertHelpDocument>
+  ): Promise<HelpDocument> {
     const [updated] = await db
       .update(helpDocuments)
       .set({
@@ -1352,12 +1550,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   // AI Chat operations
-  async createChatMessage(message: InsertAiChatMessage): Promise<AiChatMessage> {
-    const [created] = await db.insert(aiChatMessages).values(message).returning();
+  async createChatMessage(
+    message: InsertAiChatMessage
+  ): Promise<AiChatMessage> {
+    const [created] = await db
+      .insert(aiChatMessages)
+      .values(message)
+      .returning();
     return created;
   }
 
-  async getChatMessages(userId: string, sessionId: string): Promise<AiChatMessage[]> {
+  async getChatMessages(
+    userId: string,
+    sessionId: string
+  ): Promise<AiChatMessage[]> {
     return await db
       .select()
       .from(aiChatMessages)
@@ -1370,7 +1576,9 @@ export class DatabaseStorage implements IStorage {
       .orderBy(aiChatMessages.createdAt);
   }
 
-  async getChatSessions(userId: string): Promise<{ sessionId: string; lastMessage: string; createdAt: Date }[]> {
+  async getChatSessions(
+    userId: string
+  ): Promise<{ sessionId: string; lastMessage: string; createdAt: Date }[]> {
     const sessions = await db
       .selectDistinct({
         sessionId: aiChatMessages.sessionId,
@@ -1382,22 +1590,29 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(aiChatMessages.createdAt));
 
     // Group by session and get the last message
-    const sessionMap = new Map<string, { sessionId: string; lastMessage: string; createdAt: Date }>();
-    
+    const sessionMap = new Map<
+      string,
+      { sessionId: string; lastMessage: string; createdAt: Date }
+    >();
+
     for (const session of sessions) {
       if (session.createdAt) {
         const existing = sessionMap.get(session.sessionId);
         if (!existing || session.createdAt > existing.createdAt) {
           sessionMap.set(session.sessionId, {
             sessionId: session.sessionId,
-            lastMessage: session.content.substring(0, 100) + (session.content.length > 100 ? '...' : ''),
+            lastMessage:
+              session.content.substring(0, 100) +
+              (session.content.length > 100 ? "..." : ""),
             createdAt: session.createdAt,
           });
         }
       }
     }
 
-    return Array.from(sessionMap.values()).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return Array.from(sessionMap.values()).sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+    );
   }
 
   // User Guide operations
@@ -1406,7 +1621,10 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async updateUserGuide(id: number, guide: Partial<InsertUserGuide>): Promise<UserGuide> {
+  async updateUserGuide(
+    id: number,
+    guide: Partial<InsertUserGuide>
+  ): Promise<UserGuide> {
     const [updated] = await db
       .update(userGuides)
       .set({
@@ -1422,9 +1640,13 @@ export class DatabaseStorage implements IStorage {
     await db.delete(userGuides).where(eq(userGuides.id, id));
   }
 
-  async getUserGuides(filters?: { category?: string; type?: string; isPublished?: boolean }): Promise<UserGuide[]> {
+  async getUserGuides(filters?: {
+    category?: string;
+    type?: string;
+    isPublished?: boolean;
+  }): Promise<UserGuide[]> {
     let query = db.select().from(userGuides);
-    
+
     const conditions = [];
     if (filters?.category) {
       conditions.push(eq(userGuides.category, filters.category));
@@ -1435,16 +1657,19 @@ export class DatabaseStorage implements IStorage {
     if (filters?.isPublished !== undefined) {
       conditions.push(eq(userGuides.isPublished, filters.isPublished));
     }
-    
+
     if (conditions.length > 0) {
       query = query.where(and(...conditions)) as any;
     }
-    
+
     return await query.orderBy(desc(userGuides.createdAt));
   }
 
   async getUserGuideById(id: number): Promise<UserGuide | undefined> {
-    const [guide] = await db.select().from(userGuides).where(eq(userGuides.id, id));
+    const [guide] = await db
+      .select()
+      .from(userGuides)
+      .where(eq(userGuides.id, id));
     return guide;
   }
 
@@ -1458,12 +1683,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   // User Guide Category operations
-  async createUserGuideCategory(category: InsertUserGuideCategory): Promise<UserGuideCategory> {
-    const [created] = await db.insert(userGuideCategories).values(category).returning();
+  async createUserGuideCategory(
+    category: InsertUserGuideCategory
+  ): Promise<UserGuideCategory> {
+    const [created] = await db
+      .insert(userGuideCategories)
+      .values(category)
+      .returning();
     return created;
   }
 
-  async updateUserGuideCategory(id: number, category: Partial<InsertUserGuideCategory>): Promise<UserGuideCategory> {
+  async updateUserGuideCategory(
+    id: number,
+    category: Partial<InsertUserGuideCategory>
+  ): Promise<UserGuideCategory> {
     const [updated] = await db
       .update(userGuideCategories)
       .set(category)
@@ -1485,16 +1718,25 @@ export class DatabaseStorage implements IStorage {
 
   // Department operations
   async createDepartment(department: InsertDepartment): Promise<Department> {
-    const [created] = await db.insert(departments).values(department).returning();
+    const [created] = await db
+      .insert(departments)
+      .values(department)
+      .returning();
     return created;
   }
-  
+
   async getDepartmentById(id: number): Promise<Department | undefined> {
-    const [dept] = await db.select().from(departments).where(eq(departments.id, id));
+    const [dept] = await db
+      .select()
+      .from(departments)
+      .where(eq(departments.id, id));
     return dept;
   }
 
-  async updateDepartment(id: number, department: Partial<InsertDepartment>): Promise<Department> {
+  async updateDepartment(
+    id: number,
+    department: Partial<InsertDepartment>
+  ): Promise<Department> {
     const [updated] = await db
       .update(departments)
       .set({
@@ -1511,17 +1753,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllDepartments(): Promise<Department[]> {
-    return await db.select().from(departments).where(eq(departments.isActive, true)).orderBy(departments.name);
+    return await db
+      .select()
+      .from(departments)
+      .where(eq(departments.isActive, true))
+      .orderBy(departments.name);
   }
 
   async getDepartmentById(id: number): Promise<Department | undefined> {
-    const [dept] = await db.select().from(departments).where(eq(departments.id, id));
+    const [dept] = await db
+      .select()
+      .from(departments)
+      .where(eq(departments.id, id));
     return dept;
   }
 
   // User Invitation operations
-  async createUserInvitation(invitation: InsertUserInvitation): Promise<UserInvitation> {
-    const token = Math.random().toString(36).substring(2) + Date.now().toString(36);
+  async createUserInvitation(
+    invitation: InsertUserInvitation
+  ): Promise<UserInvitation> {
+    const token =
+      Math.random().toString(36).substring(2) + Date.now().toString(36);
     const [created] = await db
       .insert(userInvitations)
       .values({
@@ -1532,17 +1784,21 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async getUserInvitations(filters?: { status?: string }): Promise<UserInvitation[]> {
+  async getUserInvitations(filters?: {
+    status?: string;
+  }): Promise<UserInvitation[]> {
     let query = db.select().from(userInvitations);
-    
+
     if (filters?.status) {
       query = query.where(eq(userInvitations.status, filters.status)) as any;
     }
-    
+
     return await query.orderBy(desc(userInvitations.createdAt));
   }
 
-  async getUserInvitationByToken(token: string): Promise<UserInvitation | undefined> {
+  async getUserInvitationByToken(
+    token: string
+  ): Promise<UserInvitation | undefined> {
     const [invitation] = await db
       .select()
       .from(userInvitations)
@@ -1554,7 +1810,7 @@ export class DatabaseStorage implements IStorage {
     const [updated] = await db
       .update(userInvitations)
       .set({
-        status: 'accepted',
+        status: "accepted",
         acceptedAt: new Date(),
       })
       .where(eq(userInvitations.id, id))
@@ -1567,12 +1823,12 @@ export class DatabaseStorage implements IStorage {
       .delete(userInvitations)
       .where(
         and(
-          eq(userInvitations.status, 'pending'),
+          eq(userInvitations.status, "pending"),
           sql`${userInvitations.expiresAt} < NOW()`
         )
       );
   }
-  
+
   async getUserInvitationById(id: number): Promise<UserInvitation | undefined> {
     const [invitation] = await db
       .select()
@@ -1580,16 +1836,18 @@ export class DatabaseStorage implements IStorage {
       .where(eq(userInvitations.id, id));
     return invitation;
   }
-  
+
   async cancelUserInvitation(id: number): Promise<void> {
     await db
       .update(userInvitations)
-      .set({ status: 'cancelled' })
+      .set({ status: "cancelled" })
       .where(eq(userInvitations.id, id));
   }
-  
+
   // Teams Integration operations
-  async getTeamsIntegrationSettings(userId: string): Promise<TeamsIntegrationSettings | undefined> {
+  async getTeamsIntegrationSettings(
+    userId: string
+  ): Promise<TeamsIntegrationSettings | undefined> {
     const [settings] = await db
       .select()
       .from(teamsIntegrationSettings)
@@ -1597,7 +1855,9 @@ export class DatabaseStorage implements IStorage {
     return settings;
   }
 
-  async upsertTeamsIntegrationSettings(settings: InsertTeamsIntegrationSettings): Promise<TeamsIntegrationSettings> {
+  async upsertTeamsIntegrationSettings(
+    settings: InsertTeamsIntegrationSettings
+  ): Promise<TeamsIntegrationSettings> {
     const [result] = await db
       .insert(teamsIntegrationSettings)
       .values(settings)
@@ -1617,7 +1877,7 @@ export class DatabaseStorage implements IStorage {
       .delete(teamsIntegrationSettings)
       .where(eq(teamsIntegrationSettings.userId, userId));
   }
-  
+
   // SSO Configuration operations
   async getSsoConfiguration(): Promise<SsoConfiguration | undefined> {
     const [config] = await db
@@ -1628,10 +1888,12 @@ export class DatabaseStorage implements IStorage {
     return config;
   }
 
-  async upsertSsoConfiguration(config: InsertSsoConfiguration): Promise<SsoConfiguration> {
+  async upsertSsoConfiguration(
+    config: InsertSsoConfiguration
+  ): Promise<SsoConfiguration> {
     // Delete any existing configuration
     await db.delete(ssoConfiguration);
-    
+
     // Insert new configuration
     const [result] = await db
       .insert(ssoConfiguration)
@@ -1642,44 +1904,51 @@ export class DatabaseStorage implements IStorage {
       .returning();
     return result;
   }
-  
+
   // Bedrock usage tracking implementations
   async trackBedrockUsage(usage: InsertBedrockUsage): Promise<BedrockUsage> {
-    const [result] = await db
-      .insert(bedrockUsage)
-      .values(usage)
-      .returning();
+    const [result] = await db.insert(bedrockUsage).values(usage).returning();
     return result;
   }
-  
-  async getBedrockUsageByUser(userId: string, startDate?: Date, endDate?: Date): Promise<BedrockUsage[]> {
-    let query = db.select().from(bedrockUsage).where(eq(bedrockUsage.userId, userId));
-    
+
+  async getBedrockUsageByUser(
+    userId: string,
+    startDate?: Date,
+    endDate?: Date
+  ): Promise<BedrockUsage[]> {
+    let query = db
+      .select()
+      .from(bedrockUsage)
+      .where(eq(bedrockUsage.userId, userId));
+
     if (startDate) {
       query = query.where(sql`${bedrockUsage.createdAt} >= ${startDate}`);
     }
     if (endDate) {
       query = query.where(sql`${bedrockUsage.createdAt} <= ${endDate}`);
     }
-    
+
     return await query.orderBy(desc(bedrockUsage.createdAt));
   }
-  
-  async getBedrockUsageSummary(startDate?: Date, endDate?: Date): Promise<{
+
+  async getBedrockUsageSummary(
+    startDate?: Date,
+    endDate?: Date
+  ): Promise<{
     totalCost: number;
     totalTokens: number;
     userCount: number;
     requestCount: number;
   }> {
     let whereConditions = [];
-    
+
     if (startDate) {
       whereConditions.push(sql`${bedrockUsage.createdAt} >= ${startDate}`);
     }
     if (endDate) {
       whereConditions.push(sql`${bedrockUsage.createdAt} <= ${endDate}`);
     }
-    
+
     const [result] = await db
       .select({
         totalCost: sql<number>`COALESCE(SUM(${bedrockUsage.cost}), 0)`,
@@ -1689,7 +1958,7 @@ export class DatabaseStorage implements IStorage {
       })
       .from(bedrockUsage)
       .where(whereConditions.length > 0 ? and(...whereConditions) : undefined);
-    
+
     return {
       totalCost: parseFloat(result.totalCost?.toString() || "0"),
       totalTokens: parseInt(result.totalTokens?.toString() || "0"),
@@ -1697,7 +1966,7 @@ export class DatabaseStorage implements IStorage {
       requestCount: parseInt(result.requestCount?.toString() || "0"),
     };
   }
-  
+
   // FAQ cache implementations
   async getFaqCacheEntry(questionHash: string): Promise<FaqCache | undefined> {
     const [entry] = await db
@@ -1706,15 +1975,12 @@ export class DatabaseStorage implements IStorage {
       .where(eq(faqCache.questionHash, questionHash));
     return entry;
   }
-  
+
   async createFaqCacheEntry(entry: InsertFaqCache): Promise<FaqCache> {
-    const [result] = await db
-      .insert(faqCache)
-      .values(entry)
-      .returning();
+    const [result] = await db.insert(faqCache).values(entry).returning();
     return result;
   }
-  
+
   async updateFaqCacheHit(id: number): Promise<void> {
     await db
       .update(faqCache)
@@ -1724,7 +1990,7 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(faqCache.id, id));
   }
-  
+
   async getPopularFaqs(limit: number = 10): Promise<FaqCache[]> {
     return await db
       .select()
@@ -1732,13 +1998,15 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(faqCache.hitCount))
       .limit(limit);
   }
-  
+
   async clearFaqCache(): Promise<void> {
     await db.delete(faqCache);
   }
 
   // Company Policy operations
-  async createCompanyPolicy(policy: InsertCompanyPolicy): Promise<CompanyPolicy> {
+  async createCompanyPolicy(
+    policy: InsertCompanyPolicy
+  ): Promise<CompanyPolicy> {
     const [result] = await db
       .insert(companyPolicies)
       .values(policy)
@@ -1746,7 +2014,10 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async updateCompanyPolicy(id: number, policy: Partial<InsertCompanyPolicy>): Promise<CompanyPolicy> {
+  async updateCompanyPolicy(
+    id: number,
+    policy: Partial<InsertCompanyPolicy>
+  ): Promise<CompanyPolicy> {
     const [result] = await db
       .update(companyPolicies)
       .set({
@@ -1770,14 +2041,16 @@ export class DatabaseStorage implements IStorage {
     return policy;
   }
 
-  async getAllCompanyPolicies(includeInactive: boolean = false): Promise<CompanyPolicy[]> {
+  async getAllCompanyPolicies(
+    includeInactive: boolean = false
+  ): Promise<CompanyPolicy[]> {
     if (includeInactive) {
       return await db
         .select()
         .from(companyPolicies)
         .orderBy(desc(companyPolicies.createdAt));
     }
-    
+
     return await db
       .select()
       .from(companyPolicies)
@@ -1788,9 +2061,9 @@ export class DatabaseStorage implements IStorage {
   async toggleCompanyPolicyStatus(id: number): Promise<CompanyPolicy> {
     const policy = await this.getCompanyPolicyById(id);
     if (!policy) {
-      throw new Error('Company policy not found');
+      throw new Error("Company policy not found");
     }
-    
+
     const [result] = await db
       .update(companyPolicies)
       .set({
@@ -1805,32 +2078,34 @@ export class DatabaseStorage implements IStorage {
   // AI Analysis and Learning Methods
   async saveTicketAnalysis(userId: string, analysis: any): Promise<void> {
     // In production, implement proper database storage
-    console.log('Saving ticket analysis for user:', userId, analysis);
+    console.log("Saving ticket analysis for user:", userId, analysis);
   }
 
   async saveAutoResponse(data: any): Promise<void> {
     // In production, implement proper database storage
-    console.log('Saving auto-response:', data);
+    console.log("Saving auto-response:", data);
   }
 
   async saveComplexityScore(data: any): Promise<void> {
     // In production, implement proper database storage
-    console.log('Saving complexity score:', data);
+    console.log("Saving complexity score:", data);
   }
 
   async saveAIAnalytics(analytics: any): Promise<void> {
     // In production, implement proper database storage
-    console.log('Saving AI analytics:', analytics);
+    console.log("Saving AI analytics:", analytics);
   }
 
   async getRecentResolvedTickets(days: number): Promise<any[]> {
     // In production, implement proper database query
-    console.log('Getting resolved tickets from last', days, 'days');
+    console.log("Getting resolved tickets from last", days, "days");
     return [];
   }
 
   // Knowledge Base operations
-  async createKnowledgeArticle(article: InsertKnowledgeArticle): Promise<KnowledgeArticle> {
+  async createKnowledgeArticle(
+    article: InsertKnowledgeArticle
+  ): Promise<KnowledgeArticle> {
     const [result] = await db
       .insert(knowledgeArticles)
       .values({
@@ -1842,7 +2117,10 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async updateKnowledgeArticle(id: number, article: Partial<InsertKnowledgeArticle>): Promise<KnowledgeArticle> {
+  async updateKnowledgeArticle(
+    id: number,
+    article: Partial<InsertKnowledgeArticle>
+  ): Promise<KnowledgeArticle> {
     const [result] = await db
       .update(knowledgeArticles)
       .set({
@@ -1866,13 +2144,13 @@ export class DatabaseStorage implements IStorage {
     return article;
   }
 
-  async getAllKnowledgeArticles(filters?: { 
-    category?: string; 
-    isPublished?: boolean; 
-    createdBy?: string 
+  async getAllKnowledgeArticles(filters?: {
+    category?: string;
+    isPublished?: boolean;
+    createdBy?: string;
   }): Promise<KnowledgeArticle[]> {
     let query = db.select().from(knowledgeArticles);
-    
+
     const conditions = [];
     if (filters?.category) {
       conditions.push(eq(knowledgeArticles.category, filters.category));
@@ -1883,28 +2161,36 @@ export class DatabaseStorage implements IStorage {
     if (filters?.createdBy) {
       conditions.push(eq(knowledgeArticles.createdBy, filters.createdBy));
     }
-    
+
     if (conditions.length > 0) {
       query = query.where(and(...conditions)) as any;
     }
-    
+
     return await query.orderBy(desc(knowledgeArticles.createdAt));
   }
 
-  async getPublishedKnowledgeArticles(category?: string): Promise<KnowledgeArticle[]> {
+  async getPublishedKnowledgeArticles(
+    category?: string
+  ): Promise<KnowledgeArticle[]> {
     return await this.getAllKnowledgeArticles({
       category,
       isPublished: true,
     });
   }
 
-  async searchKnowledgeBase(query: string, category?: string): Promise<KnowledgeArticle[]> {
-    const searchTerms = query.toLowerCase().split(' ').filter(term => term.length > 2);
+  async searchKnowledgeBase(
+    query: string,
+    category?: string
+  ): Promise<KnowledgeArticle[]> {
+    const searchTerms = query
+      .toLowerCase()
+      .split(" ")
+      .filter((term) => term.length > 2);
     const conditions = [];
-    
+
     // Add search conditions
     if (searchTerms.length > 0) {
-      const searchConditions = searchTerms.map(term => 
+      const searchConditions = searchTerms.map((term) =>
         or(
           ilike(knowledgeArticles.title, `%${term}%`),
           ilike(knowledgeArticles.content, `%${term}%`),
@@ -1913,20 +2199,20 @@ export class DatabaseStorage implements IStorage {
       );
       conditions.push(or(...searchConditions));
     }
-    
+
     // Add category filter
     if (category) {
       conditions.push(eq(knowledgeArticles.category, category));
     }
-    
+
     // Only published articles
     conditions.push(eq(knowledgeArticles.isPublished, true));
-    
+
     let dbQuery = db.select().from(knowledgeArticles);
     if (conditions.length > 0) {
       dbQuery = dbQuery.where(and(...conditions)) as any;
     }
-    
+
     return await dbQuery
       .orderBy(
         desc(knowledgeArticles.effectivenessScore),
@@ -1935,32 +2221,34 @@ export class DatabaseStorage implements IStorage {
       .limit(50);
   }
 
-  async findSimilarKnowledgeArticle(title: string): Promise<KnowledgeArticle | undefined> {
+  async findSimilarKnowledgeArticle(
+    title: string
+  ): Promise<KnowledgeArticle | undefined> {
     // Simple similarity search - in production could use vector similarity
     const normalizedTitle = title.toLowerCase();
-    const words = normalizedTitle.split(' ').filter(word => word.length > 3);
-    
+    const words = normalizedTitle.split(" ").filter((word) => word.length > 3);
+
     if (words.length === 0) return undefined;
-    
-    const conditions = words.map(word => 
+
+    const conditions = words.map((word) =>
       ilike(knowledgeArticles.title, `%${word}%`)
     );
-    
+
     const [article] = await db
       .select()
       .from(knowledgeArticles)
       .where(or(...conditions))
       .limit(1);
-    
+
     return article;
   }
 
   async toggleKnowledgeArticleStatus(id: number): Promise<KnowledgeArticle> {
     const article = await this.getKnowledgeArticle(id);
     if (!article) {
-      throw new Error('Knowledge article not found');
+      throw new Error("Knowledge article not found");
     }
-    
+
     const [result] = await db
       .update(knowledgeArticles)
       .set({
@@ -1985,10 +2273,10 @@ export class DatabaseStorage implements IStorage {
     // Simple effectiveness calculation - in production could be more sophisticated
     const article = await this.getKnowledgeArticle(id);
     if (!article) return;
-    
+
     const currentScore = article.effectivenessScore || 0;
     const newScore = (currentScore + rating) / 2; // Simple average
-    
+
     await db
       .update(knowledgeArticles)
       .set({
@@ -2004,7 +2292,7 @@ export class DatabaseStorage implements IStorage {
       .insert(learningQueue)
       .values({
         ticketId,
-        processStatus: 'pending',
+        processStatus: "pending",
       })
       .returning();
     return result;
@@ -2012,20 +2300,24 @@ export class DatabaseStorage implements IStorage {
 
   async getLearningQueueItems(status?: string): Promise<LearningQueue[]> {
     let query = db.select().from(learningQueue);
-    
+
     if (status) {
       query = query.where(eq(learningQueue.processStatus, status)) as any;
     }
-    
+
     return await query.orderBy(learningQueue.createdAt);
   }
 
-  async updateLearningQueueItem(id: number, updates: Partial<InsertLearningQueue>): Promise<LearningQueue> {
+  async updateLearningQueueItem(
+    id: number,
+    updates: Partial<InsertLearningQueue>
+  ): Promise<LearningQueue> {
     const [result] = await db
       .update(learningQueue)
       .set({
         ...updates,
-        processedAt: updates.processStatus === 'completed' ? new Date() : undefined,
+        processedAt:
+          updates.processStatus === "completed" ? new Date() : undefined,
       })
       .where(eq(learningQueue.id, id))
       .returning();
@@ -2035,13 +2327,13 @@ export class DatabaseStorage implements IStorage {
   async getRecentResolvedTickets(days: number): Promise<Task[]> {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - days);
-    
+
     return await db
       .select()
       .from(tasks)
       .where(
         and(
-          eq(tasks.status, 'resolved'),
+          eq(tasks.status, "resolved"),
           sql`${tasks.updatedAt} >= ${cutoffDate}`
         )
       )
@@ -2050,38 +2342,46 @@ export class DatabaseStorage implements IStorage {
 
   async updateKnowledgeLearningStats(stats: any): Promise<void> {
     // Store learning analytics - could be expanded to dedicated table
-    console.log('Knowledge learning stats updated:', stats);
+    console.log("Knowledge learning stats updated:", stats);
   }
 
   // Legacy compatibility methods - these should be removed once new methods are implemented
   async saveTicketAnalysis(userId: string, analysis: any): Promise<void> {
-    console.log('Saving ticket analysis:', userId, analysis);
+    console.log("Saving ticket analysis:", userId, analysis);
   }
 
   async saveAutoResponse(data: any): Promise<void> {
-    console.log('Saving auto response:', data);
+    console.log("Saving auto response:", data);
   }
 
   async saveComplexityScore(data: any): Promise<void> {
-    console.log('Saving complexity score:', data);
+    console.log("Saving complexity score:", data);
   }
 
   async saveAIAnalytics(analytics: any): Promise<void> {
-    console.log('Saving AI analytics:', analytics);
+    console.log("Saving AI analytics:", analytics);
   }
 
   // Knowledge Base operations implementation
-  async createKnowledgeArticle(article: InsertKnowledgeArticle): Promise<KnowledgeArticle> {
-    const [created] = await db.insert(knowledgeArticles).values({
-      ...article,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      usageCount: 0,
-    }).returning();
+  async createKnowledgeArticle(
+    article: InsertKnowledgeArticle
+  ): Promise<KnowledgeArticle> {
+    const [created] = await db
+      .insert(knowledgeArticles)
+      .values({
+        ...article,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        usageCount: 0,
+      })
+      .returning();
     return created;
   }
 
-  async updateKnowledgeArticle(id: number, article: Partial<InsertKnowledgeArticle>): Promise<KnowledgeArticle> {
+  async updateKnowledgeArticle(
+    id: number,
+    article: Partial<InsertKnowledgeArticle>
+  ): Promise<KnowledgeArticle> {
     const [updated] = await db
       .update(knowledgeArticles)
       .set({
@@ -2105,25 +2405,25 @@ export class DatabaseStorage implements IStorage {
     return article;
   }
 
-  async getAllKnowledgeArticles(filters?: { 
-    category?: string; 
-    isPublished?: boolean; 
-    createdBy?: string 
+  async getAllKnowledgeArticles(filters?: {
+    category?: string;
+    isPublished?: boolean;
+    createdBy?: string;
   }): Promise<KnowledgeArticle[]> {
     const conditions = [];
-    
+
     if (filters?.category) {
       conditions.push(eq(knowledgeArticles.category, filters.category));
     }
-    
+
     if (filters?.isPublished !== undefined) {
       conditions.push(eq(knowledgeArticles.isPublished, filters.isPublished));
     }
-    
+
     if (filters?.createdBy) {
       conditions.push(eq(knowledgeArticles.createdBy, filters.createdBy));
     }
-    
+
     return await db
       .select()
       .from(knowledgeArticles)
@@ -2131,13 +2431,15 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(knowledgeArticles.createdAt));
   }
 
-  async getPublishedKnowledgeArticles(category?: string): Promise<KnowledgeArticle[]> {
+  async getPublishedKnowledgeArticles(
+    category?: string
+  ): Promise<KnowledgeArticle[]> {
     const conditions = [eq(knowledgeArticles.isPublished, true)];
-    
+
     if (category) {
       conditions.push(eq(knowledgeArticles.category, category));
     }
-    
+
     return await db
       .select()
       .from(knowledgeArticles)
@@ -2145,20 +2447,23 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(knowledgeArticles.usageCount));
   }
 
-  async searchKnowledgeBase(query: string, category?: string): Promise<KnowledgeArticle[]> {
+  async searchKnowledgeBase(
+    query: string,
+    category?: string
+  ): Promise<KnowledgeArticle[]> {
     const conditions = [
       eq(knowledgeArticles.isPublished, true),
       or(
         like(knowledgeArticles.title, `%${query}%`),
         like(knowledgeArticles.content, `%${query}%`),
         like(knowledgeArticles.summary, `%${query}%`)
-      )
+      ),
     ];
-    
+
     if (category) {
       conditions.push(eq(knowledgeArticles.category, category));
     }
-    
+
     return await db
       .select()
       .from(knowledgeArticles)
@@ -2166,7 +2471,9 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(knowledgeArticles.usageCount));
   }
 
-  async findSimilarKnowledgeArticle(title: string): Promise<KnowledgeArticle | undefined> {
+  async findSimilarKnowledgeArticle(
+    title: string
+  ): Promise<KnowledgeArticle | undefined> {
     const [article] = await db
       .select()
       .from(knowledgeArticles)
@@ -2183,9 +2490,9 @@ export class DatabaseStorage implements IStorage {
   async toggleKnowledgeArticleStatus(id: number): Promise<KnowledgeArticle> {
     const article = await this.getKnowledgeArticle(id);
     if (!article) {
-      throw new Error('Article not found');
+      throw new Error("Article not found");
     }
-    
+
     const [updated] = await db
       .update(knowledgeArticles)
       .set({
@@ -2210,12 +2517,12 @@ export class DatabaseStorage implements IStorage {
   async updateArticleEffectiveness(id: number, rating: number): Promise<void> {
     const article = await this.getKnowledgeArticle(id);
     if (!article) return;
-    
+
     // Simple effectiveness calculation - could be enhanced with more sophisticated algorithms
-    const currentScore = parseFloat(article.effectivenessScore || '0');
+    const currentScore = parseFloat(article.effectivenessScore || "0");
     const usageCount = article.usageCount || 1;
-    const newScore = ((currentScore * usageCount) + rating) / (usageCount + 1);
-    
+    const newScore = (currentScore * usageCount + rating) / (usageCount + 1);
+
     await db
       .update(knowledgeArticles)
       .set({
@@ -2227,11 +2534,14 @@ export class DatabaseStorage implements IStorage {
 
   // Learning Queue operations implementation
   async addToLearningQueue(ticketId: number): Promise<LearningQueue> {
-    const [queued] = await db.insert(learningQueue).values({
-      ticketId,
-      processStatus: 'pending',
-      createdAt: new Date(),
-    }).returning();
+    const [queued] = await db
+      .insert(learningQueue)
+      .values({
+        ticketId,
+        processStatus: "pending",
+        createdAt: new Date(),
+      })
+      .returning();
     return queued;
   }
 }

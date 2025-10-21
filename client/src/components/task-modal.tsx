@@ -1,6 +1,6 @@
 /**
  * TaskModal Component - Unified Ticket Creation and Editing Interface
- * 
+ *
  * This component provides a comprehensive modal for ticket management with:
  * - Tabbed interface for ticket details, comments, and attachments
  * - Real-time form validation and error handling
@@ -10,7 +10,7 @@
  * - Status and priority management
  * - Comment threading and history
  * - Audit trail for all changes
- * 
+ *
  * Features modern UX/UI patterns:
  * - Visual card-based form sections with color-coded borders
  * - Contextual icons and improved visual hierarchy
@@ -45,28 +45,27 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { 
-  Send, 
-  Plus, 
-  Clock, 
-  User, 
-  Users, 
-  Calendar, 
-  Flag, 
-  Tag, 
-  FileText, 
-  CheckCircle, 
-  AlertTriangle, 
+import {
+  Send,
+  Plus,
+  Clock,
+  User,
+  Users,
+  Calendar,
+  Flag,
+  Tag,
+  FileText,
+  CheckCircle,
+  AlertTriangle,
   CircleDot,
   Target,
   Zap,
   Paperclip,
   Download,
   Trash2,
-  Upload
+  Upload,
 } from "lucide-react";
 import generateShortId from "@/lib/generateShortId";
 
@@ -78,11 +77,11 @@ interface TaskModalProps {
 
 export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user } = useAuth() as { user?: { role?: string } } as any;
   const queryClient = useQueryClient();
   const [currentTab, setCurrentTab] = useState("details");
   const [commentText, setCommentText] = useState("");
-  
+
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -94,29 +93,45 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     assigneeType: "user",
     assigneeTeamId: "",
     dueDate: "",
+    departmentId: "",
+    teamId: "",
   });
 
-  // Load teams and users for assignment
-  const { data: teams } = useQuery({
-    queryKey: ["/api/teams"],
-    enabled: isOpen,
+  // Load meta for create/edit (role-scoped values and permissions)
+  const metaUrl = task?.id
+    ? `/api/tickets/${task.id}/meta`
+    : "/api/tickets/meta";
+  const { data: meta } = useQuery<any>({
+    queryKey: [metaUrl],
+    enabled: true,
+    initialData: {},
+    refetchOnMount: "always",
   });
 
-  const { data: users } = useQuery({
-    queryKey: ["/api/users"],
-    enabled: isOpen,
-  });
+  const departments = meta?.departments || [];
+  const teams = meta?.teams || [];
+  const assignableUsers = meta?.assignableUsers || [];
+  const categoriesMeta = meta?.categories || [];
+  const prioritiesMeta = meta?.priorities || [];
+  const statusesMeta = meta?.statuses || [];
+  const permissions = meta?.permissions || {};
 
-  const { data: taskComments } = useQuery({
+  const { data: taskComments } = useQuery<any[]>({
     queryKey: ["/api/tasks", task?.id, "comments"],
     enabled: !!task?.id && isOpen,
     retry: false,
+    initialData: [],
+    refetchOnMount: "always",
   });
 
-  const { data: taskAttachments, refetch: refetchAttachments } = useQuery({
+  const { data: taskAttachments, refetch: refetchAttachments } = useQuery<
+    any[]
+  >({
     queryKey: ["/api/tasks", task?.id, "attachments"],
     enabled: !!task?.id && isOpen,
     retry: false,
+    initialData: [],
+    refetchOnMount: "always",
   });
 
   useEffect(() => {
@@ -131,7 +146,11 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         assigneeId: task.assigneeId || "unassigned",
         assigneeType: task.assigneeType || "user",
         assigneeTeamId: task.assigneeTeamId?.toString() || "unassigned",
-        dueDate: task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : "",
+        dueDate: task.dueDate
+          ? new Date(task.dueDate).toISOString().split("T")[0]
+          : "",
+        departmentId: "",
+        teamId: "",
       });
       setCurrentTab("details");
     } else {
@@ -146,6 +165,8 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         assigneeType: "user",
         assigneeTeamId: "",
         dueDate: "",
+        departmentId: "",
+        teamId: "",
       });
       setCurrentTab("details");
     }
@@ -223,10 +244,16 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
 
   const addCommentMutation = useMutation({
     mutationFn: async (commentData: any) => {
-      return await apiRequest("POST", `/api/tasks/${task.id}/comments`, commentData);
+      return await apiRequest(
+        "POST",
+        `/api/tasks/${task.id}/comments`,
+        commentData
+      );
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/tasks", task?.id, "comments"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/tasks", task?.id, "comments"],
+      });
       setCommentText("");
       toast({
         title: "Success",
@@ -254,12 +281,12 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   });
 
   const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!formData.title.trim()) {
       toast({
         title: "Error",
@@ -278,6 +305,26 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       return;
     }
 
+    // Customers must select Department and Team (routing)
+    if (user?.role === "customer") {
+      if (!formData.departmentId) {
+        toast({
+          title: "Error",
+          description: "Department is required",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!formData.teamId) {
+        toast({
+          title: "Error",
+          description: "Team is required",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     const taskData = {
       ticketNumber: generateShortId(), // Prevents validation errors in shared/schema line 110
       title: formData.title.trim(),
@@ -286,10 +333,27 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       priority: formData.priority,
       status: formData.status,
       notes: formData.notes.trim(),
-      assigneeId: formData.assigneeType === "user" && formData.assigneeId !== "unassigned" ? formData.assigneeId : null,
+      assigneeId:
+        formData.assigneeType === "user" && formData.assigneeId !== "unassigned"
+          ? formData.assigneeId
+          : null,
       assigneeType: formData.assigneeType,
-      assigneeTeamId: formData.assigneeType === "team" && formData.assigneeTeamId !== "unassigned" ? parseInt(formData.assigneeTeamId) : null,
-      dueDate: formData.dueDate ? new Date(formData.dueDate).toISOString() : null,
+      assigneeTeamId:
+        formData.assigneeType === "team" &&
+        formData.assigneeTeamId !== "unassigned"
+          ? parseInt(formData.assigneeTeamId)
+          : null,
+      dueDate: formData.dueDate
+        ? new Date(formData.dueDate).toISOString()
+        : null,
+      // For customers, include explicit routing fields required by API
+      ...(user?.role === "customer"
+        ? {
+            departmentId: parseInt(formData.departmentId),
+            teamId: parseInt(formData.teamId),
+            assigneeType: "team" as const,
+          }
+        : {}),
     };
 
     if (task) {
@@ -301,46 +365,65 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
 
   const handleAddComment = () => {
     if (!commentText.trim()) return;
-    
+
     addCommentMutation.mutate({
-      content: commentText.trim()
+      content: commentText.trim(),
     });
   };
 
   const getPriorityIcon = (priority: string) => {
     switch (priority) {
-      case "high": return <AlertTriangle className="h-4 w-4 text-red-500" />;
-      case "medium": return <CircleDot className="h-4 w-4 text-yellow-500" />;
-      case "low": return <CheckCircle className="h-4 w-4 text-green-500" />;
-      default: return <CircleDot className="h-4 w-4 text-slate-400" />;
+      case "high":
+        return <AlertTriangle className="h-4 w-4 text-red-500" />;
+      case "medium":
+        return <CircleDot className="h-4 w-4 text-yellow-500" />;
+      case "low":
+        return <CheckCircle className="h-4 w-4 text-green-500" />;
+      default:
+        return <CircleDot className="h-4 w-4 text-slate-400" />;
     }
   };
 
   const getCategoryIcon = (category: string) => {
     switch (category) {
-      case "bug": return <AlertTriangle className="h-4 w-4 text-red-500" />;
-      case "feature": return <Zap className="h-4 w-4 text-blue-500" />;
-      case "support": return <User className="h-4 w-4 text-purple-500" />;
-      case "enhancement": return <Target className="h-4 w-4 text-green-500" />;
-      default: return <Tag className="h-4 w-4 text-slate-400" />;
+      case "bug":
+        return <AlertTriangle className="h-4 w-4 text-red-500" />;
+      case "feature":
+        return <Zap className="h-4 w-4 text-blue-500" />;
+      case "support":
+        return <User className="h-4 w-4 text-purple-500" />;
+      case "enhancement":
+        return <Target className="h-4 w-4 text-green-500" />;
+      default:
+        return <Tag className="h-4 w-4 text-slate-400" />;
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "open": return "bg-blue-100 text-blue-800 border-blue-200";
-      case "in_progress": return "bg-yellow-100 text-yellow-800 border-yellow-200";
-      case "resolved": return "bg-green-100 text-green-800 border-green-200";
-      case "closed": return "bg-slate-100 text-slate-800 border-slate-200";
-      case "on_hold": return "bg-orange-100 text-orange-800 border-orange-200";
-      default: return "bg-slate-100 text-slate-800 border-slate-200";
+      case "open":
+        return "bg-blue-100 text-blue-800 border-blue-200";
+      case "in_progress":
+        return "bg-yellow-100 text-yellow-800 border-yellow-200";
+      case "resolved":
+        return "bg-green-100 text-green-800 border-green-200";
+      case "closed":
+        return "bg-slate-100 text-slate-800 border-slate-200";
+      case "on_hold":
+        return "bg-orange-100 text-orange-800 border-orange-200";
+      default:
+        return "bg-slate-100 text-slate-800 border-slate-200";
     }
   };
 
   // File attachment mutations
   const addAttachmentMutation = useMutation({
     mutationFn: async (attachmentData: any) => {
-      return await apiRequest("POST", `/api/tasks/${task?.id}/attachments`, attachmentData);
+      return await apiRequest(
+        "POST",
+        `/api/tasks/${task?.id}/attachments`,
+        attachmentData
+      );
     },
     onSuccess: () => {
       toast({
@@ -407,7 +490,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     // In a real app, you would upload the file to a storage service
     // For now, we'll simulate with a fake URL
     const fakeUrl = `https://storage.example.com/${Date.now()}_${file.name}`;
-    
+
     await addAttachmentMutation.mutateAsync({
       fileName: file.name,
       fileSize: file.size,
@@ -416,7 +499,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     });
 
     // Reset the input
-    e.target.value = '';
+    e.target.value = "";
   };
 
   return (
@@ -428,11 +511,17 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
             <DialogHeader>
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-blue-100 rounded-lg">
-                  {task ? <FileText className="h-5 w-5 text-blue-600" /> : <Plus className="h-5 w-5 text-blue-600" />}
+                  {task ? (
+                    <FileText className="h-5 w-5 text-blue-600" />
+                  ) : (
+                    <Plus className="h-5 w-5 text-blue-600" />
+                  )}
                 </div>
                 <div className="flex-1">
                   <DialogTitle className="text-xl font-semibold text-slate-900">
-                    {task ? `Edit Ticket ${task.ticketNumber || ''}` : "Create New Ticket"}
+                    {task
+                      ? `Edit Ticket ${task.ticketNumber || ""}`
+                      : "Create New Ticket"}
                   </DialogTitle>
                   <DialogDescription className="text-slate-600 mt-1">
                     {task ? (
@@ -442,24 +531,31 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                           {task.creatorName && task.createdAt && (
                             <p className="flex items-center gap-1">
                               <User className="h-3 w-3" />
-                              Created by {task.creatorName} on {new Date(task.createdAt).toLocaleDateString()}
+                              Created by {task.creatorName} on{" "}
+                              {new Date(task.createdAt).toLocaleDateString()}
                             </p>
                           )}
                           {task.updatedAt && (
                             <p className="flex items-center gap-1">
                               <Clock className="h-3 w-3" />
-                              Last updated {task.lastUpdatedBy ? `by ${task.lastUpdatedBy} ` : ''}
-                              on {new Date(task.updatedAt).toLocaleDateString()} at {new Date(task.updatedAt).toLocaleTimeString()}
+                              Last updated{" "}
+                              {task.lastUpdatedBy
+                                ? `by ${task.lastUpdatedBy} `
+                                : ""}
+                              on {new Date(task.updatedAt).toLocaleDateString()}{" "}
+                              at {new Date(task.updatedAt).toLocaleTimeString()}
                             </p>
                           )}
                         </div>
                       </div>
-                    ) : "Fill in the details to create a new ticket for your team."}
+                    ) : (
+                      "Fill in the details to create a new ticket for your team."
+                    )}
                   </DialogDescription>
                 </div>
                 {task && (
                   <Badge className={`${getStatusColor(task.status)} border`}>
-                    {task.status?.replace('_', ' ').toUpperCase()}
+                    {task.status?.replace("_", " ").toUpperCase()}
                   </Badge>
                 )}
               </div>
@@ -468,11 +564,15 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
 
           {/* Content */}
           <div className="flex-1 overflow-hidden">
-            <Tabs value={currentTab} onValueChange={setCurrentTab} className="h-full flex flex-col">
+            <Tabs
+              value={currentTab}
+              onValueChange={setCurrentTab}
+              className="h-full flex flex-col"
+            >
               <div className="border-b px-6">
                 <TabsList className="bg-transparent h-12 p-0 w-full justify-start">
-                  <TabsTrigger 
-                    value="details" 
+                  <TabsTrigger
+                    value="details"
                     className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
                   >
                     <FileText className="h-4 w-4 mr-2" />
@@ -480,21 +580,25 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                   </TabsTrigger>
                   {task && (
                     <>
-                      <TabsTrigger 
-                        value="comments" 
+                      <TabsTrigger
+                        value="comments"
                         className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
                       >
                         <Send className="h-4 w-4 mr-2" />
-                        Comments {taskComments?.length ? `(${taskComments.length})` : ''}
+                        Comments{" "}
+                        {taskComments?.length ? `(${taskComments.length})` : ""}
                       </TabsTrigger>
                     </>
                   )}
-                  <TabsTrigger 
-                    value="attachments" 
+                  <TabsTrigger
+                    value="attachments"
                     className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
                   >
                     <Paperclip className="h-4 w-4 mr-2" />
-                    Attachments {taskAttachments?.length ? `(${taskAttachments.length})` : ''}
+                    Attachments{" "}
+                    {taskAttachments?.length
+                      ? `(${taskAttachments.length})`
+                      : ""}
                   </TabsTrigger>
                 </TabsList>
               </div>
@@ -511,8 +615,12 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-4">
+                        {/* Department/Team selection moved under Assignment & Timeline */}
                         <div>
-                          <Label htmlFor="title" className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                          <Label
+                            htmlFor="title"
+                            className="text-sm font-medium text-slate-700 flex items-center gap-2"
+                          >
                             <FileText className="h-4 w-4" />
                             Task Title *
                           </Label>
@@ -520,15 +628,22 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                             id="title"
                             placeholder="e.g., Fix login page authentication issue"
                             value={formData.title}
-                            onChange={(e) => handleInputChange("title", e.target.value)}
+                            onChange={(e) =>
+                              handleInputChange("title", e.target.value)
+                            }
                             className="mt-2 text-base"
                             required
                           />
-                          <p className="text-xs text-slate-500 mt-1">Be specific and descriptive</p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            Be specific and descriptive
+                          </p>
                         </div>
-                        
+
                         <div>
-                          <Label htmlFor="description" className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                          <Label
+                            htmlFor="description"
+                            className="text-sm font-medium text-slate-700 flex items-center gap-2"
+                          >
                             <FileText className="h-4 w-4" />
                             Description
                           </Label>
@@ -537,96 +652,78 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                             placeholder="Provide detailed information about the task, requirements, and expected outcomes..."
                             rows={4}
                             value={formData.description}
-                            onChange={(e) => handleInputChange("description", e.target.value)}
+                            onChange={(e) =>
+                              handleInputChange("description", e.target.value)
+                            }
                             className="mt-2 resize-none"
                           />
-                          <p className="text-xs text-slate-500 mt-1">Include context, requirements, and acceptance criteria</p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            Include context, requirements, and acceptance
+                            criteria
+                          </p>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
                           <div>
-                            <Label htmlFor="category" className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                            <Label
+                              htmlFor="category"
+                              className="text-sm font-medium text-slate-700 flex items-center gap-2"
+                            >
                               <Tag className="h-4 w-4" />
                               Category *
                             </Label>
-                            <Select value={formData.category} onValueChange={(value) => handleInputChange("category", value)}>
+                            <Select
+                              value={formData.category}
+                              onValueChange={(value) =>
+                                handleInputChange("category", value)
+                              }
+                            >
                               <SelectTrigger className="mt-2">
                                 <SelectValue placeholder="Select category" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="bug">
-                                  <div className="flex items-center gap-2">
-                                    {getCategoryIcon("bug")}
-                                    Bug Fix
-                                  </div>
-                                </SelectItem>
-                                <SelectItem value="feature">
-                                  <div className="flex items-center gap-2">
-                                    {getCategoryIcon("feature")}
-                                    New Feature
-                                  </div>
-                                </SelectItem>
-                                <SelectItem value="support">
-                                  <div className="flex items-center gap-2">
-                                    {getCategoryIcon("support")}
-                                    Support Request
-                                  </div>
-                                </SelectItem>
-                                <SelectItem value="enhancement">
-                                  <div className="flex items-center gap-2">
-                                    {getCategoryIcon("enhancement")}
-                                    Enhancement
-                                  </div>
-                                </SelectItem>
-                                <SelectItem value="incident">
-                                  <div className="flex items-center gap-2">
-                                    <AlertTriangle className="h-4 w-4 text-orange-500" />
-                                    Incident
-                                  </div>
-                                </SelectItem>
-                                <SelectItem value="request">
-                                  <div className="flex items-center gap-2">
-                                    <User className="h-4 w-4 text-blue-500" />
-                                    Request
-                                  </div>
-                                </SelectItem>
+                                {categoriesMeta?.map((c: string) => (
+                                  <SelectItem key={c} value={c}>
+                                    <div className="flex items-center gap-2">
+                                      {getCategoryIcon(c)}
+                                      {c.charAt(0).toUpperCase() + c.slice(1)}
+                                    </div>
+                                  </SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           </div>
 
                           <div>
-                            <Label htmlFor="priority" className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                            <Label
+                              htmlFor="priority"
+                              className="text-sm font-medium text-slate-700 flex items-center gap-2"
+                            >
                               <Flag className="h-4 w-4" />
                               Priority
                             </Label>
-                            <Select value={formData.priority} onValueChange={(value) => handleInputChange("priority", value)}>
+                            <Select
+                              value={formData.priority}
+                              onValueChange={(value) =>
+                                handleInputChange("priority", value)
+                              }
+                            >
                               <SelectTrigger className="mt-2">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="high">
-                                  <div className="flex items-center gap-2">
-                                    {getPriorityIcon("high")}
-                                    High Priority
-                                  </div>
-                                </SelectItem>
-                                <SelectItem value="medium">
-                                  <div className="flex items-center gap-2">
-                                    {getPriorityIcon("medium")}
-                                    Medium Priority
-                                  </div>
-                                </SelectItem>
-                                <SelectItem value="low">
-                                  <div className="flex items-center gap-2">
-                                    {getPriorityIcon("low")}
-                                    Low Priority
-                                  </div>
-                                </SelectItem>
+                                {prioritiesMeta?.map((p: string) => (
+                                  <SelectItem key={p} value={p}>
+                                    <div className="flex items-center gap-2">
+                                      {getPriorityIcon(p)}
+                                      {p.charAt(0).toUpperCase() + p.slice(1)}
+                                    </div>
+                                  </SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           </div>
                         </div>
-
                       </CardContent>
                     </Card>
 
@@ -641,45 +738,47 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                         </CardHeader>
                         <CardContent>
                           <div>
-                            <Label htmlFor="status" className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                            <Label
+                              htmlFor="status"
+                              className="text-sm font-medium text-slate-700 flex items-center gap-2"
+                            >
                               <CircleDot className="h-4 w-4" />
                               Current Status
                             </Label>
-                            <Select value={formData.status} onValueChange={(value) => handleInputChange("status", value)}>
+                            <Select
+                              value={formData.status}
+                              onValueChange={(value) =>
+                                handleInputChange("status", value)
+                              }
+                              disabled={
+                                !permissions?.canChangeStatus &&
+                                permissions?.canChangeStatus !==
+                                  "directlyAssignedOnly"
+                              }
+                            >
                               <SelectTrigger className="mt-2">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="open">
-                                  <div className="flex items-center gap-2">
-                                    <CircleDot className="h-4 w-4 text-blue-500" />
-                                    Open
-                                  </div>
-                                </SelectItem>
-                                <SelectItem value="in_progress">
-                                  <div className="flex items-center gap-2">
-                                    <Clock className="h-4 w-4 text-yellow-500" />
-                                    In Progress
-                                  </div>
-                                </SelectItem>
-                                <SelectItem value="resolved">
-                                  <div className="flex items-center gap-2">
-                                    <CheckCircle className="h-4 w-4 text-green-500" />
-                                    Resolved
-                                  </div>
-                                </SelectItem>
-                                <SelectItem value="closed">
-                                  <div className="flex items-center gap-2">
-                                    <CheckCircle className="h-4 w-4 text-slate-500" />
-                                    Closed
-                                  </div>
-                                </SelectItem>
-                                <SelectItem value="on_hold">
-                                  <div className="flex items-center gap-2">
-                                    <AlertTriangle className="h-4 w-4 text-orange-500" />
-                                    On Hold
-                                  </div>
-                                </SelectItem>
+                                {statusesMeta?.map((s: string) => (
+                                  <SelectItem key={s} value={s}>
+                                    <div className="flex items-center gap-2">
+                                      {s === "open" && (
+                                        <CircleDot className="h-4 w-4 text-blue-500" />
+                                      )}
+                                      {s === "in_progress" && (
+                                        <Clock className="h-4 w-4 text-yellow-500" />
+                                      )}
+                                      {(s === "resolved" || s === "closed") && (
+                                        <CheckCircle className="h-4 w-4 text-green-500" />
+                                      )}
+                                      {s === "on_hold" && (
+                                        <AlertTriangle className="h-4 w-4 text-orange-500" />
+                                      )}
+                                      {s.replace("_", " ")}
+                                    </div>
+                                  </SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           </div>
@@ -702,7 +801,12 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                               <User className="h-4 w-4" />
                               Assignment Type
                             </Label>
-                            <Select value={formData.assigneeType} onValueChange={(value) => handleInputChange("assigneeType", value)}>
+                            <Select
+                              value={formData.assigneeType}
+                              onValueChange={(value) =>
+                                handleInputChange("assigneeType", value)
+                              }
+                            >
                               <SelectTrigger className="mt-2">
                                 <SelectValue />
                               </SelectTrigger>
@@ -731,69 +835,119 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                             <Input
                               type="date"
                               value={formData.dueDate}
-                              onChange={(e) => handleInputChange("dueDate", e.target.value)}
+                              onChange={(e) =>
+                                handleInputChange("dueDate", e.target.value)
+                              }
                               className="mt-2"
                             />
                           </div>
                         </div>
 
-                        {formData.assigneeType === "user" && (
-                          <div className="col-span-2">
-                            <Label className="text-sm font-medium text-slate-700">Assign to User</Label>
-                            <Select value={formData.assigneeId} onValueChange={(value) => handleInputChange("assigneeId", value)}>
-                              <SelectTrigger className="mt-2">
-                                <SelectValue placeholder="Select user" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="unassigned">
-                                  <div className="flex items-center gap-2">
-                                    <User className="h-4 w-4" />
-                                    Unassigned
-                                  </div>
-                                </SelectItem>
-                                {users?.map((user: any) => (
-                                  <SelectItem key={user.id} value={user.id}>
+                        {formData.assigneeType === "team" &&
+                          permissions?.allowedAssigneeTypes?.includes(
+                            "team"
+                          ) && (
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <Label className="text-sm font-medium text-slate-700">
+                                  Department *
+                                </Label>
+                                <Select
+                                  value={formData.departmentId}
+                                  onValueChange={(value) => {
+                                    handleInputChange("departmentId", value);
+                                    // When department changes, clear team to force re-select
+                                    handleInputChange("teamId", "");
+                                  }}
+                                >
+                                  <SelectTrigger className="mt-2">
+                                    <SelectValue placeholder="Select department" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {departments?.map((dept: any) => (
+                                      <SelectItem
+                                        key={dept.id}
+                                        value={dept.id.toString()}
+                                      >
+                                        {dept.name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div>
+                                <Label className="text-sm font-medium text-slate-700">
+                                  Team *
+                                </Label>
+                                <Select
+                                  value={formData.teamId}
+                                  onValueChange={(value) =>
+                                    handleInputChange("teamId", value)
+                                  }
+                                >
+                                  <SelectTrigger className="mt-2">
+                                    <SelectValue placeholder="Select team" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {teams
+                                      ?.filter(
+                                        (t: any) =>
+                                          !formData.departmentId ||
+                                          t.departmentId?.toString() ===
+                                            formData.departmentId
+                                      )
+                                      ?.map((team: any) => (
+                                        <SelectItem
+                                          key={team.id}
+                                          value={team.id.toString()}
+                                        >
+                                          {team.name}
+                                        </SelectItem>
+                                      ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                          )}
+
+                        {formData.assigneeType !== "team" &&
+                          permissions?.allowedAssigneeTypes?.includes(
+                            "user"
+                          ) && (
+                            <div className="col-span-2">
+                              <Label className="text-sm font-medium text-slate-700">
+                                Assign to User
+                              </Label>
+                              <Select
+                                value={formData.assigneeId}
+                                onValueChange={(value) =>
+                                  handleInputChange("assigneeId", value)
+                                }
+                              >
+                                <SelectTrigger className="mt-2">
+                                  <SelectValue placeholder="Select user" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="unassigned">
                                     <div className="flex items-center gap-2">
                                       <User className="h-4 w-4" />
-                                      {user.firstName && user.lastName 
-                                        ? `${user.firstName} ${user.lastName}` 
-                                        : user.email}
+                                      Unassigned
                                     </div>
                                   </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        )}
-
-                        {formData.assigneeType === "team" && (
-                          <div className="col-span-2">
-                            <Label className="text-sm font-medium text-slate-700">Assign to Team</Label>
-                            <Select value={formData.assigneeTeamId} onValueChange={(value) => handleInputChange("assigneeTeamId", value)}>
-                              <SelectTrigger className="mt-2">
-                                <SelectValue placeholder="Select team" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="unassigned">
-                                  <div className="flex items-center gap-2">
-                                    <Users className="h-4 w-4" />
-                                    Unassigned
-                                  </div>
-                                </SelectItem>
-                                {teams?.map((team: any) => (
-                                  <SelectItem key={team.id} value={team.id.toString()}>
-                                    <div className="flex items-center gap-2">
-                                      <Users className="h-4 w-4" />
-                                      {team.name}
-                                    </div>
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        )}
-
-
+                                  {assignableUsers?.map((user: any) => (
+                                    <SelectItem key={user.id} value={user.id}>
+                                      <div className="flex items-center gap-2">
+                                        <User className="h-4 w-4" />
+                                        {user.firstName && user.lastName
+                                          ? `${user.firstName} ${user.lastName}`
+                                          : user.email}
+                                      </div>
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
                       </CardContent>
                     </Card>
 
@@ -810,7 +964,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                           placeholder="Add any additional notes, special instructions, or important details..."
                           rows={3}
                           value={formData.notes}
-                          onChange={(e) => handleInputChange("notes", e.target.value)}
+                          onChange={(e) =>
+                            handleInputChange("notes", e.target.value)
+                          }
                           className="resize-none"
                         />
                       </CardContent>
@@ -838,14 +994,19 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                             className="resize-none"
                           />
                           <div className="flex justify-end">
-                            <Button 
+                            <Button
                               onClick={handleAddComment}
-                              disabled={!commentText.trim() || addCommentMutation.isPending}
+                              disabled={
+                                !commentText.trim() ||
+                                addCommentMutation.isPending
+                              }
                               size="sm"
                               className="bg-blue-600 hover:bg-blue-700"
                             >
                               <Send className="h-4 w-4 mr-2" />
-                              {addCommentMutation.isPending ? "Adding..." : "Add Comment"}
+                              {addCommentMutation.isPending
+                                ? "Adding..."
+                                : "Add Comment"}
                             </Button>
                           </div>
                         </CardContent>
@@ -853,9 +1014,12 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
 
                       {/* Comments List */}
                       <div className="space-y-3">
-                        {taskComments?.length > 0 ? (
-                          taskComments.map((comment: any) => (
-                            <Card key={comment.id} className="border-l-4 border-l-blue-200">
+                        {taskComments?.length ? (
+                          taskComments?.map((comment: any) => (
+                            <Card
+                              key={comment.id}
+                              className="border-l-4 border-l-blue-200"
+                            >
                               <CardContent className="pt-4">
                                 <div className="flex items-start gap-3">
                                   <div className="p-2 bg-blue-100 rounded-full">
@@ -863,12 +1027,18 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                   </div>
                                   <div className="flex-1">
                                     <div className="flex items-center gap-2 mb-1">
-                                      <span className="font-medium text-slate-900">{comment.userName}</span>
+                                      <span className="font-medium text-slate-900">
+                                        {comment.userName}
+                                      </span>
                                       <span className="text-xs text-slate-500">
-                                        {new Date(comment.createdAt).toLocaleDateString()}
+                                        {new Date(
+                                          comment.createdAt
+                                        ).toLocaleDateString()}
                                       </span>
                                     </div>
-                                    <p className="text-slate-700">{comment.content}</p>
+                                    <p className="text-slate-700">
+                                      {comment.content}
+                                    </p>
                                   </div>
                                 </div>
                               </CardContent>
@@ -885,7 +1055,6 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                   </TabsContent>
                 )}
 
-          
                 <TabsContent value="attachments" className="mt-0 p-6">
                   <div className="space-y-4">
                     {/* Upload Attachment */}
@@ -923,10 +1092,15 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
 
                     {/* Attachments List */}
                     <div className="space-y-3">
-                      <h3 className="font-medium text-slate-900">Attached Files</h3>
-                      {taskAttachments?.length > 0 ? (
-                        taskAttachments.map((attachment: any) => (
-                          <Card key={attachment.id} className="border-l-4 border-l-purple-200">
+                      <h3 className="font-medium text-slate-900">
+                        Attached Files
+                      </h3>
+                      {taskAttachments?.length ? (
+                        taskAttachments?.map((attachment: any) => (
+                          <Card
+                            key={attachment.id}
+                            className="border-l-4 border-l-purple-200"
+                          >
                             <CardContent className="pt-4">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-3">
@@ -938,9 +1112,11 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                       {attachment.fileName}
                                     </p>
                                     <p className="text-xs text-slate-500">
-                                      {(attachment.fileSize / 1024).toFixed(2)} KB • 
-                                      Uploaded by {attachment.userName} on{' '}
-                                      {new Date(attachment.createdAt).toLocaleDateString()}
+                                      {(attachment.fileSize / 1024).toFixed(2)}{" "}
+                                      KB • Uploaded by {attachment.userName} on{" "}
+                                      {new Date(
+                                        attachment.createdAt
+                                      ).toLocaleDateString()}
                                     </p>
                                   </div>
                                 </div>
@@ -948,15 +1124,23 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => window.open(attachment.fileUrl, '_blank')}
+                                    onClick={() =>
+                                      window.open(attachment.fileUrl, "_blank")
+                                    }
                                   >
                                     <Download className="h-4 w-4" />
                                   </Button>
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => deleteAttachmentMutation.mutate(attachment.id)}
-                                    disabled={deleteAttachmentMutation.isPending}
+                                    onClick={() =>
+                                      deleteAttachmentMutation.mutate(
+                                        attachment.id
+                                      )
+                                    }
+                                    disabled={
+                                      deleteAttachmentMutation.isPending
+                                    }
                                   >
                                     <Trash2 className="h-4 w-4 text-red-500" />
                                   </Button>
@@ -968,13 +1152,14 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                       ) : (
                         <div className="text-center py-8 text-slate-500">
                           <Paperclip className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                          <p>No attachments yet. Upload a file to get started!</p>
+                          <p>
+                            No attachments yet. Upload a file to get started!
+                          </p>
                         </div>
                       )}
                     </div>
                   </div>
                 </TabsContent>
-                
               </div>
             </Tabs>
           </div>
@@ -985,15 +1170,20 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
               <Button type="button" variant="outline" onClick={onClose}>
                 Cancel
               </Button>
-              <Button 
+              <Button
                 onClick={handleSubmit}
-                disabled={createTaskMutation.isPending || updateTaskMutation.isPending}
+                disabled={
+                  createTaskMutation.isPending || updateTaskMutation.isPending
+                }
                 className="bg-blue-600 hover:bg-blue-700"
               >
-                {createTaskMutation.isPending || updateTaskMutation.isPending 
-                  ? (task ? "Updating..." : "Creating...") 
-                  : (task ? "Update Ticket" : "Create Ticket")
-                }
+                {createTaskMutation.isPending || updateTaskMutation.isPending
+                  ? task
+                    ? "Updating..."
+                    : "Creating..."
+                  : task
+                  ? "Update Ticket"
+                  : "Create Ticket"}
               </Button>
             </DialogFooter>
           </div>

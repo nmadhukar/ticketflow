@@ -63,6 +63,8 @@ export default function Departments() {
 
   const { data: departments = [], isLoading } = useQuery<Department[]>({
     queryKey: ["/api/departments"],
+    refetchInterval: 30000, //
+    refetchOnMount: "always",
   });
 
   const { data: users = [] } = useQuery<User[]>({
@@ -74,7 +76,7 @@ export default function Departments() {
     defaultValues: {
       name: "",
       description: "",
-      managerId: "",
+      managerId: "none",
     },
   });
 
@@ -84,7 +86,12 @@ export default function Departments() {
 
   const createMutation = useMutation({
     mutationFn: async (data: DepartmentFormData) => {
-      await apiRequest("POST", "/api/admin/departments", data);
+      const payload = {
+        ...data,
+        managerId:
+          !data.managerId || data.managerId === "none" ? null : data.managerId,
+      };
+      await apiRequest("POST", "/api/admin/departments", payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
@@ -112,7 +119,12 @@ export default function Departments() {
       id: number;
       data: DepartmentFormData;
     }) => {
-      await apiRequest("PUT", `/api/admin/departments/${id}`, data);
+      const payload = {
+        ...data,
+        managerId:
+          !data.managerId || data.managerId === "none" ? null : data.managerId,
+      };
+      await apiRequest("PUT", `/api/admin/departments/${id}`, payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
@@ -166,7 +178,7 @@ export default function Departments() {
     editForm.reset({
       name: department.name,
       description: department.description || "",
-      managerId: department.managerId || "",
+      managerId: department.managerId || "none",
     });
   };
 
@@ -183,7 +195,7 @@ export default function Departments() {
       title="Department Management"
       subTitle="Organize users into departments"
       action={
-        departments.length ? (
+        departments?.length ? (
           <Button className="gap-2" onClick={() => setIsCreateOpen(true)}>
             <Plus className="w-4 h-4" />
             Add Department

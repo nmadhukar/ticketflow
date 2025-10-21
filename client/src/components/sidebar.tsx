@@ -35,7 +35,6 @@ export function Sidebar({ className }: SidebarProps) {
       return [
         { name: "Dashboard", href: "/", icon: LayoutDashboard },
         { name: "All Tickets", href: "/tasks", icon: FolderOpen },
-        { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
         { name: "Departments", href: "/departments", icon: Building },
         { name: "Knowledge Base", href: "/knowledge-base", icon: BookOpen },
       ];
@@ -45,8 +44,8 @@ export function Sidebar({ className }: SidebarProps) {
         { name: "Dashboard", href: "/", icon: LayoutDashboard },
         { name: "All Tickets", href: "/tasks", icon: FolderOpen },
         { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
-        { name: "Departments", href: "/departments", icon: Building },
         { name: "Teams", href: "/teams", icon: Users },
+        { name: "Departments", href: "/departments", icon: Building },
       ];
     }
     if (role === "agent") {
@@ -60,15 +59,13 @@ export function Sidebar({ className }: SidebarProps) {
     if (role === "user") {
       return [
         { name: "Dashboard", href: "/", icon: LayoutDashboard },
+        { name: "All Tickets", href: "/tasks", icon: FolderOpen },
         { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
         { name: "Teams", href: "/teams", icon: Users },
       ];
     }
 
-    return [
-      { name: "Dashboard", href: "/", icon: LayoutDashboard },
-      { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
-    ];
+    return [{ name: "Dashboard", href: "/", icon: LayoutDashboard }];
   })();
 
   const adminGroups = [
@@ -142,7 +139,7 @@ export function Sidebar({ className }: SidebarProps) {
   return (
     <div
       className={cn(
-        "flex h-full w-72 flex-col border-r bg-background",
+        "flex h-full w-64 flex-col border-r bg-background",
         className
       )}
     >

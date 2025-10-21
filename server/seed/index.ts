@@ -1,3 +1,4 @@
-export { seedDefaultUsers } from "./seedDefaultUsers";
+export { seedUsers } from "./seedUsers";
 export { seedDepartments } from "./seedDepartments";
-export { seedDefaultTeams } from "./seedDefaultTeams";
+export { seedTeams } from "./seedTeams";
+export { seedTickets } from "./seedTickets";

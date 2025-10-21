@@ -7,11 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -69,11 +65,15 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
   // Add comment mutation
   const addComment = useMutation({
     mutationFn: async (content: string) => {
-      const res = await apiRequest("POST", `/api/tasks/${ticketId}/comments`, { content });
+      const res = await apiRequest("POST", `/api/tasks/${ticketId}/comments`, {
+        content,
+      });
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/tasks/${ticketId}/comments`] });
+      queryClient.invalidateQueries({
+        queryKey: [`/api/tasks/${ticketId}/comments`],
+      });
       setComment("");
       toast({
         title: "Comment added",
@@ -92,13 +92,19 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
   // Update AI response effectiveness
   const updateAIEffectiveness = useMutation({
     mutationFn: async (wasHelpful: boolean) => {
-      const res = await apiRequest("POST", `/api/tasks/${ticketId}/auto-response/feedback`, { wasHelpful });
+      const res = await apiRequest(
+        "POST",
+        `/api/tasks/${ticketId}/auto-response/feedback`,
+        { wasHelpful }
+      );
       return res.json();
     },
     onSuccess: (_, wasHelpful) => {
       toast({
         title: "Feedback received",
-        description: `Thank you for letting us know the AI response was ${wasHelpful ? 'helpful' : 'not helpful'}.`,
+        description: `Thank you for letting us know the AI response was ${
+          wasHelpful ? "helpful" : "not helpful"
+        }.`,
       });
     },
   });
@@ -106,12 +112,19 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
   // Apply AI response
   const applyAIResponse = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/tasks/${ticketId}/auto-response/apply`);
+      const res = await apiRequest(
+        "POST",
+        `/api/tasks/${ticketId}/auto-response/apply`
+      );
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/tasks/${ticketId}/comments`] });
-      queryClient.invalidateQueries({ queryKey: [`/api/tasks/${ticketId}/auto-response`] });
+      queryClient.invalidateQueries({
+        queryKey: [`/api/tasks/${ticketId}/comments`],
+      });
+      queryClient.invalidateQueries({
+        queryKey: [`/api/tasks/${ticketId}/auto-response`],
+      });
       toast({
         title: "AI response applied",
         description: "The AI-generated response has been added to the ticket.",
@@ -129,7 +142,7 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
   const handleSubmitComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!comment.trim()) return;
-    
+
     setIsSubmitting(true);
     await addComment.mutateAsync(comment);
     setIsSubmitting(false);
@@ -168,21 +181,31 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
   };
 
   const getConfidenceLevel = (score: number) => {
-    if (score >= 0.8) return { label: "High", color: "text-green-600 dark:text-green-400" };
-    if (score >= 0.6) return { label: "Medium", color: "text-yellow-600 dark:text-yellow-400" };
+    if (score >= 0.8)
+      return { label: "High", color: "text-green-600 dark:text-green-400" };
+    if (score >= 0.6)
+      return { label: "Medium", color: "text-yellow-600 dark:text-yellow-400" };
     return { label: "Low", color: "text-red-600 dark:text-red-400" };
   };
 
   if (ticketLoading) {
-    return <div className="flex items-center justify-center p-8">Loading ticket details...</div>;
+    return (
+      <div className="flex items-center justify-center p-8">
+        Loading ticket details...
+      </div>
+    );
   }
 
   if (!ticket) {
-    return <div className="flex items-center justify-center p-8">Ticket not found</div>;
+    return (
+      <div className="flex items-center justify-center p-8">
+        Ticket not found
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-6">
+    <>
       {/* Ticket Header */}
       <Card>
         <CardHeader>
@@ -215,11 +238,15 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
             </div>
             <div>
               <p className="text-muted-foreground">Created on</p>
-              <p className="font-medium">{format(new Date(ticket.createdAt), "MMM d, yyyy h:mm a")}</p>
+              <p className="font-medium">
+                {format(new Date(ticket.createdAt), "MMM d, yyyy h:mm a")}
+              </p>
             </div>
             <div>
               <p className="text-muted-foreground">Assigned to</p>
-              <p className="font-medium">{ticket.assignedToName || ticket.teamName || "Unassigned"}</p>
+              <p className="font-medium">
+                {ticket.assignedToName || ticket.teamName || "Unassigned"}
+              </p>
             </div>
             <div>
               <p className="text-muted-foreground">Category</p>
@@ -252,11 +279,20 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
                 <div className="flex items-center gap-2">
                   <Sparkles className="h-4 w-4 text-muted-foreground" />
                   <span className="text-sm">Confidence:</span>
-                  <span className={cn("font-medium", getConfidenceLevel(aiResponse.confidenceScore).color)}>
-                    {getConfidenceLevel(aiResponse.confidenceScore).label} ({(aiResponse.confidenceScore * 100).toFixed(0)}%)
+                  <span
+                    className={cn(
+                      "font-medium",
+                      getConfidenceLevel(aiResponse.confidenceScore).color
+                    )}
+                  >
+                    {getConfidenceLevel(aiResponse.confidenceScore).label} (
+                    {(aiResponse.confidenceScore * 100).toFixed(0)}%)
                   </span>
                 </div>
-                <Progress value={aiResponse.confidenceScore * 100} className="w-24" />
+                <Progress
+                  value={aiResponse.confidenceScore * 100}
+                  className="w-24"
+                />
               </div>
             </div>
           </CardHeader>
@@ -265,7 +301,8 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
               <AlertTriangle className="h-4 w-4" />
               <AlertTitle>AI-Generated Content</AlertTitle>
               <AlertDescription>
-                This response was automatically generated by AI with {(aiResponse.confidenceScore * 100).toFixed(0)}% confidence.
+                This response was automatically generated by AI with{" "}
+                {(aiResponse.confidenceScore * 100).toFixed(0)}% confidence.
                 Please review before applying.
               </AlertDescription>
             </Alert>
@@ -273,21 +310,30 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
               <div className="p-4 bg-muted rounded-lg">
                 <p className="whitespace-pre-wrap">{aiResponse.aiResponse}</p>
               </div>
-              {aiResponse.suggestedArticles && aiResponse.suggestedArticles.length > 0 && (
-                <div>
-                  <p className="text-sm font-medium mb-2">Related Knowledge Articles:</p>
-                  <div className="space-y-2">
-                    {aiResponse.suggestedArticles.map((articleId: number) => (
-                      <div key={articleId} className="flex items-center gap-2 text-sm">
-                        <FileText className="h-4 w-4 text-muted-foreground" />
-                        <a href={`/knowledge/${articleId}`} className="text-primary hover:underline">
-                          Knowledge Article #{articleId}
-                        </a>
-                      </div>
-                    ))}
+              {aiResponse.suggestedArticles &&
+                aiResponse.suggestedArticles.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium mb-2">
+                      Related Knowledge Articles:
+                    </p>
+                    <div className="space-y-2">
+                      {aiResponse.suggestedArticles.map((articleId: number) => (
+                        <div
+                          key={articleId}
+                          className="flex items-center gap-2 text-sm"
+                        >
+                          <FileText className="h-4 w-4 text-muted-foreground" />
+                          <a
+                            href={`/knowledge/${articleId}`}
+                            className="text-primary hover:underline"
+                          >
+                            Knowledge Article #{articleId}
+                          </a>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
               <div className="flex items-center justify-between mt-4">
                 <Button
                   onClick={() => applyAIResponse.mutate()}
@@ -318,7 +364,9 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
         <CardContent>
           <div className="space-y-4">
             {commentsLoading ? (
-              <div className="text-center py-4 text-muted-foreground">Loading comments...</div>
+              <div className="text-center py-4 text-muted-foreground">
+                Loading comments...
+              </div>
             ) : comments && comments.length > 0 ? (
               comments.map((comment: any) => (
                 <div key={comment.id} className="flex gap-3">
@@ -334,7 +382,10 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
                         {comment.user?.firstName} {comment.user?.lastName}
                       </span>
                       <span className="text-sm text-muted-foreground">
-                        {format(new Date(comment.createdAt), "MMM d, yyyy h:mm a")}
+                        {format(
+                          new Date(comment.createdAt),
+                          "MMM d, yyyy h:mm a"
+                        )}
                       </span>
                       {comment.isAIGenerated && (
                         <Badge variant="secondary" className="text-xs">
@@ -343,12 +394,16 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
                         </Badge>
                       )}
                     </div>
-                    <p className="text-sm whitespace-pre-wrap">{comment.content}</p>
+                    <p className="text-sm whitespace-pre-wrap">
+                      {comment.content}
+                    </p>
                   </div>
                 </div>
               ))
             ) : (
-              <div className="text-center py-4 text-muted-foreground">No comments yet</div>
+              <div className="text-center py-4 text-muted-foreground">
+                No comments yet
+              </div>
             )}
           </div>
           <Separator className="my-4" />
@@ -384,10 +439,18 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
                 <div key={item.id} className="flex items-start gap-2 text-sm">
                   <div className="w-2 h-2 rounded-full bg-primary mt-1.5" />
                   <div className="flex-1">
-                    <span className="font-medium">{item.user?.firstName} {item.user?.lastName}</span>
-                    <span className="text-muted-foreground"> {item.action}</span>
+                    <span className="font-medium">
+                      {item.user?.firstName} {item.user?.lastName}
+                    </span>
+                    <span className="text-muted-foreground">
+                      {" "}
+                      {item.action}
+                    </span>
                     {item.details && (
-                      <span className="text-muted-foreground"> - {item.details}</span>
+                      <span className="text-muted-foreground">
+                        {" "}
+                        - {item.details}
+                      </span>
                     )}
                     <div className="text-xs text-muted-foreground">
                       {format(new Date(item.createdAt), "MMM d, yyyy h:mm a")}
@@ -399,6 +462,6 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
           </CardContent>
         </Card>
       )}
-    </div>
+    </>
   );
 }

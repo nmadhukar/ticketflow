@@ -223,6 +223,8 @@ export default function TeamDetail() {
       (user: any) => !members?.some((member: any) => member.userId === user.id)
     ) || [];
 
+  const isUserAdminOrManager = ["manager", "admin"].includes(user?.role);
+
   return (
     <MainWrapper
       title="Teams"
@@ -263,15 +265,17 @@ export default function TeamDetail() {
                   </div>
                 </div>
                 <div className="flex flex-col gap-4 items-end justify-between">
-                  {!membersLoading && !!members.length && (
-                    <Button
-                      className="bg-blue-600 hover:bg-blue-700"
-                      onClick={() => setIsAddMemberOpen(true)}
-                    >
-                      <UserPlus className="h-4 w-4 mr-2" />
-                      Add Member
-                    </Button>
-                  )}
+                  {isUserAdminOrManager &&
+                    !membersLoading &&
+                    !!members.length && (
+                      <Button
+                        className="bg-blue-600 hover:bg-blue-700"
+                        onClick={() => setIsAddMemberOpen(true)}
+                      >
+                        <UserPlus className="h-4 w-4 mr-2" />
+                        Add Member
+                      </Button>
+                    )}
                   <Badge variant="outline" className="bg-blue-50 text-blue-700">
                     <Calendar className="h-3 w-3 mr-1" />
                     Created {new Date(team?.createdAt).toLocaleDateString()}

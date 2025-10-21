@@ -1,44 +1,44 @@
 /**
  * TicketFlow API Routes - Complete REST API Implementation
- * 
+ *
  * This module defines all REST API endpoints for the TicketFlow application with:
- * 
+ *
  * Authentication & Authorization:
  * - Multi-strategy authentication (local + Microsoft 365 SSO)
  * - Role-based access control (customer, user, manager, admin)
  * - Session management and security middleware
- * 
+ *
  * Core Ticket Management:
  * - CRUD operations for tickets with full audit trails
  * - Comment and attachment handling
  * - Status tracking and assignment management
  * - Real-time updates via WebSocket integration
- * 
+ *
  * AI-Powered Features:
  * - Automatic ticket analysis and classification
  * - Intelligent response generation with confidence scoring
  * - Knowledge base learning from resolved tickets
  * - FAQ cache management and semantic search
- * 
+ *
  * Team Collaboration:
  * - Team management and member assignment
  * - Department organization and workflows
  * - User invitation and approval systems
  * - Microsoft Teams integration for notifications
- * 
+ *
  * Administrative Features:
  * - Company settings and branding management
  * - Email template and notification configuration
  * - API key management and security
  * - User guide and documentation systems
  * - Policy document management for AI training
- * 
+ *
  * Security & Monitoring:
  * - Input validation using Zod schemas
  * - Rate limiting and abuse protection
  * - Audit logging and activity tracking
  * - Error handling and recovery procedures
- * 
+ *
  * @module routes
  */
 
@@ -50,9 +50,9 @@ import { setupAuth, isAuthenticated } from "./auth";
 import { setupMicrosoftAuth, isMicrosoftUser } from "./microsoftAuth";
 import { teamsIntegration } from "./microsoftTeams";
 import { sendTestEmail } from "./ses";
-import { 
-  insertTaskSchema, 
-  insertTeamSchema, 
+import {
+  insertTaskSchema,
+  insertTeamSchema,
   insertTaskCommentSchema,
   insertTaskAttachmentSchema,
   insertCompanySettingsSchema,
@@ -63,15 +63,35 @@ import {
   escalationRules,
   aiFeedback,
   learningQueue,
-  tasks
+  tasks,
 } from "@shared/schema";
-import { processTicketWithAI, analyzeTicket, generateAutoResponse } from "./aiTicketAnalysis";
-import { processKnowledgeLearning, intelligentKnowledgeSearch, scheduleKnowledgeLearning } from "./knowledgeBaseLearning";
+import {
+  processTicketWithAI,
+  analyzeTicket,
+  generateAutoResponse,
+} from "./aiTicketAnalysis";
+import {
+  processKnowledgeLearning,
+  intelligentKnowledgeSearch,
+  scheduleKnowledgeLearning,
+} from "./knowledgeBaseLearning";
 import { z } from "zod";
-import { createHash } from 'crypto';
-import multer from 'multer';
+import { createHash } from "crypto";
+import multer from "multer";
 import { db } from "./db";
-import { eq, desc, and, or, ilike, count, avg, sum, sql } from "drizzle-orm";
+import {
+  eq,
+  desc,
+  and,
+  or,
+  ilike,
+  count,
+  avg,
+  sum,
+  sql,
+  inArray,
+} from "drizzle-orm";
+import { teams, departments, users } from "@shared/schema";
 
 // Configure multer for file uploads
 const upload = multer({
@@ -83,7 +103,7 @@ const upload = multer({
 
 /**
  * Registers all application routes and returns HTTP server instance
- * 
+ *
  * @param app - Express application instance
  * @returns HTTP server with WebSocket support
  */
@@ -95,7 +115,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Auth routes are now handled in auth.ts
 
   // Users route
-  app.get('/api/users', isAuthenticated, async (req, res) => {
+  app.get("/api/users", isAuthenticated, async (req, res) => {
     try {
       const users = await storage.getAllUsers();
       res.json(users);
@@ -115,30 +135,142 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      const { status, category, assigneeId, search, limit, offset } = req.query;
-      
-      // If user is a customer, only show their own tickets
-      let filters: any = {
+
+      const {
         status,
         category,
         assigneeId,
+        teamId,
+        departmentId,
+        mine,
         search,
-        limit: limit ? parseInt(limit) : undefined,
-        offset: offset ? parseInt(offset) : undefined,
+        limit,
+        offset,
+      } = req.query as any;
+
+      // Base filters (used per-branch); pagination applied after union when needed
+      const baseFilters: any = {
+        status,
+        category,
+        search,
       };
-      
-      if (user?.role === 'customer') {
-        filters.createdBy = userId;
-        delete filters.assigneeId; // Customers can't filter by assignee
-      } else if (user?.role !== 'admin' && !assigneeId) {
-        // For non-admin users (not customers), show tasks they created or are assigned to
-        filters.userIdFilter = userId;
+
+      if (user?.role === "customer") {
+        const tasks = await storage.getTasks({
+          ...baseFilters,
+          createdBy: userId,
+        });
+        return res.json(tasks);
       }
-      // Admins see all tasks by default
-      
-      const tasks = await storage.getTasks(filters);
-      res.json(tasks);
+
+      if (user?.role === "admin") {
+        // Admin can optionally filter to their own
+        const tasks = await storage.getTasks({
+          ...baseFilters,
+          assigneeId: mine === "true" ? userId : assigneeId || undefined,
+        });
+        return res.json(tasks);
+      }
+
+      // Manager / Agent / User: union of direct assignments and team-assigned tickets
+      let allowedTeamIds: number[] = [];
+      if (user?.role === "manager") {
+        // Teams in departments managed by this manager
+        const managedTeams = await db
+          .select({ id: teams.id })
+          .from(teams)
+          .innerJoin(departments, eq(teams.departmentId, departments.id))
+          .where(eq(departments.managerId as any, userId) as any);
+        allowedTeamIds = managedTeams.map((t) => t.id);
+
+        if (teamId) {
+          const parsedTeamId = parseInt(teamId);
+          if (!allowedTeamIds.includes(parsedTeamId)) {
+            return res.status(403).json({
+              message: "Forbidden: not a manager of the team's department",
+            });
+          }
+          allowedTeamIds = [parsedTeamId];
+        } else if (departmentId) {
+          const parsedDeptId = parseInt(departmentId);
+          const managedDept = await db
+            .select({ id: departments.id })
+            .from(departments)
+            .where(
+              and(
+                eq(departments.id, parsedDeptId),
+                eq(departments.managerId as any, userId) as any
+              ) as any
+            );
+          if (!managedDept.length) {
+            return res.status(403).json({
+              message: "Forbidden: not a manager of the requested department",
+            });
+          }
+          const deptTeams = await db
+            .select({ id: teams.id })
+            .from(teams)
+            .where(eq(teams.departmentId, parsedDeptId));
+          allowedTeamIds = deptTeams.map((t) => t.id);
+        }
+      } else {
+        // agent/user scope from membership
+        const myTeams = await storage.getUserTeams(userId);
+        const myTeamIds = myTeams.map((t) => t.id);
+        if (teamId) {
+          const parsedTeamId = parseInt(teamId);
+          if (!myTeamIds.includes(parsedTeamId)) {
+            return res.status(403).json({
+              message: "Forbidden: not a member of the requested team",
+            });
+          }
+          allowedTeamIds = [parsedTeamId];
+        } else if (departmentId) {
+          const deptTeams = await db
+            .select({ id: teams.id })
+            .from(teams)
+            .where(eq(teams.departmentId, parseInt(departmentId)));
+          const deptTeamIds = deptTeams.map((t) => t.id);
+          allowedTeamIds = deptTeamIds.filter((id) => myTeamIds.includes(id));
+        } else {
+          allowedTeamIds = myTeamIds;
+        }
+      }
+
+      const includeMine = mine !== "false" && !assigneeId; // include my direct assignments by default
+
+      // Fetch union parts without pagination; paginate after merge
+      const promises: Promise<any[]>[] = [];
+      if (includeMine) {
+        promises.push(storage.getTasks({ ...baseFilters, assigneeId: userId }));
+      }
+      if (assigneeId && user?.role !== "customer") {
+        promises.push(storage.getTasks({ ...baseFilters, assigneeId }));
+      }
+      if (allowedTeamIds.length > 0) {
+        promises.push(
+          storage.getTasks({ ...baseFilters, assigneeTeamIds: allowedTeamIds })
+        );
+      }
+      const parts = await Promise.all(promises);
+      const mergedMap = new Map<number, any>();
+      for (const list of parts) {
+        for (const t of list) {
+          mergedMap.set(t.id, t);
+        }
+      }
+      // Sort by createdAt desc and paginate
+      const merged = Array.from(mergedMap.values()).sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      const lim = limit ? parseInt(limit) : undefined;
+      const off = offset ? parseInt(offset) : undefined;
+      const paged =
+        typeof off === "number" || typeof lim === "number"
+          ? merged.slice(off || 0, (off || 0) + (lim || merged.length))
+          : merged;
+      return res.json(paged);
     } catch (error) {
       console.error("Error fetching tasks:", error);
       res.status(500).json({ message: "Failed to fetch tasks" });
@@ -164,26 +296,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Tickets in user's team queues
+  app.get("/api/tasks/my-groups", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const { status, category, search, limit, offset } = req.query as any;
+      const myTeams = await storage.getUserTeams(userId);
+      const myTeamIds = myTeams.map((t) => t.id);
+      const tasks = await storage.getTasks({
+        status,
+        category,
+        search,
+        assigneeTeamIds: myTeamIds,
+        limit: limit ? parseInt(limit) : undefined,
+        offset: offset ? parseInt(offset) : undefined,
+      });
+      res.json(tasks);
+    } catch (error) {
+      console.error("Error fetching my-group tasks:", error);
+      res.status(500).json({ message: "Failed to fetch tasks" });
+    }
+  });
+
   app.get("/api/tasks/:id", isAuthenticated, async (req: any, res) => {
     try {
       const taskId = parseInt(req.params.id);
       if (isNaN(taskId)) {
         return res.status(400).json({ message: "Invalid task ID" });
       }
-      
+
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
       const task = await storage.getTask(taskId);
-      
+
       if (!task) {
         return res.status(404).json({ message: "Task not found" });
       }
-      
+
       // If user is a customer, they can only view their own tickets
-      if (user?.role === 'customer' && task.createdBy !== userId) {
+      if (user?.role === "customer" && task.createdBy !== userId) {
         return res.status(403).json({ message: "Access denied" });
       }
-      
+
       res.json(task);
     } catch (error) {
       console.error("Error fetching task:", error);
@@ -191,20 +345,283 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Ticket meta endpoints for create/edit modals
+  app.get("/api/tickets/meta", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+
+      if (!user) return res.status(401).json({ message: "Unauthorized" });
+
+      // Static enumerations
+      const categories = [
+        "bug",
+        "feature",
+        "support",
+        "enhancement",
+        "incident",
+        "request",
+      ];
+      const priorities = ["low", "medium", "high", "urgent"];
+      const statuses = ["open", "in_progress", "resolved", "closed", "on_hold"];
+
+      let departmentsRows: any[] = [];
+      let teamsRows: any[] = [];
+      let assignableUsers: any[] = [];
+      let myTeams: any[] = [];
+      const basePermissions: any = {
+        canAssign: false,
+        canChangeStatus: false,
+        allowedAssigneeTypes: [] as string[],
+      };
+
+      if (user.role === "admin") {
+        departmentsRows = await db
+          .select({ id: departments.id, name: departments.name })
+          .from(departments)
+          .where(eq(departments.isActive, true));
+        teamsRows = await db
+          .select({
+            id: teams.id,
+            name: teams.name,
+            departmentId: teams.departmentId,
+          })
+          .from(teams);
+        assignableUsers = await db
+          .select({
+            id: users.id,
+            firstName: users.firstName,
+            lastName: users.lastName,
+            email: users.email,
+            role: users.role,
+          })
+          .from(users)
+          .where(
+            or(
+              eq(users.role, "admin"),
+              or(eq(users.role, "manager"), eq(users.role, "user"))
+            )
+          );
+        basePermissions.canAssign = true;
+        basePermissions.canChangeStatus = true;
+        basePermissions.allowedAssigneeTypes = ["user", "team"];
+      } else if (user.role === "manager") {
+        // Departments managed by this manager
+        departmentsRows = await db
+          .select({ id: departments.id, name: departments.name })
+          .from(departments)
+          .where(
+            and(
+              eq(departments.isActive, true),
+              eq(departments.managerId as any, userId) as any
+            )
+          );
+        teamsRows = await db
+          .select({
+            id: teams.id,
+            name: teams.name,
+            departmentId: teams.departmentId,
+          })
+          .from(teams)
+          .innerJoin(departments, eq(teams.departmentId, departments.id))
+          .where(eq(departments.managerId as any, userId) as any);
+        assignableUsers = await db
+          .select({
+            id: users.id,
+            firstName: users.firstName,
+            lastName: users.lastName,
+            email: users.email,
+            role: users.role,
+          })
+          .from(users)
+          .where(or(eq(users.role, "manager"), eq(users.role, "user")));
+        basePermissions.canAssign = true;
+        basePermissions.canChangeStatus = true;
+        basePermissions.allowedAssigneeTypes = ["user", "team"];
+      } else if (user.role === "user" || user.role === "agent") {
+        // Agents/users: no assignment lists; but provide my teams for convenience
+        const mine = await storage.getUserTeams(userId);
+        myTeams = mine.map((t) => ({
+          id: t.id,
+          name: (t as any).name,
+          departmentId: (t as any).departmentId,
+        }));
+        basePermissions.canAssign = false;
+        basePermissions.canChangeStatus = "directlyAssignedOnly";
+        basePermissions.allowedAssigneeTypes = [];
+      } else if (user.role === "customer") {
+        // Customers: can select department/team or assign to a user
+        departmentsRows = await db
+          .select({ id: departments.id, name: departments.name })
+          .from(departments)
+          .where(eq(departments.isActive, true));
+        teamsRows = await db
+          .select({
+            id: teams.id,
+            name: teams.name,
+            departmentId: teams.departmentId,
+          })
+          .from(teams);
+        // Provide assignable users (exclude customers)
+        assignableUsers = await db
+          .select({
+            id: users.id,
+            firstName: users.firstName,
+            lastName: users.lastName,
+            email: users.email,
+            role: users.role,
+          })
+          .from(users)
+          .where(
+            or(
+              eq(users.role, "manager"),
+              or(eq(users.role, "agent"), eq(users.role, "user"))
+            )
+          );
+        basePermissions.canAssign = true;
+        basePermissions.canChangeStatus = false;
+        basePermissions.allowedAssigneeTypes = ["user", "team"];
+      }
+
+      return res.json({
+        categories,
+        priorities,
+        statuses,
+        departments: departmentsRows,
+        teams: teamsRows,
+        assignableUsers,
+        myTeams,
+        permissions: basePermissions,
+      });
+    } catch (error) {
+      console.error("Error fetching ticket meta:", error);
+      res.status(500).json({ message: "Failed to fetch ticket meta" });
+    }
+  });
+
+  app.get("/api/tickets/:id/meta", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      const taskId = parseInt(req.params.id);
+      if (!user || isNaN(taskId))
+        return res.status(400).json({ message: "Bad request" });
+
+      const task = await storage.getTask(taskId);
+      if (!task) return res.status(404).json({ message: "Task not found" });
+
+      // Reuse meta data
+      const baseMetaRes = await fetch(
+        `${req.protocol}://${req.get("host")}/api/tickets/meta`,
+        {
+          headers: { cookie: req.headers.cookie as string },
+        } as any
+      );
+      let baseMeta: any = {};
+      try {
+        baseMeta = await baseMetaRes.json();
+      } catch {}
+
+      // Permissions for this ticket
+      let canChangeStatus = false;
+      let canAssign = false;
+      let allowedAssigneeTypes: string[] = [];
+
+      if (user.role === "admin") {
+        canChangeStatus = true;
+        canAssign = true;
+        allowedAssigneeTypes = ["user", "team"];
+      } else if (user.role === "manager") {
+        // Only within managed departments (if team-assigned)
+        canChangeStatus = true;
+        canAssign = true;
+        allowedAssigneeTypes = ["user", "team"];
+      } else if (user.role === "user" || user.role === "agent") {
+        canChangeStatus =
+          task.assigneeType === "user" && task.assigneeId === userId;
+        canAssign = false;
+        allowedAssigneeTypes = [];
+      } else if (user.role === "customer") {
+        canChangeStatus = false;
+        canAssign = false;
+        allowedAssigneeTypes = ["team"]; // only on create
+      }
+
+      const permissions = {
+        ...baseMeta.permissions,
+        canAssign,
+        canChangeStatus,
+        allowedAssigneeTypes,
+      };
+
+      return res.json({
+        ...baseMeta,
+        taskSummary: {
+          id: task.id,
+          status: task.status,
+          assigneeType: task.assigneeType,
+          assigneeId: task.assigneeId,
+          assigneeTeamId: task.assigneeTeamId,
+        },
+        permissions,
+      });
+    } catch (error) {
+      console.error("Error fetching ticket meta (by id):", error);
+      res.status(500).json({ message: "Failed to fetch ticket meta" });
+    }
+  });
+
   app.post("/api/tasks", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
+      const isCustomer = (await storage.getUser(userId))?.role === "customer";
+
+      // Enforce routing for customers: require departmentId and teamId
+      if (isCustomer) {
+        const { departmentId, teamId } = req.body || {};
+        const parsedDeptId = parseInt(departmentId);
+        const parsedTeamId = parseInt(teamId);
+        if (!parsedDeptId || !parsedTeamId) {
+          return res.status(400).json({
+            message: "departmentId and teamId are required for customers",
+          });
+        }
+        const dept = await storage.getDepartmentById(parsedDeptId);
+        if (!dept || dept.isActive === false) {
+          return res
+            .status(400)
+            .json({ message: "Invalid or inactive department" });
+        }
+        const team = await storage.getTeam(parsedTeamId);
+        if (!team) {
+          return res.status(400).json({ message: "Invalid team" });
+        }
+        // Optional: if team has departmentId, validate it matches
+        if (
+          (team as any).departmentId &&
+          (team as any).departmentId !== parsedDeptId
+        ) {
+          return res.status(400).json({
+            message: "Team does not belong to the selected department",
+          });
+        }
+        // Force team routing
+        req.body.assigneeType = "team";
+        req.body.assigneeTeamId = parsedTeamId;
+        req.body.assigneeId = null;
+      }
+
       const taskData = insertTaskSchema.parse({
         ...req.body,
         createdBy: userId,
       });
       const task = await storage.createTask(taskData);
-      
+
       // Run AI analysis for auto-response
       try {
         const { aiAutoResponseService } = await import("./aiAutoResponse");
         const analysis = await aiAutoResponseService.analyzeTicket(task);
-        
+
         // Save complexity score
         await aiAutoResponseService.saveComplexityScore(
           task.id,
@@ -212,7 +629,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           analysis.factors,
           `Complexity: ${analysis.complexity}/100. Should escalate: ${analysis.shouldEscalate}`
         );
-        
+
         // If confidence is high enough, save and apply auto-response
         if (analysis.autoResponse && analysis.confidence >= 0.7) {
           await aiAutoResponseService.saveAutoResponse(
@@ -221,35 +638,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
             analysis.confidence,
             true // Applied automatically
           );
-          
+
           // Add the auto-response as a comment
-          await storage.createTaskComment({
+          // If you have a comment insert helper in storage, replace with it later.
+          await db.insert(taskComments).values({
             taskId: task.id,
-            userId: 'system', // System-generated comment
-            content: `**AI Auto-Response** (Confidence: ${(analysis.confidence * 100).toFixed(0)}%):\n\n${analysis.autoResponse}`,
-          });
+            userId: userId,
+            content: `AI Auto-Response (confidence ${(
+              analysis.confidence * 100
+            ).toFixed(0)}%): ${analysis.autoResponse}`,
+          } as any);
         }
-        
+
         // If should escalate, update assignment based on complexity
         if (analysis.shouldEscalate && analysis.complexity > 70) {
           // TODO: Implement escalation rules
-          console.log(`Ticket ${task.ticketNumber} should be escalated (complexity: ${analysis.complexity})`);
+          console.log(
+            `Ticket ${task.ticketNumber} should be escalated (complexity: ${analysis.complexity})`
+          );
         }
       } catch (error) {
         console.error("Error in AI analysis:", error);
         // Continue without AI features if there's an error
       }
-      
+
       // Send Teams notification for new task
       try {
         const user = await storage.getUser(userId);
         const allUsers = await storage.getAllUsers();
         const notificationPromises = allUsers.map(async (notifyUser) => {
-          const settings = await storage.getTeamsIntegrationSettings(notifyUser.id);
-          if (settings?.enabled && settings.notificationTypes?.includes('ticket_created')) {
-            const actionUrl = `${req.protocol}://${req.get('host')}/my-tasks`;
-            const message = `New ticket created by ${user?.email || 'a user'}`;
-            
+          const settings = await storage.getTeamsIntegrationSettings(
+            notifyUser.id
+          );
+          if (
+            settings?.enabled &&
+            settings.notificationTypes?.includes("ticket_created")
+          ) {
+            const actionUrl = `${req.protocol}://${req.get("host")}/my-tasks`;
+            const message = `New ticket created by ${user?.email || "a user"}`;
+
             if (settings.webhookUrl) {
               await teamsIntegration.sendWebhookNotification(
                 settings.webhookUrl,
@@ -264,11 +691,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error) {
         console.error("Error sending Teams notifications:", error);
       }
-      
+
       res.status(201).json(task);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid task data", errors: error.errors });
+        return res
+          .status(400)
+          .json({ message: "Invalid task data", errors: error.errors });
       }
       console.error("Error creating task:", error);
       res.status(500).json({ message: "Failed to create task" });
@@ -280,48 +709,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const taskId = parseInt(req.params.id);
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
+
       // Get the task to check ownership
       const task = await storage.getTask(taskId);
       if (!task) {
         return res.status(404).json({ message: "Task not found" });
       }
-      
+
       // Customers can only update their own tickets
-      if (user?.role === 'customer' && task.createdBy !== userId) {
+      if (user?.role === "customer" && task.createdBy !== userId) {
         return res.status(403).json({ message: "Access denied" });
       }
-      
+
       const updates = insertTaskSchema.partial().parse(req.body);
       const updatedTask = await storage.updateTask(taskId, updates, userId);
-      
+
       // If task was resolved, trigger knowledge base learning
-      if (updates.status === 'resolved' && task.status !== 'resolved') {
+      if (updates.status === "resolved" && task.status !== "resolved") {
         try {
           const { knowledgeBaseService } = await import("./knowledgeBase");
           await knowledgeBaseService.learnFromResolvedTicket(taskId);
-          console.log(`Knowledge base learning triggered for resolved ticket ${updatedTask.ticketNumber}`);
+          console.log(
+            `Knowledge base learning triggered for resolved ticket ${updatedTask.ticketNumber}`
+          );
         } catch (error) {
           console.error("Error in knowledge base learning:", error);
         }
       }
-      
+
       // Send Teams notification for task update
       try {
         const user = await storage.getUser(userId);
         const allUsers = await storage.getAllUsers();
         const notificationPromises = allUsers.map(async (notifyUser) => {
-          const settings = await storage.getTeamsIntegrationSettings(notifyUser.id);
-          if (settings?.enabled && 
-              (settings.notificationTypes?.includes('ticket_updated') ||
-               (updates.assigneeId && settings.notificationTypes?.includes('ticket_assigned')))) {
-            const actionUrl = `${req.protocol}://${req.get('host')}/my-tasks`;
-            let message = `Ticket updated by ${user?.email || 'a user'}`;
-            
+          const settings = await storage.getTeamsIntegrationSettings(
+            notifyUser.id
+          );
+          if (
+            settings?.enabled &&
+            (settings.notificationTypes?.includes("ticket_updated") ||
+              (updates.assigneeId &&
+                settings.notificationTypes?.includes("ticket_assigned")))
+          ) {
+            const actionUrl = `${req.protocol}://${req.get("host")}/my-tasks`;
+            let message = `Ticket updated by ${user?.email || "a user"}`;
+
             if (updates.assigneeId && updates.assigneeId === notifyUser.id) {
-              message = `Ticket assigned to you by ${user?.email || 'a user'}`;
+              message = `Ticket assigned to you by ${user?.email || "a user"}`;
             }
-            
+
             if (settings.webhookUrl) {
               await teamsIntegration.sendWebhookNotification(
                 settings.webhookUrl,
@@ -336,11 +772,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error) {
         console.error("Error sending Teams notifications:", error);
       }
-      
+
       res.json(updatedTask);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid update data", errors: error.errors });
+        return res
+          .status(400)
+          .json({ message: "Invalid update data", errors: error.errors });
       }
       console.error("Error updating task:", error);
       res.status(500).json({ message: "Failed to update task" });
@@ -352,12 +790,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const taskId = parseInt(req.params.id);
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
+
       // Customers cannot delete tasks
-      if (user?.role === 'customer') {
-        return res.status(403).json({ message: "Customers cannot delete tickets" });
+      if (user?.role === "customer") {
+        return res
+          .status(403)
+          .json({ message: "Customers cannot delete tickets" });
       }
-      
+
       await storage.deleteTask(taskId);
       res.status(204).send();
     } catch (error) {
@@ -372,15 +812,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const taskId = parseInt(req.params.id);
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
+
       // Check if customer has access to this task
-      if (user?.role === 'customer') {
+      if (user?.role === "customer") {
         const task = await storage.getTask(taskId);
         if (!task || task.createdBy !== userId) {
           return res.status(403).json({ message: "Access denied" });
         }
       }
-      
+
       const comments = await storage.getTaskComments(taskId);
       res.json(comments);
     } catch (error) {
@@ -389,35 +829,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/tasks/:id/comments", isAuthenticated, async (req: any, res) => {
-    try {
-      const taskId = parseInt(req.params.id);
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      // Check if customer has access to this task
-      if (user?.role === 'customer') {
-        const task = await storage.getTask(taskId);
-        if (!task || task.createdBy !== userId) {
-          return res.status(403).json({ message: "Access denied" });
+  app.post(
+    "/api/tasks/:id/comments",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const taskId = parseInt(req.params.id);
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        // Check if customer has access to this task
+        if (user?.role === "customer") {
+          const task = await storage.getTask(taskId);
+          if (!task || task.createdBy !== userId) {
+            return res.status(403).json({ message: "Access denied" });
+          }
         }
+
+        const commentData = insertTaskCommentSchema.parse({
+          ...req.body,
+          taskId,
+          userId,
+        });
+        const comment = await storage.addTaskComment(commentData);
+        res.status(201).json(comment);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res
+            .status(400)
+            .json({ message: "Invalid comment data", errors: error.errors });
+        }
+        console.error("Error creating comment:", error);
+        res.status(500).json({ message: "Failed to create comment" });
       }
-      
-      const commentData = insertTaskCommentSchema.parse({
-        ...req.body,
-        taskId,
-        userId,
-      });
-      const comment = await storage.addTaskComment(commentData);
-      res.status(201).json(comment);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid comment data", errors: error.errors });
-      }
-      console.error("Error creating comment:", error);
-      res.status(500).json({ message: "Failed to create comment" });
     }
-  });
+  );
 
   // Users routes
   app.get("/api/users", isAuthenticated, async (req, res) => {
@@ -435,14 +881,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
+
       // Customers cannot access teams
-      if (user?.role === 'customer') {
-        return res.status(403).json({ message: "Customers cannot access teams" });
+      if (user?.role === "customer") {
+        return res
+          .status(403)
+          .json({ message: "Customers cannot access teams" });
       }
-      
-      const teams = await storage.getTeams();
-      res.json(teams);
+
+      if (["admin", "customer"].includes(user?.role)) {
+        const allTeams = await storage.getTeams();
+        return res.json(allTeams);
+      }
+
+      if (user?.role === "manager") {
+        // select teams within departments managed by this manager using join
+        const managedTeams = await db
+          .select({
+            id: teams.id,
+            name: teams.name,
+            description: teams.description,
+            createdAt: teams.createdAt,
+            createdBy: teams.createdBy,
+          })
+          .from(teams)
+          .innerJoin(departments, eq(teams.departmentId, departments.id))
+          .where(eq(departments.managerId as any, userId) as any)
+          .orderBy(desc(teams.createdAt));
+
+        return res.json(managedTeams);
+      }
+
+      // Agents/Users: forbid listing all teams; use /api/teams/my
+      return res.status(403).json({ message: "Forbidden" });
     } catch (error) {
       console.error("Error fetching teams:", error);
       res.status(500).json({ message: "Failed to fetch teams" });
@@ -453,12 +924,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
+
       // Customers cannot access teams
-      if (user?.role === 'customer') {
-        return res.status(403).json({ message: "Customers cannot access teams" });
+      if (user?.role === "customer") {
+        return res
+          .status(403)
+          .json({ message: "Customers cannot access teams" });
       }
-      
+
       const teams = await storage.getUserTeams(userId);
       res.json(teams);
     } catch (error) {
@@ -478,7 +951,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(201).json(team);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid team data", errors: error.errors });
+        return res
+          .status(400)
+          .json({ message: "Invalid team data", errors: error.errors });
       }
       console.error("Error creating team:", error);
       res.status(500).json({ message: "Failed to create team" });
@@ -511,23 +986,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update team member role
-  app.patch("/api/teams/:teamId/members/:userId", isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
+  app.patch(
+    "/api/teams/:teamId/members/:userId",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Forbidden" });
+        }
+
+        const { teamId, userId } = req.params;
+        const { role } = req.body;
+
+        const updatedMember = await storage.updateTeamMemberRole(
+          userId,
+          parseInt(teamId),
+          role
+        );
+        res.json(updatedMember);
+      } catch (error) {
+        console.error("Error updating team member role:", error);
+        res.status(500).json({ message: "Failed to update team member role" });
       }
-      
-      const { teamId, userId } = req.params;
-      const { role } = req.body;
-      
-      const updatedMember = await storage.updateTeamMemberRole(userId, parseInt(teamId), role);
-      res.json(updatedMember);
-    } catch (error) {
-      console.error("Error updating team member role:", error);
-      res.status(500).json({ message: "Failed to update team member role" });
     }
-  });
+  );
 
   // Admin routes
   app.get("/api/admin/users", isAuthenticated, async (req: any, res) => {
@@ -536,7 +1019,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (user?.role !== "admin") {
         return res.status(403).json({ message: "Forbidden" });
       }
-      
+
       const users = await storage.getAllUsers();
       res.json(users);
     } catch (error) {
@@ -551,7 +1034,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (user?.role !== "admin") {
         return res.status(403).json({ message: "Forbidden" });
       }
-      
+
       const stats = await storage.getAdminStats();
       res.json(stats);
     } catch (error) {
@@ -560,89 +1043,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/admin/users/:userId", isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
-      }
-      
-      const { userId } = req.params;
-      const updates = req.body;
-      
-      const updatedUser = await storage.updateUserProfile(userId, updates);
-      res.json(updatedUser);
-    } catch (error) {
-      console.error("Error updating user:", error);
-      res.status(500).json({ message: "Failed to update user" });
-    }
-  });
+  app.patch(
+    "/api/admin/users/:userId",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Forbidden" });
+        }
 
-  app.post("/api/admin/users/:userId/toggle-status", isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
-      }
-      
-      const { userId } = req.params;
-      const updatedUser = await storage.toggleUserStatus(userId);
-      res.json(updatedUser);
-    } catch (error) {
-      console.error("Error toggling user status:", error);
-      res.status(500).json({ message: "Failed to toggle user status" });
-    }
-  });
+        const { userId } = req.params;
+        const updates = req.body;
 
-  app.post("/api/admin/users/:userId/approve", isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
+        const updatedUser = await storage.updateUserProfile(userId, updates);
+        res.json(updatedUser);
+      } catch (error) {
+        console.error("Error updating user:", error);
+        res.status(500).json({ message: "Failed to update user" });
       }
-      
-      const { userId } = req.params;
-      const updatedUser = await storage.approveUser(userId);
-      res.json(updatedUser);
-    } catch (error) {
-      console.error("Error approving user:", error);
-      res.status(500).json({ message: "Failed to approve user" });
     }
-  });
+  );
 
-  app.post("/api/admin/users/:userId/assign-team", isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
-      }
-      
-      const { userId } = req.params;
-      const { teamId, role } = req.body;
-      
-      const teamMember = await storage.assignUserToTeam(userId, teamId, role);
-      res.json(teamMember);
-    } catch (error) {
-      console.error("Error assigning user to team:", error);
-      res.status(500).json({ message: "Failed to assign user to team" });
-    }
-  });
+  app.post(
+    "/api/admin/users/:userId/toggle-status",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Forbidden" });
+        }
 
-  app.delete("/api/admin/users/:userId/remove-team/:teamId", isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
+        const { userId } = req.params;
+        const updatedUser = await storage.toggleUserStatus(userId);
+        res.json(updatedUser);
+      } catch (error) {
+        console.error("Error toggling user status:", error);
+        res.status(500).json({ message: "Failed to toggle user status" });
       }
-      
-      const { userId, teamId } = req.params;
-      await storage.removeUserFromTeam(userId, parseInt(teamId));
-      res.status(204).send();
-    } catch (error) {
-      console.error("Error removing user from team:", error);
-      res.status(500).json({ message: "Failed to remove user from team" });
     }
-  });
+  );
+
+  app.post(
+    "/api/admin/users/:userId/approve",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Forbidden" });
+        }
+
+        const { userId } = req.params;
+        const updatedUser = await storage.approveUser(userId);
+        res.json(updatedUser);
+      } catch (error) {
+        console.error("Error approving user:", error);
+        res.status(500).json({ message: "Failed to approve user" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/admin/users/:userId/assign-team",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Forbidden" });
+        }
+
+        const { userId } = req.params;
+        const { teamId, role } = req.body;
+
+        const teamMember = await storage.assignUserToTeam(userId, teamId, role);
+        res.json(teamMember);
+      } catch (error) {
+        console.error("Error assigning user to team:", error);
+        res.status(500).json({ message: "Failed to assign user to team" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/admin/users/:userId/remove-team/:teamId",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Forbidden" });
+        }
+
+        const { userId, teamId } = req.params;
+        await storage.removeUserFromTeam(userId, parseInt(teamId));
+        res.status(204).send();
+      } catch (error) {
+        console.error("Error removing user from team:", error);
+        res.status(500).json({ message: "Failed to remove user from team" });
+      }
+    }
+  );
 
   app.get("/api/admin/departments", isAuthenticated, async (req: any, res) => {
     try {
@@ -650,7 +1153,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (user?.role !== "admin") {
         return res.status(403).json({ message: "Forbidden" });
       }
-      
+
       const departments = await storage.getDepartments();
       res.json(departments);
     } catch (error) {
@@ -659,30 +1162,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/admin/users/:userId/reset-password", isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
+  app.post(
+    "/api/admin/users/:userId/reset-password",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Forbidden" });
+        }
+
+        const { userId } = req.params;
+        const result = await storage.resetUserPassword(userId);
+        res.json(result);
+      } catch (error) {
+        console.error("Error resetting password:", error);
+        res.status(500).json({ message: "Failed to reset password" });
       }
-      
-      const { userId } = req.params;
-      const result = await storage.resetUserPassword(userId);
-      res.json(result);
-    } catch (error) {
-      console.error("Error resetting password:", error);
-      res.status(500).json({ message: "Failed to reset password" });
     }
-  });
+  );
 
   // Statistics
   app.get("/api/stats", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
+
       // If admin, show all stats, otherwise show user-specific stats
-      const stats = await storage.getTaskStats(user?.role === 'admin' ? undefined : userId);
+      const stats = await storage.getTaskStats(
+        user?.role === "admin" ? undefined : userId
+      );
       res.json(stats);
     } catch (error) {
       console.error("Error fetching stats:", error);
@@ -725,81 +1234,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Add task comment
-  app.post("/api/tasks/:id/comments", isAuthenticated, async (req: any, res) => {
-    try {
-      const taskId = parseInt(req.params.id);
-      const userId = getUserId(req);
-      const { content } = req.body;
+  app.post(
+    "/api/tasks/:id/comments",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const taskId = parseInt(req.params.id);
+        const userId = getUserId(req);
+        const { content } = req.body;
 
-      if (!content || !content.trim()) {
-        return res.status(400).json({ message: "Comment content is required" });
+        if (!content || !content.trim()) {
+          return res
+            .status(400)
+            .json({ message: "Comment content is required" });
+        }
+
+        const comment = await storage.addTaskComment({
+          taskId,
+          userId,
+          content: content.trim(),
+        });
+
+        res.status(201).json(comment);
+      } catch (error) {
+        console.error("Error creating task comment:", error);
+        res.status(500).json({ message: "Failed to create comment" });
       }
-
-      const comment = await storage.addTaskComment({
-        taskId,
-        userId,
-        content: content.trim(),
-      });
-
-      res.status(201).json(comment);
-    } catch (error) {
-      console.error("Error creating task comment:", error);
-      res.status(500).json({ message: "Failed to create comment" });
     }
-  });
+  );
 
   // Attachment routes
-  app.get("/api/tasks/:id/attachments", isAuthenticated, async (req: any, res) => {
-    try {
-      const taskId = parseInt(req.params.id);
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      // Check if customer has access to this task
-      if (user?.role === 'customer') {
-        const task = await storage.getTask(taskId);
-        if (!task || task.createdBy !== userId) {
-          return res.status(403).json({ message: "Access denied" });
-        }
-      }
-      
-      const attachments = await storage.getTaskAttachments(taskId);
-      res.json(attachments);
-    } catch (error) {
-      console.error("Error fetching attachments:", error);
-      res.status(500).json({ message: "Failed to fetch attachments" });
-    }
-  });
+  app.get(
+    "/api/tasks/:id/attachments",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const taskId = parseInt(req.params.id);
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
 
-  app.post("/api/tasks/:id/attachments", isAuthenticated, async (req: any, res) => {
-    try {
-      const taskId = parseInt(req.params.id);
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      // Check if customer has access to this task
-      if (user?.role === 'customer') {
-        const task = await storage.getTask(taskId);
-        if (!task || task.createdBy !== userId) {
-          return res.status(403).json({ message: "Access denied" });
+        // Check if customer has access to this task
+        if (user?.role === "customer") {
+          const task = await storage.getTask(taskId);
+          if (!task || task.createdBy !== userId) {
+            return res.status(403).json({ message: "Access denied" });
+          }
         }
+
+        const attachments = await storage.getTaskAttachments(taskId);
+        res.json(attachments);
+      } catch (error) {
+        console.error("Error fetching attachments:", error);
+        res.status(500).json({ message: "Failed to fetch attachments" });
       }
-      
-      const attachmentData = insertTaskAttachmentSchema.parse({
-        ...req.body,
-        taskId,
-        userId,
-      });
-      const attachment = await storage.addTaskAttachment(attachmentData);
-      res.status(201).json(attachment);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid attachment data", errors: error.errors });
-      }
-      console.error("Error creating attachment:", error);
-      res.status(500).json({ message: "Failed to create attachment" });
     }
-  });
+  );
+
+  app.post(
+    "/api/tasks/:id/attachments",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const taskId = parseInt(req.params.id);
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        // Check if customer has access to this task
+        if (user?.role === "customer") {
+          const task = await storage.getTask(taskId);
+          if (!task || task.createdBy !== userId) {
+            return res.status(403).json({ message: "Access denied" });
+          }
+        }
+
+        const attachmentData = insertTaskAttachmentSchema.parse({
+          ...req.body,
+          taskId,
+          userId,
+        });
+        const attachment = await storage.addTaskAttachment(attachmentData);
+        res.status(201).json(attachment);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res
+            .status(400)
+            .json({ message: "Invalid attachment data", errors: error.errors });
+        }
+        console.error("Error creating attachment:", error);
+        res.status(500).json({ message: "Failed to create attachment" });
+      }
+    }
+  );
 
   app.delete("/api/attachments/:id", isAuthenticated, async (req, res) => {
     try {
@@ -816,7 +1341,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/company-settings", isAuthenticated, async (req, res) => {
     try {
       const settings = await storage.getCompanySettings();
-      res.json(settings || { companyName: "TicketFlow", primaryColor: "#3b82f6" });
+      res.json(
+        settings || { companyName: "TicketFlow", primaryColor: "#3b82f6" }
+      );
     } catch (error) {
       console.error("Error fetching company settings:", error);
       res.status(500).json({ message: "Failed to fetch company settings" });
@@ -827,16 +1354,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const user = await storage.getUser(getUserId(req));
       if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Only admins can update company settings" });
+        return res
+          .status(403)
+          .json({ message: "Only admins can update company settings" });
       }
-      
+
       const userId = getUserId(req);
       const settingsData = insertCompanySettingsSchema.parse(req.body);
-      const settings = await storage.updateCompanySettings(settingsData, userId);
+      const settings = await storage.updateCompanySettings(
+        settingsData,
+        userId
+      );
       res.json(settings);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid settings data", errors: error.errors });
+        return res
+          .status(400)
+          .json({ message: "Invalid settings data", errors: error.errors });
       }
       console.error("Error updating company settings:", error);
       res.status(500).json({ message: "Failed to update company settings" });
@@ -844,31 +1378,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Logo upload endpoint
-  app.post("/api/company-settings/logo", isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Only admins can update company logo" });
+  app.post(
+    "/api/company-settings/logo",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (user?.role !== "admin") {
+          return res
+            .status(403)
+            .json({ message: "Only admins can update company logo" });
+        }
+
+        const { fileName, fileType, fileData } = req.body;
+
+        // Validate file type
+        if (!["image/jpeg", "image/jpg", "image/png"].includes(fileType)) {
+          return res.status(400).json({
+            message: "Invalid file type. Only JPG and PNG are allowed.",
+          });
+        }
+
+        // Convert base64 to data URL
+        const logoUrl = `data:${fileType};base64,${fileData}`;
+
+        const userId = getUserId(req);
+        const settings = await storage.updateCompanySettings(
+          { logoUrl },
+          userId
+        );
+        res.json(settings);
+      } catch (error) {
+        console.error("Error uploading logo:", error);
+        res.status(500).json({ message: "Failed to upload logo" });
       }
-      
-      const { fileName, fileType, fileData } = req.body;
-      
-      // Validate file type
-      if (!['image/jpeg', 'image/jpg', 'image/png'].includes(fileType)) {
-        return res.status(400).json({ message: "Invalid file type. Only JPG and PNG are allowed." });
-      }
-      
-      // Convert base64 to data URL
-      const logoUrl = `data:${fileType};base64,${fileData}`;
-      
-      const userId = getUserId(req);
-      const settings = await storage.updateCompanySettings({ logoUrl }, userId);
-      res.json(settings);
-    } catch (error) {
-      console.error("Error uploading logo:", error);
-      res.status(500).json({ message: "Failed to upload logo" });
     }
-  });
+  );
 
   // API key routes
   app.get("/api/api-keys", isAuthenticated, async (req: any, res) => {
@@ -876,7 +1421,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getUserId(req);
       const apiKeys = await storage.getApiKeys(userId);
       // Don't send the actual key hashes to the client
-      const sanitizedKeys = apiKeys.map(key => ({
+      const sanitizedKeys = apiKeys.map((key) => ({
         ...key,
         keyHash: undefined,
       }));
@@ -902,7 +1447,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid API key data", errors: error.errors });
+        return res
+          .status(400)
+          .json({ message: "Invalid API key data", errors: error.errors });
       }
       console.error("Error creating API key:", error);
       res.status(500).json({ message: "Failed to create API key" });
@@ -913,15 +1460,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const keyId = parseInt(req.params.id);
       const userId = getUserId(req);
-      
+
       // Verify the key belongs to the user
       const apiKeys = await storage.getApiKeys(userId);
-      const keyExists = apiKeys.some(key => key.id === keyId);
-      
+      const keyExists = apiKeys.some((key) => key.id === keyId);
+
       if (!keyExists) {
         return res.status(404).json({ message: "API key not found" });
       }
-      
+
       await storage.revokeApiKey(keyId);
       res.status(204).send();
     } catch (error) {
@@ -931,39 +1478,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Save Perplexity API key
-  app.post('/api/api-keys/perplexity', isAuthenticated, async (req, res) => {
+  app.post("/api/api-keys/perplexity", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       const { apiKey } = req.body;
       if (!apiKey) {
         return res.status(400).json({ message: "API key is required" });
       }
-      
+
       // Check if Perplexity key already exists
-      const existingKeys = await storage.getApiKeys('system');
-      const perplexityKey = existingKeys.find(key => key.name === 'Perplexity API Key');
-      
+      const existingKeys = await storage.getApiKeys("system");
+      const perplexityKey = existingKeys.find(
+        (key) => key.name === "Perplexity API Key"
+      );
+
       if (perplexityKey) {
         // Update existing key
         await storage.updateApiKey(perplexityKey.id, { keyHash: apiKey });
       } else {
         // Create new key
         await storage.createApiKey({
-          userId: 'system',
-          name: 'Perplexity API Key',
+          userId: "system",
+          name: "Perplexity API Key",
           keyHash: apiKey,
           keyPrefix: apiKey.substring(0, 8),
-          permissions: ['ai_chat'],
+          permissions: ["ai_chat"],
           isActive: true,
         });
       }
-      
+
       res.json({ message: "Perplexity API key saved successfully" });
     } catch (error) {
       console.error("Error saving Perplexity API key:", error);
@@ -972,35 +1521,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get Perplexity API key status
-  app.get('/api/api-keys/perplexity/status', isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.get(
+    "/api/api-keys/perplexity/status",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const apiKeys = await storage.getApiKeys("system");
+        const perplexityKey = apiKeys.find(
+          (key) => key.name === "Perplexity API Key" && key.isActive
+        );
+
+        res.json({ exists: !!perplexityKey });
+      } catch (error) {
+        console.error("Error checking Perplexity API key:", error);
+        res.status(500).json({ message: "Failed to check Perplexity API key" });
       }
-      
-      const apiKeys = await storage.getApiKeys('system');
-      const perplexityKey = apiKeys.find(key => key.name === 'Perplexity API Key' && key.isActive);
-      
-      res.json({ exists: !!perplexityKey });
-    } catch (error) {
-      console.error("Error checking Perplexity API key:", error);
-      res.status(500).json({ message: "Failed to check Perplexity API key" });
     }
-  });
+  );
 
   // SMTP settings routes (admin only)
   app.get("/api/smtp/settings", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
+
       if (user?.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       const settings = await storage.getSmtpSettings();
       res.json(settings || null);
     } catch (error) {
@@ -1013,11 +1568,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
+
       if (user?.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       const settings = await storage.updateSmtpSettings(req.body, userId);
       res.json(settings);
     } catch (error) {
@@ -1031,11 +1586,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
+
       if (user?.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       const templates = await storage.getEmailTemplates();
       res.json(templates);
     } catch (error) {
@@ -1044,112 +1599,128 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/email/templates/:name", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
-      }
-      
-      const template = await storage.getEmailTemplate(req.params.name);
-      if (template) {
-        res.json(template);
-      } else {
-        res.status(404).json({ message: "Template not found" });
-      }
-    } catch (error) {
-      console.error("Error fetching email template:", error);
-      res.status(500).json({ message: "Failed to fetch email template" });
-    }
-  });
+  app.get(
+    "/api/email/templates/:name",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
 
-  app.put("/api/email/templates/:name", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const template = await storage.getEmailTemplate(req.params.name);
+        if (template) {
+          res.json(template);
+        } else {
+          res.status(404).json({ message: "Template not found" });
+        }
+      } catch (error) {
+        console.error("Error fetching email template:", error);
+        res.status(500).json({ message: "Failed to fetch email template" });
       }
-      
-      const template = await storage.updateEmailTemplate(req.params.name, req.body, userId);
-      res.json(template);
-    } catch (error) {
-      console.error("Error updating email template:", error);
-      res.status(500).json({ message: "Failed to update email template" });
     }
-  });
+  );
+
+  app.put(
+    "/api/email/templates/:name",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const template = await storage.updateEmailTemplate(
+          req.params.name,
+          req.body,
+          userId
+        );
+        res.json(template);
+      } catch (error) {
+        console.error("Error updating email template:", error);
+        res.status(500).json({ message: "Failed to update email template" });
+      }
+    }
+  );
 
   // SSO Configuration routes
   app.get("/api/sso/config", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
+
       if (user?.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       const config = await storage.getSsoConfiguration();
-      res.json(config || { clientId: '', clientSecret: '', tenantId: '' });
+      res.json(config || { clientId: "", clientSecret: "", tenantId: "" });
     } catch (error) {
       console.error("Error fetching SSO configuration:", error);
       res.status(500).json({ message: "Failed to fetch SSO configuration" });
     }
   });
-  
+
   // SSO Status check (available to all authenticated users)
   app.get("/api/sso/status", isAuthenticated, async (req: any, res) => {
     try {
       const config = await storage.getSsoConfiguration();
-      const isConfigured = !!(config?.clientId && config?.clientSecret && config?.tenantId);
+      const isConfigured = !!(
+        config?.clientId &&
+        config?.clientSecret &&
+        config?.tenantId
+      );
       res.json({ configured: isConfigured });
     } catch (error) {
       console.error("Error checking SSO status:", error);
       res.status(500).json({ message: "Failed to check SSO status" });
     }
   });
-  
+
   // Test SSO Configuration (admin only)
   app.post("/api/sso/test", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
+
       if (user?.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       const config = await storage.getSsoConfiguration();
       if (!config?.clientId || !config?.clientSecret || !config?.tenantId) {
         return res.status(400).json({ message: "SSO not configured" });
       }
-      
+
       // Test the configuration by trying to fetch the OpenID configuration
       const metadataUrl = `https://login.microsoftonline.com/${config.tenantId}/v2.0/.well-known/openid-configuration`;
-      
+
       try {
         const response = await fetch(metadataUrl);
         if (!response.ok) {
-          return res.status(400).json({ 
-            message: "Invalid tenant ID or Azure AD configuration", 
-            details: `Failed to fetch metadata from ${metadataUrl}` 
+          return res.status(400).json({
+            message: "Invalid tenant ID or Azure AD configuration",
+            details: `Failed to fetch metadata from ${metadataUrl}`,
           });
         }
-        
+
         const metadata = await response.json();
-        res.json({ 
-          success: true, 
+        res.json({
+          success: true,
           message: "SSO configuration is valid",
-          issuer: metadata.issuer 
+          issuer: metadata.issuer,
         });
       } catch (fetchError) {
         console.error("Error testing SSO config:", fetchError);
-        res.status(400).json({ 
-          message: "Failed to connect to Azure AD", 
-          details: fetchError.message 
+        res.status(400).json({
+          message: "Failed to connect to Azure AD",
+          details: fetchError.message,
         });
       }
     } catch (error) {
@@ -1162,11 +1733,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
+
       if (user?.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       const config = await storage.upsertSsoConfiguration({
         ...req.body,
         updatedBy: userId,
@@ -1183,16 +1754,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
+
       if (user?.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       // This will be implemented when we integrate email templates
       const { to, templateName } = req.body;
-      
+
       // For now, just return success
-      res.json({ message: "Test email functionality will be available after email template integration" });
+      res.json({
+        message:
+          "Test email functionality will be available after email template integration",
+      });
     } catch (error) {
       console.error("Error sending test email:", error);
       res.status(500).json({ message: "Failed to send test email" });
@@ -1200,25 +1774,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get SMTP settings (admin only)
-  app.get('/api/smtp/settings', isAuthenticated, async (req, res) => {
+  app.get("/api/smtp/settings", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       const settings = await storage.getSmtpSettings();
-      
+
       // Return AWS SES settings in the format expected by frontend
       if (settings) {
         res.json({
           awsAccessKeyId: settings.awsAccessKeyId,
           awsSecretAccessKey: settings.awsSecretAccessKey,
-          awsRegion: settings.awsRegion || 'us-east-1',
+          awsRegion: settings.awsRegion || "us-east-1",
           fromEmail: settings.fromEmail,
-          fromName: settings.fromName || 'TicketFlow',
+          fromName: settings.fromName || "TicketFlow",
         });
       } else {
         res.json({});
@@ -1228,30 +1802,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to fetch SMTP settings" });
     }
   });
-  
+
   // Save SMTP settings (admin only)
-  app.post('/api/smtp/settings', isAuthenticated, async (req, res) => {
+  app.post("/api/smtp/settings", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       // Save AWS SES settings
       const smtpSettings = {
         awsAccessKeyId: req.body.awsAccessKeyId,
         awsSecretAccessKey: req.body.awsSecretAccessKey,
-        awsRegion: req.body.awsRegion || 'us-east-1',
+        awsRegion: req.body.awsRegion || "us-east-1",
         fromEmail: req.body.fromEmail,
-        fromName: req.body.fromName || 'TicketFlow',
+        fromName: req.body.fromName || "TicketFlow",
         useAwsSes: true,
         isActive: true,
       };
-      
+
       const settings = await storage.updateSmtpSettings(smtpSettings, userId);
-      
+
       // Return in the format expected by frontend
       res.json({
         awsAccessKeyId: settings.awsAccessKeyId,
@@ -1267,35 +1841,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Test SMTP configuration
-  app.post('/api/smtp/test', isAuthenticated, async (req, res) => {
+  app.post("/api/smtp/test", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
 
       const { testEmail } = req.body;
-      
+
       if (!testEmail) {
-        return res.status(400).json({ message: "Test email address is required" });
+        return res
+          .status(400)
+          .json({ message: "Test email address is required" });
       }
 
       // Get current SMTP settings
       const smtpSettings = await storage.getSmtpSettings();
-      
+
       if (!smtpSettings) {
-        return res.status(400).json({ message: "SMTP settings not configured" });
+        return res
+          .status(400)
+          .json({ message: "SMTP settings not configured" });
       }
 
       // Test sending email using AWS SES
       const success = await sendTestEmail(
-        '', // host not used for AWS SES
+        "", // host not used for AWS SES
         0, // port not used for AWS SES
-        smtpSettings.awsAccessKeyId || '',
-        smtpSettings.awsSecretAccessKey || '',
-        smtpSettings.awsRegion || 'us-east-1',
+        smtpSettings.awsAccessKeyId || "",
+        smtpSettings.awsSecretAccessKey || "",
+        smtpSettings.awsRegion || "us-east-1",
         smtpSettings.fromEmail,
         smtpSettings.fromName,
         testEmail
@@ -1304,7 +1882,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (success) {
         res.json({ message: "Test email sent successfully" });
       } else {
-        res.status(500).json({ message: "Failed to send test email. Please check your AWS credentials and ensure the email addresses are verified in SES." });
+        res.status(500).json({
+          message:
+            "Failed to send test email. Please check your AWS credentials and ensure the email addresses are verified in SES.",
+        });
       }
     } catch (error) {
       console.error("SMTP test error:", error);
@@ -1313,17 +1894,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Email template routes
-  
+
   // Get all email templates (admin only)
-  app.get('/api/email-templates', isAuthenticated, async (req, res) => {
+  app.get("/api/email-templates", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       const templates = await storage.getEmailTemplates();
       res.json(templates);
     } catch (error) {
@@ -1331,19 +1912,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to fetch email templates" });
     }
   });
-  
+
   // Update email template (admin only)
-  app.put('/api/email-templates/:name', isAuthenticated, async (req, res) => {
+  app.put("/api/email-templates/:name", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       const { name } = req.params;
-      const template = await storage.updateEmailTemplate(name, req.body, userId);
+      const template = await storage.updateEmailTemplate(
+        name,
+        req.body,
+        userId
+      );
       res.json(template);
     } catch (error) {
       console.error("Error updating email template:", error);
@@ -1352,9 +1937,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Help documentation routes
-  
+
   // Get all help documents (public)
-  app.get('/api/help', async (req, res) => {
+  app.get("/api/help", async (req, res) => {
     try {
       const documents = await storage.getHelpDocuments();
       res.json(documents);
@@ -1365,13 +1950,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Search help documents (public)
-  app.get('/api/help/search', async (req, res) => {
+  app.get("/api/help/search", async (req, res) => {
     try {
       const { q } = req.query;
-      if (!q || typeof q !== 'string') {
+      if (!q || typeof q !== "string") {
         return res.status(400).json({ message: "Search query is required" });
       }
-      
+
       const documents = await storage.searchHelpDocuments(q);
       res.json(documents);
     } catch (error) {
@@ -1381,18 +1966,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get single help document (public)
-  app.get('/api/help/:id', async (req, res) => {
+  app.get("/api/help/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const document = await storage.getHelpDocument(id);
-      
+
       if (!document) {
         return res.status(404).json({ message: "Help document not found" });
       }
-      
+
       // Increment view count
       await storage.incrementViewCount(id);
-      
+
       res.json(document);
     } catch (error) {
       console.error("Error fetching help document:", error);
@@ -1401,19 +1986,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Upload help document (admin only)
-  app.post('/api/admin/help', isAuthenticated, async (req, res) => {
+  app.post("/api/admin/help", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
 
       const { title, filename, content, fileData, category, tags } = req.body;
-      
+
       if (!title || !filename || !content || !fileData) {
-        return res.status(400).json({ message: "Title, filename, content, and file data are required" });
+        return res.status(400).json({
+          message: "Title, filename, content, and file data are required",
+        });
       }
 
       const document = await storage.createHelpDocument({
@@ -1434,18 +2021,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update help document (admin only)
-  app.put('/api/admin/help/:id', isAuthenticated, async (req, res) => {
+  app.put("/api/admin/help/:id", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
 
       const id = parseInt(req.params.id);
       const updates = req.body;
-      
+
       const document = await storage.updateHelpDocument(id, updates);
       res.json(document);
     } catch (error) {
@@ -1455,18 +2042,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Delete help document (admin only)
-  app.delete('/api/admin/help/:id', isAuthenticated, async (req, res) => {
+  app.delete("/api/admin/help/:id", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
 
       const id = parseInt(req.params.id);
       await storage.deleteHelpDocument(id);
-      
+
       res.json({ message: "Help document deleted successfully" });
     } catch (error) {
       console.error("Error deleting help document:", error);
@@ -1475,9 +2062,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // User Guide routes
-  
+
   // Get all guide categories
-  app.get('/api/guide-categories', isAuthenticated, async (req, res) => {
+  app.get("/api/guide-categories", isAuthenticated, async (req, res) => {
     try {
       const categories = await storage.getUserGuideCategories();
       res.json(categories);
@@ -1488,10 +2075,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get all guides (optionally filter by published status)
-  app.get('/api/guides', isAuthenticated, async (req, res) => {
+  app.get("/api/guides", isAuthenticated, async (req, res) => {
     try {
       const { published } = req.query;
-      const guides = await storage.getUserGuides(published === 'true' ? { isPublished: true } : undefined);
+      const guides = await storage.getUserGuides(
+        published === "true" ? { isPublished: true } : undefined
+      );
       res.json(guides);
     } catch (error) {
       console.error("Error fetching guides:", error);
@@ -1500,18 +2089,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get single guide
-  app.get('/api/guides/:id', isAuthenticated, async (req, res) => {
+  app.get("/api/guides/:id", isAuthenticated, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const guide = await storage.getUserGuideById(id);
-      
+
       if (!guide) {
         return res.status(404).json({ message: "Guide not found" });
       }
-      
+
       // Increment view count
       await storage.incrementGuideViewCount(id);
-      
+
       res.json(guide);
     } catch (error) {
       console.error("Error fetching guide:", error);
@@ -1520,12 +2109,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create guide category (admin only)
-  app.post('/api/admin/guide-categories', isAuthenticated, async (req, res) => {
+  app.post("/api/admin/guide-categories", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
 
@@ -1538,50 +2127,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update guide category (admin only)
-  app.put('/api/admin/guide-categories/:id', isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
-      }
+  app.put(
+    "/api/admin/guide-categories/:id",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
 
-      const id = parseInt(req.params.id);
-      const category = await storage.updateUserGuideCategory(id, req.body);
-      res.json(category);
-    } catch (error) {
-      console.error("Error updating guide category:", error);
-      res.status(500).json({ message: "Failed to update guide category" });
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const id = parseInt(req.params.id);
+        const category = await storage.updateUserGuideCategory(id, req.body);
+        res.json(category);
+      } catch (error) {
+        console.error("Error updating guide category:", error);
+        res.status(500).json({ message: "Failed to update guide category" });
+      }
     }
-  });
+  );
 
   // Delete guide category (admin only)
-  app.delete('/api/admin/guide-categories/:id', isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
-      }
+  app.delete(
+    "/api/admin/guide-categories/:id",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
 
-      const id = parseInt(req.params.id);
-      await storage.deleteUserGuideCategory(id);
-      res.json({ message: "Guide category deleted successfully" });
-    } catch (error) {
-      console.error("Error deleting guide category:", error);
-      res.status(500).json({ message: "Failed to delete guide category" });
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const id = parseInt(req.params.id);
+        await storage.deleteUserGuideCategory(id);
+        res.json({ message: "Guide category deleted successfully" });
+      } catch (error) {
+        console.error("Error deleting guide category:", error);
+        res.status(500).json({ message: "Failed to delete guide category" });
+      }
     }
-  });
+  );
 
   // Create guide (admin only)
-  app.post('/api/admin/guides', isAuthenticated, async (req, res) => {
+  app.post("/api/admin/guides", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
 
@@ -1597,12 +2194,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update guide (admin only)
-  app.put('/api/admin/guides/:id', isAuthenticated, async (req, res) => {
+  app.put("/api/admin/guides/:id", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
 
@@ -1616,12 +2213,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Delete guide (admin only)
-  app.delete('/api/admin/guides/:id', isAuthenticated, async (req, res) => {
+  app.delete("/api/admin/guides/:id", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
 
@@ -1638,28 +2235,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
   function normalizeQuestion(question: string): string {
     return question
       .toLowerCase()
-      .replace(/[^\w\s]/g, '') // Remove special characters
-      .replace(/\s+/g, ' ') // Normalize whitespace
+      .replace(/[^\w\s]/g, "") // Remove special characters
+      .replace(/\s+/g, " ") // Normalize whitespace
       .trim();
   }
 
   // Helper function to calculate question hash
   function calculateQuestionHash(normalizedQuestion: string): string {
-    return createHash('sha256').update(normalizedQuestion).digest('hex');
+    return createHash("sha256").update(normalizedQuestion).digest("hex");
   }
-  
+
   // Helper function to calculate token costs for Bedrock
-  function calculateBedrockCost(inputTokens: number, outputTokens: number, modelId: string): number {
+  function calculateBedrockCost(
+    inputTokens: number,
+    outputTokens: number,
+    modelId: string
+  ): number {
     // Claude 3 Sonnet pricing per 1M tokens (as of 2024)
-    const pricePerMillionInputTokens = 3.00; // $3 per 1M input tokens
-    const pricePerMillionOutputTokens = 15.00; // $15 per 1M output tokens
-    
+    const pricePerMillionInputTokens = 3.0; // $3 per 1M input tokens
+    const pricePerMillionOutputTokens = 15.0; // $15 per 1M output tokens
+
     const inputCost = (inputTokens / 1_000_000) * pricePerMillionInputTokens;
     const outputCost = (outputTokens / 1_000_000) * pricePerMillionOutputTokens;
-    
+
     return inputCost + outputCost;
   }
-  
+
   // Helper function to estimate token count (rough approximation)
   function estimateTokenCount(text: string): number {
     // Rough estimation: 1 token ≈ 4 characters for English text
@@ -1667,41 +2268,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   // AI Chat routes
-  app.post('/api/chat', isAuthenticated, async (req, res) => {
+  app.post("/api/chat", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const { sessionId, message } = req.body;
-      
+
       if (!sessionId || !message) {
-        return res.status(400).json({ message: "Session ID and message are required" });
+        return res
+          .status(400)
+          .json({ message: "Session ID and message are required" });
       }
 
       // Save user message
       await storage.createChatMessage({
         userId,
         sessionId,
-        role: 'user',
+        role: "user",
         content: message,
       });
 
       // Check FAQ cache first
       const normalizedQuestion = normalizeQuestion(message);
       const questionHash = calculateQuestionHash(normalizedQuestion);
-      
+
       const cachedAnswer = await storage.getFaqCacheEntry(questionHash);
       if (cachedAnswer) {
         // Update hit count
         await storage.updateFaqCacheHit(cachedAnswer.id);
-        
+
         // Save cached response
         const aiMessage = await storage.createChatMessage({
           userId,
           sessionId,
-          role: 'assistant',
+          role: "assistant",
           content: cachedAnswer.answer,
           relatedDocumentIds: [],
         });
-        
+
         return res.json({
           message: aiMessage,
           relatedDocuments: [],
@@ -1711,49 +2314,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Check if we have AWS Bedrock credentials
       const smtpSettings = await storage.getSmtpSettings();
-      const hasBedrockCredentials = (smtpSettings?.bedrockAccessKeyId && smtpSettings?.bedrockSecretAccessKey && smtpSettings?.bedrockRegion) || 
-                                     (smtpSettings?.awsAccessKeyId && smtpSettings?.awsSecretAccessKey && smtpSettings?.awsRegion);
-      
+      const hasBedrockCredentials =
+        (smtpSettings?.bedrockAccessKeyId &&
+          smtpSettings?.bedrockSecretAccessKey &&
+          smtpSettings?.bedrockRegion) ||
+        (smtpSettings?.awsAccessKeyId &&
+          smtpSettings?.awsSecretAccessKey &&
+          smtpSettings?.awsRegion);
+
       let response = "";
       const relevantDocIds: number[] = [];
       let usageData = null;
-      
+
       if (hasBedrockCredentials) {
         // Use AWS Bedrock for intelligent responses
         try {
           // Import AWS Bedrock client
-          const { BedrockRuntimeClient, InvokeModelCommand } = await import('@aws-sdk/client-bedrock-runtime');
-          
+          const { BedrockRuntimeClient, InvokeModelCommand } = await import(
+            "@aws-sdk/client-bedrock-runtime"
+          );
+
           // Get help documents for context
           const helpDocs = await storage.searchHelpDocuments(message);
           let context = "";
-          
+
           if (helpDocs.length > 0) {
             context = "\n\nRelevant documentation context:\n";
             const topDocs = helpDocs.slice(0, 3);
             for (const doc of topDocs) {
               relevantDocIds.push(doc.id);
-              context += `- ${doc.title}: ${doc.content.substring(0, 200)}...\n`;
+              context += `- ${doc.title}: ${doc.content.substring(
+                0,
+                200
+              )}...\n`;
             }
           }
-          
+
           // Configure AWS Bedrock client - use Bedrock-specific credentials if available, otherwise fall back to SES credentials
           const bedrockClient = new BedrockRuntimeClient({
-            region: smtpSettings.bedrockRegion || smtpSettings.awsRegion || 'us-east-1',
+            region:
+              smtpSettings.bedrockRegion ||
+              smtpSettings.awsRegion ||
+              "us-east-1",
             credentials: {
-              accessKeyId: smtpSettings.bedrockAccessKeyId || smtpSettings.awsAccessKeyId || '',
-              secretAccessKey: smtpSettings.bedrockSecretAccessKey || smtpSettings.awsSecretAccessKey || '',
+              accessKeyId:
+                smtpSettings.bedrockAccessKeyId ||
+                smtpSettings.awsAccessKeyId ||
+                "",
+              secretAccessKey:
+                smtpSettings.bedrockSecretAccessKey ||
+                smtpSettings.awsSecretAccessKey ||
+                "",
             },
           });
-          
+
           // Prepare the system message and user message
-          const systemMessage = "You are a helpful assistant for TicketFlow, a ticketing system. Answer questions based on the provided context when available. Be concise and helpful.";
-          
+          const systemMessage =
+            "You are a helpful assistant for TicketFlow, a ticketing system. Answer questions based on the provided context when available. Be concise and helpful.";
+
           let userMessage = message;
           if (context) {
             userMessage = `Context:\n${context}\n\nUser question: ${message}`;
           }
-          
+
           // Try different models based on availability
           // Using Claude Instant v1 which has broader availability
           let modelId = "anthropic.claude-instant-v1";
@@ -1762,18 +2385,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             max_tokens: 1000,
             temperature: 0.2,
             system: systemMessage,
-            messages: [{
-              role: "user",
-              content: userMessage
-            }]
+            messages: [
+              {
+                role: "user",
+                content: userMessage,
+              },
+            ],
           };
-          
+
           // Check if we should use a different model based on settings or fallback
           const companySettings = await storage.getCompanySettings();
           if (companySettings?.bedrockModelId) {
             modelId = companySettings.bedrockModelId;
           }
-          
+
           // Create the request payload based on model type
           const command = new InvokeModelCommand({
             modelId,
@@ -1781,18 +2406,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             accept: "application/json",
             body: JSON.stringify(modelPayload),
           });
-          
+
           // Invoke the model
           const bedrockResponse = await bedrockClient.send(command);
-          const responseBody = JSON.parse(new TextDecoder().decode(bedrockResponse.body));
+          const responseBody = JSON.parse(
+            new TextDecoder().decode(bedrockResponse.body)
+          );
           response = responseBody.content[0].text;
-          
+
           // Track usage
           const inputTokens = estimateTokenCount(systemMessage + userMessage);
           const outputTokens = estimateTokenCount(response);
           const totalTokens = inputTokens + outputTokens;
           const cost = calculateBedrockCost(inputTokens, outputTokens, modelId);
-          
+
           usageData = await storage.trackBedrockUsage({
             userId,
             sessionId,
@@ -1802,7 +2429,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             modelId,
             cost: cost.toFixed(6),
           });
-          
+
           // Cache the response if it's a straightforward Q&A (not context-dependent)
           if (!context && response.length > 50) {
             await storage.createFaqCacheEntry({
@@ -1812,34 +2439,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
               answer: response,
             });
           }
-          
         } catch (error: any) {
           console.error("Error calling AWS Bedrock:", error);
           console.error("Error details:", error.message, error.name);
           // Fallback to simple response
-          response = "I apologize, but I'm having trouble processing your request. Please try again later or contact support.";
+          response =
+            "I apologize, but I'm having trouble processing your request. Please try again later or contact support.";
         }
       } else {
         // No AWS credentials configured - use simple fallback
         try {
           const helpDocs = await storage.searchHelpDocuments(message);
-          
+
           if (helpDocs.length > 0) {
             response = "I found some relevant documentation:\n\n";
             const topDocs = helpDocs.slice(0, 3);
-            
+
             for (const doc of topDocs) {
               relevantDocIds.push(doc.id);
               response += `**${doc.title}**\n`;
-              const contentPreview = doc.content.substring(0, 300) + (doc.content.length > 300 ? '...' : '');
+              const contentPreview =
+                doc.content.substring(0, 300) +
+                (doc.content.length > 300 ? "..." : "");
               response += `${contentPreview}\n\n`;
             }
           } else {
-            response = "I'm here to help! However, the AI service is not configured. Please ask your administrator to configure AWS credentials in the Admin Panel > Email Settings tab.";
+            response =
+              "I'm here to help! However, the AI service is not configured. Please ask your administrator to configure AWS credentials in the Admin Panel > Email Settings tab.";
           }
         } catch (error) {
           console.error("Error searching help documents:", error);
-          response = "I'm experiencing technical difficulties. Please try again later.";
+          response =
+            "I'm experiencing technical difficulties. Please try again later.";
         }
       }
 
@@ -1847,20 +2478,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const aiMessage = await storage.createChatMessage({
         userId,
         sessionId,
-        role: 'assistant',
+        role: "assistant",
         content: response,
-        relatedDocumentIds: relevantDocIds.length > 0 ? relevantDocIds : undefined,
+        relatedDocumentIds:
+          relevantDocIds.length > 0 ? relevantDocIds : undefined,
       });
 
       res.json({
         message: aiMessage,
         relatedDocuments: [],
-        usageData: usageData ? {
-          inputTokens: usageData.inputTokens,
-          outputTokens: usageData.outputTokens,
-          totalTokens: usageData.totalTokens,
-          cost: parseFloat(usageData.cost),
-        } : undefined,
+        usageData: usageData
+          ? {
+              inputTokens: usageData.inputTokens,
+              outputTokens: usageData.outputTokens,
+              totalTokens: usageData.totalTokens,
+              cost: parseFloat(usageData.cost),
+            }
+          : undefined,
       });
     } catch (error: any) {
       console.error("Error in chat:", error);
@@ -1870,11 +2504,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get chat history
-  app.get('/api/chat/:sessionId', isAuthenticated, async (req, res) => {
+  app.get("/api/chat/:sessionId", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const { sessionId } = req.params;
-      
+
       const messages = await storage.getChatMessages(userId, sessionId);
       res.json(messages);
     } catch (error) {
@@ -1884,7 +2518,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get chat sessions
-  app.get('/api/chat-sessions', isAuthenticated, async (req, res) => {
+  app.get("/api/chat-sessions", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const sessions = await storage.getChatSessions(userId);
@@ -1896,19 +2530,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Bedrock usage endpoints
-  app.get('/api/bedrock/usage', isAuthenticated, async (req, res) => {
+  app.get("/api/bedrock/usage", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
+
       // Allow users to see their own usage, admins to see all
-      const targetUserId = user?.role === 'admin' && req.query.userId ? 
-        req.query.userId as string : userId;
-      
-      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
-      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
-      
-      const usage = await storage.getBedrockUsageByUser(targetUserId, startDate, endDate);
+      const targetUserId =
+        user?.role === "admin" && req.query.userId
+          ? (req.query.userId as string)
+          : userId;
+
+      const startDate = req.query.startDate
+        ? new Date(req.query.startDate as string)
+        : undefined;
+      const endDate = req.query.endDate
+        ? new Date(req.query.endDate as string)
+        : undefined;
+
+      const usage = await storage.getBedrockUsageByUser(
+        targetUserId,
+        startDate,
+        endDate
+      );
       res.json(usage);
     } catch (error) {
       console.error("Error fetching Bedrock usage:", error);
@@ -1916,36 +2560,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/bedrock/usage/summary', isAuthenticated, async (req, res) => {
+  app.get("/api/bedrock/usage/summary", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (user?.role !== 'admin') {
+
+      if (user?.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
-      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
-      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
-      
+
+      const startDate = req.query.startDate
+        ? new Date(req.query.startDate as string)
+        : undefined;
+      const endDate = req.query.endDate
+        ? new Date(req.query.endDate as string)
+        : undefined;
+
       const summary = await storage.getBedrockUsageSummary(startDate, endDate);
       res.json(summary);
     } catch (error) {
       console.error("Error fetching Bedrock usage summary:", error);
-      res.status(500).json({ message: "Failed to fetch Bedrock usage summary" });
+      res
+        .status(500)
+        .json({ message: "Failed to fetch Bedrock usage summary" });
     }
   });
 
   // FAQ cache endpoints
-  app.get('/api/faq-cache', isAuthenticated, async (req, res) => {
+  app.get("/api/faq-cache", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (user?.role !== 'admin') {
+
+      if (user?.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
       const popularFaqs = await storage.getPopularFaqs(limit);
       res.json(popularFaqs);
@@ -1955,15 +2605,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete('/api/faq-cache', isAuthenticated, async (req, res) => {
+  app.delete("/api/faq-cache", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (user?.role !== 'admin') {
+
+      if (user?.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       await storage.clearFaqCache();
       res.json({ message: "FAQ cache cleared successfully" });
     } catch (error) {
@@ -1973,9 +2623,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Company Policy endpoints
-  app.get('/api/company-policies', isAuthenticated, async (req, res) => {
+  app.get("/api/company-policies", isAuthenticated, async (req, res) => {
     try {
-      const includeInactive = req.query.includeInactive === 'true';
+      const includeInactive = req.query.includeInactive === "true";
       const policies = await storage.getAllCompanyPolicies(includeInactive);
       res.json(policies);
     } catch (error) {
@@ -1984,15 +2634,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/company-policies/:id', isAuthenticated, async (req, res) => {
+  app.get("/api/company-policies/:id", isAuthenticated, async (req, res) => {
     try {
       const policyId = parseInt(req.params.id);
       const policy = await storage.getCompanyPolicyById(policyId);
-      
+
       if (!policy) {
         return res.status(404).json({ message: "Company policy not found" });
       }
-      
+
       res.json(policy);
     } catch (error) {
       console.error("Error fetching company policy:", error);
@@ -2000,146 +2650,172 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/admin/company-policies', isAuthenticated, upload.single('file'), async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (user?.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
-      }
+  app.post(
+    "/api/admin/company-policies",
+    isAuthenticated,
+    upload.single("file"),
+    async (req, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
 
-      if (!req.file) {
-        return res.status(400).json({ message: "File is required" });
-      }
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
 
-      const { description } = req.body;
-      
-      // Use filename (without extension) as title if not provided
-      const title = req.body.title || req.file.originalname.replace(/\.[^/.]+$/, '');
-      
-      // Convert file to Base64 for storage
-      const fileData = req.file.buffer.toString('base64');
-      
-      const policy = await storage.createCompanyPolicy({
-        title,
-        description,
-        content: null, // Will be extracted later if it's a text-based file
-        fileData,
-        fileName: req.file.originalname,
-        fileSize: req.file.size,
-        mimeType: req.file.mimetype,
-        uploadedBy: userId,
-        isActive: true,
-      });
-      
-      res.json(policy);
-    } catch (error) {
-      console.error("Error creating company policy:", error);
-      res.status(500).json({ message: "Failed to create company policy" });
+        if (!req.file) {
+          return res.status(400).json({ message: "File is required" });
+        }
+
+        const { description } = req.body;
+
+        // Use filename (without extension) as title if not provided
+        const title =
+          req.body.title || req.file.originalname.replace(/\.[^/.]+$/, "");
+
+        // Convert file to Base64 for storage
+        const fileData = req.file.buffer.toString("base64");
+
+        const policy = await storage.createCompanyPolicy({
+          title,
+          description,
+          content: null, // Will be extracted later if it's a text-based file
+          fileData,
+          fileName: req.file.originalname,
+          fileSize: req.file.size,
+          mimeType: req.file.mimetype,
+          uploadedBy: userId,
+          isActive: true,
+        });
+
+        res.json(policy);
+      } catch (error) {
+        console.error("Error creating company policy:", error);
+        res.status(500).json({ message: "Failed to create company policy" });
+      }
     }
-  });
+  );
 
-  app.put('/api/admin/company-policies/:id', isAuthenticated, upload.single('file'), async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (user?.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
-      }
+  app.put(
+    "/api/admin/company-policies/:id",
+    isAuthenticated,
+    upload.single("file"),
+    async (req, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
 
-      const policyId = parseInt(req.params.id);
-      const { title, description } = req.body;
-      
-      const updateData: any = { title, description };
-      
-      if (req.file) {
-        const fileData = req.file.buffer.toString('base64');
-        updateData.fileData = fileData;
-        updateData.content = null; // Will be extracted later if it's a text-based file
-        updateData.fileName = req.file.originalname;
-        updateData.fileSize = req.file.size;
-        updateData.mimeType = req.file.mimetype;
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const policyId = parseInt(req.params.id);
+        const { title, description } = req.body;
+
+        const updateData: any = { title, description };
+
+        if (req.file) {
+          const fileData = req.file.buffer.toString("base64");
+          updateData.fileData = fileData;
+          updateData.content = null; // Will be extracted later if it's a text-based file
+          updateData.fileName = req.file.originalname;
+          updateData.fileSize = req.file.size;
+          updateData.mimeType = req.file.mimetype;
+        }
+
+        const policy = await storage.updateCompanyPolicy(policyId, updateData);
+        res.json(policy);
+      } catch (error) {
+        console.error("Error updating company policy:", error);
+        res.status(500).json({ message: "Failed to update company policy" });
       }
-      
-      const policy = await storage.updateCompanyPolicy(policyId, updateData);
-      res.json(policy);
-    } catch (error) {
-      console.error("Error updating company policy:", error);
-      res.status(500).json({ message: "Failed to update company policy" });
     }
-  });
+  );
 
-  app.delete('/api/admin/company-policies/:id', isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (user?.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.delete(
+    "/api/admin/company-policies/:id",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const policyId = parseInt(req.params.id);
+        await storage.deleteCompanyPolicy(policyId);
+        res.json({ message: "Company policy deleted successfully" });
+      } catch (error) {
+        console.error("Error deleting company policy:", error);
+        res.status(500).json({ message: "Failed to delete company policy" });
       }
-
-      const policyId = parseInt(req.params.id);
-      await storage.deleteCompanyPolicy(policyId);
-      res.json({ message: "Company policy deleted successfully" });
-    } catch (error) {
-      console.error("Error deleting company policy:", error);
-      res.status(500).json({ message: "Failed to delete company policy" });
     }
-  });
+  );
 
-  app.post('/api/admin/company-policies/:id/toggle', isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (user?.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.post(
+    "/api/admin/company-policies/:id/toggle",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const policyId = parseInt(req.params.id);
+        const policy = await storage.toggleCompanyPolicyStatus(policyId);
+        res.json(policy);
+      } catch (error) {
+        console.error("Error toggling company policy status:", error);
+        res
+          .status(500)
+          .json({ message: "Failed to toggle company policy status" });
       }
-
-      const policyId = parseInt(req.params.id);
-      const policy = await storage.toggleCompanyPolicyStatus(policyId);
-      res.json(policy);
-    } catch (error) {
-      console.error("Error toggling company policy status:", error);
-      res.status(500).json({ message: "Failed to toggle company policy status" });
     }
-  });
+  );
 
-  app.get('/api/company-policies/:id/download', isAuthenticated, async (req, res) => {
-    try {
-      const policyId = parseInt(req.params.id);
-      const policy = await storage.getCompanyPolicyById(policyId);
-      
-      if (!policy) {
-        return res.status(404).json({ message: "Company policy not found" });
+  app.get(
+    "/api/company-policies/:id/download",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const policyId = parseInt(req.params.id);
+        const policy = await storage.getCompanyPolicyById(policyId);
+
+        if (!policy) {
+          return res.status(404).json({ message: "Company policy not found" });
+        }
+
+        // Check if fileData exists (new format) or fall back to content (old format)
+        const fileBuffer = policy.fileData
+          ? Buffer.from(policy.fileData, "base64")
+          : Buffer.from(policy.content || "", "utf-8");
+
+        res.setHeader("Content-Type", policy.mimeType);
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${policy.fileName}"`
+        );
+        res.send(fileBuffer);
+      } catch (error) {
+        console.error("Error downloading company policy:", error);
+        res.status(500).json({ message: "Failed to download company policy" });
       }
-      
-      // Check if fileData exists (new format) or fall back to content (old format)
-      const fileBuffer = policy.fileData 
-        ? Buffer.from(policy.fileData, 'base64')
-        : Buffer.from(policy.content || '', 'utf-8');
-      
-      res.setHeader('Content-Type', policy.mimeType);
-      res.setHeader('Content-Disposition', `attachment; filename="${policy.fileName}"`);
-      res.send(fileBuffer);
-    } catch (error) {
-      console.error("Error downloading company policy:", error);
-      res.status(500).json({ message: "Failed to download company policy" });
     }
-  });
-
-
+  );
 
   // Get all user guides (filtered by query params)
-  app.get('/api/guides', isAuthenticated, async (req, res) => {
+  app.get("/api/guides", isAuthenticated, async (req, res) => {
     try {
       const { category, type, published } = req.query;
       const guides = await storage.getUserGuides({
         category: category as string,
         type: type as string,
-        isPublished: published !== undefined ? published === 'true' : undefined,
+        isPublished: published !== undefined ? published === "true" : undefined,
       });
       res.json(guides);
     } catch (error) {
@@ -2149,18 +2825,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get single user guide
-  app.get('/api/guides/:id', isAuthenticated, async (req, res) => {
+  app.get("/api/guides/:id", isAuthenticated, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const guide = await storage.getUserGuideById(id);
-      
+
       if (!guide) {
         return res.status(404).json({ message: "Guide not found" });
       }
 
       // Increment view count
       await storage.incrementGuideViewCount(id);
-      
+
       res.json(guide);
     } catch (error) {
       console.error("Error fetching guide:", error);
@@ -2169,12 +2845,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create user guide (admin only)
-  app.post('/api/admin/guides', isAuthenticated, async (req, res) => {
+  app.post("/api/admin/guides", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
 
@@ -2190,12 +2866,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update user guide (admin only)
-  app.put('/api/admin/guides/:id', isAuthenticated, async (req, res) => {
+  app.put("/api/admin/guides/:id", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
 
@@ -2209,12 +2885,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Delete user guide (admin only)
-  app.delete('/api/admin/guides/:id', isAuthenticated, async (req, res) => {
+  app.delete("/api/admin/guides/:id", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
 
@@ -2228,102 +2904,152 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Cancel user invitation (admin only)
-  app.delete('/api/admin/invitations/:id', isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
-      }
+  app.delete(
+    "/api/admin/invitations/:id",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
 
-      const id = parseInt(req.params.id);
-      await storage.cancelUserInvitation(id);
-      res.json({ message: "Invitation cancelled successfully" });
-    } catch (error) {
-      console.error("Error cancelling invitation:", error);
-      res.status(500).json({ message: "Failed to cancel invitation" });
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const id = parseInt(req.params.id);
+        await storage.cancelUserInvitation(id);
+        res.json({ message: "Invitation cancelled successfully" });
+      } catch (error) {
+        console.error("Error cancelling invitation:", error);
+        res.status(500).json({ message: "Failed to cancel invitation" });
+      }
     }
-  });
+  );
 
   // Resend user invitation (admin only)
-  app.post('/api/admin/invitations/:id/resend', isAuthenticated, async (req, res) => {
+  app.post(
+    "/api/admin/invitations/:id/resend",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const id = parseInt(req.params.id);
+        const invitation = await storage.getUserInvitationById(id);
+
+        if (!invitation) {
+          return res.status(404).json({ message: "Invitation not found" });
+        }
+
+        if (invitation.status === "accepted") {
+          return res
+            .status(400)
+            .json({ message: "Cannot resend accepted invitation" });
+        }
+
+        // Send invitation email using the template
+        const smtpSettings = await storage.getSmtpSettings();
+        const emailTemplate = await storage.getEmailTemplate("user_invitation");
+        const companySettings = await storage.getCompanySettings();
+
+        if (
+          smtpSettings &&
+          emailTemplate &&
+          smtpSettings.awsAccessKeyId &&
+          smtpSettings.awsSecretAccessKey
+        ) {
+          const { sendEmailWithTemplate } = await import("./ses");
+          const inviteUrl = `${req.protocol}://${req.get(
+            "host"
+          )}/auth?mode=register&email=${encodeURIComponent(
+            invitation.email
+          )}&token=${invitation.invitationToken}`;
+
+          const department = invitation.departmentId
+            ? await storage.getDepartmentById(invitation.departmentId)
+            : null;
+          const inviter = await storage.getUser(invitation.invitedBy);
+
+          await sendEmailWithTemplate({
+            to: invitation.email,
+            template: emailTemplate,
+            variables: {
+              companyName: companySettings?.companyName || "TicketFlow",
+              invitedName: invitation.email.split("@")[0], // Use email prefix as name
+              inviterName: inviter
+                ? `${inviter.firstName} ${inviter.lastName}`
+                : "Admin",
+              email: invitation.email,
+              role:
+                invitation.role.charAt(0).toUpperCase() +
+                invitation.role.slice(1),
+              department: department?.name || "Not assigned",
+              registrationUrl: inviteUrl,
+              year: new Date().getFullYear().toString(),
+            },
+            fromEmail: smtpSettings.fromEmail,
+            fromName: smtpSettings.fromName,
+            awsAccessKeyId: smtpSettings.awsAccessKeyId,
+            awsSecretAccessKey: smtpSettings.awsSecretAccessKey,
+            awsRegion: smtpSettings.awsRegion,
+          });
+        }
+
+        res.json({ message: "Invitation resent successfully" });
+      } catch (error) {
+        console.error("Error resending invitation:", error);
+        res.status(500).json({ message: "Failed to resend invitation" });
+      }
+    }
+  );
+
+  // Department routes (scoped by role)
+  app.get("/api/departments", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+
+      if (!user) {
+        return res.status(401).json({ message: "Unauthorized" });
       }
 
-      const id = parseInt(req.params.id);
-      const invitation = await storage.getUserInvitationById(id);
-      
-      if (!invitation) {
-        return res.status(404).json({ message: "Invitation not found" });
+      if (user.role === "admin") {
+        const rows = await storage.getAllDepartments();
+        return res.json(rows);
       }
 
-      if (invitation.status === 'accepted') {
-        return res.status(400).json({ message: "Cannot resend accepted invitation" });
+      if (user.role === "manager") {
+        const rows = await db
+          .select()
+          .from(departments)
+          .where(
+            and(
+              eq(departments.isActive, true),
+              eq(departments.managerId as any, userId) as any
+            )
+          )
+          .orderBy(departments.name);
+        return res.json(rows);
       }
 
-      // Send invitation email using the template
-      const smtpSettings = await storage.getSmtpSettings();
-      const emailTemplate = await storage.getEmailTemplate('user_invitation');
-      const companySettings = await storage.getCompanySettings();
-      
-      if (smtpSettings && emailTemplate && smtpSettings.awsAccessKeyId && smtpSettings.awsSecretAccessKey) {
-        const { sendEmailWithTemplate } = await import('./ses');
-        const inviteUrl = `${req.protocol}://${req.get('host')}/auth?mode=register&email=${encodeURIComponent(invitation.email)}&token=${invitation.invitationToken}`;
-        
-        const department = invitation.departmentId ? await storage.getDepartmentById(invitation.departmentId) : null;
-        const inviter = await storage.getUser(invitation.invitedBy);
-        
-        await sendEmailWithTemplate({
-          to: invitation.email,
-          template: emailTemplate,
-          variables: {
-            companyName: companySettings?.companyName || 'TicketFlow',
-            invitedName: invitation.email.split('@')[0], // Use email prefix as name
-            inviterName: inviter ? `${inviter.firstName} ${inviter.lastName}` : 'Admin',
-            email: invitation.email,
-            role: invitation.role.charAt(0).toUpperCase() + invitation.role.slice(1),
-            department: department?.name || 'Not assigned',
-            registrationUrl: inviteUrl,
-            year: new Date().getFullYear().toString(),
-          },
-          fromEmail: smtpSettings.fromEmail,
-          fromName: smtpSettings.fromName,
-          awsAccessKeyId: smtpSettings.awsAccessKeyId,
-          awsSecretAccessKey: smtpSettings.awsSecretAccessKey,
-          awsRegion: smtpSettings.awsRegion,
-        });
-      }
-
-      res.json({ message: "Invitation resent successfully" });
-    } catch (error) {
-      console.error("Error resending invitation:", error);
-      res.status(500).json({ message: "Failed to resend invitation" });
-    }
-  });
-
-  // Department routes (admin only)
-  app.get('/api/departments', isAuthenticated, async (req, res) => {
-    try {
-      const departments = await storage.getAllDepartments();
-      res.json(departments);
+      return res.status(403).json({ message: "Forbidden" });
     } catch (error) {
       console.error("Error fetching departments:", error);
       res.status(500).json({ message: "Failed to fetch departments" });
     }
   });
 
-  app.post('/api/admin/departments', isAuthenticated, async (req, res) => {
+  app.post("/api/admin/departments", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
 
@@ -2335,12 +3061,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put('/api/admin/departments/:id', isAuthenticated, async (req, res) => {
+  app.put("/api/admin/departments/:id", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
 
@@ -2353,36 +3079,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete('/api/admin/departments/:id', isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
-      }
+  app.delete(
+    "/api/admin/departments/:id",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
 
-      const id = parseInt(req.params.id);
-      await storage.deleteDepartment(id);
-      res.json({ message: "Department deleted successfully" });
-    } catch (error) {
-      console.error("Error deleting department:", error);
-      res.status(500).json({ message: "Failed to delete department" });
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const id = parseInt(req.params.id);
+        await storage.deleteDepartment(id);
+        res.json({ message: "Department deleted successfully" });
+      } catch (error) {
+        console.error("Error deleting department:", error);
+        res.status(500).json({ message: "Failed to delete department" });
+      }
     }
-  });
+  );
 
   // User invitation routes (admin only)
-  app.get('/api/admin/invitations', isAuthenticated, async (req, res) => {
+  app.get("/api/admin/invitations", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
 
       const { status } = req.query;
-      const invitations = await storage.getUserInvitations({ status: status as string });
+      const invitations = await storage.getUserInvitations({
+        status: status as string,
+      });
       res.json(invitations);
     } catch (error) {
       console.error("Error fetching invitations:", error);
@@ -2390,32 +3122,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/admin/invitations', isAuthenticated, async (req, res) => {
+  app.post("/api/admin/invitations", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
 
       // Check if a user with this email already exists
       const existingUser = await storage.getUserByEmail(req.body.email);
       if (existingUser) {
-        return res.status(400).json({ 
-          message: "A user with this email address already exists in the system." 
+        return res.status(400).json({
+          message:
+            "A user with this email address already exists in the system.",
         });
       }
 
       // Check for existing pending invitations
-      const existingInvitations = await storage.getUserInvitations({ status: 'pending' });
-      const hasPendingInvitation = existingInvitations.some(inv => 
-        inv.email === req.body.email && new Date(inv.expiresAt) > new Date()
+      const existingInvitations = await storage.getUserInvitations({
+        status: "pending",
+      });
+      const hasPendingInvitation = existingInvitations.some(
+        (inv) =>
+          inv.email === req.body.email && new Date(inv.expiresAt) > new Date()
       );
-      
+
       if (hasPendingInvitation) {
-        return res.status(400).json({ 
-          message: "An invitation has already been sent to this email address and is still pending." 
+        return res.status(400).json({
+          message:
+            "An invitation has already been sent to this email address and is still pending.",
         });
       }
 
@@ -2427,25 +3164,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Send invitation email using the template
       const smtpSettings = await storage.getSmtpSettings();
-      const emailTemplate = await storage.getEmailTemplate('user_invitation');
+      const emailTemplate = await storage.getEmailTemplate("user_invitation");
       const companySettings = await storage.getCompanySettings();
-      
-      if (smtpSettings && emailTemplate && smtpSettings.awsAccessKeyId && smtpSettings.awsSecretAccessKey) {
-        const { sendEmailWithTemplate } = await import('./ses');
-        const inviteUrl = `${req.protocol}://${req.get('host')}/auth?mode=register&email=${encodeURIComponent(invitation.email)}&token=${invitation.invitationToken}`;
-        
-        const department = invitation.departmentId ? await storage.getDepartmentById(invitation.departmentId) : null;
-        
+
+      if (
+        smtpSettings &&
+        emailTemplate &&
+        smtpSettings.awsAccessKeyId &&
+        smtpSettings.awsSecretAccessKey
+      ) {
+        const { sendEmailWithTemplate } = await import("./ses");
+        const inviteUrl = `${req.protocol}://${req.get(
+          "host"
+        )}/auth?mode=register&email=${encodeURIComponent(
+          invitation.email
+        )}&token=${invitation.invitationToken}`;
+
+        const department = invitation.departmentId
+          ? await storage.getDepartmentById(invitation.departmentId)
+          : null;
+
         await sendEmailWithTemplate({
           to: invitation.email,
           template: emailTemplate,
           variables: {
-            companyName: companySettings?.companyName || 'TicketFlow',
-            invitedName: invitation.email.split('@')[0], // Use email prefix as name
-            inviterName: user.firstName ? `${user.firstName} ${user.lastName}` : 'Admin',
+            companyName: companySettings?.companyName || "TicketFlow",
+            invitedName: invitation.email.split("@")[0], // Use email prefix as name
+            inviterName: user.firstName
+              ? `${user.firstName} ${user.lastName}`
+              : "Admin",
             email: invitation.email,
-            role: invitation.role.charAt(0).toUpperCase() + invitation.role.slice(1),
-            department: department?.name || 'Not assigned',
+            role:
+              invitation.role.charAt(0).toUpperCase() +
+              invitation.role.slice(1),
+            department: department?.name || "Not assigned",
             registrationUrl: inviteUrl,
             year: new Date().getFullYear().toString(),
           },
@@ -2465,16 +3217,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Public route to accept invitation
-  app.get('/api/invitations/:token', async (req, res) => {
+  app.get("/api/invitations/:token", async (req, res) => {
     try {
-      const invitation = await storage.getUserInvitationByToken(req.params.token);
-      
+      const invitation = await storage.getUserInvitationByToken(
+        req.params.token
+      );
+
       if (!invitation) {
         return res.status(404).json({ message: "Invalid invitation token" });
       }
 
-      if (invitation.status === 'accepted') {
-        return res.status(400).json({ message: "Invitation has already been accepted" });
+      if (invitation.status === "accepted") {
+        return res
+          .status(400)
+          .json({ message: "Invitation has already been accepted" });
       }
 
       if (new Date(invitation.expiresAt) < new Date()) {
@@ -2492,16 +3248,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/invitations/:token/accept', async (req, res) => {
+  app.post("/api/invitations/:token/accept", async (req, res) => {
     try {
-      const invitation = await storage.getUserInvitationByToken(req.params.token);
-      
+      const invitation = await storage.getUserInvitationByToken(
+        req.params.token
+      );
+
       if (!invitation) {
         return res.status(404).json({ message: "Invalid invitation token" });
       }
 
-      if (invitation.status === 'accepted') {
-        return res.status(400).json({ message: "Invitation has already been accepted" });
+      if (invitation.status === "accepted") {
+        return res
+          .status(400)
+          .json({ message: "Invitation has already been accepted" });
       }
 
       if (new Date(invitation.expiresAt) < new Date()) {
@@ -2529,115 +3289,143 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }, 24 * 60 * 60 * 1000); // Run once per day
 
   // Teams Integration routes
-  app.get('/api/teams-integration/settings', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const settings = await storage.getTeamsIntegrationSettings(userId);
-      res.json(settings || { enabled: false });
-    } catch (error) {
-      console.error("Error fetching Teams settings:", error);
-      res.status(500).json({ message: "Failed to fetch Teams settings" });
+  app.get(
+    "/api/teams-integration/settings",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const settings = await storage.getTeamsIntegrationSettings(userId);
+        res.json(settings || { enabled: false });
+      } catch (error) {
+        console.error("Error fetching Teams settings:", error);
+        res.status(500).json({ message: "Failed to fetch Teams settings" });
+      }
     }
-  });
+  );
 
-  app.post('/api/teams-integration/settings', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const settings = await storage.upsertTeamsIntegrationSettings({
-        ...req.body,
-        userId,
-      });
-      res.json(settings);
-    } catch (error) {
-      console.error("Error updating Teams settings:", error);
-      res.status(500).json({ message: "Failed to update Teams settings" });
+  app.post(
+    "/api/teams-integration/settings",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const settings = await storage.upsertTeamsIntegrationSettings({
+          ...req.body,
+          userId,
+        });
+        res.json(settings);
+      } catch (error) {
+        console.error("Error updating Teams settings:", error);
+        res.status(500).json({ message: "Failed to update Teams settings" });
+      }
     }
-  });
+  );
 
-  app.delete('/api/teams-integration/settings', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      await storage.deleteTeamsIntegrationSettings(userId);
-      res.json({ message: "Teams integration disabled" });
-    } catch (error) {
-      console.error("Error disabling Teams integration:", error);
-      res.status(500).json({ message: "Failed to disable Teams integration" });
+  app.delete(
+    "/api/teams-integration/settings",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        await storage.deleteTeamsIntegrationSettings(userId);
+        res.json({ message: "Teams integration disabled" });
+      } catch (error) {
+        console.error("Error disabling Teams integration:", error);
+        res
+          .status(500)
+          .json({ message: "Failed to disable Teams integration" });
+      }
     }
-  });
+  );
 
   // Get user's teams and channels
-  app.get('/api/teams-integration/teams', isAuthenticated, async (req: any, res) => {
-    try {
-      if (!req.user.access_token) {
-        return res.status(401).json({ message: "Microsoft authentication required" });
-      }
+  app.get(
+    "/api/teams-integration/teams",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        if (!req.user.access_token) {
+          return res
+            .status(401)
+            .json({ message: "Microsoft authentication required" });
+        }
 
-      const teams = await teamsIntegration.listTeamsAndChannels(req.user.access_token);
-      res.json(teams);
-    } catch (error) {
-      console.error("Error fetching teams:", error);
-      res.status(500).json({ message: "Failed to fetch teams" });
+        const teams = await teamsIntegration.listTeamsAndChannels(
+          req.user.access_token
+        );
+        res.json(teams);
+      } catch (error) {
+        console.error("Error fetching teams:", error);
+        res.status(500).json({ message: "Failed to fetch teams" });
+      }
     }
-  });
+  );
 
   // Send test notification
-  app.post('/api/teams-integration/test', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const settings = await storage.getTeamsIntegrationSettings(userId);
-      
-      if (!settings || !settings.enabled) {
-        return res.status(400).json({ message: "Teams integration not configured" });
-      }
+  app.post(
+    "/api/teams-integration/test",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const settings = await storage.getTeamsIntegrationSettings(userId);
 
-      const testTask = {
-        id: 0,
-        ticketNumber: "TKT-TEST",
-        title: "Test Notification",
-        description: "This is a test notification from TicketFlow",
-        status: "open",
-        priority: "medium",
-        category: "support",
-        createdBy: userId,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as Task;
+        if (!settings || !settings.enabled) {
+          return res
+            .status(400)
+            .json({ message: "Teams integration not configured" });
+        }
 
-      const actionUrl = `${req.protocol}://${req.get('host')}/`;
-      let success = false;
+        const testTask = {
+          id: 0,
+          ticketNumber: "TKT-TEST",
+          title: "Test Notification",
+          description: "This is a test notification from TicketFlow",
+          status: "open",
+          priority: "medium",
+          category: "support",
+          createdBy: userId,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as Task;
 
-      if (settings.webhookUrl) {
-        success = await teamsIntegration.sendWebhookNotification(
-          settings.webhookUrl,
-          testTask,
-          "Test notification from TicketFlow",
-          actionUrl
-        );
-      } else if (settings.teamId && settings.channelId) {
-        success = await teamsIntegration.sendChannelNotification(
-          settings.teamId,
-          settings.channelId,
-          testTask,
-          "Test notification from TicketFlow",
-          actionUrl
-        );
-      }
+        const actionUrl = `${req.protocol}://${req.get("host")}/`;
+        let success = false;
 
-      if (success) {
-        res.json({ message: "Test notification sent successfully" });
-      } else {
+        if (settings.webhookUrl) {
+          success = await teamsIntegration.sendWebhookNotification(
+            settings.webhookUrl,
+            testTask,
+            "Test notification from TicketFlow",
+            actionUrl
+          );
+        } else if (settings.teamId && settings.channelId) {
+          success = await teamsIntegration.sendChannelNotification(
+            settings.teamId,
+            settings.channelId,
+            testTask,
+            "Test notification from TicketFlow",
+            actionUrl
+          );
+        }
+
+        if (success) {
+          res.json({ message: "Test notification sent successfully" });
+        } else {
+          res.status(500).json({ message: "Failed to send test notification" });
+        }
+      } catch (error) {
+        console.error("Error sending test notification:", error);
         res.status(500).json({ message: "Failed to send test notification" });
       }
-    } catch (error) {
-      console.error("Error sending test notification:", error);
-      res.status(500).json({ message: "Failed to send test notification" });
     }
-  });
+  );
 
   // Smart Helpdesk API Routes
-  
+
   // Get AI auto-response for a ticket
-  app.get('/api/tasks/:id/auto-response', isAuthenticated, async (req, res) => {
+  app.get("/api/tasks/:id/auto-response", isAuthenticated, async (req, res) => {
     try {
       const taskId = parseInt(req.params.id);
       const [autoResponse] = await db
@@ -2646,74 +3434,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .where(eq(ticketAutoResponses.ticketId, taskId))
         .orderBy(desc(ticketAutoResponses.createdAt))
         .limit(1);
-      
+
       res.json(autoResponse || null);
     } catch (error) {
       console.error("Error fetching auto-response:", error);
       res.status(500).json({ message: "Failed to fetch auto-response" });
     }
   });
-  
+
   // Update auto-response effectiveness
-  app.post('/api/tasks/:id/auto-response/feedback', isAuthenticated, async (req, res) => {
-    try {
-      const taskId = parseInt(req.params.id);
-      const { wasHelpful } = req.body;
-      
-      const { aiAutoResponseService } = await import("./aiAutoResponse");
-      await aiAutoResponseService.updateResponseEffectiveness(taskId, wasHelpful);
-      
-      res.json({ message: "Feedback recorded" });
-    } catch (error) {
-      console.error("Error recording feedback:", error);
-      res.status(500).json({ message: "Failed to record feedback" });
+  app.post(
+    "/api/tasks/:id/auto-response/feedback",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const taskId = parseInt(req.params.id);
+        const { wasHelpful } = req.body;
+
+        const { aiAutoResponseService } = await import("./aiAutoResponse");
+        await aiAutoResponseService.updateResponseEffectiveness(
+          taskId,
+          wasHelpful
+        );
+
+        res.json({ message: "Feedback recorded" });
+      } catch (error) {
+        console.error("Error recording feedback:", error);
+        res.status(500).json({ message: "Failed to record feedback" });
+      }
     }
-  });
-  
+  );
+
   // Knowledge Base Routes
-  
+
   // Search knowledge base
-  app.get('/api/knowledge/search', isAuthenticated, async (req, res) => {
+  app.get("/api/knowledge/search", isAuthenticated, async (req, res) => {
     try {
       const { query, category, limit = 10 } = req.query;
-      
+
       const articles = await db
         .select()
         .from(knowledgeArticles)
-        .where(and(
-          eq(knowledgeArticles.isPublished, true),
-          query ? or(
-            ilike(knowledgeArticles.title, `%${query}%`),
-            ilike(knowledgeArticles.content, `%${query}%`)
-          ) : undefined,
-          category ? eq(knowledgeArticles.category, category as string) : undefined
-        ))
+        .where(
+          and(
+            eq(knowledgeArticles.isPublished, true),
+            query
+              ? or(
+                  ilike(knowledgeArticles.title, `%${query}%`),
+                  ilike(knowledgeArticles.content, `%${query}%`)
+                )
+              : undefined,
+            category
+              ? eq(knowledgeArticles.category, category as string)
+              : undefined
+          )
+        )
         .orderBy(
           desc(knowledgeArticles.effectivenessScore),
           desc(knowledgeArticles.usageCount)
         )
         .limit(parseInt(limit as string));
-      
+
       res.json(articles);
     } catch (error) {
       console.error("Error searching knowledge base:", error);
       res.status(500).json({ message: "Failed to search knowledge base" });
     }
   });
-  
+
   // Get knowledge articles (admin)
-  app.get('/api/admin/knowledge', isAuthenticated, async (req: any, res) => {
+  app.get("/api/admin/knowledge", isAuthenticated, async (req: any, res) => {
     try {
       const user = await storage.getUser(getUserId(req));
-      if (!user || user.role !== 'admin') {
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       const { category, published } = req.query;
       const filters: any = {};
       if (category) filters.category = category as string;
-      if (published !== undefined) filters.isPublished = published === 'true';
-      
+      if (published !== undefined) filters.isPublished = published === "true";
+
       const articles = await storage.getAllKnowledgeArticles(filters);
       res.json(articles);
     } catch (error) {
@@ -2723,12 +3524,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create knowledge article (admin)
-  app.post('/api/admin/knowledge', isAuthenticated, async (req: any, res) => {
+  app.post("/api/admin/knowledge", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (!user || user.role !== 'admin') {
+
+      if (!user || user.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
 
@@ -2746,104 +3547,125 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update knowledge article (admin)
-  app.put('/api/admin/knowledge/:id', isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.put(
+    "/api/admin/knowledge/:id",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const articleId = parseInt(req.params.id);
+        const article = await storage.updateKnowledgeArticle(
+          articleId,
+          req.body
+        );
+        res.json(article);
+      } catch (error) {
+        console.error("Error updating knowledge article:", error);
+        res.status(500).json({ message: "Failed to update knowledge article" });
       }
-      
-      const articleId = parseInt(req.params.id);
-      const article = await storage.updateKnowledgeArticle(articleId, req.body);
-      res.json(article);
-    } catch (error) {
-      console.error("Error updating knowledge article:", error);
-      res.status(500).json({ message: "Failed to update knowledge article" });
     }
-  });
+  );
 
   // Delete knowledge article (admin)
-  app.delete('/api/admin/knowledge/:id', isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.delete(
+    "/api/admin/knowledge/:id",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const articleId = parseInt(req.params.id);
+        await storage.deleteKnowledgeArticle(articleId);
+        res.json({ message: "Knowledge article deleted successfully" });
+      } catch (error) {
+        console.error("Error deleting knowledge article:", error);
+        res.status(500).json({ message: "Failed to delete knowledge article" });
       }
-      
-      const articleId = parseInt(req.params.id);
-      await storage.deleteKnowledgeArticle(articleId);
-      res.json({ message: "Knowledge article deleted successfully" });
-    } catch (error) {
-      console.error("Error deleting knowledge article:", error);
-      res.status(500).json({ message: "Failed to delete knowledge article" });
     }
-  });
-  
+  );
+
   // Publish/unpublish knowledge article
-  app.patch('/api/admin/knowledge/:id/publish', isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.patch(
+    "/api/admin/knowledge/:id/publish",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const articleId = parseInt(req.params.id);
+        const { isPublished } = req.body;
+
+        const { knowledgeBaseService } = await import("./knowledgeBase");
+        if (isPublished) {
+          await knowledgeBaseService.publishArticle(articleId);
+        } else {
+          await knowledgeBaseService.unpublishArticle(articleId);
+        }
+
+        res.json({ message: "Article updated" });
+      } catch (error) {
+        console.error("Error updating article:", error);
+        res.status(500).json({ message: "Failed to update article" });
       }
-      
-      const articleId = parseInt(req.params.id);
-      const { isPublished } = req.body;
-      
-      const { knowledgeBaseService } = await import("./knowledgeBase");
-      if (isPublished) {
-        await knowledgeBaseService.publishArticle(articleId);
-      } else {
-        await knowledgeBaseService.unpublishArticle(articleId);
-      }
-      
-      res.json({ message: "Article updated" });
-    } catch (error) {
-      console.error("Error updating article:", error);
-      res.status(500).json({ message: "Failed to update article" });
     }
-  });
-  
+  );
+
   // Feedback on knowledge article
-  app.post('/api/knowledge/:id/feedback', isAuthenticated, async (req, res) => {
+  app.post("/api/knowledge/:id/feedback", isAuthenticated, async (req, res) => {
     try {
       const articleId = parseInt(req.params.id);
       const { wasHelpful } = req.body;
-      
+
       const { knowledgeBaseService } = await import("./knowledgeBase");
-      await knowledgeBaseService.updateArticleEffectiveness(articleId, wasHelpful);
-      
+      await knowledgeBaseService.updateArticleEffectiveness(
+        articleId,
+        wasHelpful
+      );
+
       res.json({ message: "Feedback recorded" });
     } catch (error) {
       console.error("Error recording feedback:", error);
       res.status(500).json({ message: "Failed to record feedback" });
     }
   });
-  
+
   // AI Analytics Routes
-  
+
   // Get AI performance metrics
-  app.get('/api/analytics/ai-performance', isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (!user || (user.role !== 'admin' && user.role !== 'manager')) {
-        return res.status(403).json({ message: "Manager access required" });
-      }
-      
-      // Get auto-response statistics
-      const autoResponseStats = await db
-        .select({
-          total: count(),
-          applied: count(ticketAutoResponses.wasApplied),
-          helpful: count(ticketAutoResponses.wasHelpful),
-          avgConfidence: avg(ticketAutoResponses.confidenceScore),
-        })
-        .from(ticketAutoResponses);
-      
-      // Get complexity distribution
-      const complexityDist = await db
-        .select({
-          range: sql<string>`
+  app.get(
+    "/api/analytics/ai-performance",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (!user || (user.role !== "admin" && user.role !== "manager")) {
+          return res.status(403).json({ message: "Manager access required" });
+        }
+
+        // Get auto-response statistics
+        const autoResponseStats = await db
+          .select({
+            total: count(),
+            applied: count(ticketAutoResponses.wasApplied),
+            helpful: count(ticketAutoResponses.wasHelpful),
+            avgConfidence: avg(ticketAutoResponses.confidenceScore),
+          })
+          .from(ticketAutoResponses);
+
+        // Get complexity distribution
+        const complexityDist = await db
+          .select({
+            range: sql<string>`
             CASE 
               WHEN complexity_score < 20 THEN 'Very Low'
               WHEN complexity_score < 40 THEN 'Low'
@@ -2852,129 +3674,146 @@ export async function registerRoutes(app: Express): Promise<Server> {
               ELSE 'Very High'
             END
           `,
-          count: count(),
-        })
-        .from(ticketComplexityScores)
-        .groupBy(sql`1`);
-      
-      // Get knowledge base stats
-      const kbStats = await db
-        .select({
-          totalArticles: count(),
-          publishedArticles: count(knowledgeArticles.isPublished),
-          avgEffectiveness: avg(knowledgeArticles.effectivenessScore),
-          totalUsage: sum(knowledgeArticles.usageCount),
-        })
-        .from(knowledgeArticles);
-      
-      res.json({
-        autoResponse: autoResponseStats[0],
-        complexity: complexityDist,
-        knowledgeBase: kbStats[0],
-      });
-    } catch (error) {
-      console.error("Error fetching AI analytics:", error);
-      res.status(500).json({ message: "Failed to fetch AI analytics" });
+            count: count(),
+          })
+          .from(ticketComplexityScores)
+          .groupBy(sql`1`);
+
+        // Get knowledge base stats
+        const kbStats = await db
+          .select({
+            totalArticles: count(),
+            publishedArticles: count(knowledgeArticles.isPublished),
+            avgEffectiveness: avg(knowledgeArticles.effectivenessScore),
+            totalUsage: sum(knowledgeArticles.usageCount),
+          })
+          .from(knowledgeArticles);
+
+        res.json({
+          autoResponse: autoResponseStats[0],
+          complexity: complexityDist,
+          knowledgeBase: kbStats[0],
+        });
+      } catch (error) {
+        console.error("Error fetching AI analytics:", error);
+        res.status(500).json({ message: "Failed to fetch AI analytics" });
+      }
     }
-  });
-  
+  );
+
   // Escalation Rules Management
-  
+
   // Get escalation rules
-  app.get('/api/admin/escalation-rules', isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.get(
+    "/api/admin/escalation-rules",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const rules = await db
+          .select()
+          .from(escalationRules)
+          .orderBy(desc(escalationRules.priority));
+
+        res.json(rules);
+      } catch (error) {
+        console.error("Error fetching escalation rules:", error);
+        res.status(500).json({ message: "Failed to fetch escalation rules" });
       }
-      
-      const rules = await db
-        .select()
-        .from(escalationRules)
-        .orderBy(desc(escalationRules.priority));
-      
-      res.json(rules);
-    } catch (error) {
-      console.error("Error fetching escalation rules:", error);
-      res.status(500).json({ message: "Failed to fetch escalation rules" });
     }
-  });
-  
+  );
+
   // Create escalation rule
-  app.post('/api/admin/escalation-rules', isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.post(
+    "/api/admin/escalation-rules",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const rule = await db
+          .insert(escalationRules)
+          .values(req.body)
+          .returning();
+
+        res.json(rule[0]);
+      } catch (error) {
+        console.error("Error creating escalation rule:", error);
+        res.status(500).json({ message: "Failed to create escalation rule" });
       }
-      
-      const rule = await db
-        .insert(escalationRules)
-        .values(req.body)
-        .returning();
-      
-      res.json(rule[0]);
-    } catch (error) {
-      console.error("Error creating escalation rule:", error);
-      res.status(500).json({ message: "Failed to create escalation rule" });
     }
-  });
-  
+  );
+
   // Update escalation rule
-  app.put('/api/admin/escalation-rules/:id', isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.put(
+    "/api/admin/escalation-rules/:id",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const ruleId = parseInt(req.params.id);
+        const rule = await db
+          .update(escalationRules)
+          .set(req.body)
+          .where(eq(escalationRules.id, ruleId))
+          .returning();
+
+        res.json(rule[0]);
+      } catch (error) {
+        console.error("Error updating escalation rule:", error);
+        res.status(500).json({ message: "Failed to update escalation rule" });
       }
-      
-      const ruleId = parseInt(req.params.id);
-      const rule = await db
-        .update(escalationRules)
-        .set(req.body)
-        .where(eq(escalationRules.id, ruleId))
-        .returning();
-      
-      res.json(rule[0]);
-    } catch (error) {
-      console.error("Error updating escalation rule:", error);
-      res.status(500).json({ message: "Failed to update escalation rule" });
     }
-  });
-  
+  );
+
   // Delete escalation rule
-  app.delete('/api/admin/escalation-rules/:id', isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.delete(
+    "/api/admin/escalation-rules/:id",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const ruleId = parseInt(req.params.id);
+        await db.delete(escalationRules).where(eq(escalationRules.id, ruleId));
+
+        res.json({ message: "Rule deleted successfully" });
+      } catch (error) {
+        console.error("Error deleting escalation rule:", error);
+        res.status(500).json({ message: "Failed to delete escalation rule" });
       }
-      
-      const ruleId = parseInt(req.params.id);
-      await db
-        .delete(escalationRules)
-        .where(eq(escalationRules.id, ruleId));
-      
-      res.json({ message: "Rule deleted successfully" });
-    } catch (error) {
-      console.error("Error deleting escalation rule:", error);
-      res.status(500).json({ message: "Failed to delete escalation rule" });
     }
-  });
+  );
 
   // Self-Learning Knowledge Base Endpoints
-  
+
   // Submit feedback on AI response
-  app.post('/api/ai-feedback', isAuthenticated, async (req: any, res) => {
+  app.post("/api/ai-feedback", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
       const { feedbackType, referenceId, rating, comment, ticketId } = req.body;
-      
+
       // Validate rating
       if (![1, 5].includes(rating)) {
-        return res.status(400).json({ message: "Rating must be 1 (thumbs down) or 5 (thumbs up)" });
+        return res
+          .status(400)
+          .json({ message: "Rating must be 1 (thumbs down) or 5 (thumbs up)" });
       }
-      
+
       const feedback = await db
         .insert(aiFeedback)
         .values({
@@ -2986,205 +3825,248 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ticketId,
         })
         .returning();
-      
+
       // Update knowledge article effectiveness if applicable
-      if (feedbackType === 'knowledge_article') {
-        console.log(`Feedback received for knowledge article ${referenceId}: ${rating === 5 ? 'positive' : 'negative'}`);
+      if (feedbackType === "knowledge_article") {
+        console.log(
+          `Feedback received for knowledge article ${referenceId}: ${
+            rating === 5 ? "positive" : "negative"
+          }`
+        );
         // Knowledge article effectiveness tracking would be implemented here
       }
-      
+
       res.json(feedback[0]);
     } catch (error) {
       console.error("Error submitting AI feedback:", error);
       res.status(500).json({ message: "Failed to submit feedback" });
     }
   });
-  
+
   // Get AI feedback for a reference
-  app.get('/api/ai-feedback/:type/:referenceId', isAuthenticated, async (req: any, res) => {
-    try {
-      const { type, referenceId } = req.params;
-      
-      const feedback = await db
-        .select()
-        .from(aiFeedback)
-        .where(
-          and(
-            eq(aiFeedback.feedbackType, type),
-            eq(aiFeedback.referenceId, parseInt(referenceId))
+  app.get(
+    "/api/ai-feedback/:type/:referenceId",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const { type, referenceId } = req.params;
+
+        const feedback = await db
+          .select()
+          .from(aiFeedback)
+          .where(
+            and(
+              eq(aiFeedback.feedbackType, type),
+              eq(aiFeedback.referenceId, parseInt(referenceId))
+            )
           )
-        )
-        .orderBy(desc(aiFeedback.createdAt));
-      
-      res.json(feedback);
-    } catch (error) {
-      console.error("Error fetching AI feedback:", error);
-      res.status(500).json({ message: "Failed to fetch feedback" });
+          .orderBy(desc(aiFeedback.createdAt));
+
+        res.json(feedback);
+      } catch (error) {
+        console.error("Error fetching AI feedback:", error);
+        res.status(500).json({ message: "Failed to fetch feedback" });
+      }
     }
-  });
-  
+  );
+
   // Search knowledge base with semantic search
-  app.post('/api/knowledge-base/search', isAuthenticated, async (req: any, res) => {
-    try {
-      const { query, limit = 5 } = req.body;
-      
-      if (!query) {
-        return res.status(400).json({ message: "Search query is required" });
+  app.post(
+    "/api/knowledge-base/search",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const { query, limit = 5 } = req.body;
+
+        if (!query) {
+          return res.status(400).json({ message: "Search query is required" });
+        }
+
+        const results = await intelligentKnowledgeSearch(query, null, limit);
+
+        res.json(results);
+      } catch (error) {
+        console.error("Error searching knowledge base:", error);
+        res.status(500).json({ message: "Failed to search knowledge base" });
       }
-      
-      const results = await intelligentKnowledgeSearch(query, null, limit);
-      
-      res.json(results);
-    } catch (error) {
-      console.error("Error searching knowledge base:", error);
-      res.status(500).json({ message: "Failed to search knowledge base" });
     }
-  });
-  
+  );
+
   // Add ticket to learning queue when resolved
-  app.post('/api/tasks/:id/add-to-learning', isAuthenticated, async (req: any, res) => {
-    try {
-      const taskId = parseInt(req.params.id);
-      
-      // Check if ticket is resolved
-      const [task] = await db
-        .select()
-        .from(tasks)
-        .where(eq(tasks.id, taskId))
-        .limit(1);
-      
-      if (!task || task.status !== 'resolved') {
-        return res.status(400).json({ message: "Only resolved tickets can be added to learning queue" });
+  app.post(
+    "/api/tasks/:id/add-to-learning",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const taskId = parseInt(req.params.id);
+
+        // Check if ticket is resolved
+        const [task] = await db
+          .select()
+          .from(tasks)
+          .where(eq(tasks.id, taskId))
+          .limit(1);
+
+        if (!task || task.status !== "resolved") {
+          return res.status(400).json({
+            message: "Only resolved tickets can be added to learning queue",
+          });
+        }
+
+        // Check if already in queue
+        const existing = await db
+          .select()
+          .from(learningQueue)
+          .where(eq(learningQueue.ticketId, taskId))
+          .limit(1);
+
+        if (existing.length > 0) {
+          return res
+            .status(400)
+            .json({ message: "Ticket already in learning queue" });
+        }
+
+        // Add to queue
+        const [queueItem] = await db
+          .insert(learningQueue)
+          .values({ ticketId: taskId })
+          .returning();
+
+        res.json(queueItem);
+      } catch (error) {
+        console.error("Error adding to learning queue:", error);
+        res.status(500).json({ message: "Failed to add to learning queue" });
       }
-      
-      // Check if already in queue
-      const existing = await db
-        .select()
-        .from(learningQueue)
-        .where(eq(learningQueue.ticketId, taskId))
-        .limit(1);
-      
-      if (existing.length > 0) {
-        return res.status(400).json({ message: "Ticket already in learning queue" });
-      }
-      
-      // Add to queue
-      const [queueItem] = await db
-        .insert(learningQueue)
-        .values({ ticketId: taskId })
-        .returning();
-      
-      res.json(queueItem);
-    } catch (error) {
-      console.error("Error adding to learning queue:", error);
-      res.status(500).json({ message: "Failed to add to learning queue" });
     }
-  });
-  
+  );
+
   // Process learning queue (admin only)
-  app.post('/api/admin/learning-queue/process', isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.post(
+    "/api/admin/learning-queue/process",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        // Process knowledge learning queue asynchronously
+        processKnowledgeLearning().catch(console.error);
+
+        res.json({ message: "Learning queue processing started" });
+      } catch (error) {
+        console.error("Error starting learning queue:", error);
+        res.status(500).json({ message: "Failed to start learning queue" });
       }
-      
-      // Process knowledge learning queue asynchronously
-      processKnowledgeLearning().catch(console.error);
-      
-      res.json({ message: "Learning queue processing started" });
-    } catch (error) {
-      console.error("Error starting learning queue:", error);
-      res.status(500).json({ message: "Failed to start learning queue" });
     }
-  });
-  
+  );
+
   // Seed historical tickets for learning (admin only)
-  app.post('/api/admin/learning-queue/seed', isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.post(
+    "/api/admin/learning-queue/seed",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const { daysBack = 90 } = req.body;
+
+        // Seed historical tickets for learning
+        console.log(
+          `Started seeding historical tickets from the last ${daysBack} days`
+        );
+        // Historical ticket seeding would be implemented here
+
+        res.json({
+          message: `Started seeding historical tickets from the last ${daysBack} days`,
+        });
+      } catch (error) {
+        console.error("Error seeding historical tickets:", error);
+        res.status(500).json({ message: "Failed to seed historical tickets" });
       }
-      
-      const { daysBack = 90 } = req.body;
-      
-      // Seed historical tickets for learning
-      console.log(`Started seeding historical tickets from the last ${daysBack} days`);
-      // Historical ticket seeding would be implemented here
-      
-      res.json({ message: `Started seeding historical tickets from the last ${daysBack} days` });
-    } catch (error) {
-      console.error("Error seeding historical tickets:", error);
-      res.status(500).json({ message: "Failed to seed historical tickets" });
     }
-  });
-  
+  );
+
   // Get learning queue status
-  app.get('/api/admin/learning-queue/status', isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (!user || user.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.get(
+    "/api/admin/learning-queue/status",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const status = await db
+          .select({
+            status: learningQueue.processStatus,
+            count: count(),
+          })
+          .from(learningQueue)
+          .groupBy(learningQueue.processStatus);
+
+        res.json(status);
+      } catch (error) {
+        console.error("Error fetching learning queue status:", error);
+        res
+          .status(500)
+          .json({ message: "Failed to fetch learning queue status" });
       }
-      
-      const status = await db
-        .select({
-          status: learningQueue.processStatus,
-          count: count(),
-        })
-        .from(learningQueue)
-        .groupBy(learningQueue.processStatus);
-      
-      res.json(status);
-    } catch (error) {
-      console.error("Error fetching learning queue status:", error);
-      res.status(500).json({ message: "Failed to fetch learning queue status" });
     }
-  });
+  );
 
   const httpServer = createServer(app);
-  
+
   // WebSocket server for real-time updates
-  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
-  
+  const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
+
   // Store connected clients with their user IDs
   const clients = new Map<string, WebSocket>();
-  
-  wss.on('connection', (ws, req) => {
-    console.log('WebSocket client connected');
-    
+
+  wss.on("connection", (ws, req) => {
+    console.log("WebSocket client connected");
+
     // Extract user ID from the session or authentication
     let userId: string | null = null;
-    
-    ws.on('message', (message) => {
+
+    ws.on("message", (message) => {
       try {
         const data = JSON.parse(message.toString());
-        
-        if (data.type === 'auth' && data.userId) {
+
+        if (data.type === "auth" && data.userId) {
           userId = data.userId;
           clients.set(userId, ws);
-          ws.send(JSON.stringify({ type: 'connected', message: 'WebSocket connection established' }));
+          ws.send(
+            JSON.stringify({
+              type: "connected",
+              message: "WebSocket connection established",
+            })
+          );
         }
-        
+
         // Handle other message types if needed
       } catch (error) {
-        console.error('WebSocket message error:', error);
+        console.error("WebSocket message error:", error);
       }
     });
-    
-    ws.on('close', () => {
+
+    ws.on("close", () => {
       if (userId) {
         clients.delete(userId);
       }
-      console.log('WebSocket client disconnected');
+      console.log("WebSocket client disconnected");
     });
-    
-    ws.on('error', (error) => {
-      console.error('WebSocket error:', error);
+
+    ws.on("error", (error) => {
+      console.error("WebSocket error:", error);
     });
   });
-  
+
   // Helper function to broadcast updates to specific users
   function broadcastToUser(userId: string, message: any) {
     const client = clients.get(userId);
@@ -3192,7 +4074,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       client.send(JSON.stringify(message));
     }
   }
-  
+
   // Helper function to broadcast to all connected clients
   function broadcastToAll(message: any) {
     clients.forEach((client) => {
@@ -3201,31 +4083,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     });
   }
-  
+
   // Attach broadcast functions to app for use in routes
   (app as any).broadcastToUser = broadcastToUser;
   (app as any).broadcastToAll = broadcastToAll;
-  
+
   // AI Analysis and Auto-Response Routes
   app.post("/api/ai/analyze-ticket", isAuthenticated, async (req: any, res) => {
     try {
       const { title, description, category, priority } = req.body;
       const userId = getUserId(req);
-      
+
       if (!title || !description) {
-        return res.status(400).json({ message: "Title and description are required" });
+        return res
+          .status(400)
+          .json({ message: "Title and description are required" });
       }
 
       const analysis = await analyzeTicket({
         title,
         description,
-        category: category || 'support',
-        priority: priority || 'medium',
-        reporterId: userId
+        category: category || "support",
+        priority: priority || "medium",
+        reporterId: userId,
       });
 
       if (!analysis) {
-        return res.status(503).json({ message: "AI analysis service unavailable" });
+        return res
+          .status(503)
+          .json({ message: "AI analysis service unavailable" });
       }
 
       res.json(analysis);
@@ -3235,78 +4121,100 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/ai/generate-response", isAuthenticated, async (req: any, res) => {
-    try {
-      const { title, description, category, priority, analysis } = req.body;
-      
-      if (!title || !description || !analysis) {
-        return res.status(400).json({ message: "Title, description, and analysis are required" });
+  app.post(
+    "/api/ai/generate-response",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const { title, description, category, priority, analysis } = req.body;
+
+        if (!title || !description || !analysis) {
+          return res
+            .status(400)
+            .json({ message: "Title, description, and analysis are required" });
+        }
+
+        const autoResponse = await generateAutoResponse(
+          { title, description, category, priority },
+          analysis
+        );
+
+        if (!autoResponse) {
+          return res
+            .status(503)
+            .json({ message: "AI response generation service unavailable" });
+        }
+
+        res.json(autoResponse);
+      } catch (error) {
+        console.error("AI response generation error:", error);
+        res.status(500).json({ message: "Failed to generate response" });
       }
-
-      const autoResponse = await generateAutoResponse(
-        { title, description, category, priority },
-        analysis
-      );
-
-      if (!autoResponse) {
-        return res.status(503).json({ message: "AI response generation service unavailable" });
-      }
-
-      res.json(autoResponse);
-    } catch (error) {
-      console.error("AI response generation error:", error);
-      res.status(500).json({ message: "Failed to generate response" });
     }
-  });
+  );
 
   // Knowledge Base Learning Routes
-  app.post("/api/ai/knowledge-learning/run", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      // Only admins can manually trigger knowledge learning
-      if (user?.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.post(
+    "/api/ai/knowledge-learning/run",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        // Only admins can manually trigger knowledge learning
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const results = await processKnowledgeLearning();
+        res.json({
+          message: "Knowledge learning process completed",
+          ...results,
+        });
+      } catch (error) {
+        console.error("Knowledge learning error:", error);
+        res.status(500).json({ message: "Failed to run knowledge learning" });
       }
-
-      const results = await processKnowledgeLearning();
-      res.json({
-        message: "Knowledge learning process completed",
-        ...results
-      });
-    } catch (error) {
-      console.error("Knowledge learning error:", error);
-      res.status(500).json({ message: "Failed to run knowledge learning" });
     }
-  });
+  );
 
-  app.get("/api/ai/knowledge-search", isAuthenticated, async (req: any, res) => {
-    try {
-      const { query, category, maxResults = 10 } = req.query;
-      
-      if (!query) {
-        return res.status(400).json({ message: "Query parameter is required" });
+  app.get(
+    "/api/ai/knowledge-search",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const { query, category, maxResults = 10 } = req.query;
+
+        if (!query) {
+          return res
+            .status(400)
+            .json({ message: "Query parameter is required" });
+        }
+
+        const results = await intelligentKnowledgeSearch(
+          query as string,
+          category as string,
+          parseInt(maxResults as string)
+        );
+
+        res.json(results);
+      } catch (error) {
+        console.error("Knowledge search error:", error);
+        res.status(500).json({ message: "Failed to search knowledge base" });
       }
-
-      const results = await intelligentKnowledgeSearch(
-        query as string,
-        category as string,
-        parseInt(maxResults as string)
-      );
-
-      res.json(results);
-    } catch (error) {
-      console.error("Knowledge search error:", error);
-      res.status(500).json({ message: "Failed to search knowledge base" });
     }
-  });
+  );
 
   // AI System Status Route
   app.get("/api/ai/status", isAuthenticated, async (req: any, res) => {
     try {
-      const awsConfigured = !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_REGION);
-      
+      const awsConfigured = !!(
+        process.env.AWS_ACCESS_KEY_ID &&
+        process.env.AWS_SECRET_ACCESS_KEY &&
+        process.env.AWS_REGION
+      );
+
       res.json({
         awsCredentials: awsConfigured,
         bedrockAvailable: awsConfigured,
@@ -3316,8 +4224,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ticketAnalysis: awsConfigured,
           autoResponse: awsConfigured,
           knowledgeLearning: awsConfigured,
-          intelligentSearch: awsConfigured
-        }
+          intelligentSearch: awsConfigured,
+        },
       });
     } catch (error) {
       console.error("AI status check error:", error);
@@ -3326,214 +4234,249 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Knowledge Base Management Routes (admin only)
-  
+
   // Get all knowledge articles with filtering
-  app.get('/api/admin/knowledge', isAuthenticated, async (req: any, res) => {
+  app.get("/api/admin/knowledge", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (user?.role !== 'admin') {
+
+      if (user?.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       const { category, published } = req.query;
-      
+
       const filters: any = {};
       if (category) filters.category = category as string;
       if (published !== undefined) {
-        filters.isPublished = published === 'true';
+        filters.isPublished = published === "true";
       }
-      
+
       const articles = await storage.getAllKnowledgeArticles(filters);
       res.json(articles);
     } catch (error) {
-      console.error('Error fetching knowledge articles:', error);
-      res.status(500).json({ message: 'Failed to fetch knowledge articles' });
+      console.error("Error fetching knowledge articles:", error);
+      res.status(500).json({ message: "Failed to fetch knowledge articles" });
     }
   });
 
   // Create a new knowledge article
-  app.post('/api/admin/knowledge', isAuthenticated, async (req: any, res) => {
+  app.post("/api/admin/knowledge", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      
-      if (user?.role !== 'admin') {
+
+      if (user?.role !== "admin") {
         return res.status(403).json({ message: "Admin access required" });
       }
-      
+
       const { title, summary, content, category, tags, isPublished } = req.body;
-      
+
       if (!title || !content) {
-        return res.status(400).json({ message: 'Title and content are required' });
+        return res
+          .status(400)
+          .json({ message: "Title and content are required" });
       }
-      
+
       const article = await storage.createKnowledgeArticle({
         title,
         summary: summary || null,
         content,
-        category: category || 'general',
+        category: category || "general",
         tags: tags || [],
         isPublished: isPublished || false,
         createdBy: userId,
-        source: 'manual',
+        source: "manual",
       });
-      
+
       res.status(201).json(article);
     } catch (error) {
-      console.error('Error creating knowledge article:', error);
-      res.status(500).json({ message: 'Failed to create knowledge article' });
+      console.error("Error creating knowledge article:", error);
+      res.status(500).json({ message: "Failed to create knowledge article" });
     }
   });
 
   // Get a specific knowledge article
-  app.get('/api/admin/knowledge/:id', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (user?.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.get(
+    "/api/admin/knowledge/:id",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const id = parseInt(req.params.id);
+        const article = await storage.getKnowledgeArticle(id);
+
+        if (!article) {
+          return res
+            .status(404)
+            .json({ message: "Knowledge article not found" });
+        }
+
+        res.json(article);
+      } catch (error) {
+        console.error("Error fetching knowledge article:", error);
+        res.status(500).json({ message: "Failed to fetch knowledge article" });
       }
-      
-      const id = parseInt(req.params.id);
-      const article = await storage.getKnowledgeArticle(id);
-      
-      if (!article) {
-        return res.status(404).json({ message: 'Knowledge article not found' });
-      }
-      
-      res.json(article);
-    } catch (error) {
-      console.error('Error fetching knowledge article:', error);
-      res.status(500).json({ message: 'Failed to fetch knowledge article' });
     }
-  });
+  );
 
   // Update a knowledge article
-  app.put('/api/admin/knowledge/:id', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (user?.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.put(
+    "/api/admin/knowledge/:id",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const id = parseInt(req.params.id);
+        const updates = req.body;
+
+        // Ensure we don't update protected fields
+        delete updates.id;
+        delete updates.createdAt;
+        delete updates.usageCount;
+        delete updates.createdBy;
+
+        const article = await storage.updateKnowledgeArticle(id, updates);
+        res.json(article);
+      } catch (error) {
+        console.error("Error updating knowledge article:", error);
+        res.status(500).json({ message: "Failed to update knowledge article" });
       }
-      
-      const id = parseInt(req.params.id);
-      const updates = req.body;
-      
-      // Ensure we don't update protected fields
-      delete updates.id;
-      delete updates.createdAt;
-      delete updates.usageCount;
-      delete updates.createdBy;
-      
-      const article = await storage.updateKnowledgeArticle(id, updates);
-      res.json(article);
-    } catch (error) {
-      console.error('Error updating knowledge article:', error);
-      res.status(500).json({ message: 'Failed to update knowledge article' });
     }
-  });
+  );
 
   // Delete a knowledge article
-  app.delete('/api/admin/knowledge/:id', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (user?.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.delete(
+    "/api/admin/knowledge/:id",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const id = parseInt(req.params.id);
+        await storage.deleteKnowledgeArticle(id);
+        res.json({ message: "Knowledge article deleted successfully" });
+      } catch (error) {
+        console.error("Error deleting knowledge article:", error);
+        res.status(500).json({ message: "Failed to delete knowledge article" });
       }
-      
-      const id = parseInt(req.params.id);
-      await storage.deleteKnowledgeArticle(id);
-      res.json({ message: 'Knowledge article deleted successfully' });
-    } catch (error) {
-      console.error('Error deleting knowledge article:', error);
-      res.status(500).json({ message: 'Failed to delete knowledge article' });
     }
-  });
+  );
 
   // Toggle article published status
-  app.patch('/api/admin/knowledge/:id/toggle-status', isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      
-      if (user?.role !== 'admin') {
-        return res.status(403).json({ message: "Admin access required" });
+  app.patch(
+    "/api/admin/knowledge/:id/toggle-status",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const id = parseInt(req.params.id);
+        const article = await storage.toggleKnowledgeArticleStatus(id);
+        res.json(article);
+      } catch (error) {
+        console.error("Error toggling article status:", error);
+        res.status(500).json({ message: "Failed to toggle article status" });
       }
-      
-      const id = parseInt(req.params.id);
-      const article = await storage.toggleKnowledgeArticleStatus(id);
-      res.json(article);
-    } catch (error) {
-      console.error('Error toggling article status:', error);
-      res.status(500).json({ message: 'Failed to toggle article status' });
     }
-  });
+  );
 
   // Public knowledge base search (for all users)
-  app.get('/api/knowledge/search', isAuthenticated, async (req: any, res) => {
+  app.get("/api/knowledge/search", isAuthenticated, async (req: any, res) => {
     try {
       const { q: query, category } = req.query;
-      
+
       if (!query) {
-        return res.status(400).json({ message: 'Search query is required' });
+        return res.status(400).json({ message: "Search query is required" });
       }
-      
-      const articles = await storage.searchKnowledgeBase(query as string, category as string);
+
+      const articles = await storage.searchKnowledgeBase(
+        query as string,
+        category as string
+      );
       res.json(articles);
     } catch (error) {
-      console.error('Error searching knowledge base:', error);
-      res.status(500).json({ message: 'Failed to search knowledge base' });
+      console.error("Error searching knowledge base:", error);
+      res.status(500).json({ message: "Failed to search knowledge base" });
     }
   });
 
   // Get published knowledge articles (for all users)
-  app.get('/api/knowledge/articles', isAuthenticated, async (req: any, res) => {
+  app.get("/api/knowledge/articles", isAuthenticated, async (req: any, res) => {
     try {
       const { category } = req.query;
-      const articles = await storage.getPublishedKnowledgeArticles(category as string);
+      const articles = await storage.getPublishedKnowledgeArticles(
+        category as string
+      );
       res.json(articles);
     } catch (error) {
-      console.error('Error fetching published articles:', error);
-      res.status(500).json({ message: 'Failed to fetch knowledge articles' });
+      console.error("Error fetching published articles:", error);
+      res.status(500).json({ message: "Failed to fetch knowledge articles" });
     }
   });
 
   // Track article usage (when users view an article)
-  app.post('/api/knowledge/:id/track-usage', isAuthenticated, async (req: any, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      await storage.incrementKnowledgeArticleUsage(id);
-      res.json({ message: 'Usage tracked successfully' });
-    } catch (error) {
-      console.error('Error tracking article usage:', error);
-      res.status(500).json({ message: 'Failed to track usage' });
+  app.post(
+    "/api/knowledge/:id/track-usage",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const id = parseInt(req.params.id);
+        await storage.incrementKnowledgeArticleUsage(id);
+        res.json({ message: "Usage tracked successfully" });
+      } catch (error) {
+        console.error("Error tracking article usage:", error);
+        res.status(500).json({ message: "Failed to track usage" });
+      }
     }
-  });
+  );
 
   // Rate article effectiveness (user feedback)
-  app.post('/api/knowledge/:id/rate', isAuthenticated, async (req: any, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const { rating } = req.body;
-      
-      if (rating < 1 || rating > 5) {
-        return res.status(400).json({ message: 'Rating must be between 1 and 5' });
+  app.post(
+    "/api/knowledge/:id/rate",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const id = parseInt(req.params.id);
+        const { rating } = req.body;
+
+        if (rating < 1 || rating > 5) {
+          return res
+            .status(400)
+            .json({ message: "Rating must be between 1 and 5" });
+        }
+
+        await storage.updateArticleEffectiveness(id, rating);
+        res.json({ message: "Rating submitted successfully" });
+      } catch (error) {
+        console.error("Error rating article:", error);
+        res.status(500).json({ message: "Failed to submit rating" });
       }
-      
-      await storage.updateArticleEffectiveness(id, rating);
-      res.json({ message: 'Rating submitted successfully' });
-    } catch (error) {
-      console.error('Error rating article:', error);
-      res.status(500).json({ message: 'Failed to submit rating' });
     }
-  });
+  );
 
   // Initialize AI systems
   try {

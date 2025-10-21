@@ -77,7 +77,7 @@ function Router() {
   return (
     <>
       <Switch>
-        <Route path="/auth" component={AuthPage} />
+        <Route path="/login" component={AuthPage} />
         <Route path="/api-docs" component={ApiDocs} />
 
         {!isAuthenticated ? (
@@ -97,7 +97,11 @@ function Router() {
                     <Tasks />
                   </ProtectedRoute>
                 </Route>
-                <Route path="/my-tasks" component={MyTasks} />
+                <Route path="/my-tasks">
+                  <ProtectedRoute allowedRoles={["manager", "agent", "user"]}>
+                    <MyTasks />
+                  </ProtectedRoute>
+                </Route>
                 <Route path="/teams">
                   <ProtectedRoute allowedRoles={["manager", "agent", "user"]}>
                     <Teams />
@@ -106,9 +110,7 @@ function Router() {
                 <Route
                   path="/teams/:id"
                   component={(params) => (
-                    <ProtectedRoute
-                      allowedRoles={["admin", "manager", "agent", "user"]}
-                    >
+                    <ProtectedRoute allowedRoles={["admin", "manager", "user"]}>
                       <TeamDetail />
                     </ProtectedRoute>
                   )}

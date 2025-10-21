@@ -36,6 +36,8 @@ import {
   Trash2,
   Target,
   Zap,
+  AlertCircle,
+  XCircle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -44,10 +46,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import MainWrapper from "@/components/main-wrapper";
+import { cn } from "@/lib/utils";
 
 export default function Tasks() {
   const { toast } = useToast();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
   const queryClient = useQueryClient();
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
@@ -58,6 +61,23 @@ export default function Tasks() {
     category: "all",
     priority: "all",
   });
+  const [page, setPage] = useState(0);
+  const pageSize = 20;
+
+  useEffect(() => {
+    // Reset to first page when filters change
+    setPage(0);
+  }, [filters.search, filters.status, filters.category]);
+
+  const params = new URLSearchParams();
+  if (filters.status && filters.status !== "all")
+    params.set("status", filters.status);
+  if (filters.category && filters.category !== "all")
+    params.set("category", filters.category);
+  if (filters.search) params.set("search", filters.search);
+  params.set("limit", String(pageSize));
+  params.set("offset", String(page * pageSize));
+  const tasksUrl = `/api/tasks?${params.toString()}`;
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -74,10 +94,12 @@ export default function Tasks() {
     }
   }, [isAuthenticated, isLoading, toast]);
 
-  const { data: tasks, isLoading: tasksLoading } = useQuery({
-    queryKey: ["/api/tasks"],
+  const { data: tasks, isLoading: tasksLoading } = useQuery<any[]>({
+    queryKey: [tasksUrl],
     retry: false,
     enabled: isAuthenticated,
+    initialData: [],
+    refetchOnMount: "always",
   });
 
   const deleteTaskMutation = useMutation({
@@ -119,54 +141,22 @@ export default function Tasks() {
     );
   }
 
-  const getPriorityIcon = (priority: string) => {
-    switch (priority) {
-      case "high":
-        return <AlertTriangle className="h-4 w-4 text-red-500" />;
-      case "medium":
-        return <CircleDot className="h-4 w-4 text-yellow-500" />;
-      case "low":
-        return <CheckCircle className="h-4 w-4 text-green-500" />;
-      default:
-        return <CircleDot className="h-4 w-4 text-slate-400" />;
-    }
-  };
+  const role = (user as any)?.role as string | undefined;
+  const canCreate = ["customer", "manager", "admin"].includes(role || "");
+  const canDelete = role === "admin";
 
-  const getCategoryIcon = (category: string) => {
-    switch (category) {
-      case "bug":
-        return <AlertTriangle className="h-4 w-4 text-red-500" />;
-      case "feature":
-        return <Zap className="h-4 w-4 text-blue-500" />;
-      case "support":
-        return <User className="h-4 w-4 text-purple-500" />;
-      case "enhancement":
-        return <Target className="h-4 w-4 text-green-500" />;
-      case "incident":
-        return <AlertTriangle className="h-4 w-4 text-orange-500" />;
-      case "request":
-        return <FileText className="h-4 w-4 text-blue-500" />;
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case "open":
+        return <AlertCircle className="h-3 w-3" />;
+      case "in_progress":
+        return <Clock className="h-3 w-3" />;
+      case "resolved":
+        return <CheckCircle className="h-3 w-3" />;
+      case "closed":
+        return <XCircle className="h-3 w-3" />;
       default:
-        return <Tag className="h-4 w-4 text-slate-400" />;
-    }
-  };
-
-  const getCategoryColor = (category: string) => {
-    switch (category) {
-      case "bug":
-        return "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400 border-red-200 dark:border-red-800";
-      case "feature":
-        return "bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400 border-blue-200 dark:border-blue-800";
-      case "support":
-        return "bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-400 border-purple-200 dark:border-purple-800";
-      case "enhancement":
-        return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400 border-green-200 dark:border-green-800";
-      case "incident":
-        return "bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400 border-orange-200 dark:border-orange-800";
-      case "request":
-        return "bg-muted text-muted-foreground border-border";
-      default:
-        return "bg-muted text-muted-foreground border-border";
+        return null;
     }
   };
 
@@ -183,22 +173,73 @@ export default function Tasks() {
       case "on_hold":
         return "status-badge-on-hold";
       default:
-        return "bg-muted text-muted-foreground border-border";
+        return "bg-muted text-muted-foreground";
     }
   };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case "urgent":
-        return "bg-destructive text-destructive-foreground border-destructive";
+        return "bg-destructive text-destructive-foreground";
       case "high":
-        return "bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400 border-orange-200 dark:border-orange-800";
+        return "bg-orange-500 text-white";
       case "medium":
-        return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800";
+        return "bg-yellow-500 text-white";
       case "low":
-        return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400 border-green-200 dark:border-green-800";
+        return "bg-green-500 text-white";
       default:
-        return "bg-muted text-muted-foreground border-border";
+        return "bg-muted text-muted-foreground";
+    }
+  };
+
+  const getCategoryColor = (category: string) => {
+    switch (category) {
+      case "bug":
+        return "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400";
+      case "feature":
+        return "bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400";
+      case "support":
+        return "bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-400";
+      case "enhancement":
+        return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
+      case "incident":
+        return "bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400";
+      case "request":
+        return "bg-teal-100 text-teal-800 dark:bg-teal-900/20 dark:text-teal-400";
+      default:
+        return "bg-muted text-muted-foreground";
+    }
+  };
+
+  const getPriorityIcon = (priority: string) => {
+    switch (priority) {
+      case "high":
+        return <AlertTriangle className="h-3 w-3 text-red-200" />;
+      case "medium":
+        return <CircleDot className="h-3 w-3 text-yellow-200" />;
+      case "low":
+        return <CheckCircle className="h-3 w-3 text-green-200" />;
+      default:
+        return <CircleDot className="h-3 w-3 text-slate-200" />;
+    }
+  };
+
+  const getCategoryIcon = (category: string) => {
+    switch (category) {
+      case "bug":
+        return <AlertTriangle className="h-3 w-3 text-red-500" />;
+      case "feature":
+        return <Zap className="h-3 w-3 text-blue-500" />;
+      case "support":
+        return <User className="h-3 w-3 text-purple-500" />;
+      case "enhancement":
+        return <Target className="h-3 w-3 text-green-500" />;
+      case "incident":
+        return <AlertTriangle className="h-3 w-3 text-orange-500" />;
+      case "request":
+        return <FileText className="h-3 w-3 text-blue-500" />;
+      default:
+        return <Tag className="h-3 w-3 text-slate-400" />;
     }
   };
 
@@ -269,13 +310,15 @@ export default function Tasks() {
     return new Date(dueDate) < new Date();
   };
 
+  console.log(tasks);
   return (
     <MainWrapper
       title="All Tickets"
       subTitle="Manage and track all tickets across your projects"
       action={
         !tasksLoading &&
-        !!tasks?.length && (
+        !!tasks?.length &&
+        canCreate && (
           <Button
             onClick={() => {
               setEditingTask(null);
@@ -391,6 +434,27 @@ export default function Tasks() {
                   Clear filters
                 </Button>
               )}
+              <div className="ml-4 text-sm text-muted-foreground">
+                Page {page + 1}
+              </div>
+              <div className="flex gap-2 ml-auto">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={page === 0 || tasksLoading}
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                >
+                  Prev
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={tasksLoading || (tasks?.length || 0) < pageSize}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </Button>
+              </div>
             </div>
           </div>
         </CardContent>
@@ -443,51 +507,59 @@ export default function Tasks() {
                             {task.title}
                           </p>
                           {task.description && (
-                            <p className="text-sm text-muted-foreground line-clamp-1 mt-1">
+                            <p className="text-sm text-muted-foreground line-clamp-2 mt-1 w-56">
                               {task.description}
                             </p>
                           )}
                         </div>
                       </td>
-                      <td className="p-4">
+                      <td className="p-4 w-fit">
                         <Badge
-                          className={`${getPriorityColor(
-                            task.priority
-                          )} border`}
+                          className={cn(
+                            "min-w-max flex items-center gap-1 w-fit text-xs lowercase shadow-sm",
+                            getPriorityColor(task.priority)
+                          )}
                         >
-                          <span className="flex items-center gap-1">
-                            {getPriorityIcon(task.priority)}
-                            {task.priority?.toUpperCase()}
-                          </span>
+                          <span> {getPriorityIcon(task.priority)}</span>
+                          <span> {task.priority?.toUpperCase()}</span>
                         </Badge>
                       </td>
                       <td className="p-4">
                         <Badge
-                          className={`${getStatusColor(task.status)} border`}
+                          className={cn(
+                            "min-w-max flex items-center gap-1 w-fit text-xs lowercase shadow-sm",
+                            getStatusColor(task.status)
+                          )}
                         >
-                          {task.status?.replace("_", " ").toUpperCase()}
+                          <span> {getStatusIcon(task.status)}</span>
+                          <span>
+                            {task.status?.replace("_", " ").toUpperCase()}
+                          </span>
                         </Badge>
                       </td>
                       <td className="p-4">
                         <Badge
                           className={`${getCategoryColor(
                             task.category
-                          )} border`}
+                          )} border flex items-center gap-1 text-xs w-fit lowercase shadow-sm`}
                         >
-                          <span className="flex items-center gap-1">
-                            {getCategoryIcon(task.category)}
-                            {task.category?.toUpperCase()}
-                          </span>
+                          <span> {getCategoryIcon(task.category)}</span>
+                          <span> {task.category?.toUpperCase()}</span>
                         </Badge>
                       </td>
                       <td className="p-4">
-                        {task.assigneeId ? (
+                        {task.assigneeType === "team" && task.assigneeTeamId ? (
                           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            {task.assigneeType === "team" ? (
-                              <Users className="h-4 w-4" />
-                            ) : (
-                              <User className="h-4 w-4" />
-                            )}
+                            <Users className="h-4 w-4" />
+                            <span>
+                              {task.teamName ||
+                                task.assigneeName ||
+                                `Team #${task.assigneeTeamId}`}
+                            </span>
+                          </div>
+                        ) : task.assigneeId ? (
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <User className="h-4 w-4" />
                             <span>{task.assigneeName || task.assigneeId}</span>
                           </div>
                         ) : (
@@ -515,7 +587,11 @@ export default function Tasks() {
                       </td>
                       <td className="p-4">
                         <div className="text-sm text-muted-foreground">
-                          <div>{task.creatorName || "Unknown"}</div>
+                          <div>
+                            {task.createdByName ||
+                              task.creatorName ||
+                              "Unknown"}
+                          </div>
                           <div className="text-xs">
                             {getTimeAgo(task.createdAt)}
                           </div>
@@ -548,13 +624,15 @@ export default function Tasks() {
                                 <Edit3 className="h-4 w-4 mr-2" />
                                 Edit Ticket
                               </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => handleDeleteTask(task.id)}
-                                className="text-red-600"
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Delete Ticket
-                              </DropdownMenuItem>
+                              {canDelete && (
+                                <DropdownMenuItem
+                                  onClick={() => handleDeleteTask(task.id)}
+                                  className="text-red-600"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete Ticket
+                                </DropdownMenuItem>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
@@ -584,7 +662,8 @@ export default function Tasks() {
                 {!filters.search &&
                   filters.status === "all" &&
                   filters.category === "all" &&
-                  filters.priority === "all" && (
+                  filters.priority === "all" &&
+                  canCreate && (
                     <Button
                       onClick={() => {
                         setEditingTask(null);

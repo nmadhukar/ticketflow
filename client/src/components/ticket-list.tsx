@@ -25,6 +25,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -45,26 +49,36 @@ import {
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
 
-interface Ticket {
+export interface Ticket {
   id: number;
   ticketNumber: string;
   title: string;
   description: string;
+  category: string;
   status: string;
   priority: string;
-  category: string;
-  assignedTo: string;
-  assignedToName?: string;
-  teamId?: number;
-  teamName?: string;
-  createdAt: string;
-  updatedAt: string;
-  createdBy: string;
-  createdByName?: string;
-  aiConfidence?: number;
-  hasAutoResponse?: boolean;
+  severity: string;
+  notes?: string;
+  assigneeId?: string;
+  assigneeType?: string;
+  assigneeTeamId?: number;
+  createdBy?: string;
+  dueDate?: string;
+  resolvedAt?: string;
+  closedAt?: string;
+  estimatedHours: number;
+  actualHours: number;
   tags?: string[];
+  createdAt: string;
+  updatedAt?: string;
+  creatorName?: string;
+  assigneeName?: string;
+  lastUpdatedBy?: string;
+  // Optional AI fields when present
+  hasAutoResponse?: boolean;
+  aiConfidence?: number;
 }
 
 interface TicketListProps {
@@ -73,13 +87,16 @@ interface TicketListProps {
   allowDragDrop?: boolean;
 }
 
-export default function TicketList({ 
-  onTicketSelect, 
+export default function TicketList({
+  onTicketSelect,
   showAIInfo = true,
-  allowDragDrop = true 
+  allowDragDrop = true,
 }: TicketListProps) {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { user } = useAuth();
+  const role = (user as any)?.role as string | undefined;
+  const currentUserId = (user as any)?.id as string | undefined;
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
@@ -87,19 +104,19 @@ export default function TicketList({
   const [draggedTicket, setDraggedTicket] = useState<Ticket | null>(null);
 
   // Fetch tickets
-  const { data: tickets, isLoading } = useQuery({
+  const { data: tickets, isLoading } = useQuery<Ticket[]>({
     queryKey: ["/api/tasks"],
     refetchInterval: 30000, // Refresh every 30 seconds
+    refetchOnMount: "always",
   });
 
-  // Fetch users for assignment
-  const { data: users } = useQuery({
-    queryKey: ["/api/users"],
-  });
-
-  // Fetch teams for assignment
-  const { data: teams } = useQuery({
-    queryKey: ["/api/teams"],
+  // Teams for assignment (admin/manager can assign to any scoped team; others use my teams)
+  const teamsEndpoint =
+    role === "admin" || role === "manager" ? "/api/teams" : "/api/teams/my";
+  const { data: teams } = useQuery<any[]>({
+    queryKey: [teamsEndpoint],
+    enabled: !!role && role !== "customer",
+    initialData: [],
   });
 
   // Update ticket mutation
@@ -126,14 +143,17 @@ export default function TicketList({
 
   // Filter tickets based on search and filters
   const filteredTickets = tickets?.filter((ticket: Ticket) => {
-    const matchesSearch = 
+    const matchesSearch =
       ticket.ticketNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
       ticket.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       ticket.description?.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesStatus = statusFilter === "all" || ticket.status === statusFilter;
-    const matchesPriority = priorityFilter === "all" || ticket.priority === priorityFilter;
-    const matchesCategory = categoryFilter === "all" || ticket.category === categoryFilter;
+
+    const matchesStatus =
+      statusFilter === "all" || ticket.status === statusFilter;
+    const matchesPriority =
+      priorityFilter === "all" || ticket.priority === priorityFilter;
+    const matchesCategory =
+      categoryFilter === "all" || ticket.category === categoryFilter;
 
     return matchesSearch && matchesStatus && matchesPriority && matchesCategory;
   });
@@ -141,6 +161,7 @@ export default function TicketList({
   // Drag and drop handlers
   const handleDragStart = (e: React.DragEvent, ticket: Ticket) => {
     if (!allowDragDrop) return;
+    if (!(role === "admin" || role === "manager")) return;
     setDraggedTicket(ticket);
     e.dataTransfer.effectAllowed = "move";
   };
@@ -151,21 +172,38 @@ export default function TicketList({
     e.dataTransfer.dropEffect = "move";
   };
 
-  const handleDrop = (e: React.DragEvent, targetUserId: string | null, targetTeamId: number | null) => {
+  const handleDrop = (
+    e: React.DragEvent,
+    targetUserId?: string,
+    targetTeamId?: number
+  ) => {
     if (!allowDragDrop || !draggedTicket) return;
+    if (!(role === "admin" || role === "manager")) return;
     e.preventDefault();
 
     const updates: any = {};
-    if (targetUserId !== null) {
-      updates.assignedTo = targetUserId;
-      updates.teamId = null;
-    } else if (targetTeamId !== null) {
-      updates.teamId = targetTeamId;
-      updates.assignedTo = null;
+    if (targetUserId) {
+      updates.assigneeType = "user";
+      updates.assigneeId = targetUserId;
+      updates.assigneeTeamId = null;
+    } else if (targetTeamId) {
+      updates.assigneeType = "team";
+      updates.assigneeTeamId = targetTeamId;
+      updates.assigneeId = null;
     }
 
     updateTicket.mutate({ id: draggedTicket.id, updates });
     setDraggedTicket(null);
+  };
+
+  const canUpdateStatus = (ticket: Ticket) => {
+    if (role === "admin" || role === "manager") return true;
+    if (role === "agent" || role === "user") {
+      return (
+        ticket.assigneeType === "user" && ticket.assigneeId === currentUserId
+      );
+    }
+    return false;
   };
 
   const getStatusIcon = (status: string) => {
@@ -241,7 +279,11 @@ export default function TicketList({
   };
 
   if (isLoading) {
-    return <div className="flex items-center justify-center p-8">Loading tickets...</div>;
+    return (
+      <div className="flex items-center justify-center p-8">
+        Loading tickets...
+      </div>
+    );
   }
 
   return (
@@ -302,17 +344,21 @@ export default function TicketList({
         </div>
       </CardHeader>
       <CardContent>
-        <div className="overflow-x-auto">
+        <div className="h-fit max-h-full overflow-x-auto overflow-y-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-32">Ticket #</TableHead>
+                <TableHead className="w-24">Ticket #</TableHead>
                 <TableHead>Title</TableHead>
                 <TableHead className="w-24">Status</TableHead>
                 <TableHead className="w-24">Priority</TableHead>
                 <TableHead className="w-28">Category</TableHead>
                 <TableHead className="w-32">Assigned To</TableHead>
-                {showAIInfo && <TableHead className="w-28">AI Info</TableHead>}
+                {showAIInfo && (
+                  <TableHead>
+                    <p className="w-20">AI Info</p>
+                  </TableHead>
+                )}
                 <TableHead className="w-32">Created</TableHead>
                 <TableHead className="w-20">Actions</TableHead>
               </TableRow>
@@ -327,17 +373,34 @@ export default function TicketList({
                   )}
                   draggable={allowDragDrop}
                   onDragStart={(e) => handleDragStart(e, ticket)}
-                  onClick={() => onTicketSelect ? onTicketSelect(ticket) : setLocation(`/tickets/${ticket.id}`)}
+                  onClick={() =>
+                    onTicketSelect
+                      ? onTicketSelect(ticket)
+                      : setLocation(`/tickets/${ticket.id}`)
+                  }
                 >
-                  <TableCell className="font-medium">{ticket.ticketNumber}</TableCell>
+                  <TableCell className="font-medium">
+                    <Badge
+                      variant="outline"
+                      className="font-mono text-xs text-center w-24"
+                    >
+                      {ticket.ticketNumber}
+                    </Badge>
+                  </TableCell>
                   <TableCell>
                     <div className="space-y-1">
-                      <div className="font-medium">{ticket.title}</div>
+                      <p className="font-medium text-xs line-clamp-2 w-40">
+                        {ticket.title}
+                      </p>
                       {ticket.tags && ticket.tags.length > 0 && (
                         <div className="flex items-center gap-1">
                           <Tag className="h-3 w-3 text-muted-foreground" />
                           {ticket.tags.map((tag, index) => (
-                            <Badge key={index} variant="outline" className="text-xs">
+                            <Badge
+                              key={index}
+                              variant="outline"
+                              className="text-xs"
+                            >
                               {tag}
                             </Badge>
                           ))}
@@ -346,40 +409,68 @@ export default function TicketList({
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge className={cn("gap-1", getStatusColor(ticket.status))}>
-                      {getStatusIcon(ticket.status)}
-                      {ticket.status.replace("_", " ")}
+                    <Badge
+                      className={cn(
+                        "gap-1 min-w-max shadow-sm",
+                        getStatusColor(ticket.status)
+                      )}
+                    >
+                      <span> {getStatusIcon(ticket.status)}</span>
+                      <span>{ticket.status.replace("_", " ")}</span>
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge className={getPriorityColor(ticket.priority)}>
+                    <Badge
+                      className={cn(
+                        "min-w-max shadow-sm",
+                        getPriorityColor(ticket.priority)
+                      )}
+                    >
                       {ticket.priority}
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge className={getCategoryColor(ticket.category)}>
+                    <Badge
+                      className={cn(
+                        "min-w-max shadow-sm",
+                        getCategoryColor(ticket.category)
+                      )}
+                    >
                       {ticket.category}
                     </Badge>
                   </TableCell>
                   <TableCell>
                     <div
-                      className="flex items-center gap-1"
+                      className="w-32 flex items-center gap-1"
                       onDragOver={handleDragOver}
-                      onDrop={(e) => handleDrop(e, ticket.assignedTo, ticket.teamId || null)}
+                      onDrop={(e) =>
+                        handleDrop(
+                          e,
+                          ticket?.assigneeId,
+                          ticket?.assigneeTeamId
+                        )
+                      }
                     >
                       <User className="h-3 w-3 text-muted-foreground" />
                       <span className="text-sm">
-                        {ticket.assignedToName || ticket.teamName || "Unassigned"}
+                        {ticket.assigneeName ||
+                          ticket.assigneeType ||
+                          "Unassigned"}
                       </span>
                     </div>
                   </TableCell>
                   {showAIInfo && (
                     <TableCell>
                       {ticket.hasAutoResponse && (
-                        <div className="flex items-center gap-2">
+                        <div className="w-32 flex items-center gap-2">
                           <Brain className="h-4 w-4 text-primary" />
                           {ticket.aiConfidence && (
-                            <span className={cn("text-sm font-medium", getAIConfidenceColor(ticket.aiConfidence))}>
+                            <span
+                              className={cn(
+                                "text-sm font-medium",
+                                getAIConfidenceColor(ticket.aiConfidence)
+                              )}
+                            >
                               {(ticket.aiConfidence * 100).toFixed(0)}%
                             </span>
                           )}
@@ -388,37 +479,109 @@ export default function TicketList({
                     </TableCell>
                   )}
                   <TableCell>
-                    <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                    <div className="min-w-max flex items-center gap-1 text-sm text-muted-foreground">
                       <Calendar className="h-3 w-3" />
                       {format(new Date(ticket.createdAt), "MMM d")}
                     </div>
                   </TableCell>
                   <TableCell>
                     <DropdownMenu>
-                      <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenuTrigger
+                        asChild
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <Button variant="ghost" size="icon">
                           <MoreVertical className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={(e) => {
-                          e.stopPropagation();
-                          setLocation(`/tickets/${ticket.id}`);
-                        }}>
+                        <DropdownMenuItem
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setLocation(`/tickets/${ticket.id}`);
+                          }}
+                        >
                           View Details
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => {
-                          e.stopPropagation();
-                          // Quick assign functionality
-                        }}>
-                          Quick Assign
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => {
-                          e.stopPropagation();
-                          // Quick status update
-                        }}>
-                          Update Status
-                        </DropdownMenuItem>
+                        {(role === "admin" || role === "manager") && (
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger>
+                              Quick Assign
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent>
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!currentUserId) return;
+                                  updateTicket.mutate({
+                                    id: ticket.id,
+                                    updates: {
+                                      assigneeType: "user",
+                                      assigneeId: currentUserId,
+                                      assigneeTeamId: null,
+                                    },
+                                  });
+                                }}
+                              >
+                                Assign to me
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              {teams?.length ? (
+                                teams.map((t: any) => (
+                                  <DropdownMenuItem
+                                    key={t.id}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      updateTicket.mutate({
+                                        id: ticket.id,
+                                        updates: {
+                                          assigneeType: "team",
+                                          assigneeTeamId: t.id,
+                                          assigneeId: null,
+                                        },
+                                      });
+                                    }}
+                                  >
+                                    Assign to team: {t.name}
+                                  </DropdownMenuItem>
+                                ))
+                              ) : (
+                                <DropdownMenuItem disabled>
+                                  No teams available
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                        )}
+                        {canUpdateStatus(ticket) && (
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger>
+                              Update Status
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent>
+                              {[
+                                "open",
+                                "in_progress",
+                                "resolved",
+                                "closed",
+                                "on_hold",
+                              ].map((s) => (
+                                <DropdownMenuItem
+                                  key={s}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateTicket.mutate({
+                                      id: ticket.id,
+                                      updates: { status: s },
+                                    });
+                                  }}
+                                >
+                                  {s.replace("_", " ")}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>

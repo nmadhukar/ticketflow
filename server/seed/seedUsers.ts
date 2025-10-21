@@ -20,7 +20,7 @@ async function hashPassword(password: string): Promise<string> {
   return `${buf.toString("hex")}.${salt}`;
 }
 
-export async function seedDefaultUsers() {
+export async function seedUsers() {
   try {
     console.log("Checking for default admin user...");
 
@@ -87,6 +87,36 @@ export async function seedDefaultUsers() {
         role: "customer",
       },
     ];
+
+    // Create 3 users per role with role prefix in name
+    const EXTRA_ROLES: Array<
+      "admin" | "manager" | "agent" | "user" | "customer"
+    > = ["admin", "manager", "agent", "user", "customer"];
+
+    for (const role of EXTRA_ROLES) {
+      for (let i = 1; i <= 3; i++) {
+        const email = `${role}${i}@ticketflow.local`;
+        const exists = await db
+          .select()
+          .from(users)
+          .where(eq(users.email, email))
+          .limit(1);
+        if (exists.length === 0) {
+          const hashed = await hashPassword("Password123!");
+          await db.insert(users).values({
+            id: randomUUID(),
+            email,
+            password: hashed,
+            firstName: `(${role.charAt(0).toUpperCase() + role.slice(1)})`,
+            lastName: i === 1 ? "Taylor" : i === 2 ? "Jordan" : "Morgan",
+            role: role as any,
+            isActive: true,
+            isApproved: true,
+          });
+          console.log(`✓ Created ${role} user: ${email}`);
+        }
+      }
+    }
 
     for (const dummy of DUMMY_USERS) {
       const exists = await db

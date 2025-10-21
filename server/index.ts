@@ -64,11 +64,12 @@ app.use((req, res, next) => {
 
     // Seed default users, departments, and teams on startup
     try {
-      const { seedDefaultUsers, seedDepartments, seedDefaultTeams } =
+      const { seedUsers, seedDepartments, seedTeams, seedTickets } =
         await import("./seed");
-      await seedDefaultUsers();
+      await seedUsers();
       await seedDepartments();
-      await seedDefaultTeams();
+      await seedTeams();
+      await seedTickets();
     } catch (error) {
       console.error("Failed to run seeders:", error);
     }
