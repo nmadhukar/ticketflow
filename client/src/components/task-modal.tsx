@@ -75,6 +75,51 @@ interface TaskModalProps {
   task?: any;
 }
 
+const getPriorityIcon = (priority: string) => {
+  switch (priority) {
+    case "high":
+      return <AlertTriangle className="h-4 w-4 text-red-500" />;
+    case "medium":
+      return <CircleDot className="h-4 w-4 text-yellow-500" />;
+    case "low":
+      return <CheckCircle className="h-4 w-4 text-green-500" />;
+    default:
+      return <CircleDot className="h-4 w-4 text-slate-400" />;
+  }
+};
+
+const getCategoryIcon = (category: string) => {
+  switch (category) {
+    case "bug":
+      return <AlertTriangle className="h-4 w-4 text-red-500" />;
+    case "feature":
+      return <Zap className="h-4 w-4 text-blue-500" />;
+    case "support":
+      return <User className="h-4 w-4 text-purple-500" />;
+    case "enhancement":
+      return <Target className="h-4 w-4 text-green-500" />;
+    default:
+      return <Tag className="h-4 w-4 text-slate-400" />;
+  }
+};
+
+const getStatusColor = (status: string) => {
+  switch (status) {
+    case "open":
+      return "bg-blue-100 text-blue-800 border-blue-200";
+    case "in_progress":
+      return "bg-yellow-100 text-yellow-800 border-yellow-200";
+    case "resolved":
+      return "bg-green-100 text-green-800 border-green-200";
+    case "closed":
+      return "bg-slate-100 text-slate-800 border-slate-200";
+    case "on_hold":
+      return "bg-orange-100 text-orange-800 border-orange-200";
+    default:
+      return "bg-slate-100 text-slate-800 border-slate-200";
+  }
+};
+
 export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   const { toast } = useToast();
   const { user } = useAuth() as { user?: { role?: string } } as any;
@@ -108,6 +153,13 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     refetchOnMount: "always",
   });
 
+  // Always load the freshest task details when editing to ensure full payload
+  const { data: taskDetails } = useQuery<any>({
+    queryKey: [task?.id ? `/api/tasks/${task.id}` : undefined],
+    enabled: !!task?.id && isOpen,
+    refetchOnMount: "always",
+  });
+
   const departments = meta?.departments || [];
   const teams = meta?.teams || [];
   const assignableUsers = meta?.assignableUsers || [];
@@ -115,6 +167,39 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   const prioritiesMeta = meta?.priorities || [];
   const statusesMeta = meta?.statuses || [];
   const permissions = meta?.permissions || {};
+
+  // Admin fallback: ensure admins are never blocked by missing/lagging meta
+  const effectivePermissions = (() => {
+    if ((user as any)?.role === "admin") {
+      return {
+        ...permissions,
+        allowedFields: [
+          "title",
+          "description",
+          "category",
+          "priority",
+          "status",
+          "notes",
+          "assigneeId",
+          "assigneeType",
+          "assigneeTeamId",
+          "dueDate",
+        ],
+        allowedAssigneeTypes: ["user", "team"],
+      } as any;
+    }
+    return permissions as any;
+  })();
+
+  const canEditField = (field: string) => {
+    // Admins always allowed
+    if ((user as any)?.role === "admin") return true;
+    // On create, allow all fields and rely on server-side validation
+    if (!task) return true;
+    const allowed: string[] | undefined = effectivePermissions?.allowedFields;
+    if (!Array.isArray(allowed)) return true; // fail-open for UX; server still enforces
+    return allowed.includes(field);
+  };
 
   const { data: taskComments } = useQuery<any[]>({
     queryKey: ["/api/tasks", task?.id, "comments"],
@@ -135,22 +220,40 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   });
 
   useEffect(() => {
-    if (task) {
+    const current = (taskDetails || task) as any;
+    if (current) {
+      // Derive department/team selection when team-assigned
+      let departmentId = "";
+      let teamId = "";
+      if (
+        current.assigneeType === "team" &&
+        current.assigneeTeamId &&
+        Array.isArray(teams)
+      ) {
+        const match = (teams as any[]).find(
+          (t) => t.id === current.assigneeTeamId
+        );
+        if (match) {
+          departmentId = match.departmentId?.toString?.() || "";
+          teamId = match.id?.toString?.() || "";
+        }
+      }
+
       setFormData({
-        title: task.title || "",
-        description: task.description || "",
-        category: task.category || "",
-        priority: task.priority || "medium",
-        status: task.status || "open",
-        notes: task.notes || "",
-        assigneeId: task.assigneeId || "unassigned",
-        assigneeType: task.assigneeType || "user",
-        assigneeTeamId: task.assigneeTeamId?.toString() || "unassigned",
-        dueDate: task.dueDate
-          ? new Date(task.dueDate).toISOString().split("T")[0]
+        title: current.title || "",
+        description: current.description || "",
+        category: current.category || "",
+        priority: current.priority || "medium",
+        status: current.status || "open",
+        notes: current.notes || "",
+        assigneeId: current.assigneeId || "unassigned",
+        assigneeType: current.assigneeType || "user",
+        assigneeTeamId: current.assigneeTeamId?.toString?.() || "unassigned",
+        dueDate: current.dueDate
+          ? new Date(current.dueDate).toISOString().split("T")[0]
           : "",
-        departmentId: "",
-        teamId: "",
+        departmentId,
+        teamId,
       });
       setCurrentTab("details");
     } else {
@@ -170,7 +273,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       });
       setCurrentTab("details");
     }
-  }, [task, isOpen]);
+  }, [task, taskDetails, isOpen]);
 
   const createTaskMutation = useMutation({
     mutationFn: async (taskData: any) => {
@@ -354,7 +457,17 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
             assigneeType: "team" as const,
           }
         : {}),
-    };
+    } as any;
+
+    // If editing, prune disallowed fields client-side for UX; server still enforces
+    if (task && Array.isArray(permissions?.allowedFields)) {
+      const allowedSet = new Set<string>(permissions.allowedFields);
+      Object.keys(taskData).forEach((key) => {
+        if (!allowedSet.has(key)) {
+          delete (taskData as any)[key];
+        }
+      });
+    }
 
     if (task) {
       updateTaskMutation.mutate(taskData);
@@ -369,51 +482,6 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     addCommentMutation.mutate({
       content: commentText.trim(),
     });
-  };
-
-  const getPriorityIcon = (priority: string) => {
-    switch (priority) {
-      case "high":
-        return <AlertTriangle className="h-4 w-4 text-red-500" />;
-      case "medium":
-        return <CircleDot className="h-4 w-4 text-yellow-500" />;
-      case "low":
-        return <CheckCircle className="h-4 w-4 text-green-500" />;
-      default:
-        return <CircleDot className="h-4 w-4 text-slate-400" />;
-    }
-  };
-
-  const getCategoryIcon = (category: string) => {
-    switch (category) {
-      case "bug":
-        return <AlertTriangle className="h-4 w-4 text-red-500" />;
-      case "feature":
-        return <Zap className="h-4 w-4 text-blue-500" />;
-      case "support":
-        return <User className="h-4 w-4 text-purple-500" />;
-      case "enhancement":
-        return <Target className="h-4 w-4 text-green-500" />;
-      default:
-        return <Tag className="h-4 w-4 text-slate-400" />;
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "open":
-        return "bg-blue-100 text-blue-800 border-blue-200";
-      case "in_progress":
-        return "bg-yellow-100 text-yellow-800 border-yellow-200";
-      case "resolved":
-        return "bg-green-100 text-green-800 border-green-200";
-      case "closed":
-        return "bg-slate-100 text-slate-800 border-slate-200";
-      case "on_hold":
-        return "bg-orange-100 text-orange-800 border-orange-200";
-      default:
-        return "bg-slate-100 text-slate-800 border-slate-200";
-    }
   };
 
   // File attachment mutations
@@ -677,6 +745,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                               onValueChange={(value) =>
                                 handleInputChange("category", value)
                               }
+                              disabled={!!task && !canEditField("category")}
                             >
                               <SelectTrigger className="mt-2">
                                 <SelectValue placeholder="Select category" />
@@ -707,6 +776,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                               onValueChange={(value) =>
                                 handleInputChange("priority", value)
                               }
+                              disabled={!!task && !canEditField("priority")}
                             >
                               <SelectTrigger className="mt-2">
                                 <SelectValue />
@@ -750,11 +820,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                               onValueChange={(value) =>
                                 handleInputChange("status", value)
                               }
-                              disabled={
-                                !permissions?.canChangeStatus &&
-                                permissions?.canChangeStatus !==
-                                  "directlyAssignedOnly"
-                              }
+                              disabled={!!task && !canEditField("status")}
                             >
                               <SelectTrigger className="mt-2">
                                 <SelectValue />
@@ -806,6 +872,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                               onValueChange={(value) =>
                                 handleInputChange("assigneeType", value)
                               }
+                              disabled={!!task && !canEditField("assigneeType")}
                             >
                               <SelectTrigger className="mt-2">
                                 <SelectValue />
@@ -839,14 +906,15 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                 handleInputChange("dueDate", e.target.value)
                               }
                               className="mt-2"
+                              disabled={!!task && !canEditField("dueDate")}
                             />
                           </div>
                         </div>
 
                         {formData.assigneeType === "team" &&
-                          permissions?.allowedAssigneeTypes?.includes(
-                            "team"
-                          ) && (
+                          (
+                            effectivePermissions?.allowedAssigneeTypes || []
+                          )?.includes("team") && (
                             <div className="grid grid-cols-2 gap-4">
                               <div>
                                 <Label className="text-sm font-medium text-slate-700">
@@ -859,6 +927,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                     // When department changes, clear team to force re-select
                                     handleInputChange("teamId", "");
                                   }}
+                                  disabled={
+                                    !!task && !canEditField("assigneeTeamId")
+                                  }
                                 >
                                   <SelectTrigger className="mt-2">
                                     <SelectValue placeholder="Select department" />
@@ -883,6 +954,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                   value={formData.teamId}
                                   onValueChange={(value) =>
                                     handleInputChange("teamId", value)
+                                  }
+                                  disabled={
+                                    !!task && !canEditField("assigneeTeamId")
                                   }
                                 >
                                   <SelectTrigger className="mt-2">
@@ -911,9 +985,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                           )}
 
                         {formData.assigneeType !== "team" &&
-                          permissions?.allowedAssigneeTypes?.includes(
-                            "user"
-                          ) && (
+                          (
+                            effectivePermissions?.allowedAssigneeTypes || []
+                          )?.includes("user") && (
                             <div className="col-span-2">
                               <Label className="text-sm font-medium text-slate-700">
                                 Assign to User
@@ -923,6 +997,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                 onValueChange={(value) =>
                                   handleInputChange("assigneeId", value)
                                 }
+                                disabled={!!task && !canEditField("assigneeId")}
                               >
                                 <SelectTrigger className="mt-2">
                                   <SelectValue placeholder="Select user" />

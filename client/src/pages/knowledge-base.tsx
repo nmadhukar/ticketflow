@@ -9,29 +9,82 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Plus, Edit, Trash2, BookOpen, Search, Eye, EyeOff, Brain, FileText, HelpCircle, Lightbulb, AlertCircle, CheckCircle, Clock, Loader2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
+  Plus,
+  Edit,
+  Trash2,
+  BookOpen,
+  Search,
+  Eye,
+  EyeOff,
+  Brain,
+  FileText,
+  HelpCircle,
+  Lightbulb,
+  AlertCircle,
+  CheckCircle,
+  Clock,
+  Loader2,
+} from "lucide-react";
 import { format } from "date-fns";
 import type { KnowledgeArticle } from "@shared/schema";
 import MainWrapper from "@/components/main-wrapper";
 
 /**
  * Knowledge Base Management Page
- * 
+ *
  * This component provides comprehensive knowledge base management functionality including:
  * - Manual creation of knowledge articles for common issues and resolutions
  * - Integration with AI-powered learning from resolved tickets
  * - Article management with publishing, editing, and deletion capabilities
  * - Search and filtering by category, status, and content
  * - Performance analytics for article effectiveness
- * 
+ *
  * The page is designed for admin users to manage both manually created articles
  * and AI-generated knowledge from the learning system.
  */
@@ -39,13 +92,14 @@ export default function KnowledgeBase() {
   const { toast } = useToast();
   const { isAuthenticated, isLoading, user } = useAuth();
   const queryClient = useQueryClient();
-  
+
   const [isArticleDialogOpen, setIsArticleDialogOpen] = useState(false);
-  const [selectedArticle, setSelectedArticle] = useState<KnowledgeArticle | null>(null);
+  const [selectedArticle, setSelectedArticle] =
+    useState<KnowledgeArticle | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  
+
   // Form states for article creation/editing
   const [articleTitle, setArticleTitle] = useState("");
   const [articleSummary, setArticleSummary] = useState("");
@@ -65,12 +119,12 @@ export default function KnowledgeBase() {
     "security",
     "integration",
     "performance",
-    "general"
+    "general",
   ];
 
   // Redirect to home if not authenticated or not admin
   useEffect(() => {
-    if (!isLoading && (!isAuthenticated || (user as any)?.role !== 'admin')) {
+    if (!isLoading && !isAuthenticated) {
       toast({
         title: "Unauthorized",
         description: "Admin access required. Redirecting...",
@@ -84,39 +138,53 @@ export default function KnowledgeBase() {
   }, [isAuthenticated, isLoading, user, toast]);
 
   // Fetch knowledge articles
-  const { data: articles = [], isLoading: articlesLoading, refetch: refetchArticles } = useQuery<KnowledgeArticle[]>({
-    queryKey: ['/api/admin/knowledge', { category: categoryFilter, published: statusFilter }],
+  const {
+    data: articles = [],
+    isLoading: articlesLoading,
+    refetch: refetchArticles,
+  } = useQuery<KnowledgeArticle[]>({
+    queryKey: [
+      "/api/admin/knowledge",
+      { category: categoryFilter, published: statusFilter },
+    ],
     queryFn: async () => {
       const params = new URLSearchParams();
-      if (categoryFilter && categoryFilter !== 'all') params.append('category', categoryFilter);
-      if (statusFilter && statusFilter !== 'all') params.append('published', statusFilter);
-      
-      const response = await fetch(`/api/admin/knowledge?${params.toString()}`, {
-        credentials: 'include',
-      });
-      if (!response.ok) throw new Error('Failed to fetch knowledge articles');
+      if (categoryFilter && categoryFilter !== "all")
+        params.append("category", categoryFilter);
+      if (statusFilter && statusFilter !== "all")
+        params.append("published", statusFilter);
+
+      const response = await fetch(
+        `/api/admin/knowledge?${params.toString()}`,
+        {
+          credentials: "include",
+        }
+      );
+      if (!response.ok) throw new Error("Failed to fetch knowledge articles");
       return response.json();
     },
     retry: false,
-    enabled: isAuthenticated && (user as any)?.role === 'admin',
+    enabled: isAuthenticated && (user as any)?.role === "admin",
   });
 
   // Create/Update article mutation
   const saveArticleMutation = useMutation({
     mutationFn: async (data: any) => {
-      const url = selectedArticle 
+      const url = selectedArticle
         ? `/api/admin/knowledge/${selectedArticle.id}`
-        : '/api/admin/knowledge';
-      
-      return await apiRequest(selectedArticle ? 'PUT' : 'POST', url, data);
+        : "/api/admin/knowledge";
+
+      return await apiRequest(selectedArticle ? "PUT" : "POST", url, data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/knowledge'] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/knowledge"] });
       resetArticleForm();
       setIsArticleDialogOpen(false);
       toast({
         title: "Success",
-        description: `Knowledge article ${selectedArticle ? 'updated' : 'created'} successfully`,
+        description: `Knowledge article ${
+          selectedArticle ? "updated" : "created"
+        } successfully`,
       });
     },
     onError: (error: Error) => {
@@ -142,10 +210,10 @@ export default function KnowledgeBase() {
   // Delete article mutation
   const deleteArticleMutation = useMutation({
     mutationFn: async (id: number) => {
-      return await apiRequest('DELETE', `/api/admin/knowledge/${id}`);
+      return await apiRequest("DELETE", `/api/admin/knowledge/${id}`);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/knowledge'] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/knowledge"] });
       toast({
         title: "Success",
         description: "Knowledge article deleted successfully",
@@ -174,12 +242,12 @@ export default function KnowledgeBase() {
   // Toggle publish status mutation
   const togglePublishMutation = useMutation({
     mutationFn: async (article: KnowledgeArticle) => {
-      return await apiRequest('PUT', `/api/admin/knowledge/${article.id}`, {
-        isPublished: !article.isPublished
+      return await apiRequest("PUT", `/api/admin/knowledge/${article.id}`, {
+        isPublished: !article.isPublished,
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/knowledge'] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/knowledge"] });
       toast({
         title: "Success",
         description: "Article status updated successfully",
@@ -197,15 +265,15 @@ export default function KnowledgeBase() {
   // Trigger AI learning mutation
   const triggerLearningMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch('/api/ai/knowledge-learning/run', {
-        method: 'POST',
-        credentials: 'include',
+      const response = await fetch("/api/ai/knowledge-learning/run", {
+        method: "POST",
+        credentials: "include",
       });
-      if (!response.ok) throw new Error('Failed to trigger knowledge learning');
+      if (!response.ok) throw new Error("Failed to trigger knowledge learning");
       return response.json();
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/knowledge'] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/knowledge"] });
       toast({
         title: "AI Learning Complete",
         description: `Found ${data.patternsFound} patterns, created ${data.articlesCreated} articles (${data.articlesPublished} published)`,
@@ -256,42 +324,68 @@ export default function KnowledgeBase() {
       summary: articleSummary.trim(),
       content: articleContent.trim(),
       category: articleCategory || "general",
-      tags: articleTags ? articleTags.split(",").map(tag => tag.trim()).filter(Boolean) : [],
+      tags: articleTags
+        ? articleTags
+            .split(",")
+            .map((tag) => tag.trim())
+            .filter(Boolean)
+        : [],
       isPublished,
     };
-    
+
     saveArticleMutation.mutate(data);
   };
 
   // Filter articles based on search and filters
   const filteredArticles = articles.filter((article: KnowledgeArticle) => {
-    const matchesSearch = !searchQuery || 
+    const matchesSearch =
+      !searchQuery ||
       article.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       article.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
       article.summary?.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesCategory = !categoryFilter || categoryFilter === 'all' || article.category === categoryFilter;
-    const matchesStatus = !statusFilter || statusFilter === 'all' || 
-      (statusFilter === 'published' && article.isPublished) ||
-      (statusFilter === 'draft' && !article.isPublished);
-    
+
+    const matchesCategory =
+      !categoryFilter ||
+      categoryFilter === "all" ||
+      article.category === categoryFilter;
+    const matchesStatus =
+      !statusFilter ||
+      statusFilter === "all" ||
+      (statusFilter === "published" && article.isPublished) ||
+      (statusFilter === "draft" && !article.isPublished);
+
     return matchesSearch && matchesCategory && matchesStatus;
   });
 
   const getStatusBadge = (article: KnowledgeArticle) => {
     if (article.isPublished) {
-      return <Badge variant="default" className="bg-green-100 text-green-800"><CheckCircle className="h-3 w-3 mr-1" />Published</Badge>;
+      return (
+        <Badge variant="default" className="bg-green-100 text-green-800">
+          <CheckCircle className="h-3 w-3 mr-1" />
+          Published
+        </Badge>
+      );
     }
-    return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />Draft</Badge>;
+    return (
+      <Badge variant="secondary">
+        <Clock className="h-3 w-3 mr-1" />
+        Draft
+      </Badge>
+    );
   };
 
   const getCategoryIcon = (category: string) => {
     switch (category) {
-      case 'troubleshooting': return <AlertCircle className="h-4 w-4" />;
-      case 'how-to': return <BookOpen className="h-4 w-4" />;
-      case 'faq': return <HelpCircle className="h-4 w-4" />;
-      case 'technical': return <Brain className="h-4 w-4" />;
-      default: return <FileText className="h-4 w-4" />;
+      case "troubleshooting":
+        return <AlertCircle className="h-4 w-4" />;
+      case "how-to":
+        return <BookOpen className="h-4 w-4" />;
+      case "faq":
+        return <HelpCircle className="h-4 w-4" />;
+      case "technical":
+        return <Brain className="h-4 w-4" />;
+      default:
+        return <FileText className="h-4 w-4" />;
     }
   };
 
@@ -304,123 +398,134 @@ export default function KnowledgeBase() {
   }
 
   return (
-    <MainWrapper title="Knowledge Base Management" subTitle="Manage knowledge articles for common issues and resolutions">
+    <MainWrapper
+      title="Knowledge Base Management"
+      subTitle="Manage knowledge articles for common issues and resolutions"
+    >
       <div className="flex justify-end items-center py-4 gap-4">
-          <Button
-            onClick={() => triggerLearningMutation.mutate()}
-            disabled={triggerLearningMutation.isPending}
-            variant="outline"
-          >
-            {triggerLearningMutation.isPending ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Brain className="h-4 w-4 mr-2" />
-            )}
-            AI Learning
-          </Button>
-          <Dialog open={isArticleDialogOpen} onOpenChange={setIsArticleDialogOpen}>
-            <DialogTrigger asChild>
-              <Button onClick={() => resetArticleForm()}>
-                <Plus className="h-4 w-4 mr-2" />
-                Add Article
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>
-                  {selectedArticle ? 'Edit Knowledge Article' : 'Create Knowledge Article'}
-                </DialogTitle>
-                <DialogDescription>
-                  {selectedArticle 
-                    ? 'Update the knowledge article details below.'
-                    : 'Create a new knowledge article for common issues and their resolutions.'
-                  }
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4">
-                <div>
-                  <Label htmlFor="title">Title *</Label>
-                  <Input
-                    id="title"
-                    value={articleTitle}
-                    onChange={(e) => setArticleTitle(e.target.value)}
-                    placeholder="e.g., How to reset password"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="summary">Summary</Label>
-                  <Input
-                    id="summary"
-                    value={articleSummary}
-                    onChange={(e) => setArticleSummary(e.target.value)}
-                    placeholder="Brief description of the solution"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="category">Category</Label>
-                  <Select value={articleCategory} onValueChange={setArticleCategory}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {knowledgeCategories.map((category) => (
-                        <SelectItem key={category} value={category}>
-                          <div className="flex items-center gap-2">
-                            {getCategoryIcon(category)}
-                            {category.charAt(0).toUpperCase() + category.slice(1).replace('-', ' ')}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="tags">Tags</Label>
-                  <Input
-                    id="tags"
-                    value={articleTags}
-                    onChange={(e) => setArticleTags(e.target.value)}
-                    placeholder="Comma-separated tags (e.g., password, authentication, login)"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="content">Content *</Label>
-                  <Textarea
-                    id="content"
-                    value={articleContent}
-                    onChange={(e) => setArticleContent(e.target.value)}
-                    placeholder="Detailed step-by-step resolution..."
-                    className="min-h-[200px]"
-                  />
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="published"
-                    checked={isPublished}
-                    onCheckedChange={setIsPublished}
-                  />
-                  <Label htmlFor="published">Publish immediately</Label>
-                </div>
+        <Button
+          onClick={() => triggerLearningMutation.mutate()}
+          disabled={triggerLearningMutation.isPending}
+          variant="outline"
+        >
+          {triggerLearningMutation.isPending ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <Brain className="h-4 w-4 mr-2" />
+          )}
+          AI Learning
+        </Button>
+        <Dialog
+          open={isArticleDialogOpen}
+          onOpenChange={setIsArticleDialogOpen}
+        >
+          <DialogTrigger asChild>
+            <Button onClick={() => resetArticleForm()}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Article
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>
+                {selectedArticle
+                  ? "Edit Knowledge Article"
+                  : "Create Knowledge Article"}
+              </DialogTitle>
+              <DialogDescription>
+                {selectedArticle
+                  ? "Update the knowledge article details below."
+                  : "Create a new knowledge article for common issues and their resolutions."}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="title">Title *</Label>
+                <Input
+                  id="title"
+                  value={articleTitle}
+                  onChange={(e) => setArticleTitle(e.target.value)}
+                  placeholder="e.g., How to reset password"
+                />
               </div>
-              <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setIsArticleDialogOpen(false)}
+              <div>
+                <Label htmlFor="summary">Summary</Label>
+                <Input
+                  id="summary"
+                  value={articleSummary}
+                  onChange={(e) => setArticleSummary(e.target.value)}
+                  placeholder="Brief description of the solution"
+                />
+              </div>
+              <div>
+                <Label htmlFor="category">Category</Label>
+                <Select
+                  value={articleCategory}
+                  onValueChange={setArticleCategory}
                 >
-                  Cancel
-                </Button>
-                <Button 
-                  onClick={handleSaveArticle}
-                  disabled={saveArticleMutation.isPending}
-                >
-                  {saveArticleMutation.isPending && (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  )}
-                  {selectedArticle ? 'Update' : 'Create'} Article
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {knowledgeCategories.map((category) => (
+                      <SelectItem key={category} value={category}>
+                        <div className="flex items-center gap-2">
+                          {getCategoryIcon(category)}
+                          {category.charAt(0).toUpperCase() +
+                            category.slice(1).replace("-", " ")}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="tags">Tags</Label>
+                <Input
+                  id="tags"
+                  value={articleTags}
+                  onChange={(e) => setArticleTags(e.target.value)}
+                  placeholder="Comma-separated tags (e.g., password, authentication, login)"
+                />
+              </div>
+              <div>
+                <Label htmlFor="content">Content *</Label>
+                <Textarea
+                  id="content"
+                  value={articleContent}
+                  onChange={(e) => setArticleContent(e.target.value)}
+                  placeholder="Detailed step-by-step resolution..."
+                  className="min-h-[200px]"
+                />
+              </div>
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="published"
+                  checked={isPublished}
+                  onCheckedChange={setIsPublished}
+                />
+                <Label htmlFor="published">Publish immediately</Label>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setIsArticleDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSaveArticle}
+                disabled={saveArticleMutation.isPending}
+              >
+                {saveArticleMutation.isPending && (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                )}
+                {selectedArticle ? "Update" : "Create"} Article
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {/* Filters and Search */}
@@ -454,7 +559,8 @@ export default function KnowledgeBase() {
                     <SelectItem key={category} value={category}>
                       <div className="flex items-center gap-2">
                         {getCategoryIcon(category)}
-                        {category.charAt(0).toUpperCase() + category.slice(1).replace('-', ' ')}
+                        {category.charAt(0).toUpperCase() +
+                          category.slice(1).replace("-", " ")}
                       </div>
                     </SelectItem>
                   ))}
@@ -475,8 +581,8 @@ export default function KnowledgeBase() {
               </Select>
             </div>
             <div className="flex items-end">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => {
                   setSearchQuery("");
                   setCategoryFilter("all");
@@ -522,10 +628,9 @@ export default function KnowledgeBase() {
               ) : filteredArticles.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center">
-                    {searchQuery || categoryFilter || statusFilter 
+                    {searchQuery || categoryFilter || statusFilter
                       ? "No articles match your search criteria."
-                      : "No knowledge articles found. Create your first article!"
-                    }
+                      : "No knowledge articles found. Create your first article!"}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -533,7 +638,7 @@ export default function KnowledgeBase() {
                   <TableRow key={article.id}>
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
-                        {getCategoryIcon(article.category || 'general')}
+                        {getCategoryIcon(article.category || "general")}
                         <div>
                           <div className="font-medium">{article.title}</div>
                           {article.summary && (
@@ -546,19 +651,22 @@ export default function KnowledgeBase() {
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline">
-                        {article.category || 'general'}
+                        {article.category || "general"}
                       </Badge>
                     </TableCell>
                     <TableCell>{getStatusBadge(article)}</TableCell>
                     <TableCell>{article.usageCount || 0}</TableCell>
                     <TableCell>
-                      {article.effectivenessScore ? 
-                        `${Math.round(parseFloat(article.effectivenessScore) * 100)}%` : 
-                        'N/A'
-                      }
+                      {article.effectivenessScore
+                        ? `${Math.round(
+                            parseFloat(article.effectivenessScore) * 100
+                          )}%`
+                        : "N/A"}
                     </TableCell>
                     <TableCell>
-                      {article.createdAt ? format(new Date(article.createdAt), "MMM d, yyyy") : "Unknown"}
+                      {article.createdAt
+                        ? format(new Date(article.createdAt), "MMM d, yyyy")
+                        : "Unknown"}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
@@ -568,7 +676,11 @@ export default function KnowledgeBase() {
                           onClick={() => togglePublishMutation.mutate(article)}
                           disabled={togglePublishMutation.isPending}
                         >
-                          {article.isPublished ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          {article.isPublished ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
                         </Button>
                         <Button
                           size="sm"
@@ -585,15 +697,20 @@ export default function KnowledgeBase() {
                           </AlertDialogTrigger>
                           <AlertDialogContent>
                             <AlertDialogHeader>
-                              <AlertDialogTitle>Delete Knowledge Article</AlertDialogTitle>
+                              <AlertDialogTitle>
+                                Delete Knowledge Article
+                              </AlertDialogTitle>
                               <AlertDialogDescription>
-                                Are you sure you want to delete "{article.title}"? This action cannot be undone.
+                                Are you sure you want to delete "{article.title}
+                                "? This action cannot be undone.
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
                               <AlertDialogCancel>Cancel</AlertDialogCancel>
                               <AlertDialogAction
-                                onClick={() => deleteArticleMutation.mutate(article.id)}
+                                onClick={() =>
+                                  deleteArticleMutation.mutate(article.id)
+                                }
                                 disabled={deleteArticleMutation.isPending}
                                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                               >

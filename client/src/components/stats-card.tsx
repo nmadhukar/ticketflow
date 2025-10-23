@@ -9,15 +9,25 @@ interface StatsCardProps {
   isActive?: boolean;
 }
 
-export default function StatsCard({ title, value, icon, loading, isActive }: StatsCardProps) {
+export default function StatsCard({
+  title,
+  value,
+  icon,
+  loading,
+  isActive,
+}: StatsCardProps) {
   return (
-    <Card className={`shadow-business hover:shadow-business-hover transition-all ${isActive ? 'ring-2 ring-primary' : ''}`}>
-      <CardContent className="p-6">
+    <Card
+      className={`shadow-business hover:shadow-business-hover transition-all ${
+        isActive ? "ring-2 ring-primary" : ""
+      }`}
+    >
+      <CardContent className="p-8">
         <div className="flex items-center justify-between">
-          <div>
+          <div className="flex flex-col gap-2">
             <p className="text-sm text-muted-foreground">{title}</p>
             {loading ? (
-              <Skeleton className="h-8 w-16 mt-1" />
+              <Skeleton className="h-10 w-16 mt-1" />
             ) : (
               <p className="text-3xl font-bold">{value}</p>
             )}

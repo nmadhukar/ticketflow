@@ -198,7 +198,7 @@ export default function TicketList({
 
   const canUpdateStatus = (ticket: Ticket) => {
     if (role === "admin" || role === "manager") return true;
-    if (role === "agent" || role === "user") {
+    if (role === "agent") {
       return (
         ticket.assigneeType === "user" && ticket.assigneeId === currentUserId
       );

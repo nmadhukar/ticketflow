@@ -1,15 +1,15 @@
-import { useState, useEffect } from "react";
-import { useAuth } from "@/hooks/useAuth";
-import { useToast } from "@/hooks/use-toast";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { isUnauthorizedError } from "@/lib/authUtils";
-import { apiRequest } from "@/lib/queryClient";
-import Header from "@/components/header";
+import MainWrapper from "@/components/main-wrapper";
 import TaskModal from "@/components/task-modal";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -17,36 +17,132 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
+import { isUnauthorizedError } from "@/lib/authUtils";
+import { apiRequest } from "@/lib/queryClient";
+import { cn } from "@/lib/utils";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Plus,
-  Search,
-  Filter,
-  MoreVertical,
-  Calendar,
-  User,
-  Clock,
+  AlertCircle,
   AlertTriangle,
   CheckCircle,
   CircleDot,
-  Tag,
-  Users,
-  FileText,
-  Eye,
+  Clock,
   Edit3,
-  Trash2,
+  Eye,
+  FileText,
+  MoreVertical,
+  Plus,
+  Search,
+  Tag,
   Target,
-  Zap,
-  AlertCircle,
+  Trash2,
+  User,
+  Users,
   XCircle,
+  Zap,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import MainWrapper from "@/components/main-wrapper";
-import { cn } from "@/lib/utils";
+import { useEffect, useState } from "react";
+
+const getStatusIcon = (status: string) => {
+  switch (status) {
+    case "open":
+      return <AlertCircle className="h-3 w-3" />;
+    case "in_progress":
+      return <Clock className="h-3 w-3" />;
+    case "resolved":
+      return <CheckCircle className="h-3 w-3" />;
+    case "closed":
+      return <XCircle className="h-3 w-3" />;
+    default:
+      return null;
+  }
+};
+
+const getStatusColor = (status: string) => {
+  switch (status) {
+    case "open":
+      return "status-badge-open";
+    case "in_progress":
+      return "status-badge-in-progress";
+    case "resolved":
+      return "status-badge-resolved";
+    case "closed":
+      return "status-badge-closed";
+    case "on_hold":
+      return "status-badge-on-hold";
+    default:
+      return "bg-muted text-muted-foreground";
+  }
+};
+
+const getPriorityColor = (priority: string) => {
+  switch (priority) {
+    case "urgent":
+      return "bg-destructive text-destructive-foreground";
+    case "high":
+      return "bg-orange-500 text-white";
+    case "medium":
+      return "bg-yellow-500 text-white";
+    case "low":
+      return "bg-green-500 text-white";
+    default:
+      return "bg-muted text-muted-foreground";
+  }
+};
+
+const getCategoryColor = (category: string) => {
+  switch (category) {
+    case "bug":
+      return "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400";
+    case "feature":
+      return "bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400";
+    case "support":
+      return "bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-400";
+    case "enhancement":
+      return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
+    case "incident":
+      return "bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400";
+    case "request":
+      return "bg-teal-100 text-teal-800 dark:bg-teal-900/20 dark:text-teal-400";
+    default:
+      return "bg-muted text-muted-foreground";
+  }
+};
+
+const getPriorityIcon = (priority: string) => {
+  switch (priority) {
+    case "high":
+      return <AlertTriangle className="h-3 w-3 text-red-200" />;
+    case "medium":
+      return <CircleDot className="h-3 w-3 text-yellow-200" />;
+    case "low":
+      return <CheckCircle className="h-3 w-3 text-green-200" />;
+    default:
+      return <CircleDot className="h-3 w-3 text-slate-200" />;
+  }
+};
+
+const getCategoryIcon = (category: string) => {
+  switch (category) {
+    case "bug":
+      return <AlertTriangle className="h-3 w-3 text-red-500" />;
+    case "feature":
+      return <Zap className="h-3 w-3 text-blue-500" />;
+    case "support":
+      return <User className="h-3 w-3 text-purple-500" />;
+    case "enhancement":
+      return <Target className="h-3 w-3 text-green-500" />;
+    case "incident":
+      return <AlertTriangle className="h-3 w-3 text-orange-500" />;
+    case "request":
+      return <FileText className="h-3 w-3 text-blue-500" />;
+    default:
+      return <Tag className="h-3 w-3 text-slate-400" />;
+  }
+};
 
 export default function Tasks() {
   const { toast } = useToast();
@@ -63,6 +159,7 @@ export default function Tasks() {
   });
   const [page, setPage] = useState(0);
   const pageSize = 20;
+  const [showMine, setShowMine] = useState(false);
 
   useEffect(() => {
     // Reset to first page when filters change
@@ -77,7 +174,17 @@ export default function Tasks() {
   if (filters.search) params.set("search", filters.search);
   params.set("limit", String(pageSize));
   params.set("offset", String(page * pageSize));
-  const tasksUrl = `/api/tasks?${params.toString()}`;
+  const baseUrl = showMine ? "/api/tasks/my" : "/api/tasks";
+  const tasksUrl = showMine ? baseUrl : `${baseUrl}?${params.toString()}`;
+
+  useEffect(() => {
+    setPage(0);
+  }, [showMine]);
+
+  useEffect(() => {
+    // Ensure active query refetches immediately when toggling views
+    queryClient.invalidateQueries({ queryKey: [tasksUrl] });
+  }, [showMine, tasksUrl, queryClient]);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -108,6 +215,7 @@ export default function Tasks() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/tasks/my"] });
       toast({
         title: "Success",
         description: "Task deleted successfully",
@@ -142,106 +250,10 @@ export default function Tasks() {
   }
 
   const role = (user as any)?.role as string | undefined;
-  const canCreate = ["customer", "manager", "admin"].includes(role || "");
+  const canCreate = ["customer", "manager", "admin", "agent"].includes(
+    role || ""
+  );
   const canDelete = role === "admin";
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "open":
-        return <AlertCircle className="h-3 w-3" />;
-      case "in_progress":
-        return <Clock className="h-3 w-3" />;
-      case "resolved":
-        return <CheckCircle className="h-3 w-3" />;
-      case "closed":
-        return <XCircle className="h-3 w-3" />;
-      default:
-        return null;
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "open":
-        return "status-badge-open";
-      case "in_progress":
-        return "status-badge-in-progress";
-      case "resolved":
-        return "status-badge-resolved";
-      case "closed":
-        return "status-badge-closed";
-      case "on_hold":
-        return "status-badge-on-hold";
-      default:
-        return "bg-muted text-muted-foreground";
-    }
-  };
-
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case "urgent":
-        return "bg-destructive text-destructive-foreground";
-      case "high":
-        return "bg-orange-500 text-white";
-      case "medium":
-        return "bg-yellow-500 text-white";
-      case "low":
-        return "bg-green-500 text-white";
-      default:
-        return "bg-muted text-muted-foreground";
-    }
-  };
-
-  const getCategoryColor = (category: string) => {
-    switch (category) {
-      case "bug":
-        return "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400";
-      case "feature":
-        return "bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400";
-      case "support":
-        return "bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-400";
-      case "enhancement":
-        return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
-      case "incident":
-        return "bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400";
-      case "request":
-        return "bg-teal-100 text-teal-800 dark:bg-teal-900/20 dark:text-teal-400";
-      default:
-        return "bg-muted text-muted-foreground";
-    }
-  };
-
-  const getPriorityIcon = (priority: string) => {
-    switch (priority) {
-      case "high":
-        return <AlertTriangle className="h-3 w-3 text-red-200" />;
-      case "medium":
-        return <CircleDot className="h-3 w-3 text-yellow-200" />;
-      case "low":
-        return <CheckCircle className="h-3 w-3 text-green-200" />;
-      default:
-        return <CircleDot className="h-3 w-3 text-slate-200" />;
-    }
-  };
-
-  const getCategoryIcon = (category: string) => {
-    switch (category) {
-      case "bug":
-        return <AlertTriangle className="h-3 w-3 text-red-500" />;
-      case "feature":
-        return <Zap className="h-3 w-3 text-blue-500" />;
-      case "support":
-        return <User className="h-3 w-3 text-purple-500" />;
-      case "enhancement":
-        return <Target className="h-3 w-3 text-green-500" />;
-      case "incident":
-        return <AlertTriangle className="h-3 w-3 text-orange-500" />;
-      case "request":
-        return <FileText className="h-3 w-3 text-blue-500" />;
-      default:
-        return <Tag className="h-3 w-3 text-slate-400" />;
-    }
-  };
 
   const handleEditTask = (task: any) => {
     setEditingTask(task);
@@ -349,7 +361,7 @@ export default function Tasks() {
             </div>
 
             {/* Filter Controls */}
-            <div className="flex gap-3">
+            <div className="flex gap-3 items-center">
               <Select
                 value={filters.status}
                 onValueChange={(value) =>
@@ -406,6 +418,21 @@ export default function Tasks() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                id="only-my-tickets"
+                checked={showMine}
+                onCheckedChange={(v) => {
+                  setShowMine(!!v);
+                }}
+              />
+              <label
+                htmlFor="only-my-tickets"
+                className="text-sm text-muted-foreground select-none"
+              >
+                Only My Tickets
+              </label>
+            </div>
           </div>
 
           {/* Active Filters & Stats */}
@@ -434,27 +461,31 @@ export default function Tasks() {
                   Clear filters
                 </Button>
               )}
-              <div className="ml-4 text-sm text-muted-foreground">
-                Page {page + 1}
-              </div>
-              <div className="flex gap-2 ml-auto">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={page === 0 || tasksLoading}
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                >
-                  Prev
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={tasksLoading || (tasks?.length || 0) < pageSize}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Next
-                </Button>
-              </div>
+              {!showMine && (
+                <>
+                  <div className="ml-4 text-sm text-muted-foreground">
+                    Page {page + 1}
+                  </div>
+                  <div className="flex gap-2 ml-auto">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={page === 0 || tasksLoading}
+                      onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    >
+                      Prev
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={tasksLoading || (tasks?.length || 0) < pageSize}
+                      onClick={() => setPage((p) => p + 1)}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </CardContent>
@@ -649,7 +680,7 @@ export default function Tasks() {
                   <FileText className="h-8 w-8 text-slate-400" />
                 </div>
                 <h3 className="text-lg font-medium text-slate-900 mb-2">
-                  No tickets found
+                  {showMine ? "No tickets assigned" : "No tickets found"}
                 </h3>
                 <p className="text-slate-500 mb-6">
                   {filters.search ||
@@ -657,6 +688,8 @@ export default function Tasks() {
                   filters.category !== "all" ||
                   filters.priority !== "all"
                     ? "Try adjusting your filters to see more tickets."
+                    : showMine
+                    ? "You don't have any tickets assigned yet."
                     : "Get started by creating your first ticket."}
                 </p>
                 {!filters.search &&

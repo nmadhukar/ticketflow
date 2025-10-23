@@ -70,11 +70,11 @@ export async function seedTeams() {
       Sales: ["SMB Sales", "Enterprise Sales"],
     };
 
-    // Candidate members: agents and users only (exclude managers/admin/customers)
+    // Candidate members: agents only (exclude managers/admin/customers)
     const candidateUsers = await db
       .select({ id: users.id, email: users.email, role: users.role })
       .from(users)
-      .where(inArray(users.role as any, ["agent", "user"]) as any);
+      .where(inArray(users.role as any, ["agent"]) as any);
 
     // Rotate through candidates so each team gets different members
     let memberIndex = 0;

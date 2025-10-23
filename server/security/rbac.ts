@@ -126,6 +126,38 @@ const checkConditions = (
     return context.articleStatus === 'published';
   }
   
+  // Limited fields only (for updates); reject if body contains fields outside allowed list
+  if (Array.isArray(conditions.limitedFields)) {
+    const updateFields: string[] = Array.isArray((context as any).updateFields)
+      ? (context as any).updateFields
+      : [];
+    if (updateFields.length > 0) {
+      const hasDisallowed = updateFields.some(
+        (field) => !conditions.limitedFields.includes(field)
+      );
+      if (hasDisallowed) return false;
+    }
+  }
+
+  // Assign only to self or to a team the user belongs to
+  if (conditions.toSelfOrTeam) {
+    const desiredAssigneeType = (context as any).assigneeType;
+    const desiredAssigneeId = (context as any).assigneeId;
+    const desiredAssigneeTeamId = (context as any).assigneeTeamId;
+
+    if (desiredAssigneeType === 'user' && desiredAssigneeId === (context as any).userId) {
+      return true;
+    }
+    if (
+      desiredAssigneeType === 'team' &&
+      Array.isArray((context as any).userTeamIds) &&
+      (context as any).userTeamIds.includes(desiredAssigneeTeamId)
+    ) {
+      return true;
+    }
+    return false;
+  }
+
   // Own profile only
   if (conditions.ownProfileOnly) {
     return context.profileUserId === context.userId;
@@ -166,6 +198,7 @@ export const requirePermission = (action: string, resource: string) => {
     
     const context = {
       userId: req.user.userId,
+      updateFields: req.body && typeof req.body === 'object' ? Object.keys(req.body) : [],
       ...req.body,
       ...req.params,
       ...req.query

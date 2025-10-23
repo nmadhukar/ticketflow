@@ -1,21 +1,17 @@
-import React from "react";
-import { Link, useLocation } from "wouter";
-import { cn } from "@/lib/utils";
+import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/useAuth";
-import { useQuery } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard,
-  CheckSquare,
-  Users,
-  TicketIcon,
-  FolderOpen,
-  Settings,
   BookOpen,
   Brain,
-  Plug,
   Building,
+  FolderOpen,
+  LayoutDashboard,
+  Plug,
+  Settings,
+  Users,
 } from "lucide-react";
-import { Separator } from "@/components/ui/separator";
+import { Link, useLocation } from "wouter";
 
 interface SidebarProps {
   className?: string;
@@ -25,16 +21,12 @@ export function Sidebar({ className }: SidebarProps) {
   const [location] = useLocation();
   const { user } = useAuth();
 
-  const { data: companySettings } = useQuery({
-    queryKey: ["/api/company-settings"],
-  });
-
   const navigation = (() => {
     const role = (user as any)?.role;
     if (role === "admin") {
       return [
         { name: "Dashboard", href: "/", icon: LayoutDashboard },
-        { name: "All Tickets", href: "/tasks", icon: FolderOpen },
+        { name: "Tickets", href: "/tasks", icon: FolderOpen },
         { name: "Departments", href: "/departments", icon: Building },
         { name: "Knowledge Base", href: "/knowledge-base", icon: BookOpen },
       ];
@@ -42,8 +34,7 @@ export function Sidebar({ className }: SidebarProps) {
     if (role === "manager") {
       return [
         { name: "Dashboard", href: "/", icon: LayoutDashboard },
-        { name: "All Tickets", href: "/tasks", icon: FolderOpen },
-        { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
+        { name: "Tickets", href: "/tasks", icon: FolderOpen },
         { name: "Teams", href: "/teams", icon: Users },
         { name: "Departments", href: "/departments", icon: Building },
       ];
@@ -51,21 +42,16 @@ export function Sidebar({ className }: SidebarProps) {
     if (role === "agent") {
       return [
         { name: "Dashboard", href: "/", icon: LayoutDashboard },
-        { name: "All Tickets", href: "/tasks", icon: FolderOpen },
-        { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
+        { name: "Tickets", href: "/tasks", icon: FolderOpen },
         { name: "Teams", href: "/teams", icon: Users },
-      ];
-    }
-    if (role === "user") {
-      return [
-        { name: "Dashboard", href: "/", icon: LayoutDashboard },
-        { name: "All Tickets", href: "/tasks", icon: FolderOpen },
-        { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
-        { name: "Teams", href: "/teams", icon: Users },
+        { name: "Knowledge Base", href: "/knowledge-base", icon: BookOpen },
       ];
     }
 
-    return [{ name: "Dashboard", href: "/", icon: LayoutDashboard }];
+    return [
+      { name: "Tickets", href: "/", icon: LayoutDashboard },
+      { name: "Knowledge Base", href: "/knowledge-base", icon: BookOpen },
+    ];
   })();
 
   const adminGroups = [
@@ -143,25 +129,6 @@ export function Sidebar({ className }: SidebarProps) {
         className
       )}
     >
-      <div className="flex h-16 items-center px-6 border-b gradient-business-subtle">
-        <Link href="/">
-          <div className="flex items-center gap-2 font-semibold text-lg cursor-pointer">
-            {(companySettings as any)?.logoUrl ? (
-              <img
-                src={(companySettings as any).logoUrl}
-                alt={(companySettings as any).companyName || "Company Logo"}
-                className="h-8 w-auto object-contain max-w-[120px]"
-              />
-            ) : (
-              <TicketIcon className="h-6 w-6 text-primary" />
-            )}
-            <span className="text-foreground">
-              {(companySettings as any)?.companyName || "TicketFlow"}
-            </span>
-          </div>
-        </Link>
-      </div>
-
       <div className="flex-1 overflow-y-auto py-4">
         <nav className="space-y-1 px-3">
           {navigation.map((item) => {

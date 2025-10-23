@@ -92,6 +92,7 @@ import {
   inArray,
 } from "drizzle-orm";
 import { teams, departments, users } from "@shared/schema";
+import { logSecurityEvent } from "./security/rbac";
 
 // Configure multer for file uploads
 const upload = multer({
@@ -373,6 +374,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         canAssign: false,
         canChangeStatus: false,
         allowedAssigneeTypes: [] as string[],
+        allowedFields: [] as string[],
       };
 
       if (user.role === "admin") {
@@ -405,6 +407,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         basePermissions.canAssign = true;
         basePermissions.canChangeStatus = true;
         basePermissions.allowedAssigneeTypes = ["user", "team"];
+        basePermissions.allowedFields = [
+          "title",
+          "description",
+          "category",
+          "priority",
+          "status",
+          "notes",
+          "assigneeId",
+          "assigneeType",
+          "assigneeTeamId",
+          "dueDate",
+        ];
       } else if (user.role === "manager") {
         // Departments managed by this manager
         departmentsRows = await db
@@ -434,11 +448,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
             role: users.role,
           })
           .from(users)
-          .where(or(eq(users.role, "manager"), eq(users.role, "user")));
+          .where(or(eq(users.role, "manager"), eq(users.role, "agent")));
         basePermissions.canAssign = true;
         basePermissions.canChangeStatus = true;
         basePermissions.allowedAssigneeTypes = ["user", "team"];
-      } else if (user.role === "user" || user.role === "agent") {
+        basePermissions.allowedFields = [
+          "title",
+          "description",
+          "category",
+          "priority",
+          "status",
+          "notes",
+          "assigneeId",
+          "assigneeType",
+          "assigneeTeamId",
+          "dueDate",
+        ];
+      } else if (user.role === "agent") {
         // Agents/users: no assignment lists; but provide my teams for convenience
         const mine = await storage.getUserTeams(userId);
         myTeams = mine.map((t) => ({
@@ -449,6 +475,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         basePermissions.canAssign = false;
         basePermissions.canChangeStatus = "directlyAssignedOnly";
         basePermissions.allowedAssigneeTypes = [];
+        basePermissions.allowedFields = [
+          "priority",
+          "status",
+          "dueDate",
+          "notes",
+        ]; // effective on edit when permitted
       } else if (user.role === "customer") {
         // Customers: can select department/team or assign to a user
         departmentsRows = await db
@@ -472,15 +504,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             role: users.role,
           })
           .from(users)
-          .where(
-            or(
-              eq(users.role, "manager"),
-              or(eq(users.role, "agent"), eq(users.role, "user"))
-            )
-          );
+          .where(or(eq(users.role, "manager"), eq(users.role, "agent")));
         basePermissions.canAssign = true;
         basePermissions.canChangeStatus = false;
         basePermissions.allowedAssigneeTypes = ["user", "team"];
+        basePermissions.allowedFields = ["title", "description"]; // only on edit of own tickets
       }
 
       return res.json({
@@ -522,29 +550,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
         baseMeta = await baseMetaRes.json();
       } catch {}
 
-      // Permissions for this ticket
+      // Permissions for this ticket (policy 1b + 2a)
       let canChangeStatus = false;
       let canAssign = false;
       let allowedAssigneeTypes: string[] = [];
+      let allowedFields: string[] = [];
 
       if (user.role === "admin") {
         canChangeStatus = true;
         canAssign = true;
         allowedAssigneeTypes = ["user", "team"];
+        allowedFields = [
+          "title",
+          "description",
+          "category",
+          "priority",
+          "status",
+          "notes",
+          "assigneeId",
+          "assigneeType",
+          "assigneeTeamId",
+          "dueDate",
+        ];
       } else if (user.role === "manager") {
         // Only within managed departments (if team-assigned)
         canChangeStatus = true;
         canAssign = true;
         allowedAssigneeTypes = ["user", "team"];
-      } else if (user.role === "user" || user.role === "agent") {
-        canChangeStatus =
+        allowedFields = [
+          "title",
+          "description",
+          "category",
+          "priority",
+          "status",
+          "notes",
+          "assigneeId",
+          "assigneeType",
+          "assigneeTeamId",
+          "dueDate",
+        ];
+      } else if (user.role === "agent") {
+        const myTeams = await storage.getUserTeams(userId);
+        const userTeamIds = (myTeams || []).map((t: any) => t.id);
+        const isAssigneeUser =
           task.assigneeType === "user" && task.assigneeId === userId;
-        canAssign = false;
-        allowedAssigneeTypes = [];
+        const isInTicketTeam =
+          task.assigneeType === "team" && task.assigneeTeamId
+            ? userTeamIds.includes(task.assigneeTeamId as any)
+            : false;
+        canChangeStatus = isAssigneeUser || isInTicketTeam;
+        canAssign = isAssigneeUser; // only assignee can reassign
+        allowedAssigneeTypes = isAssigneeUser ? ["user", "team"] : [];
+        allowedFields = ["priority", "status", "dueDate", "notes"];
+        if (isAssigneeUser) {
+          allowedFields.push("assigneeType", "assigneeId", "assigneeTeamId");
+        }
       } else if (user.role === "customer") {
         canChangeStatus = false;
         canAssign = false;
         allowedAssigneeTypes = ["team"]; // only on create
+        allowedFields = ["title", "description"];
       }
 
       const permissions = {
@@ -552,6 +617,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         canAssign,
         canChangeStatus,
         allowedAssigneeTypes,
+        allowedFields,
       };
 
       return res.json({
@@ -639,15 +705,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             true // Applied automatically
           );
 
-          // Add the auto-response as a comment
-          // If you have a comment insert helper in storage, replace with it later.
-          await db.insert(taskComments).values({
-            taskId: task.id,
-            userId: userId,
-            content: `AI Auto-Response (confidence ${(
-              analysis.confidence * 100
-            ).toFixed(0)}%): ${analysis.autoResponse}`,
-          } as any);
+          // Add the auto-response as a comment (use storage layer if available)
+          try {
+            await storage.addTaskComment({
+              taskId: task.id,
+              userId: userId,
+              content: `AI Auto-Response (confidence ${(
+                analysis.confidence * 100
+              ).toFixed(0)}%): ${analysis.autoResponse}`,
+            } as any);
+          } catch {}
         }
 
         // If should escalate, update assignment based on complexity
@@ -716,9 +783,150 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Task not found" });
       }
 
-      // Customers can only update their own tickets
-      if (user?.role === "customer" && task.createdBy !== userId) {
+      // Build context
+      const myTeams = await storage.getUserTeams(userId);
+      const userTeamIds = (myTeams || []).map((t: any) => t.id);
+      const isTicketOwner = task.createdBy === userId;
+      const isAssigneeUser =
+        task.assigneeType === "user" && task.assigneeId === userId;
+      const isInTicketTeam =
+        task.assigneeType === "team" && task.assigneeTeamId
+          ? userTeamIds.includes(task.assigneeTeamId as any)
+          : false;
+      const updateFields =
+        req.body && typeof req.body === "object" ? Object.keys(req.body) : [];
+
+      // Allowed fields by role/context
+      let allowedFields: string[] = [];
+      if (user?.role === "admin") {
+        allowedFields = [
+          "title",
+          "description",
+          "category",
+          "priority",
+          "status",
+          "notes",
+          "assigneeId",
+          "assigneeType",
+          "assigneeTeamId",
+          "dueDate",
+        ];
+      } else if (user?.role === "customer") {
+        if (!isTicketOwner) {
+          try {
+            logSecurityEvent(req as any, "update", "ticket", false, {
+              reason: "customer_not_owner",
+              taskId,
+            });
+          } catch {}
+          return res.status(403).json({ message: "Access denied" });
+        }
+        allowedFields = ["title", "description"];
+      } else if (user?.role === "agent") {
+        if (isAssigneeUser || isInTicketTeam) {
+          // Team members can change status/priority/dueDate; only assignee can reassign
+          allowedFields = ["status", "priority", "dueDate", "notes"];
+          if (isAssigneeUser) {
+            allowedFields.push("assigneeType", "assigneeId", "assigneeTeamId");
+          }
+        } else {
+          // Not part of the ticket team nor assignee
+          allowedFields = [];
+        }
+      } else {
+        // Unknown role
         return res.status(403).json({ message: "Access denied" });
+      }
+
+      // Reject if attempting to modify fields outside allowed set (unless admin)
+      if (user?.role !== "admin") {
+        const hasDisallowed = updateFields.some(
+          (f) => !allowedFields.includes(f)
+        );
+        if (hasDisallowed) {
+          try {
+            logSecurityEvent(req as any, "update", "ticket", false, {
+              reason: "disallowed_fields",
+              fields: updateFields.filter((f) => !allowedFields.includes(f)),
+              taskId,
+            });
+          } catch {}
+          return res.status(403).json({
+            message: "You do not have permission to modify one or more fields",
+          });
+        }
+      }
+
+      // Enforce assignment constraints for non-admins and only when assignment fields present
+      if (
+        user?.role !== "admin" &&
+        ("assigneeType" in req.body ||
+          "assigneeId" in req.body ||
+          "assigneeTeamId" in req.body)
+      ) {
+        if (!isAssigneeUser) {
+          try {
+            logSecurityEvent(req as any, "assign", "ticket", false, {
+              reason: "not_current_assignee",
+              taskId,
+            });
+          } catch {}
+          return res
+            .status(403)
+            .json({ message: "Only the current assignee can reassign" });
+        }
+        const desiredType = req.body.assigneeType;
+        if (desiredType === "user") {
+          if (req.body.assigneeId !== userId) {
+            try {
+              logSecurityEvent(req as any, "assign", "ticket", false, {
+                reason: "assign_user_not_self",
+                taskId,
+              });
+            } catch {}
+            return res.status(403).json({
+              message: "You can only assign to yourself or your team",
+            });
+          }
+        } else if (desiredType === "team") {
+          if (!userTeamIds.includes(req.body.assigneeTeamId)) {
+            try {
+              logSecurityEvent(req as any, "assign", "ticket", false, {
+                reason: "assign_team_not_member",
+                taskId,
+              });
+            } catch {}
+            return res
+              .status(403)
+              .json({ message: "You can only assign to your own team" });
+          }
+        }
+      }
+
+      // Optional: enforce simple status transitions, except for admin
+      if (user?.role !== "admin" && "status" in req.body) {
+        const transitionMap: Record<string, string[]> = {
+          open: ["in_progress", "on_hold"],
+          in_progress: ["resolved", "on_hold"],
+          on_hold: ["in_progress", "open"],
+          resolved: ["closed", "in_progress"],
+          closed: [],
+        };
+        const current = (task as any).status || "open";
+        const next = req.body.status;
+        const allowedNext = transitionMap[current] || [];
+        if (!allowedNext.includes(next)) {
+          try {
+            logSecurityEvent(req as any, "change_status", "ticket", false, {
+              from: current,
+              to: next,
+              taskId,
+            });
+          } catch {}
+          return res.status(400).json({
+            message: `Invalid status transition from ${current} to ${next}`,
+          });
+        }
       }
 
       const updates = insertTaskSchema.partial().parse(req.body);

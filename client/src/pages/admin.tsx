@@ -169,20 +169,24 @@ export default function AdminPanel() {
   const { data: users } = useQuery({
     queryKey: ["/api/admin/users"],
     retry: false,
+    refetchOnMount: "always",
   });
 
   const { data: systemStats } = useQuery({
     queryKey: ["/api/admin/stats"],
     retry: false,
+    refetchOnMount: "always",
   });
 
   const { data: teams } = useQuery({
     queryKey: ["/api/teams"],
     retry: false,
+    refetchOnMount: "always",
   });
 
   const { data: apiKeys } = useQuery({
     queryKey: ["/api/api-keys"],
+    refetchOnMount: "always",
   });
 
   const { data: companySettings } = useQuery({
@@ -2266,9 +2270,8 @@ export default function AdminPanel() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="user">User</SelectItem>
                     <SelectItem value="customer">Customer</SelectItem>
-                    <SelectItem value="agent">Agent</SelectItem>
+                    <SelectItem value="agent">{`Agent (Tech Support)`}</SelectItem>
                     <SelectItem value="manager">Manager</SelectItem>
                     <SelectItem value="admin">Admin</SelectItem>
                   </SelectContent>

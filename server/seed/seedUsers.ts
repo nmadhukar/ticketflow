@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { users } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { scrypt, randomBytes, randomUUID } from "crypto";
 import { promisify } from "util";
 
@@ -56,7 +56,7 @@ export async function seedUsers() {
       password: string;
       firstName: string;
       lastName: string;
-      role: "manager" | "agent" | "user" | "customer";
+      role: "manager" | "agent" | "customer";
     }> = [
       {
         email: "manager@ticketflow.local",
@@ -72,13 +72,7 @@ export async function seedUsers() {
         lastName: "Agent",
         role: "agent",
       },
-      {
-        email: "user@ticketflow.local",
-        password: "Password123!",
-        firstName: "Default",
-        lastName: "User",
-        role: "user",
-      },
+
       {
         email: "customer@ticketflow.local",
         password: "Password123!",
@@ -89,9 +83,12 @@ export async function seedUsers() {
     ];
 
     // Create 3 users per role with role prefix in name
-    const EXTRA_ROLES: Array<
-      "admin" | "manager" | "agent" | "user" | "customer"
-    > = ["admin", "manager", "agent", "user", "customer"];
+    const EXTRA_ROLES: Array<"admin" | "manager" | "agent" | "customer"> = [
+      "admin",
+      "manager",
+      "agent",
+      "customer",
+    ];
 
     for (const role of EXTRA_ROLES) {
       for (let i = 1; i <= 3; i++) {
@@ -141,6 +138,30 @@ export async function seedUsers() {
       } else {
         console.log(`User already exists: ${dummy.email}`);
       }
+    }
+
+    // Cleanup: remove legacy demo accounts user@, user1@, user2@, user3@
+    try {
+      const targets = [
+        "user@ticketflow.local",
+        "user1@ticketflow.local",
+        "user2@ticketflow.local",
+        "user3@ticketflow.local",
+      ];
+      const deleted = await db
+        .delete(users)
+        .where(inArray(users.email as any, targets as any) as any);
+      if ((deleted as any)?.rowCount) {
+        console.log(
+          `✓ Removed ${
+            (deleted as any).rowCount
+          } legacy demo account(s) (user, user1-3)`
+        );
+      }
+    } catch (e) {
+      console.warn(
+        "Warning: failed to remove legacy 'user[1-3]' accounts (non-fatal)"
+      );
     }
   } catch (error) {
     console.error("Error seeding default users:", error);

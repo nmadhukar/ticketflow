@@ -55,7 +55,7 @@ import type { UserInvitation, Department } from "@shared/schema";
 
 const invitationSchema = z.object({
   email: z.string().email("Invalid email address"),
-  role: z.enum(["admin", "manager", "user", "customer"]),
+  role: z.enum(["admin", "manager", "agent", "customer"]),
   departmentId: z.string().optional(),
   expiresAt: z.string().datetime(),
 });
@@ -79,7 +79,7 @@ export default function Invitations() {
     resolver: zodResolver(invitationSchema),
     defaultValues: {
       email: "",
-      role: "user",
+      role: "agent",
       departmentId: "none",
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days from now
     },
@@ -375,7 +375,7 @@ export default function Invitations() {
                       <SelectContent>
                         <SelectItem value="admin">Admin</SelectItem>
                         <SelectItem value="manager">Manager</SelectItem>
-                        <SelectItem value="user">User</SelectItem>
+                        <SelectItem value="agent">{`Agent (Tech Support)`}</SelectItem>
                         <SelectItem value="customer">Customer</SelectItem>
                       </SelectContent>
                     </Select>

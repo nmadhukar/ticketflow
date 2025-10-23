@@ -49,7 +49,6 @@ import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
 import Tasks from "@/pages/tasks";
-import MyTasks from "@/pages/my-tasks";
 import Teams from "@/pages/teams";
 import TeamDetail from "@/pages/team-detail";
 import AdminPanel from "@/pages/admin";
@@ -60,11 +59,8 @@ import AuthPage from "@/pages/auth-page";
 import UserGuides from "@/pages/user-guides";
 import AdminGuides from "@/pages/admin-guides";
 import Departments from "@/pages/departments";
-import Invitations from "@/pages/invitations";
-import AiAnalytics from "@/pages/ai-analytics";
 import TeamsIntegration from "@/pages/teams-integration";
 import KnowledgeBase from "@/pages/knowledge-base";
-import AISettings from "@/pages/ai-settings";
 import { WebSocketProvider } from "@/hooks/useWebSocket";
 
 function Router() {
@@ -92,25 +88,20 @@ function Router() {
                 <Route path="/" component={Dashboard} />
                 <Route path="/tasks">
                   <ProtectedRoute
-                    allowedRoles={["admin", "manager", "agent", "user"]}
+                    allowedRoles={["admin", "manager", "agent", "customer"]}
                   >
                     <Tasks />
                   </ProtectedRoute>
                 </Route>
-                <Route path="/my-tasks">
-                  <ProtectedRoute allowedRoles={["manager", "agent", "user"]}>
-                    <MyTasks />
-                  </ProtectedRoute>
-                </Route>
                 <Route path="/teams">
-                  <ProtectedRoute allowedRoles={["manager", "agent", "user"]}>
+                  <ProtectedRoute allowedRoles={["manager", "agent"]}>
                     <Teams />
                   </ProtectedRoute>
                 </Route>
                 <Route
                   path="/teams/:id"
                   component={(params) => (
-                    <ProtectedRoute allowedRoles={["admin", "manager", "user"]}>
+                    <ProtectedRoute allowedRoles={["admin", "manager"]}>
                       <TeamDetail />
                     </ProtectedRoute>
                   )}
@@ -123,42 +114,28 @@ function Router() {
                     </ProtectedRoute>
                   )}
                 />
-                <Route path="/settings" component={Settings} />
-                <Route path="/notifications" component={Notifications} />
-                <Route path="/guides" component={UserGuides} />
+                <Route path="/knowledge-base">
+                  <ProtectedRoute
+                    allowedRoles={["admin", "manager", "agent", "customer"]}
+                  >
+                    <KnowledgeBase />
+                  </ProtectedRoute>
+                </Route>
                 <Route
                   path="/ms-teams-integration"
                   component={TeamsIntegration}
                 />
+                <Route path="/settings" component={Settings} />
+                <Route path="/notifications" component={Notifications} />
+                <Route path="/guides" component={UserGuides} />
+
                 <Route path="/admin-guides" component={AdminGuides} />
                 <Route path="/admin/:tab">
                   <ProtectedRoute allowedRoles={["admin"]}>
                     <AdminPanel />
                   </ProtectedRoute>
                 </Route>
-                <Route path="/knowledge-base">
-                  <ProtectedRoute
-                    allowedRoles={["admin", "manager", "agent", "user"]}
-                  >
-                    <KnowledgeBase />
-                  </ProtectedRoute>
-                </Route>
-                <Route
-                  path="/tickets/:id"
-                  component={(params) => (
-                    <ProtectedRoute
-                      allowedRoles={[
-                        "admin",
-                        "manager",
-                        "agent",
-                        "user",
-                        "customer",
-                      ]}
-                    >
-                      <Dashboard />
-                    </ProtectedRoute>
-                  )}
-                />
+
                 <Route component={NotFound} />
               </Switch>
             </Layout>
