@@ -55,12 +55,12 @@ app.use((req, res, next) => {
     console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
 
     // Seed email templates on startup
-    try {
-      const { seedEmailTemplates } = await import("./seedEmailTemplates");
-      await seedEmailTemplates();
-    } catch (error) {
-      console.error("Failed to seed email templates:", error);
-    }
+    // try {
+    //   const { seedEmailTemplates } = await import("./seedEmailTemplates");
+    //   await seedEmailTemplates();
+    // } catch (error) {
+    //   console.error("Failed to seed email templates:", error);
+    // }
 
     // Seed default users, departments, teams, tickets, knowledge articles, and help/docs on startup
     try {
