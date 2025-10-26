@@ -139,30 +139,6 @@ export async function seedUsers() {
         console.log(`User already exists: ${dummy.email}`);
       }
     }
-
-    // Cleanup: remove legacy demo accounts user@, user1@, user2@, user3@
-    try {
-      const targets = [
-        "user@ticketflow.local",
-        "user1@ticketflow.local",
-        "user2@ticketflow.local",
-        "user3@ticketflow.local",
-      ];
-      const deleted = await db
-        .delete(users)
-        .where(inArray(users.email as any, targets as any) as any);
-      if ((deleted as any)?.rowCount) {
-        console.log(
-          `✓ Removed ${
-            (deleted as any).rowCount
-          } legacy demo account(s) (user, user1-3)`
-        );
-      }
-    } catch (e) {
-      console.warn(
-        "Warning: failed to remove legacy 'user[1-3]' accounts (non-fatal)"
-      );
-    }
   } catch (error) {
     console.error("Error seeding default users:", error);
     throw error;

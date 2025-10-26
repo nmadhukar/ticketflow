@@ -1,11 +1,14 @@
 /**
  * AWS Bedrock Integration for Intelligent Ticket Handling
- * 
+ *
  * This module provides integration with AWS Bedrock using Claude 3 Sonnet
  * for intelligent ticket analysis, response generation, and knowledge base management.
  */
 
-import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
+import {
+  BedrockRuntimeClient,
+  InvokeModelCommand,
+} from "@aws-sdk/client-bedrock-runtime";
 import { Task } from "@shared/schema";
 import { storage } from "./storage";
 
@@ -19,8 +22,9 @@ let bedrockClient: BedrockRuntimeClient | null = null;
  * Initialize AWS Bedrock client with credentials
  */
 export async function initializeBedrockClient() {
-  const { bedrockAccessKeyId, bedrockSecretAccessKey, bedrockRegion } = await getBedrockConfig();
-  
+  const { bedrockAccessKeyId, bedrockSecretAccessKey, bedrockRegion } =
+    await getBedrockConfig();
+
   if (!bedrockAccessKeyId || !bedrockSecretAccessKey || !bedrockRegion) {
     console.warn("AWS Bedrock credentials not configured");
     return null;
@@ -47,7 +51,7 @@ async function getBedrockConfig() {
       return {
         bedrockAccessKeyId: settings.bedrockAccessKeyId,
         bedrockSecretAccessKey: settings.bedrockSecretAccessKey,
-        bedrockRegion: settings.bedrockRegion || 'us-east-1',
+        bedrockRegion: settings.bedrockRegion || "us-east-1",
       };
     }
   } catch (error) {
@@ -58,7 +62,7 @@ async function getBedrockConfig() {
   return {
     bedrockAccessKeyId: process.env.AWS_ACCESS_KEY_ID,
     bedrockSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    bedrockRegion: process.env.AWS_REGION || 'us-east-1',
+    bedrockRegion: process.env.AWS_REGION || "us-east-1",
   };
 }
 
@@ -71,7 +75,7 @@ You are an expert IT support analyst. Analyze the following ticket and provide s
 
 Ticket Information:
 Title: ${ticket.title}
-Description: ${ticket.description || 'No description provided'}
+Description: ${ticket.description || "No description provided"}
 Current Status: ${ticket.status}
 Priority: ${ticket.priority}
 Category: ${ticket.category}
@@ -100,11 +104,11 @@ You are a helpful IT support assistant. Generate a response for the following ti
 
 Ticket Information:
 Title: ${ticket.title}
-Description: ${ticket.description || 'No description provided'}
+Description: ${ticket.description || "No description provided"}
 Category: ${ticket.category}
 
 Relevant Knowledge Base Articles:
-${knowledgeBase || 'No relevant articles found'}
+${knowledgeBase || "No relevant articles found"}
 
 Please generate a helpful response that:
 1. Acknowledges the user's issue
@@ -121,7 +125,7 @@ You are a knowledge management expert. Extract reusable knowledge from this reso
 
 Ticket Information:
 Title: ${ticket.title}
-Description: ${ticket.description || 'No description provided'}
+Description: ${ticket.description || "No description provided"}
 Category: ${ticket.category}
 
 Resolution:
@@ -178,7 +182,7 @@ async function invokeClaudeModel(prompt: string): Promise<string> {
   try {
     const command = new InvokeModelCommand(input);
     const response = await bedrockClient.send(command);
-    
+
     const responseBody = JSON.parse(new TextDecoder().decode(response.body));
     return responseBody.content[0].text;
   } catch (error) {
@@ -201,15 +205,15 @@ export async function analyzeTicket(ticket: Task): Promise<{
   try {
     const prompt = PROMPT_TEMPLATES.analyzeTicket(ticket);
     const response = await invokeClaudeModel(prompt);
-    
+
     // Parse JSON response
     const analysis = JSON.parse(response);
-    
+
     // Validate response structure
     if (!analysis.keyIssues || !analysis.complexityScore) {
       throw new Error("Invalid analysis response format");
     }
-    
+
     return analysis;
   } catch (error) {
     console.error("Error analyzing ticket:", error);
@@ -241,13 +245,13 @@ export async function generateResponse(
     const knowledgeBase = knowledgeBaseArticles
       .map((article) => `- ${article.title}: ${article.summary}`)
       .join("\n");
-    
+
     const prompt = PROMPT_TEMPLATES.generateResponse(ticket, knowledgeBase);
     const response = await invokeClaudeModel(prompt);
-    
+
     // Calculate confidence based on knowledge base availability
     const confidence = knowledgeBaseArticles.length > 0 ? 0.8 : 0.5;
-    
+
     return {
       response,
       confidence,
@@ -256,7 +260,8 @@ export async function generateResponse(
   } catch (error) {
     console.error("Error generating response:", error);
     return {
-      response: "I'm unable to generate an automated response at this time. A support agent will assist you shortly.",
+      response:
+        "I'm unable to generate an automated response at this time. A support agent will assist you shortly.",
       confidence: 0,
       suggestedArticles: [],
     };
@@ -279,15 +284,15 @@ export async function updateKnowledgeBase(
   try {
     const prompt = PROMPT_TEMPLATES.extractKnowledge(ticket, resolution);
     const response = await invokeClaudeModel(prompt);
-    
+
     // Parse JSON response
     const knowledge = JSON.parse(response);
-    
+
     // Validate response structure
     if (!knowledge.title || !knowledge.content) {
       throw new Error("Invalid knowledge extraction format");
     }
-    
+
     return {
       title: knowledge.title,
       summary: knowledge.summary,
@@ -315,7 +320,7 @@ export async function calculateConfidence(
 }> {
   // Base confidence calculation
   let confidence = 0.5;
-  
+
   // Adjust based on knowledge base matches
   if (knowledgeBaseMatches > 5) {
     confidence += 0.3;
@@ -324,42 +329,42 @@ export async function calculateConfidence(
   } else if (knowledgeBaseMatches > 0) {
     confidence += 0.1;
   }
-  
+
   // Adjust based on complexity
   if (ticketComplexity < 30) {
     confidence += 0.1;
   } else if (ticketComplexity > 70) {
     confidence -= 0.2;
   }
-  
+
   // Adjust based on category
   const highConfidenceCategories = ["support", "feature"];
   const lowConfidenceCategories = ["bug", "incident"];
-  
+
   if (highConfidenceCategories.includes(ticket.category || "")) {
     confidence += 0.1;
   } else if (lowConfidenceCategories.includes(ticket.category || "")) {
     confidence -= 0.1;
   }
-  
+
   // Ensure confidence is between 0 and 1
   confidence = Math.max(0, Math.min(1, confidence));
-  
+
   // Determine if should auto-respond (threshold: 0.7)
   const shouldAutoRespond = confidence >= 0.7;
-  
+
   // Generate reasoning
   let reasoning = `Confidence: ${(confidence * 100).toFixed(1)}%. `;
   reasoning += `Based on ${knowledgeBaseMatches} knowledge base matches, `;
   reasoning += `complexity score of ${ticketComplexity}, `;
   reasoning += `and category '${ticket.category}'.`;
-  
+
   if (shouldAutoRespond) {
     reasoning += " Recommending automated response.";
   } else {
     reasoning += " Recommending human review.";
   }
-  
+
   return {
     confidenceScore: confidence,
     shouldAutoRespond,
@@ -373,7 +378,8 @@ export async function calculateConfidence(
 export async function testBedrockConnection(): Promise<boolean> {
   try {
     await initializeBedrockClient();
-    const testPrompt = "Hello, this is a test. Please respond with 'Connection successful'.";
+    const testPrompt =
+      "Hello, this is a test. Please respond with 'Connection successful'.";
     const response = await invokeClaudeModel(testPrompt);
     return response.includes("successful");
   } catch (error) {

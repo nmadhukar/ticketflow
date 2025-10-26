@@ -653,13 +653,197 @@ export class DatabaseStorage implements IStorage {
     return task;
   }
 
+  async getVisibleTasksForUser(options: {
+    userId: string;
+    role: string;
+    status?: string;
+    category?: string;
+    search?: string;
+    teamId?: number;
+    departmentId?: number;
+    includeOwn?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<any[]> {
+    const {
+      userId,
+      role,
+      status,
+      category,
+      search,
+      teamId,
+      departmentId,
+      includeOwn = true,
+      limit,
+      offset,
+    } = options;
+
+    const filters: any[] = [];
+    if (status) filters.push(eq(tasks.status, status));
+    if (category) filters.push(eq(tasks.category, category));
+    if (search)
+      filters.push(
+        or(
+          like(tasks.title, `%${search}%`),
+          like(tasks.description, `%${search}%`)
+        )
+      );
+
+    let visibility: any;
+    if (role === "admin") {
+      visibility = sql`TRUE`;
+    } else if (role === "customer") {
+      visibility = eq(tasks.createdBy, userId);
+    } else if (role === "manager") {
+      const own = includeOwn
+        ? sql`${tasks.assigneeId} = ${userId}`
+        : sql`FALSE`;
+      const teamScope = sql`EXISTS (
+        SELECT 1 FROM ${teams} t
+        JOIN ${departments} d ON d.id = t.department_id
+        WHERE t.id = ${tasks.assigneeTeamId}
+          AND d.manager_id = ${userId}
+          ${teamId ? sql` AND t.id = ${teamId}` : sql``}
+          ${departmentId ? sql` AND d.id = ${departmentId}` : sql``}
+      )`;
+      const teammateScope = sql`EXISTS (
+        SELECT 1 FROM ${teamMembers} tm
+        JOIN ${teams} t ON t.id = tm.team_id
+        JOIN ${departments} d ON d.id = t.department_id
+        WHERE tm.user_id = ${tasks.assigneeId}
+          AND d.manager_id = ${userId}
+          ${teamId ? sql` AND t.id = ${teamId}` : sql``}
+          ${departmentId ? sql` AND d.id = ${departmentId}` : sql``}
+      )`;
+      visibility = or(own, teamScope, teammateScope);
+    } else {
+      const own = includeOwn
+        ? sql`${tasks.assigneeId} = ${userId}`
+        : sql`FALSE`;
+      const teamScope = sql`EXISTS (
+        SELECT 1 FROM ${teamMembers} tm
+        WHERE tm.team_id = ${tasks.assigneeTeamId}
+          AND tm.user_id = ${userId}
+      )`;
+      const teammateScope = sql`EXISTS (
+        SELECT 1 FROM ${teamMembers} tm1
+        WHERE tm1.user_id = ${tasks.assigneeId}
+          AND tm1.team_id IN (
+            SELECT tm2.team_id FROM ${teamMembers} tm2 WHERE tm2.user_id = ${userId}
+          )
+      )`;
+      visibility = or(own, teamScope, teammateScope);
+      if (teamId) {
+        visibility = and(
+          visibility,
+          sql`(
+            ${tasks.assigneeTeamId} = ${teamId}
+            OR EXISTS (
+              SELECT 1 FROM ${teamMembers} tm3 WHERE tm3.user_id = ${tasks.assigneeId} AND tm3.team_id = ${teamId}
+            )
+          )`
+        );
+      }
+      if (departmentId) {
+        visibility = and(
+          visibility,
+          sql`(
+            EXISTS (SELECT 1 FROM ${teams} tt WHERE tt.id = ${tasks.assigneeTeamId} AND tt.department_id = ${departmentId})
+            OR EXISTS (
+              SELECT 1 FROM ${teamMembers} tm4 JOIN ${teams} t4 ON t4.id = tm4.team_id
+              WHERE tm4.user_id = ${tasks.assigneeId} AND t4.department_id = ${departmentId}
+            )
+          )`
+        );
+      }
+    }
+
+    const whereAll =
+      filters.length > 0 ? and(...filters, visibility) : visibility;
+
+    let idQuery = db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(whereAll)
+      .orderBy(desc(tasks.createdAt));
+    if (limit) idQuery = idQuery.limit(limit);
+    if (offset) idQuery = idQuery.offset(offset);
+    const ids = (await idQuery).map((r) => r.id);
+    if (ids.length === 0) return [];
+
+    const taskResults = await db
+      .select()
+      .from(tasks)
+      .where(inArray(tasks.id, ids))
+      .orderBy(desc(tasks.createdAt));
+
+    const enhancedTasks: any[] = [];
+    for (const task of taskResults) {
+      let creatorName = "Unknown";
+      let assigneeName = "";
+      if ((task as any).createdBy) {
+        const [creator] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, (task as any).createdBy));
+        if (creator) {
+          creatorName =
+            (creator as any).firstName && (creator as any).lastName
+              ? `${(creator as any).firstName} ${(creator as any).lastName}`
+              : (creator as any).email || "Unknown";
+        }
+      }
+      if (
+        (task as any).assigneeType === "team" &&
+        (task as any).assigneeTeamId
+      ) {
+        const [team] = await db
+          .select()
+          .from(teams)
+          .where(eq(teams.id, (task as any).assigneeTeamId));
+        if (team) assigneeName = (team as any).name;
+      } else if ((task as any).assigneeId) {
+        const [assignee] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, (task as any).assigneeId));
+        if (assignee) {
+          assigneeName =
+            (assignee as any).firstName && (assignee as any).lastName
+              ? `${(assignee as any).firstName} ${(assignee as any).lastName}`
+              : (assignee as any).email || "";
+        }
+      }
+      const [lastHistory] = await db
+        .select({ userId: taskHistory.userId })
+        .from(taskHistory)
+        .where(eq(taskHistory.taskId, (task as any).id))
+        .orderBy(desc(taskHistory.createdAt))
+        .limit(1);
+      let lastUpdatedBy = "";
+      if (lastHistory?.userId) {
+        const [u] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, lastHistory.userId));
+        if (u) {
+          lastUpdatedBy =
+            (u as any).firstName && (u as any).lastName
+              ? `${(u as any).firstName} ${(u as any).lastName}`
+              : (u as any).email || "";
+        }
+      }
+      enhancedTasks.push({ ...task, creatorName, assigneeName, lastUpdatedBy });
+    }
+    return enhancedTasks;
+  }
+
   async getTasks(
     filters: {
       status?: string;
       category?: string;
       assigneeId?: string;
       createdBy?: string;
-      assigneeTeamIds?: number[]; // visibility scope for team queues
       search?: string;
       limit?: number;
       offset?: number;
@@ -678,10 +862,7 @@ export class DatabaseStorage implements IStorage {
     if (filters.assigneeId) {
       conditions.push(eq(tasks.assigneeId, filters.assigneeId));
     }
-    if (filters?.assigneeTeamIds?.length) {
-      conditions.push(inArray(tasks.assigneeTeamId, filters.assigneeTeamIds));
-    }
-
+    // Note: team-scoped visibility is handled by a dedicated join-based method
     if (filters.createdBy) {
       conditions.push(eq(tasks.createdBy, filters.createdBy));
     }
@@ -1725,14 +1906,6 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async getDepartmentById(id: number): Promise<Department | undefined> {
-    const [dept] = await db
-      .select()
-      .from(departments)
-      .where(eq(departments.id, id));
-    return dept;
-  }
-
   async updateDepartment(
     id: number,
     department: Partial<InsertDepartment>
@@ -2091,17 +2264,6 @@ export class DatabaseStorage implements IStorage {
     console.log("Saving complexity score:", data);
   }
 
-  async saveAIAnalytics(analytics: any): Promise<void> {
-    // In production, implement proper database storage
-    console.log("Saving AI analytics:", analytics);
-  }
-
-  async getRecentResolvedTickets(days: number): Promise<any[]> {
-    // In production, implement proper database query
-    console.log("Getting resolved tickets from last", days, "days");
-    return [];
-  }
-
   // Knowledge Base operations
   async createKnowledgeArticle(
     article: InsertKnowledgeArticle
@@ -2343,19 +2505,6 @@ export class DatabaseStorage implements IStorage {
   async updateKnowledgeLearningStats(stats: any): Promise<void> {
     // Store learning analytics - could be expanded to dedicated table
     console.log("Knowledge learning stats updated:", stats);
-  }
-
-  // Legacy compatibility methods - these should be removed once new methods are implemented
-  async saveTicketAnalysis(userId: string, analysis: any): Promise<void> {
-    console.log("Saving ticket analysis:", userId, analysis);
-  }
-
-  async saveAutoResponse(data: any): Promise<void> {
-    console.log("Saving auto response:", data);
-  }
-
-  async saveComplexityScore(data: any): Promise<void> {
-    console.log("Saving complexity score:", data);
   }
 
   async saveAIAnalytics(analytics: any): Promise<void> {

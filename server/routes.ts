@@ -149,129 +149,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         offset,
       } = req.query as any;
 
-      // Base filters (used per-branch); pagination applied after union when needed
-      const baseFilters: any = {
+      // If explicitly filtering by assigneeId (non-customer), use simple filter
+      if (assigneeId && user?.role !== "customer") {
+        const tasks = await storage.getTasks({
+          status,
+          category,
+          search,
+          assigneeId,
+          limit: limit ? parseInt(limit) : undefined,
+          offset: offset ? parseInt(offset) : undefined,
+        });
+        return res.json(tasks);
+      }
+
+      // Join-based visibility: includes own, team queues, and teammates' direct tickets as applicable
+      const includeOwn = mine !== "false" && !assigneeId;
+      const tasks = await (storage as any).getVisibleTasksForUser({
+        userId,
+        role: user?.role,
         status,
         category,
         search,
-      };
-
-      if (user?.role === "customer") {
-        const tasks = await storage.getTasks({
-          ...baseFilters,
-          createdBy: userId,
-        });
-        return res.json(tasks);
-      }
-
-      if (user?.role === "admin") {
-        // Admin can optionally filter to their own
-        const tasks = await storage.getTasks({
-          ...baseFilters,
-          assigneeId: mine === "true" ? userId : assigneeId || undefined,
-        });
-        return res.json(tasks);
-      }
-
-      // Manager / Agent / User: union of direct assignments and team-assigned tickets
-      let allowedTeamIds: number[] = [];
-      if (user?.role === "manager") {
-        // Teams in departments managed by this manager
-        const managedTeams = await db
-          .select({ id: teams.id })
-          .from(teams)
-          .innerJoin(departments, eq(teams.departmentId, departments.id))
-          .where(eq(departments.managerId as any, userId) as any);
-        allowedTeamIds = managedTeams.map((t) => t.id);
-
-        if (teamId) {
-          const parsedTeamId = parseInt(teamId);
-          if (!allowedTeamIds.includes(parsedTeamId)) {
-            return res.status(403).json({
-              message: "Forbidden: not a manager of the team's department",
-            });
-          }
-          allowedTeamIds = [parsedTeamId];
-        } else if (departmentId) {
-          const parsedDeptId = parseInt(departmentId);
-          const managedDept = await db
-            .select({ id: departments.id })
-            .from(departments)
-            .where(
-              and(
-                eq(departments.id, parsedDeptId),
-                eq(departments.managerId as any, userId) as any
-              ) as any
-            );
-          if (!managedDept.length) {
-            return res.status(403).json({
-              message: "Forbidden: not a manager of the requested department",
-            });
-          }
-          const deptTeams = await db
-            .select({ id: teams.id })
-            .from(teams)
-            .where(eq(teams.departmentId, parsedDeptId));
-          allowedTeamIds = deptTeams.map((t) => t.id);
-        }
-      } else {
-        // agent/user scope from membership
-        const myTeams = await storage.getUserTeams(userId);
-        const myTeamIds = myTeams.map((t) => t.id);
-        if (teamId) {
-          const parsedTeamId = parseInt(teamId);
-          if (!myTeamIds.includes(parsedTeamId)) {
-            return res.status(403).json({
-              message: "Forbidden: not a member of the requested team",
-            });
-          }
-          allowedTeamIds = [parsedTeamId];
-        } else if (departmentId) {
-          const deptTeams = await db
-            .select({ id: teams.id })
-            .from(teams)
-            .where(eq(teams.departmentId, parseInt(departmentId)));
-          const deptTeamIds = deptTeams.map((t) => t.id);
-          allowedTeamIds = deptTeamIds.filter((id) => myTeamIds.includes(id));
-        } else {
-          allowedTeamIds = myTeamIds;
-        }
-      }
-
-      const includeMine = mine !== "false" && !assigneeId; // include my direct assignments by default
-
-      // Fetch union parts without pagination; paginate after merge
-      const promises: Promise<any[]>[] = [];
-      if (includeMine) {
-        promises.push(storage.getTasks({ ...baseFilters, assigneeId: userId }));
-      }
-      if (assigneeId && user?.role !== "customer") {
-        promises.push(storage.getTasks({ ...baseFilters, assigneeId }));
-      }
-      if (allowedTeamIds.length > 0) {
-        promises.push(
-          storage.getTasks({ ...baseFilters, assigneeTeamIds: allowedTeamIds })
-        );
-      }
-      const parts = await Promise.all(promises);
-      const mergedMap = new Map<number, any>();
-      for (const list of parts) {
-        for (const t of list) {
-          mergedMap.set(t.id, t);
-        }
-      }
-      // Sort by createdAt desc and paginate
-      const merged = Array.from(mergedMap.values()).sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-      const lim = limit ? parseInt(limit) : undefined;
-      const off = offset ? parseInt(offset) : undefined;
-      const paged =
-        typeof off === "number" || typeof lim === "number"
-          ? merged.slice(off || 0, (off || 0) + (lim || merged.length))
-          : merged;
-      return res.json(paged);
+        teamId: teamId ? parseInt(teamId) : undefined,
+        departmentId: departmentId ? parseInt(departmentId) : undefined,
+        includeOwn,
+        limit: limit ? parseInt(limit) : undefined,
+        offset: offset ? parseInt(offset) : undefined,
+      });
+      return res.json(tasks);
     } catch (error) {
       console.error("Error fetching tasks:", error);
       res.status(500).json({ message: "Failed to fetch tasks" });
@@ -301,14 +206,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/tasks/my-groups", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
+      const user = await storage.getUser(userId);
       const { status, category, search, limit, offset } = req.query as any;
-      const myTeams = await storage.getUserTeams(userId);
-      const myTeamIds = myTeams.map((t) => t.id);
-      const tasks = await storage.getTasks({
+      // Show team queues and teammates' direct tickets; exclude own-only constraint
+      const tasks = await (storage as any).getVisibleTasksForUser({
+        userId,
+        role: user?.role,
         status,
         category,
         search,
-        assigneeTeamIds: myTeamIds,
+        includeOwn: false,
         limit: limit ? parseInt(limit) : undefined,
         offset: offset ? parseInt(offset) : undefined,
       });

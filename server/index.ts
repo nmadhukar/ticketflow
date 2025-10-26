@@ -55,21 +55,27 @@ app.use((req, res, next) => {
     console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
 
     // Seed email templates on startup
-    // try {
-    //   const { seedEmailTemplates } = await import("./seedEmailTemplates");
-    //   await seedEmailTemplates();
-    // } catch (error) {
-    //   console.error("Failed to seed email templates:", error);
-    // }
-
-    // Seed default users, departments, and teams on startup
     try {
-      const { seedUsers, seedDepartments, seedTeams, seedTickets } =
-        await import("./seed");
+      const { seedEmailTemplates } = await import("./seedEmailTemplates");
+      await seedEmailTemplates();
+    } catch (error) {
+      console.error("Failed to seed email templates:", error);
+    }
+
+    // Seed default users, departments, teams, tickets, and knowledge articles on startup
+    try {
+      const {
+        seedUsers,
+        seedDepartments,
+        seedTeams,
+        seedTickets,
+        seedKnowledgeArticles,
+      } = await import("./seed");
       await seedUsers();
       await seedDepartments();
       await seedTeams();
       await seedTickets();
+      await seedKnowledgeArticles();
     } catch (error) {
       console.error("Failed to run seeders:", error);
     }
