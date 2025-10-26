@@ -8,7 +8,20 @@ interface SeedArticle {
   content: string;
   category: string;
   tags: string[];
-  isPublished: boolean;
+  // lifecycle and origin
+  isPublished?: boolean;
+  status?: "draft" | "published" | "archived";
+  source?: "manual" | "ai_generated";
+  // metrics
+  viewCount?: number;
+  helpfulVotes?: number;
+  unhelpfulVotes?: number;
+  usageCount?: number;
+  effectivenessScore?: string; // decimal as string (e.g., "0.85")
+  // audit/relations
+  archivedAt?: Date | null;
+  lastUsed?: Date | null;
+  sourceTicketIds?: number[];
 }
 
 const DUMMY_ARTICLES: SeedArticle[] = [
@@ -20,6 +33,13 @@ const DUMMY_ARTICLES: SeedArticle[] = [
     category: "security",
     tags: ["password", "mfa", "account"],
     isPublished: true,
+    status: "published",
+    source: "manual",
+    viewCount: 128,
+    helpfulVotes: 18,
+    unhelpfulVotes: 2,
+    usageCount: 34,
+    effectivenessScore: "0.90",
   },
   {
     title: "VPN Setup (Windows)",
@@ -29,6 +49,13 @@ const DUMMY_ARTICLES: SeedArticle[] = [
     category: "network",
     tags: ["vpn", "windows", "remote"],
     isPublished: true,
+    status: "published",
+    source: "manual",
+    viewCount: 72,
+    helpfulVotes: 10,
+    unhelpfulVotes: 1,
+    usageCount: 21,
+    effectivenessScore: "0.91",
   },
   {
     title: "VPN Setup (macOS)",
@@ -38,6 +65,9 @@ const DUMMY_ARTICLES: SeedArticle[] = [
     category: "network",
     tags: ["vpn", "macos", "remote"],
     isPublished: true,
+    status: "published",
+    source: "manual",
+    usageCount: 15,
   },
   {
     title: "Outlook Email Troubleshooting",
@@ -47,6 +77,11 @@ const DUMMY_ARTICLES: SeedArticle[] = [
     category: "email",
     tags: ["outlook", "email", "office365"],
     isPublished: true,
+    status: "published",
+    source: "manual",
+    helpfulVotes: 6,
+    unhelpfulVotes: 2,
+    effectivenessScore: "0.75",
   },
   {
     title: "Microsoft Teams Notifications Fix",
@@ -56,6 +91,8 @@ const DUMMY_ARTICLES: SeedArticle[] = [
     category: "collaboration",
     tags: ["teams", "notifications", "windows", "macos"],
     isPublished: true,
+    status: "published",
+    source: "manual",
   },
   {
     title: "Printer Installation (Windows)",
@@ -65,6 +102,8 @@ const DUMMY_ARTICLES: SeedArticle[] = [
     category: "hardware",
     tags: ["printer", "windows", "drivers"],
     isPublished: true,
+    status: "published",
+    source: "manual",
   },
   {
     title: "Install Software via Company Portal",
@@ -74,6 +113,8 @@ const DUMMY_ARTICLES: SeedArticle[] = [
     category: "software",
     tags: ["intune", "company-portal", "self-service"],
     isPublished: true,
+    status: "published",
+    source: "manual",
   },
   {
     title: "Wi‑Fi Connectivity Troubleshooting",
@@ -83,6 +124,8 @@ const DUMMY_ARTICLES: SeedArticle[] = [
     category: "network",
     tags: ["wifi", "wireless", "connectivity"],
     isPublished: true,
+    status: "published",
+    source: "manual",
   },
   {
     title: "MFA Enrollment Guide",
@@ -92,6 +135,8 @@ const DUMMY_ARTICLES: SeedArticle[] = [
     category: "security",
     tags: ["mfa", "authenticator", "account"],
     isPublished: true,
+    status: "published",
+    source: "manual",
   },
   {
     title: "Laptop Won’t Boot (Basic Recovery)",
@@ -101,6 +146,8 @@ const DUMMY_ARTICLES: SeedArticle[] = [
     category: "hardware",
     tags: ["boot", "bios", "bitlocker", "diagnostics"],
     isPublished: true,
+    status: "published",
+    source: "manual",
   },
   {
     title: "Ticket Submission Best Practices",
@@ -110,6 +157,8 @@ const DUMMY_ARTICLES: SeedArticle[] = [
     category: "process",
     tags: ["itil", "support", "how-to"],
     isPublished: true,
+    status: "published",
+    source: "manual",
   },
   {
     title: "New Employee Onboarding Checklist",
@@ -119,6 +168,126 @@ const DUMMY_ARTICLES: SeedArticle[] = [
     category: "onboarding",
     tags: ["onboarding", "access", "devices"],
     isPublished: true,
+    status: "published",
+    source: "manual",
+  },
+  // Knowledge categories (general, troubleshooting, how-to, faq, technical, user-guide, system-admin, integration, performance)
+  {
+    title: "General: Resetting Application Cache",
+    summary: "A general procedure to clear app caches across OSes.",
+    content:
+      "Windows: Settings > Apps > App > Storage > Clear cache\nmacOS: ~/Library/Caches/<App>\nLinux: ~/.cache/<App>\n\nReboot app and verify.",
+    category: "general",
+    tags: ["cache", "app", "general"],
+    isPublished: true,
+    status: "published",
+    source: "manual",
+  },
+  {
+    title: "Troubleshooting: 502 Gateway Error",
+    summary: "Steps to diagnose and resolve intermittent 502 errors.",
+    content:
+      "Check service health, CDN status, origin logs, and upstream timeouts; purge cache if needed.",
+    category: "troubleshooting",
+    tags: ["http", "gateway", "cdn"],
+    status: "draft",
+    isPublished: false,
+    source: "manual",
+  },
+  {
+    title: "How-To: Export Reports to CSV",
+    summary: "Guide to exporting reports and large datasets.",
+    content:
+      "Use Export > CSV; for >100k rows, schedule asynchronous job and download from notifications.",
+    category: "how-to",
+    tags: ["reports", "export", "csv"],
+    isPublished: true,
+    status: "published",
+    source: "manual",
+    viewCount: 45,
+  },
+  {
+    title: "FAQ: Why can’t I see my team’s tickets?",
+    summary: "Visibility rules for team queues.",
+    content:
+      "Access depends on membership and department scope; request manager approval if needed.",
+    category: "faq",
+    tags: ["visibility", "teams", "rbac"],
+    isPublished: true,
+    status: "published",
+    source: "manual",
+  },
+  {
+    title: "Technical: API Rate Limiting",
+    summary: "Understanding 429 responses and backoff.",
+    content:
+      "Burst: 10 rps; Sustained: 1000/day. Implement exponential backoff, jitter, and idempotency keys.",
+    category: "technical",
+    tags: ["api", "429", "throttle"],
+    status: "draft",
+    isPublished: false,
+    source: "manual",
+  },
+  {
+    title: "System Admin: SSO Rollout Checklist",
+    summary: "Steps for enabling SSO in production.",
+    content:
+      "1. Configure IdP\n2. Map groups to roles\n3. Test pilot users\n4. Enable staged rollout\n5. Monitor login failures.",
+    category: "system-admin",
+    tags: ["sso", "idp", "rollout"],
+    isPublished: true,
+    status: "published",
+    source: "manual",
+  },
+  {
+    title: "Integration: Microsoft Teams Webhook Setup",
+    summary: "Create an incoming webhook for ticket alerts.",
+    content:
+      "Teams > Channel > Connectors > Incoming Webhook; store URL in Admin > Integrations.",
+    category: "integration",
+    tags: ["teams", "webhook", "alerts"],
+    isPublished: true,
+    status: "published",
+    source: "manual",
+  },
+  {
+    title: "Performance: Speeding up Large Ticket Searches",
+    summary: "Tips to reduce search latency for large datasets.",
+    content:
+      "Filter by category/date, use exact phrases, avoid leading wildcards; off-peak indexing.",
+    category: "performance",
+    tags: ["search", "performance", "index"],
+    isPublished: true,
+    status: "published",
+    source: "manual",
+    viewCount: 12,
+  },
+  // AI-generated draft article with related tickets
+  {
+    title: "Login Loop after Password Change",
+    summary:
+      "Resolving login loops caused by stale tokens after password reset.",
+    content:
+      "Sign out everywhere, clear browser/site data, restart device, and sign in with new credentials.",
+    category: "troubleshooting",
+    tags: ["login", "password", "token"],
+    isPublished: false,
+    status: "draft",
+    source: "ai_generated",
+    sourceTicketIds: [1011, 1019, 1042],
+  },
+  // Archived example
+  {
+    title: "Legacy VPN (PPTP) Setup",
+    summary: "Deprecated: legacy PPTP instructions (for archive only).",
+    content:
+      "PPTP is deprecated and insecure. Use IKEv2. This article is kept for historical context only.",
+    category: "network",
+    tags: ["vpn", "pptp", "legacy"],
+    isPublished: false,
+    status: "archived",
+    source: "manual",
+    archivedAt: new Date(),
   },
 ];
 
@@ -151,7 +320,28 @@ export async function seedKnowledgeArticles() {
         content: article.content,
         category: article.category,
         tags: article.tags,
-        isPublished: article.isPublished,
+        // lifecycle/source
+        isPublished:
+          article.isPublished !== undefined
+            ? article.isPublished
+            : article.status === "published",
+        status:
+          article.status !== undefined
+            ? article.status
+            : article.isPublished
+            ? "published"
+            : "draft",
+        source: article.source || "manual",
+        // metrics
+        viewCount: article.viewCount ?? 0,
+        helpfulVotes: article.helpfulVotes ?? 0,
+        unhelpfulVotes: article.unhelpfulVotes ?? 0,
+        usageCount: article.usageCount ?? 0,
+        effectivenessScore: article.effectivenessScore ?? "0.00",
+        // relations/audit
+        archivedAt: article.archivedAt ?? null,
+        lastUsed: article.lastUsed ?? null,
+        sourceTicketIds: article.sourceTicketIds ?? [],
         createdBy: admin?.id,
         createdAt: new Date(),
         updatedAt: new Date(),

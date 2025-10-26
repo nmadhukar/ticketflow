@@ -752,7 +752,16 @@ export const knowledgeArticles = pgTable("knowledge_articles", {
     precision: 3,
     scale: 2,
   }),
+  // Deprecated in favor of status; kept for backward compatibility
   isPublished: boolean("is_published").default(false),
+  // New lifecycle/status fields
+  status: varchar("status", { length: 20 }).default("draft"), // draft, published, archived
+  source: varchar("source", { length: 20 }).default("manual"), // manual, ai_generated
+  viewCount: integer("view_count").default(0),
+  helpfulVotes: integer("helpful_votes").default(0),
+  unhelpfulVotes: integer("unhelpful_votes").default(0),
+  archivedAt: timestamp("archived_at"),
+  lastUsed: timestamp("last_used"),
   createdBy: varchar("created_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -871,6 +880,18 @@ export const insertTicketComplexityScoreSchema = createInsertSchema(
   calculatedAt: true,
 });
 
+// User notifications table (optional persistence for in-app notifications)
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id),
+  title: varchar("title", { length: 255 }).notNull(),
+  content: text("content").notNull(),
+  type: varchar("type", { length: 50 }).notNull(), // task_assigned, comment_added, system
+  relatedTaskId: integer("related_task_id"),
+  isRead: boolean("is_read").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Types for new smart helpdesk tables
 export type TicketAutoResponse = typeof ticketAutoResponses.$inferSelect;
 export type InsertTicketAutoResponse = z.infer<
@@ -886,6 +907,13 @@ export type TicketComplexityScore = typeof ticketComplexityScores.$inferSelect;
 export type InsertTicketComplexityScore = z.infer<
   typeof insertTicketComplexityScoreSchema
 >;
+
+export const insertNotificationSchema = createInsertSchema(notifications).omit({
+  id: true,
+  createdAt: true,
+});
+export type Notification = typeof notifications.$inferSelect;
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 
 export const insertKnowledgeEmbeddingSchema = createInsertSchema(
   knowledgeEmbeddings

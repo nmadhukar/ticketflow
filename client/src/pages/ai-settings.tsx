@@ -453,7 +453,7 @@ export default function AISettings() {
   const bedrockConfigured = (apiKeys as any)?.bedrock?.configured;
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <>
       {/* Header */}
 
       <Card className="flex items-center justify-between">
@@ -970,6 +970,6 @@ export default function AISettings() {
           {updateSettings.isPending ? "Saving..." : "Save Settings"}
         </Button>
       </div>
-    </div>
+    </>
   );
 }

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -25,24 +25,18 @@ import { formatDistanceToNow } from "date-fns";
 import { useLocation } from "wouter";
 import MainWrapper from "@/components/main-wrapper";
 
-interface Notification {
-  id: string;
-  type:
-    | "task_assigned"
-    | "task_updated"
-    | "comment_added"
-    | "team_invite"
-    | "system"
-    | "reminder";
+interface NotificationDTO {
+  id: number;
   title: string;
-  message: string;
-  read: boolean;
-  createdAt: string;
-  actionUrl?: string;
+  content: string;
+  type: string;
+  relatedTaskId?: number | null;
+  isRead?: boolean;
+  createdAt?: string;
 }
 
 // Mock notifications data - in a real app, this would come from an API
-const mockNotifications: Notification[] = [
+const mockNotifications: NotificationDTO[] = [
   {
     id: "1",
     type: "task_assigned",
@@ -137,31 +131,53 @@ function getNotificationColor(type: Notification["type"]) {
 export default function Notifications() {
   const { user } = useAuth();
   const [, navigate] = useLocation();
-  const [notificationList, setNotificationList] =
-    useState<Notification[]>(mockNotifications);
+  const [notificationList, setNotificationList] = useState<NotificationDTO[]>(
+    []
+  );
 
   // In a real app, this would fetch notifications from the API
-  const { data: notifications = notificationList, isLoading } = useQuery({
-    queryKey: ["/api/notifications"],
-    queryFn: () => Promise.resolve(notificationList),
-    onSuccess: (data: Notification[]) => setNotificationList(data),
+  const {
+    data: notifications = notificationList,
+    isLoading,
+    refetch,
+  } = useQuery<NotificationDTO[]>({
+    queryKey: ["/api/notifications", { read: false }],
+    queryFn: async () => {
+      const res = await fetch(`/api/notifications?limit=50&read=false`, {
+        credentials: "include",
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    refetchOnMount: "always",
+    onSuccess: (data) => setNotificationList(data),
   });
 
-  const unreadCount = notificationList.filter((n) => !n.read).length;
-  const readNotifications = notificationList.filter((n) => n.read);
-  const unreadNotifications = notificationList.filter((n) => !n.read);
+  const unreadCount = notificationList.filter((n) => !n.isRead).length;
+  const readNotifications = notificationList.filter((n) => n.isRead);
+  const unreadNotifications = notificationList.filter((n) => !n.isRead);
 
-  const markAllAsRead = () => {
-    // In a real app, this would also call an API
-    setNotificationList((prev) => prev.map((n) => ({ ...n, read: true })));
-  };
+  const markAllMutation = useMutation({
+    mutationFn: async () => {
+      await fetch(`/api/notifications/read-all`, {
+        method: "PATCH",
+        credentials: "include",
+      });
+    },
+    onSuccess: () => refetch(),
+  });
+  const markAllAsRead = () => markAllMutation.mutate();
 
-  const markAsRead = (id: string) => {
-    // In a real app, this would also call an API
-    setNotificationList((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-    );
-  };
+  const markOneMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await fetch(`/api/notifications/${id}/read`, {
+        method: "PATCH",
+        credentials: "include",
+      });
+    },
+    onSuccess: () => refetch(),
+  });
+  const markAsRead = (id: number) => markOneMutation.mutate(id);
 
   if (isLoading) {
     return (
@@ -214,7 +230,7 @@ export default function Notifications() {
               <div key={notification.id}>
                 <div className="flex items-start gap-4 p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">
                   <div className="flex-shrink-0 mt-1">
-                    {getNotificationIcon(notification.type)}
+                    {getNotificationIcon("task_updated")}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
@@ -240,16 +256,18 @@ export default function Notifications() {
                         }}
                       >
                         <h4 className="font-semibold text-sm">
-                          {notification.title}
+                          {notification.title || "Notification"}
                         </h4>
                         <p className="text-sm text-muted-foreground mt-1">
-                          {notification.message}
+                          {notification.content}
                         </p>
                         <p className="text-xs text-muted-foreground mt-2">
-                          {formatDistanceToNow(
-                            new Date(notification.createdAt),
-                            { addSuffix: true }
-                          )}
+                          {notification.createdAt
+                            ? formatDistanceToNow(
+                                new Date(notification.createdAt),
+                                { addSuffix: true }
+                              )
+                            : "just now"}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
@@ -288,22 +306,24 @@ export default function Notifications() {
               <div key={notification.id}>
                 <div className="flex items-start gap-4 p-4 rounded-lg border">
                   <div className="flex-shrink-0 mt-1 opacity-60">
-                    {getNotificationIcon(notification.type)}
+                    {getNotificationIcon("task_updated")}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <h4 className="font-medium text-sm opacity-80">
-                          {notification.title}
+                          {notification.title || "Notification"}
                         </h4>
                         <p className="text-sm text-muted-foreground mt-1">
-                          {notification.message}
+                          {notification.content}
                         </p>
                         <p className="text-xs text-muted-foreground mt-2">
-                          {formatDistanceToNow(
-                            new Date(notification.createdAt),
-                            { addSuffix: true }
-                          )}
+                          {notification.createdAt
+                            ? formatDistanceToNow(
+                                new Date(notification.createdAt),
+                                { addSuffix: true }
+                              )
+                            : ""}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">

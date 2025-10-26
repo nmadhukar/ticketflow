@@ -41,6 +41,9 @@ import {
   MessageCircle,
   Plus,
   UserCheck,
+  Users,
+  UserCog,
+  Settings,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import Tasks from "./tasks";
@@ -79,6 +82,14 @@ export default function Dashboard() {
     queryKey: ["/api/stats"],
     retry: false,
     enabled: isAuthenticated && hasManagerOrAdminRole,
+  });
+
+  // Admin-only system overview stats
+  const { data: systemStats } = useQuery<any>({
+    queryKey: ["/api/admin/stats"],
+    retry: false,
+    refetchOnMount: "always",
+    enabled: isAuthenticated && (user as any)?.role === "admin",
   });
 
   const { data: recentTasks, isLoading: tasksLoading } = useQuery<any[]>({
@@ -137,6 +148,78 @@ export default function Dashboard() {
         <div className="flex items-center gap-2 text-sm text-green-600 mb-3">
           <div className="w-2 h-2 rounded-full bg-green-600 animate-pulse" />
           Real-time updates active
+        </div>
+      )}
+
+      {/* Admin-only System Overview Cards */}
+      {(user as any)?.role === "admin" && (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
+          <Card className="hover:shadow-business transition-shadow">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Users</CardTitle>
+              <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Users className="h-4 w-4 text-primary" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {(systemStats as any)?.totalUsers || 0}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {(systemStats as any)?.activeUsers || 0} active
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="hover:shadow-business transition-shadow">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Teams</CardTitle>
+              <div className="h-8 w-8 rounded-lg bg-secondary/10 flex items-center justify-center">
+                <UserCog className="h-4 w-4 text-secondary-foreground" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {(systemStats as any)?.totalTeams || 0}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Across all departments
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="hover:shadow-business transition-shadow">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Open Tickets
+              </CardTitle>
+              <div className="h-8 w-8 rounded-lg bg-accent/10 flex items-center justify-center">
+                <BarChart3 className="h-4 w-4 text-accent-foreground" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {(systemStats as any)?.openTickets || 0}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {(systemStats as any)?.urgentTickets || 0} high priority
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="hover:shadow-business transition-shadow">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Avg Resolution Time
+              </CardTitle>
+              <div className="h-8 w-8 rounded-lg bg-muted/10 flex items-center justify-center">
+                <Settings className="h-4 w-4 text-muted-foreground" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {(systemStats as any)?.avgResolutionTime || "N/A"}
+              </div>
+              <p className="text-xs text-muted-foreground">hours</p>
+            </CardContent>
+          </Card>
         </div>
       )}
       {/* {ticketId ? (

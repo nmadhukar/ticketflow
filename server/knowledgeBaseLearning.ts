@@ -1,6 +1,6 @@
 /**
  * Knowledge Base Learning System
- * 
+ *
  * This module automatically learns from resolved tickets to build a smart knowledge base.
  * Key features:
  * - Analyzes patterns in resolved tickets to identify common issues
@@ -10,21 +10,26 @@
  * - Provides insights for improving support processes
  */
 
-import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
-import { storage } from './storage';
-import { logSecurityEvent } from './security';
+import {
+  BedrockRuntimeClient,
+  InvokeModelCommand,
+} from "@aws-sdk/client-bedrock-runtime";
+import { storage } from "./storage";
+import { logSecurityEvent } from "./security";
 
 /**
  * Initialize AWS Bedrock client for knowledge extraction
  * Uses same credentials as ticket analysis but with separate error handling
  */
 const getBedrockClient = () => {
-  const region = process.env.AWS_REGION || 'us-east-1';
+  const region = process.env.AWS_REGION || "us-east-1";
   const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
   const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
 
   if (!accessKeyId || !secretAccessKey) {
-    console.warn('AWS credentials not configured. Knowledge base learning disabled.');
+    console.warn(
+      "AWS credentials not configured. Knowledge base learning disabled."
+    );
     return null;
   }
 
@@ -32,8 +37,8 @@ const getBedrockClient = () => {
     region,
     credentials: {
       accessKeyId,
-      secretAccessKey
-    }
+      secretAccessKey,
+    },
   });
 };
 
@@ -46,12 +51,12 @@ export interface KnowledgeArticle {
   content: string;
   category: string;
   tags: string[];
-  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  difficulty: "beginner" | "intermediate" | "advanced";
   estimatedReadTime: number; // in minutes
   relatedTickets: number[];
   confidence: number;
   isPublished: boolean;
-  createdBy: 'ai-learning' | string;
+  createdBy: "ai-learning" | string;
 }
 
 /**
@@ -69,14 +74,14 @@ export interface ResolutionPattern {
 
 /**
  * Batch analysis of resolved tickets to identify resolution patterns
- * 
+ *
  * Processes multiple resolved tickets to:
  * - Identify recurring problem types
  * - Extract successful resolution strategies
  * - Calculate success rates and resolution times
  * - Generate preventive measures
  * - Recommend process improvements
- * 
+ *
  * @param ticketBatch - Array of resolved tickets with their resolution data
  * @returns Array of identified resolution patterns
  */
@@ -96,7 +101,9 @@ export const analyzeResolvedTickets = async (
   if (!client || ticketBatch.length === 0) return [];
 
   try {
-    const ticketSummaries = ticketBatch.map(ticket => `
+    const ticketSummaries = ticketBatch
+      .map(
+        (ticket) => `
 Ticket ${ticket.id}:
 Title: ${ticket.title}
 Category: ${ticket.category}
@@ -104,8 +111,10 @@ Priority: ${ticket.priority}
 Problem: ${ticket.description}
 Resolution: ${ticket.resolution}
 Time to resolve: ${ticket.resolutionTime} hours
-Comments: ${ticket.comments.map(c => c.content).join('; ')}
----`).join('\n');
+Comments: ${ticket.comments.map((c) => c.content).join("; ")}
+---`
+      )
+      .join("\n");
 
     const prompt = `
 You are an expert knowledge management AI. Analyze these resolved support tickets to identify common patterns and create actionable knowledge.
@@ -142,30 +151,30 @@ Limit to the top 5 most significant patterns. Respond only with valid JSON.`;
         messages: [
           {
             role: "user",
-            content: prompt
-          }
-        ]
+            content: prompt,
+          },
+        ],
       }),
       contentType: "application/json",
-      accept: "application/json"
+      accept: "application/json",
     });
 
     const response = await client.send(command);
     const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-    
+
     if (responseBody.content && responseBody.content[0]?.text) {
       const patternsText = responseBody.content[0].text;
       const patterns = JSON.parse(patternsText) as ResolutionPattern[];
-      
+
       // Log learning activity
       logSecurityEvent({
-        action: 'knowledge_learning',
-        resource: 'tickets',
+        action: "knowledge_learning",
+        resource: "tickets",
         success: true,
-        details: { 
+        details: {
           ticketsAnalyzed: ticketBatch.length,
-          patternsFound: patterns.length
-        }
+          patternsFound: patterns.length,
+        },
       });
 
       return patterns;
@@ -173,12 +182,14 @@ Limit to the top 5 most significant patterns. Respond only with valid JSON.`;
 
     return [];
   } catch (error) {
-    console.error('Knowledge pattern analysis error:', error);
+    console.error("Knowledge pattern analysis error:", error);
     logSecurityEvent({
-      action: 'knowledge_learning',
-      resource: 'tickets',
+      action: "knowledge_learning",
+      resource: "tickets",
       success: false,
-      details: { error: error instanceof Error ? error.message : String(error) }
+      details: {
+        error: error instanceof Error ? error.message : String(error),
+      },
     });
     return [];
   }
@@ -198,8 +209,8 @@ You are a technical writer creating a knowledge base article. Based on this reso
 
 Resolution Pattern:
 Problem Type: ${pattern.problemType}
-Common Solutions: ${pattern.commonSolutions.join(', ')}
-Preventive Measures: ${pattern.preventiveMeasures.join(', ')}
+Common Solutions: ${pattern.commonSolutions.join(", ")}
+Preventive Measures: ${pattern.preventiveMeasures.join(", ")}
 Average Resolution Time: ${pattern.averageResolutionTime} hours
 Success Rate: ${pattern.successRate}%
 
@@ -231,26 +242,26 @@ Write for non-technical users. Use clear, actionable language. Include specific 
         messages: [
           {
             role: "user",
-            content: prompt
-          }
-        ]
+            content: prompt,
+          },
+        ],
       }),
       contentType: "application/json",
-      accept: "application/json"
+      accept: "application/json",
     });
 
     const response = await client.send(command);
     const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-    
+
     if (responseBody.content && responseBody.content[0]?.text) {
       const articleText = responseBody.content[0].text;
       const articleData = JSON.parse(articleText);
-      
+
       const article: KnowledgeArticle = {
         ...articleData,
         relatedTickets,
         isPublished: articleData.confidence >= 70, // Auto-publish high confidence articles
-        createdBy: 'ai-learning'
+        createdBy: "ai-learning",
       };
 
       return article;
@@ -258,7 +269,7 @@ Write for non-technical users. Use clear, actionable language. Include specific 
 
     return null;
   } catch (error) {
-    console.error('Knowledge article generation error:', error);
+    console.error("Knowledge article generation error:", error);
     return null;
   }
 };
@@ -272,15 +283,17 @@ export const processKnowledgeLearning = async (): Promise<{
   try {
     // Get recently resolved tickets (last 30 days)
     const recentResolvedTickets = await storage.getRecentResolvedTickets(30);
-    
+
     if (recentResolvedTickets.length < 5) {
-      console.log('Insufficient resolved tickets for learning (minimum 5 required)');
+      console.log(
+        "Insufficient resolved tickets for learning (minimum 5 required)"
+      );
       return { patternsFound: 0, articlesCreated: 0, articlesPublished: 0 };
     }
 
     // Group tickets by category for better pattern analysis
     const ticketsByCategory = recentResolvedTickets.reduce((groups, ticket) => {
-      const category = ticket.category || 'general';
+      const category = ticket.category || "general";
       if (!groups[category]) groups[category] = [];
       groups[category].push(ticket);
       return groups;
@@ -294,8 +307,10 @@ export const processKnowledgeLearning = async (): Promise<{
     for (const [category, tickets] of Object.entries(ticketsByCategory)) {
       if (tickets.length < 3) continue; // Need minimum tickets for pattern analysis
 
-      console.log(`Analyzing ${tickets.length} resolved tickets in category: ${category}`);
-      
+      console.log(
+        `Analyzing ${tickets.length} resolved tickets in category: ${category}`
+      );
+
       const patterns = await analyzeResolvedTickets(tickets);
       totalPatterns += patterns.length;
 
@@ -303,28 +318,52 @@ export const processKnowledgeLearning = async (): Promise<{
       for (const pattern of patterns) {
         if (pattern.frequency >= 3 && pattern.successRate >= 70) {
           const relatedTicketIds = tickets
-            .filter(t => t.title.toLowerCase().includes(pattern.problemType.toLowerCase()) ||
-                        t.description.toLowerCase().includes(pattern.problemType.toLowerCase()))
-            .map(t => t.id);
+            .filter(
+              (t) =>
+                t.title
+                  .toLowerCase()
+                  .includes(pattern.problemType.toLowerCase()) ||
+                t.description
+                  .toLowerCase()
+                  .includes(pattern.problemType.toLowerCase())
+            )
+            .map((t) => t.id);
 
-          const article = await generateKnowledgeArticle(pattern, relatedTicketIds);
-          
+          const article = await generateKnowledgeArticle(
+            pattern,
+            relatedTicketIds
+          );
+
           if (article) {
             // Check if similar article already exists
-            const existingArticle = await storage.findSimilarKnowledgeArticle(article.title);
-            
+            const existingArticle = await storage.findSimilarKnowledgeArticle(
+              article.title
+            );
+
             if (!existingArticle) {
               // Save new article
               const savedArticle = await storage.createKnowledgeArticle({
                 ...article,
+                source: "ai_generated",
+                // Always draft; admin will publish after review per requirements
+                isPublished: false,
+                status: "draft",
                 createdAt: new Date(),
-                updatedAt: new Date()
+                updatedAt: new Date(),
               });
 
               totalArticles++;
-              if (article.isPublished) totalPublished++;
+              if (
+                savedArticle.isPublished ||
+                (savedArticle as any).status === "published"
+              )
+                totalPublished++;
 
-              console.log(`Created knowledge article: "${article.title}" (${article.isPublished ? 'published' : 'draft'})`);
+              console.log(
+                `Created knowledge article: "${article.title}" (${
+                  article.isPublished ? "published" : "draft"
+                })`
+              );
             } else {
               console.log(`Similar article already exists: "${article.title}"`);
             }
@@ -339,19 +378,20 @@ export const processKnowledgeLearning = async (): Promise<{
       ticketsAnalyzed: recentResolvedTickets.length,
       patternsFound: totalPatterns,
       articlesCreated: totalArticles,
-      articlesPublished: totalPublished
+      articlesPublished: totalPublished,
     });
 
-    console.log(`Knowledge learning completed: ${totalPatterns} patterns, ${totalArticles} articles created, ${totalPublished} published`);
-    
+    console.log(
+      `Knowledge learning completed: ${totalPatterns} patterns, ${totalArticles} articles created, ${totalPublished} published`
+    );
+
     return {
       patternsFound: totalPatterns,
       articlesCreated: totalArticles,
-      articlesPublished: totalPublished
+      articlesPublished: totalPublished,
     };
-
   } catch (error) {
-    console.error('Knowledge learning process error:', error);
+    console.error("Knowledge learning process error:", error);
     return { patternsFound: 0, articlesCreated: 0, articlesPublished: 0 };
   }
 };
@@ -361,11 +401,13 @@ export const intelligentKnowledgeSearch = async (
   query: string,
   category?: string,
   maxResults: number = 10
-): Promise<Array<{
-  article: any;
-  relevanceScore: number;
-  matchedContent: string;
-}>> => {
+): Promise<
+  Array<{
+    article: any;
+    relevanceScore: number;
+    matchedContent: string;
+  }>
+> => {
   const client = getBedrockClient();
   if (!client) {
     // Fallback to basic search
@@ -375,17 +417,21 @@ export const intelligentKnowledgeSearch = async (
   try {
     // Get all published articles
     const articles = await storage.getPublishedKnowledgeArticles(category);
-    
+
     if (articles.length === 0) return [];
 
     // Use AI to rank articles by relevance
-    const articleSummaries = articles.map((article, index) => `
+    const articleSummaries = articles
+      .map(
+        (article, index) => `
 Article ${index}:
 Title: ${article.title}
 Category: ${article.category}
-Tags: ${article.tags?.join(', ') || 'none'}
+Tags: ${article.tags?.join(", ") || "none"}
 Content Preview: ${article.content.substring(0, 300)}...
----`).join('\n');
+---`
+      )
+      .join("\n");
 
     const prompt = `
 You are a search relevance AI. Rank these knowledge base articles by relevance to the user query.
@@ -414,31 +460,34 @@ Only include articles with relevance score >= 30. Limit to top ${maxResults} res
         messages: [
           {
             role: "user",
-            content: prompt
-          }
-        ]
+            content: prompt,
+          },
+        ],
       }),
       contentType: "application/json",
-      accept: "application/json"
+      accept: "application/json",
     });
 
     const response = await client.send(command);
     const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-    
+
     if (responseBody.content && responseBody.content[0]?.text) {
       const rankingsText = responseBody.content[0].text;
       const rankings = JSON.parse(rankingsText);
-      
+
       return rankings.map((ranking: any) => ({
         article: articles[ranking.articleIndex],
         relevanceScore: ranking.relevanceScore,
-        matchedContent: ranking.matchedContent
+        matchedContent: ranking.matchedContent,
       }));
     }
 
     return await basicKnowledgeSearch(query, category, maxResults);
   } catch (error) {
-    console.error('Intelligent search error, falling back to basic search:', error);
+    console.error(
+      "Intelligent search error, falling back to basic search:",
+      error
+    );
     return await basicKnowledgeSearch(query, category, maxResults);
   }
 };
@@ -448,21 +497,23 @@ const basicKnowledgeSearch = async (
   query: string,
   category?: string,
   maxResults: number = 10
-): Promise<Array<{
-  article: any;
-  relevanceScore: number;
-  matchedContent: string;
-}>> => {
+): Promise<
+  Array<{
+    article: any;
+    relevanceScore: number;
+    matchedContent: string;
+  }>
+> => {
   try {
     const articles = await storage.searchKnowledgeBase(query, category);
-    
-    return articles.slice(0, maxResults).map(article => ({
+
+    return articles.slice(0, maxResults).map((article) => ({
       article,
       relevanceScore: 50, // Default score for basic search
-      matchedContent: article.content.substring(0, 200) + '...'
+      matchedContent: article.content.substring(0, 200) + "...",
     }));
   } catch (error) {
-    console.error('Basic knowledge search error:', error);
+    console.error("Basic knowledge search error:", error);
     return [];
   }
 };
@@ -471,11 +522,11 @@ const basicKnowledgeSearch = async (
 export const scheduleKnowledgeLearning = () => {
   // Run knowledge learning every 24 hours
   setInterval(async () => {
-    console.log('Starting scheduled knowledge learning...');
+    console.log("Starting scheduled knowledge learning...");
     await processKnowledgeLearning();
   }, 24 * 60 * 60 * 1000);
 
-  console.log('Knowledge learning scheduler initialized (runs every 24 hours)');
+  console.log("Knowledge learning scheduler initialized (runs every 24 hours)");
 };
 
 // Improve existing article based on new resolution data
@@ -525,35 +576,37 @@ Only suggest updates if the new data provides valuable insights not already cove
         messages: [
           {
             role: "user",
-            content: prompt
-          }
-        ]
+            content: prompt,
+          },
+        ],
       }),
       contentType: "application/json",
-      accept: "application/json"
+      accept: "application/json",
     });
 
     const response = await client.send(command);
     const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-    
+
     if (responseBody.content && responseBody.content[0]?.text) {
       const improvementText = responseBody.content[0].text;
       const improvement = JSON.parse(improvementText);
-      
+
       if (improvement.shouldUpdate && improvement.confidence >= 70) {
         await storage.updateKnowledgeArticle(articleId, {
           content: improvement.improvedContent,
-          updatedAt: new Date()
+          updatedAt: new Date(),
         });
-        
-        console.log(`Improved knowledge article ${articleId}: ${improvement.improvementReason}`);
+
+        console.log(
+          `Improved knowledge article ${articleId}: ${improvement.improvementReason}`
+        );
         return true;
       }
     }
 
     return false;
   } catch (error) {
-    console.error('Article improvement error:', error);
+    console.error("Article improvement error:", error);
     return false;
   }
 };

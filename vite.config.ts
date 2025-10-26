@@ -7,13 +7,15 @@ export default defineConfig({
   plugins: [
     react(),
     // Only enable Replit development plugins in Replit dev environments
-    ...(process.env.NODE_ENV !== "production" && process.env.REPL_ID !== undefined
+    ...(process.env.NODE_ENV !== "production" &&
+    process.env.REPL_ID !== undefined
       ? [runtimeErrorOverlay()]
       : []),
-    ...(process.env.NODE_ENV !== "production" && process.env.REPL_ID !== undefined
+    ...(process.env.NODE_ENV !== "production" &&
+    process.env.REPL_ID !== undefined
       ? [
           await import("@replit/vite-plugin-cartographer").then((m) =>
-            m.cartographer(),
+            m.cartographer()
           ),
         ]
       : []),
@@ -34,6 +36,13 @@ export default defineConfig({
     fs: {
       strict: true,
       deny: ["**/.*"],
+    },
+    proxy: {
+      "/ws": {
+        target: "http://localhost:5000",
+        ws: true,
+        changeOrigin: true,
+      },
     },
   },
 });

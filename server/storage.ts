@@ -71,6 +71,9 @@ import {
   learningQueue,
   type LearningQueue,
   type InsertLearningQueue,
+  notifications,
+  type Notification,
+  type InsertNotification,
 } from "@shared/schema";
 import { db } from "./db";
 import {
@@ -408,6 +411,15 @@ export interface IStorage {
   getAllCompanyPolicies(includeInactive?: boolean): Promise<CompanyPolicy[]>;
   toggleCompanyPolicyStatus(id: number): Promise<CompanyPolicy>;
 
+  // Notifications operations
+  getUnreadNotifications(
+    userId: string,
+    limit?: number
+  ): Promise<Notification[]>;
+  markNotificationRead(id: number): Promise<void>;
+  markAllNotificationsRead(userId: string): Promise<void>;
+  createNotification(notification: InsertNotification): Promise<Notification>;
+
   // Knowledge Base operations
   createKnowledgeArticle(
     article: InsertKnowledgeArticle
@@ -422,6 +434,8 @@ export interface IStorage {
     category?: string;
     isPublished?: boolean;
     createdBy?: string;
+    status?: string;
+    source?: string;
   }): Promise<KnowledgeArticle[]>;
   getPublishedKnowledgeArticles(category?: string): Promise<KnowledgeArticle[]>;
   searchKnowledgeBase(
@@ -434,6 +448,11 @@ export interface IStorage {
   toggleKnowledgeArticleStatus(id: number): Promise<KnowledgeArticle>;
   incrementKnowledgeArticleUsage(id: number): Promise<void>;
   updateArticleEffectiveness(id: number, rating: number): Promise<void>;
+  setKnowledgeArticleStatus(
+    id: number,
+    status: "draft" | "published" | "archived"
+  ): Promise<KnowledgeArticle>;
+  incrementKnowledgeArticleView(id: number): Promise<void>;
 
   // Learning Queue operations
   addToLearningQueue(ticketId: number): Promise<LearningQueue>;
@@ -2274,6 +2293,11 @@ export class DatabaseStorage implements IStorage {
         ...article,
         createdAt: new Date(),
         updatedAt: new Date(),
+        status: (article as any).isPublished
+          ? "published"
+          : (article as any).status || "draft",
+        source: (article as any).source || "manual",
+        viewCount: 0,
       })
       .returning();
     return result;
@@ -2287,6 +2311,13 @@ export class DatabaseStorage implements IStorage {
       .update(knowledgeArticles)
       .set({
         ...article,
+        status:
+          (article as any).isPublished !== undefined
+            ? (article as any).isPublished
+              ? "published"
+              : "draft"
+            : (article as any).status,
+        source: (article as any).source,
         updatedAt: new Date(),
       })
       .where(eq(knowledgeArticles.id, id))
@@ -2310,10 +2341,12 @@ export class DatabaseStorage implements IStorage {
     category?: string;
     isPublished?: boolean;
     createdBy?: string;
+    status?: string;
+    source?: string;
   }): Promise<KnowledgeArticle[]> {
     let query = db.select().from(knowledgeArticles);
 
-    const conditions = [];
+    const conditions = [] as any[];
     if (filters?.category) {
       conditions.push(eq(knowledgeArticles.category, filters.category));
     }
@@ -2322,6 +2355,12 @@ export class DatabaseStorage implements IStorage {
     }
     if (filters?.createdBy) {
       conditions.push(eq(knowledgeArticles.createdBy, filters.createdBy));
+    }
+    if (filters?.status) {
+      conditions.push(eq(knowledgeArticles.status as any, filters.status));
+    }
+    if (filters?.source) {
+      conditions.push(eq(knowledgeArticles.source as any, filters.source));
     }
 
     if (conditions.length > 0) {
@@ -2334,10 +2373,13 @@ export class DatabaseStorage implements IStorage {
   async getPublishedKnowledgeArticles(
     category?: string
   ): Promise<KnowledgeArticle[]> {
-    return await this.getAllKnowledgeArticles({
-      category,
-      isPublished: true,
-    });
+    const conditions = [eq(knowledgeArticles.status as any, "published")];
+    if (category) conditions.push(eq(knowledgeArticles.category, category));
+    return await db
+      .select()
+      .from(knowledgeArticles)
+      .where(and(...conditions))
+      .orderBy(desc(knowledgeArticles.usageCount));
   }
 
   async searchKnowledgeBase(
@@ -2347,10 +2389,10 @@ export class DatabaseStorage implements IStorage {
     const searchTerms = query
       .toLowerCase()
       .split(" ")
-      .filter((term) => term.length > 2);
-    const conditions = [];
-
-    // Add search conditions
+      .filter((t) => t.length > 2);
+    const conditions = [
+      eq(knowledgeArticles.status as any, "published"),
+    ] as any[];
     if (searchTerms.length > 0) {
       const searchConditions = searchTerms.map((term) =>
         or(
@@ -2361,21 +2403,12 @@ export class DatabaseStorage implements IStorage {
       );
       conditions.push(or(...searchConditions));
     }
+    if (category) conditions.push(eq(knowledgeArticles.category, category));
 
-    // Add category filter
-    if (category) {
-      conditions.push(eq(knowledgeArticles.category, category));
-    }
-
-    // Only published articles
-    conditions.push(eq(knowledgeArticles.isPublished, true));
-
-    let dbQuery = db.select().from(knowledgeArticles);
-    if (conditions.length > 0) {
-      dbQuery = dbQuery.where(and(...conditions)) as any;
-    }
-
-    return await dbQuery
+    return await db
+      .select()
+      .from(knowledgeArticles)
+      .where(and(...conditions))
       .orderBy(
         desc(knowledgeArticles.effectivenessScore),
         desc(knowledgeArticles.usageCount)
@@ -2646,6 +2679,7 @@ export class DatabaseStorage implements IStorage {
       .update(knowledgeArticles)
       .set({
         isPublished: !article.isPublished,
+        status: !article.isPublished ? "published" : "draft",
         updatedAt: new Date(),
       })
       .where(eq(knowledgeArticles.id, id))
@@ -2667,10 +2701,10 @@ export class DatabaseStorage implements IStorage {
     const article = await this.getKnowledgeArticle(id);
     if (!article) return;
 
-    // Simple effectiveness calculation - could be enhanced with more sophisticated algorithms
-    const currentScore = parseFloat(article.effectivenessScore || "0");
-    const usageCount = article.usageCount || 1;
-    const newScore = (currentScore * usageCount + rating) / (usageCount + 1);
+    const helpful = (article as any).helpfulVotes || 0;
+    const unhelpful = (article as any).unhelpfulVotes || 0;
+    const total = helpful + unhelpful;
+    const newScore = total > 0 ? helpful / total : 0;
 
     await db
       .update(knowledgeArticles)
@@ -2681,7 +2715,72 @@ export class DatabaseStorage implements IStorage {
       .where(eq(knowledgeArticles.id, id));
   }
 
+  async setKnowledgeArticleStatus(
+    id: number,
+    status: "draft" | "published" | "archived"
+  ): Promise<KnowledgeArticle> {
+    const [updated] = await db
+      .update(knowledgeArticles)
+      .set({
+        status,
+        isPublished: status === "published",
+        archivedAt: status === "archived" ? new Date() : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(knowledgeArticles.id, id))
+      .returning();
+    return updated;
+  }
+
+  async incrementKnowledgeArticleView(id: number): Promise<void> {
+    await db
+      .update(knowledgeArticles)
+      .set({ viewCount: sql`${knowledgeArticles.viewCount} + 1` })
+      .where(eq(knowledgeArticles.id, id));
+  }
+
   // Learning Queue operations implementation
+  // Notifications operations
+  async getUnreadNotifications(
+    userId: string,
+    limit: number = 5
+  ): Promise<Notification[]> {
+    return await db
+      .select()
+      .from(notifications)
+      .where(
+        and(eq(notifications.userId, userId), eq(notifications.isRead, false))
+      )
+      .orderBy(desc(notifications.createdAt))
+      .limit(limit);
+  }
+
+  async markNotificationRead(id: number): Promise<void> {
+    await db
+      .update(notifications)
+      .set({ isRead: true })
+      .where(eq(notifications.id, id));
+  }
+
+  async markAllNotificationsRead(userId: string): Promise<void> {
+    await db
+      .update(notifications)
+      .set({ isRead: true })
+      .where(
+        and(eq(notifications.userId, userId), eq(notifications.isRead, false))
+      );
+  }
+
+  async createNotification(
+    notification: InsertNotification
+  ): Promise<Notification> {
+    const [result] = await db
+      .insert(notifications)
+      .values({ ...notification, createdAt: new Date() })
+      .returning();
+    return result;
+  }
+
   async addToLearningQueue(ticketId: number): Promise<LearningQueue> {
     const [queued] = await db
       .insert(learningQueue)

@@ -25,21 +25,23 @@ export function useWebSocket() {
     try {
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const wsUrl = `${protocol}//${window.location.host}/ws`;
-      
+
       console.log("Connecting to WebSocket:", wsUrl);
       const socket = new WebSocket(wsUrl);
-      
+
       socket.onopen = () => {
         console.log("WebSocket connected");
         setIsConnected(true);
         setReconnectAttempts(0);
-        
+
         // Send authentication message
         if (user?.id) {
-          socket.send(JSON.stringify({
-            type: 'auth',
-            userId: user.id
-          }));
+          socket.send(
+            JSON.stringify({
+              type: "auth",
+              userId: user.id,
+            })
+          );
         }
       };
 
@@ -60,14 +62,14 @@ export function useWebSocket() {
         console.log("WebSocket disconnected");
         setIsConnected(false);
         socketRef.current = null;
-        
+
         // Attempt to reconnect with exponential backoff
         if (isAuthenticated && reconnectAttempts < 5) {
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
           console.log(`Reconnecting in ${delay}ms...`);
-          
+
           reconnectTimeoutRef.current = setTimeout(() => {
-            setReconnectAttempts(prev => prev + 1);
+            setReconnectAttempts((prev) => prev + 1);
             connect();
           }, delay);
         }
@@ -84,49 +86,71 @@ export function useWebSocket() {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
-    
+
     if (socketRef.current) {
       socketRef.current.close();
       socketRef.current = null;
     }
-    
+
     setIsConnected(false);
     setReconnectAttempts(0);
   }, []);
 
   const sendMessage = useCallback((type: string, data: any) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({ type, data, timestamp: new Date().toISOString() }));
+      socketRef.current.send(
+        JSON.stringify({ type, data, timestamp: new Date().toISOString() })
+      );
     } else {
       console.warn("WebSocket is not connected");
     }
   }, []);
 
+  // Simple de-duplication window for identical messages
+  const lastMsgRef = useRef<{ key: string; ts: number } | null>(null);
+
   const handleMessage = (message: WebSocketMessage) => {
     console.log("WebSocket message received:", message);
-    
+    try {
+      const key = `${message.type}:${JSON.stringify(message.data || {})}`;
+      const now = Date.now();
+      if (
+        lastMsgRef.current &&
+        lastMsgRef.current.key === key &&
+        now - lastMsgRef.current.ts < 1000
+      ) {
+        return; // drop duplicate within 1s window
+      }
+      lastMsgRef.current = { key, ts: now };
+    } catch {}
+
     switch (message.type) {
       case "ticket:created":
         // Invalidate ticket queries to refresh the list
         queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
         queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
         queryClient.invalidateQueries({ queryKey: ["/api/activity"] });
-        
+
         // Show notification for new ticket
-        if (message.data.assignedTo === "current-user-id") { // Replace with actual user ID check
+        if (
+          (user as any)?.id &&
+          (message as any).data?.assigneeId === (user as any).id
+        ) {
           toast({
             title: "New ticket assigned",
             description: `Ticket #${message.data.ticketNumber} has been assigned to you`,
           });
         }
         break;
-        
+
       case "ticket:updated":
         // Invalidate specific ticket and list queries
-        queryClient.invalidateQueries({ queryKey: [`/api/tasks/${message.data.id}`] });
+        queryClient.invalidateQueries({
+          queryKey: [`/api/tasks/${message.data.id}`],
+        });
         queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
         queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
-        
+
         // Show notification for important updates
         if (message.data.changes?.status === "resolved") {
           toast({
@@ -135,12 +159,14 @@ export function useWebSocket() {
           });
         }
         break;
-        
+
       case "ticket:comment":
         // Invalidate comment queries
-        queryClient.invalidateQueries({ queryKey: [`/api/tasks/${message.data.ticketId}/comments`] });
+        queryClient.invalidateQueries({
+          queryKey: [`/api/tasks/${message.data.ticketId}/comments`],
+        });
         queryClient.invalidateQueries({ queryKey: ["/api/activity"] });
-        
+
         // Show notification for new comments on assigned tickets
         if (message.data.isReply) {
           toast({
@@ -149,24 +175,27 @@ export function useWebSocket() {
           });
         }
         break;
-        
+
       case "knowledge:created":
         // Invalidate knowledge base queries
         queryClient.invalidateQueries({ queryKey: ["/api/knowledge"] });
-        
+
         // Show notification for AI-created articles
         if (message.data.sourceTicketId) {
           toast({
             title: "Knowledge article created",
-            description: "AI has created a new knowledge article from a resolved ticket",
+            description:
+              "AI has created a new knowledge article from a resolved ticket",
           });
         }
         break;
-        
+
       case "ai:response":
         // Update specific ticket with AI response
-        queryClient.invalidateQueries({ queryKey: [`/api/tasks/${message.data.ticketId}/auto-response`] });
-        
+        queryClient.invalidateQueries({
+          queryKey: [`/api/tasks/${message.data.ticketId}/auto-response`],
+        });
+
         // Show notification for high-confidence AI responses
         if (message.data.confidence > 0.8) {
           toast({
@@ -175,19 +204,19 @@ export function useWebSocket() {
           });
         }
         break;
-        
+
       case "team:update":
         // Invalidate team queries
         queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
         queryClient.invalidateQueries({ queryKey: ["/api/teams/my"] });
         break;
-        
+
       case "user:update":
         // Invalidate user queries
         queryClient.invalidateQueries({ queryKey: ["/api/users"] });
         queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
         break;
-        
+
       case "system:notification":
         // Show system notifications
         toast({
@@ -196,7 +225,7 @@ export function useWebSocket() {
           variant: message.data.variant || "default",
         });
         break;
-        
+
       default:
         console.log("Unknown WebSocket message type:", message.type);
     }
@@ -209,20 +238,26 @@ export function useWebSocket() {
     } else {
       disconnect();
     }
-    
+
     return () => {
       disconnect();
     };
   }, [isAuthenticated, connect, disconnect]);
 
   // Subscribe to specific events
-  const subscribe = useCallback((ticketId: number) => {
-    sendMessage("subscribe", { ticketId });
-  }, [sendMessage]);
+  const subscribe = useCallback(
+    (ticketId: number) => {
+      sendMessage("subscribe", { ticketId });
+    },
+    [sendMessage]
+  );
 
-  const unsubscribe = useCallback((ticketId: number) => {
-    sendMessage("unsubscribe", { ticketId });
-  }, [sendMessage]);
+  const unsubscribe = useCallback(
+    (ticketId: number) => {
+      sendMessage("unsubscribe", { ticketId });
+    },
+    [sendMessage]
+  );
 
   return {
     isConnected,
@@ -246,7 +281,7 @@ const WebSocketContext = createContext<WebSocketContextType | null>(null);
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {
   const webSocket = useWebSocket();
-  
+
   return (
     <WebSocketContext.Provider value={webSocket}>
       {children}
@@ -257,7 +292,9 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 export function useWebSocketContext() {
   const context = useContext(WebSocketContext);
   if (!context) {
-    throw new Error("useWebSocketContext must be used within WebSocketProvider");
+    throw new Error(
+      "useWebSocketContext must be used within WebSocketProvider"
+    );
   }
   return context;
 }

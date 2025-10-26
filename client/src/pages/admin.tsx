@@ -65,10 +65,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Users,
-  Settings,
-  BarChart3,
-  UserCog,
   Ban,
   CheckCircle,
   Palette,
@@ -638,78 +634,12 @@ export default function AdminPanel() {
       title="Admin Panel"
       subTitle="Manage Users, Teams, Invitations, Api, Policies, Branding, AI Analytics, AI Settings and System settings"
     >
-      {/* System Overview Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
-        <Card className="hover:shadow-business transition-shadow">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Users</CardTitle>
-            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Users className="h-4 w-4 text-primary" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {(systemStats as any)?.totalUsers || 0}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {(systemStats as any)?.activeUsers || 0} active
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="hover:shadow-business transition-shadow">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Teams</CardTitle>
-            <div className="h-8 w-8 rounded-lg bg-secondary/10 flex items-center justify-center">
-              <UserCog className="h-4 w-4 text-secondary-foreground" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {(systemStats as any)?.totalTeams || 0}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Across all departments
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="hover:shadow-business transition-shadow">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Open Tickets</CardTitle>
-            <div className="h-8 w-8 rounded-lg bg-accent/10 flex items-center justify-center">
-              <BarChart3 className="h-4 w-4 text-accent-foreground" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {(systemStats as any)?.openTickets || 0}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {(systemStats as any)?.urgentTickets || 0} high priority
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="hover:shadow-business transition-shadow">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Avg Resolution Time
-            </CardTitle>
-            <div className="h-8 w-8 rounded-lg bg-muted/10 flex items-center justify-center">
-              <Settings className="h-4 w-4 text-muted-foreground" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {(systemStats as any)?.avgResolutionTime || "N/A"}
-            </div>
-            <p className="text-xs text-muted-foreground">hours</p>
-          </CardContent>
-        </Card>
-      </div>
+      {/* System Overview moved to Dashboard (admin-only) */}
 
       <div className="flex gap-6">
         {/* Main Content Area */}
         <div className="flex-1">
-          <Tabs value={activeTab} className="space-y-4">
+          <Tabs value={activeTab}>
             <TabsList className="hidden">
               <TabsTrigger value="users">Users</TabsTrigger>
               <TabsTrigger value="invitations">Invitations</TabsTrigger>
@@ -726,7 +656,7 @@ export default function AdminPanel() {
             </TabsList>
 
             {/* Users Tab */}
-            <TabsContent value="users" className="space-y-4">
+            <TabsContent value="users">
               <Card>
                 <CardHeader>
                   <div className="flex items-center justify-between">
@@ -754,7 +684,7 @@ export default function AdminPanel() {
                           </SelectItem>
                         </SelectContent>
                       </Select>
-                      <Link to="/admin/invitations">
+                      <Link to="/admin/invitations?section=management">
                         <Button>
                           <UserPlus className="h-4 w-4 mr-2" />
                           Invite User
@@ -922,7 +852,7 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* Teams Tab */}
-            <TabsContent value="teams" className="space-y-4">
+            <TabsContent value="teams">
               <Card>
                 <CardHeader>
                   <div className="flex items-center justify-between">
@@ -974,7 +904,7 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* API Tab */}
-            <TabsContent value="api" className="space-y-6">
+            <TabsContent value="api">
               <Card>
                 <CardHeader>
                   <CardTitle>API Keys</CardTitle>
@@ -1194,7 +1124,7 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* System Settings Tab */}
-            <TabsContent value="system-settings" className="space-y-4">
+            <TabsContent value="system-settings">
               <Card>
                 <CardHeader>
                   <CardTitle>System Settings</CardTitle>
@@ -1264,7 +1194,7 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* Branding Tab */}
-            <TabsContent value="branding" className="space-y-4">
+            <TabsContent value="branding">
               <Card>
                 <CardHeader>
                   <CardTitle>Company Branding</CardTitle>
@@ -1355,7 +1285,7 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* Help Tab */}
-            <TabsContent value="help" className="space-y-4">
+            <TabsContent value="help">
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -1370,77 +1300,13 @@ export default function AdminPanel() {
                 <CardContent>
                   <div className="space-y-6">
                     <HelpDocumentManager />
-
-                    <div className="border-t pt-6">
-                      <h3 className="text-lg font-semibold mb-4">
-                        Admin Tools
-                      </h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <Card className="border-2">
-                          <CardHeader className="pb-3">
-                            <CardTitle className="text-base flex items-center gap-2">
-                              <Building className="h-4 w-4" />
-                              Department Management
-                            </CardTitle>
-                            <CardDescription className="text-sm">
-                              Create and manage organizational departments
-                            </CardDescription>
-                          </CardHeader>
-                          <CardContent>
-                            <Link to="/admin/departments">
-                              <Button variant="outline" className="w-full">
-                                Manage Departments
-                              </Button>
-                            </Link>
-                          </CardContent>
-                        </Card>
-
-                        <Card className="border-2">
-                          <CardHeader className="pb-3">
-                            <CardTitle className="text-base flex items-center gap-2">
-                              <UserPlus className="h-4 w-4" />
-                              User Invitations
-                            </CardTitle>
-                            <CardDescription className="text-sm">
-                              Invite new users to join your organization
-                            </CardDescription>
-                          </CardHeader>
-                          <CardContent>
-                            <Link to="/admin/invitations">
-                              <Button variant="outline" className="w-full">
-                                Manage Invitations
-                              </Button>
-                            </Link>
-                          </CardContent>
-                        </Card>
-
-                        <Card className="border-2">
-                          <CardHeader className="pb-3">
-                            <CardTitle className="text-base flex items-center gap-2">
-                              <BookOpen className="h-4 w-4" />
-                              User Guide Management
-                            </CardTitle>
-                            <CardDescription className="text-sm">
-                              Create and organize user guides and tutorials
-                            </CardDescription>
-                          </CardHeader>
-                          <CardContent>
-                            <Link to="/admin/guides">
-                              <Button variant="outline" className="w-full">
-                                Manage User Guides
-                              </Button>
-                            </Link>
-                          </CardContent>
-                        </Card>
-                      </div>
-                    </div>
                   </div>
                 </CardContent>
               </Card>
             </TabsContent>
 
             {/* Policies Tab */}
-            <TabsContent value="policies" className="space-y-4">
+            <TabsContent value="policies">
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -1460,7 +1326,7 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* SSO Tab */}
-            <TabsContent value="sso" className="space-y-4">
+            <TabsContent value="sso">
               <Card>
                 <CardHeader>
                   <CardTitle>
@@ -1663,7 +1529,7 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* Email Tab */}
-            <TabsContent value="email" className="space-y-4">
+            <TabsContent value="email">
               <Card>
                 <CardHeader>
                   <CardTitle>AWS Configuration</CardTitle>
@@ -2103,17 +1969,17 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* AI Settings Tab */}
-            <TabsContent value="ai-settings" className="space-y-4">
+            <TabsContent value="ai-settings">
               <AISettings />
             </TabsContent>
 
             {/* AI Analytics Tab */}
-            <TabsContent value="ai-analytics" className="space-y-4">
+            <TabsContent value="ai-analytics">
               <AiAnalytics />
             </TabsContent>
 
             {/* Invitations Tab */}
-            <TabsContent value="invitations" className="space-y-4">
+            <TabsContent value="invitations">
               <Invitations />
             </TabsContent>
           </Tabs>

@@ -636,6 +636,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Continue without AI features if there's an error
       }
 
+      // WS: notify creator and, if team routed, team members (placeholder selection)
+      try {
+        const creatorMsg = envelope("ticket:created", {
+          id: task.id,
+          ticketNumber: (task as any).ticketNumber,
+          title: task.title,
+          assigneeType: task.assigneeType,
+          assigneeId: task.assigneeId,
+          assigneeTeamId: (task as any).assigneeTeamId,
+        });
+        // Notify creator
+        const creatorId = userId;
+        broadcastToMany([creatorId], creatorMsg);
+      } catch (e) {
+        console.error("WS notify ticket:created error:", e);
+      }
+
       // Send Teams notification for new task
       try {
         const user = await storage.getUser(userId);
@@ -967,6 +984,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userId,
         });
         const comment = await storage.addTaskComment(commentData);
+
+        // WS: notify about new comment
+        try {
+          const msg = envelope("ticket:comment", {
+            ticketId: taskId,
+            commentId: (comment as any).id,
+            ticketNumber: undefined,
+            isReply: true,
+          });
+          broadcastToMany([userId], msg);
+        } catch (e) {
+          console.error("WS notify ticket:comment error:", e);
+        }
+
         res.status(201).json(comment);
       } catch (error) {
         if (error instanceof z.ZodError) {
@@ -2052,6 +2083,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Help documentation routes
+
+  // Notifications endpoints (optional persistence)
+  app.get("/api/notifications", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const limit = req.query.limit ? parseInt(req.query.limit) : 5;
+      const unreadOnly = (req.query.read as string) === "false";
+      if (!unreadOnly) {
+        // For now, only support unread in this minimal implementation
+      }
+      const notifications = await storage.getUnreadNotifications(userId, limit);
+      res.json(notifications);
+    } catch (error) {
+      console.error("Error fetching notifications:", error);
+      res.status(500).json({ message: "Failed to fetch notifications" });
+    }
+  });
+
+  app.patch(
+    "/api/notifications/:id/read",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const id = parseInt(req.params.id);
+        await storage.markNotificationRead(id);
+        res.json({ success: true });
+      } catch (error) {
+        console.error("Error marking notification read:", error);
+        res.status(500).json({ message: "Failed to mark notification read" });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/notifications/read-all",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        await storage.markAllNotificationsRead(userId);
+        res.json({ success: true });
+      } catch (error) {
+        console.error("Error marking all notifications read:", error);
+        res
+          .status(500)
+          .json({ message: "Failed to mark all notifications read" });
+      }
+    }
+  );
+
+  // Get all help documents (admin)
+  app.get("/api/admin/help", isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+
+      if (!user || user.role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const documents = await storage.getHelpDocuments();
+      res.json(documents);
+    } catch (error) {
+      console.error("Error fetching help documents (admin):", error);
+      res.status(500).json({ message: "Failed to fetch help documents" });
+    }
+  });
 
   // Get all help documents (public)
   app.get("/api/help", async (req, res) => {
@@ -3941,14 +4039,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
         .returning();
 
-      // Update knowledge article effectiveness if applicable
+      // Update knowledge article helpful/unhelpful counters and effectiveness
       if (feedbackType === "knowledge_article") {
-        console.log(
-          `Feedback received for knowledge article ${referenceId}: ${
-            rating === 5 ? "positive" : "negative"
-          }`
-        );
-        // Knowledge article effectiveness tracking would be implemented here
+        if (rating === 5 || rating === 1) {
+          const field =
+            rating === 5 ? sql`helpful_votes` : sql`unhelpful_votes`;
+          await db.execute(
+            sql`UPDATE knowledge_articles SET ${field} = ${field} + 1 WHERE id = ${referenceId}`
+          );
+        }
+        await storage.updateArticleEffectiveness(referenceId, rating);
       }
 
       res.json(feedback[0]);
@@ -4142,6 +4242,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Store connected clients with their user IDs
   const clients = new Map<string, WebSocket>();
+
+  function send(ws: WebSocket, msg: any) {
+    try {
+      ws.send(JSON.stringify(msg));
+    } catch (e) {
+      console.error("WS send error:", e);
+    }
+  }
+
+  function envelope(type: string, data: any) {
+    return { type, data, ts: Date.now(), v: 1 };
+  }
+
+  function broadcastToMany(userIds: string[], message: any) {
+    for (const uid of userIds) {
+      const c = clients.get(uid);
+      if (c && c.readyState === WebSocket.OPEN) send(c, message);
+    }
+  }
 
   wss.on("connection", (ws, req) => {
     console.log("WebSocket client connected");
@@ -4360,12 +4479,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
 
-      const { category, published } = req.query;
-
+      const { category, status, source, published } = req.query as any;
       const filters: any = {};
       if (category) filters.category = category as string;
-      if (published !== undefined) {
-        filters.isPublished = published === "true";
+      if (status) filters.status = status as string;
+      if (source) filters.source = source as string;
+      if (published !== undefined && published !== "all") {
+        filters.isPublished = published === "true" || published === "published";
       }
 
       const articles = await storage.getAllKnowledgeArticles(filters);
@@ -4496,25 +4616,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
-  // Toggle article published status
+  // Publish / Unpublish / Archive / Unarchive endpoints
   app.patch(
-    "/api/admin/knowledge/:id/toggle-status",
+    "/api/admin/knowledge/:id/publish",
     isAuthenticated,
     async (req: any, res) => {
       try {
         const userId = getUserId(req);
         const user = await storage.getUser(userId);
-
-        if (user?.role !== "admin") {
+        if (user?.role !== "admin")
           return res.status(403).json({ message: "Admin access required" });
-        }
-
         const id = parseInt(req.params.id);
-        const article = await storage.toggleKnowledgeArticleStatus(id);
+        const article = await storage.setKnowledgeArticleStatus(
+          id,
+          "published"
+        );
         res.json(article);
       } catch (error) {
-        console.error("Error toggling article status:", error);
-        res.status(500).json({ message: "Failed to toggle article status" });
+        console.error("Error publishing article:", error);
+        res.status(500).json({ message: "Failed to publish article" });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/admin/knowledge/:id/unpublish",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+        if (user?.role !== "admin")
+          return res.status(403).json({ message: "Admin access required" });
+        const id = parseInt(req.params.id);
+        const article = await storage.setKnowledgeArticleStatus(id, "draft");
+        res.json(article);
+      } catch (error) {
+        console.error("Error unpublishing article:", error);
+        res.status(500).json({ message: "Failed to unpublish article" });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/admin/knowledge/:id/archive",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+        if (user?.role !== "admin")
+          return res.status(403).json({ message: "Admin access required" });
+        const id = parseInt(req.params.id);
+        const article = await storage.setKnowledgeArticleStatus(id, "archived");
+        res.json(article);
+      } catch (error) {
+        console.error("Error archiving article:", error);
+        res.status(500).json({ message: "Failed to archive article" });
+      }
+    }
+  );
+
+  app.patch(
+    "/api/admin/knowledge/:id/unarchive",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+        if (user?.role !== "admin")
+          return res.status(403).json({ message: "Admin access required" });
+        const id = parseInt(req.params.id);
+        const article = await storage.setKnowledgeArticleStatus(id, "draft");
+        res.json(article);
+      } catch (error) {
+        console.error("Error unarchiving article:", error);
+        res.status(500).json({ message: "Failed to unarchive article" });
       }
     }
   );
@@ -4553,6 +4730,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Increment knowledge article view count
+  app.post(
+    "/api/knowledge/articles/:id/view",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const id = parseInt(req.params.id);
+        await storage.incrementKnowledgeArticleView(id);
+        res.json({ success: true });
+      } catch (error) {
+        console.error("Error incrementing view count:", error);
+        res.status(500).json({ message: "Failed to increment view count" });
+      }
+    }
+  );
+
   // Track article usage (when users view an article)
   app.post(
     "/api/knowledge/:id/track-usage",
@@ -4584,6 +4777,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .json({ message: "Rating must be between 1 and 5" });
         }
 
+        // Update helpful/unhelpful counters based on rating
+        // 5 => helpful, 1 => unhelpful, others ignored for counters but still recalculated
+        if (rating === 5 || rating === 1) {
+          const field = rating === 5 ? "helpful_votes" : "unhelpful_votes";
+          await db.execute(
+            sql`UPDATE knowledge_articles SET ${sql.raw(field)} = ${sql.raw(
+              field
+            )} + 1 WHERE id = ${id}`
+          );
+        }
         await storage.updateArticleEffectiveness(id, rating);
         res.json({ message: "Rating submitted successfully" });
       } catch (error) {

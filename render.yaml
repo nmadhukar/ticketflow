@@ -29,7 +29,7 @@ services:
         value: true
       - key: DATABASE_URL
         fromDatabase:
-          name: ticketflow-db
+          name: ticketflow-db-v2
           property: connectionString
     # Add your AWS credentials here if you have them
     # - key: AWS_ACCESS_KEY_ID
@@ -48,5 +48,5 @@ services:
 
 # PostgreSQL Database
 databases:
-  - name: ticketflow-db
+  - name: ticketflow-db-v2
     plan: free

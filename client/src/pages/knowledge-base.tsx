@@ -99,6 +99,7 @@ export default function KnowledgeBase() {
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
 
   // Form states for article creation/editing
   const [articleTitle, setArticleTitle] = useState("");
@@ -145,14 +146,20 @@ export default function KnowledgeBase() {
   } = useQuery<KnowledgeArticle[]>({
     queryKey: [
       "/api/admin/knowledge",
-      { category: categoryFilter, published: statusFilter },
+      {
+        category: categoryFilter,
+        status: statusFilter !== "all" ? statusFilter : undefined,
+        source: sourceFilter !== "all" ? sourceFilter : undefined,
+      },
     ],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (categoryFilter && categoryFilter !== "all")
         params.append("category", categoryFilter);
       if (statusFilter && statusFilter !== "all")
-        params.append("published", statusFilter);
+        params.append("status", statusFilter);
+      if (sourceFilter && sourceFilter !== "all")
+        params.append("source", sourceFilter);
 
       const response = await fetch(
         `/api/admin/knowledge?${params.toString()}`,
@@ -351,10 +358,13 @@ export default function KnowledgeBase() {
     const matchesStatus =
       !statusFilter ||
       statusFilter === "all" ||
-      (statusFilter === "published" && article.isPublished) ||
-      (statusFilter === "draft" && !article.isPublished);
-
-    return matchesSearch && matchesCategory && matchesStatus;
+      (article as any).status === statusFilter ||
+      (statusFilter === "published" && article.isPublished);
+    const matchesSource =
+      !sourceFilter ||
+      sourceFilter === "all" ||
+      (article as any).source === sourceFilter;
+    return matchesSearch && matchesCategory && matchesStatus && matchesSource;
   });
 
   const getStatusBadge = (article: KnowledgeArticle) => {
@@ -401,133 +411,27 @@ export default function KnowledgeBase() {
     <MainWrapper
       title="Knowledge Base Management"
       subTitle="Manage knowledge articles for common issues and resolutions"
+      action={
+        <div className="flex items-center gap-3">
+          <Button
+            onClick={() => triggerLearningMutation.mutate()}
+            disabled={triggerLearningMutation.isPending}
+            variant="outline"
+          >
+            {triggerLearningMutation.isPending ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Brain className="h-4 w-4 mr-2" />
+            )}
+            AI Learning
+          </Button>
+          <Button onClick={() => resetArticleForm()}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Article
+          </Button>
+        </div>
+      }
     >
-      <div className="flex justify-end items-center py-4 gap-4">
-        <Button
-          onClick={() => triggerLearningMutation.mutate()}
-          disabled={triggerLearningMutation.isPending}
-          variant="outline"
-        >
-          {triggerLearningMutation.isPending ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <Brain className="h-4 w-4 mr-2" />
-          )}
-          AI Learning
-        </Button>
-        <Dialog
-          open={isArticleDialogOpen}
-          onOpenChange={setIsArticleDialogOpen}
-        >
-          <DialogTrigger asChild>
-            <Button onClick={() => resetArticleForm()}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Article
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>
-                {selectedArticle
-                  ? "Edit Knowledge Article"
-                  : "Create Knowledge Article"}
-              </DialogTitle>
-              <DialogDescription>
-                {selectedArticle
-                  ? "Update the knowledge article details below."
-                  : "Create a new knowledge article for common issues and their resolutions."}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="title">Title *</Label>
-                <Input
-                  id="title"
-                  value={articleTitle}
-                  onChange={(e) => setArticleTitle(e.target.value)}
-                  placeholder="e.g., How to reset password"
-                />
-              </div>
-              <div>
-                <Label htmlFor="summary">Summary</Label>
-                <Input
-                  id="summary"
-                  value={articleSummary}
-                  onChange={(e) => setArticleSummary(e.target.value)}
-                  placeholder="Brief description of the solution"
-                />
-              </div>
-              <div>
-                <Label htmlFor="category">Category</Label>
-                <Select
-                  value={articleCategory}
-                  onValueChange={setArticleCategory}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {knowledgeCategories.map((category) => (
-                      <SelectItem key={category} value={category}>
-                        <div className="flex items-center gap-2">
-                          {getCategoryIcon(category)}
-                          {category.charAt(0).toUpperCase() +
-                            category.slice(1).replace("-", " ")}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="tags">Tags</Label>
-                <Input
-                  id="tags"
-                  value={articleTags}
-                  onChange={(e) => setArticleTags(e.target.value)}
-                  placeholder="Comma-separated tags (e.g., password, authentication, login)"
-                />
-              </div>
-              <div>
-                <Label htmlFor="content">Content *</Label>
-                <Textarea
-                  id="content"
-                  value={articleContent}
-                  onChange={(e) => setArticleContent(e.target.value)}
-                  placeholder="Detailed step-by-step resolution..."
-                  className="min-h-[200px]"
-                />
-              </div>
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="published"
-                  checked={isPublished}
-                  onCheckedChange={setIsPublished}
-                />
-                <Label htmlFor="published">Publish immediately</Label>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setIsArticleDialogOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSaveArticle}
-                disabled={saveArticleMutation.isPending}
-              >
-                {saveArticleMutation.isPending && (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                )}
-                {selectedArticle ? "Update" : "Create"} Article
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-
       {/* Filters and Search */}
       <Card>
         <CardHeader>
@@ -577,6 +481,20 @@ export default function KnowledgeBase() {
                   <SelectItem value="all">All statuses</SelectItem>
                   <SelectItem value="published">Published</SelectItem>
                   <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="archived">Archived</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="source-filter">Source</Label>
+              <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All sources" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All sources</SelectItem>
+                  <SelectItem value="manual">Manual</SelectItem>
+                  <SelectItem value="ai_generated">AI generated</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -610,7 +528,9 @@ export default function KnowledgeBase() {
               <TableRow>
                 <TableHead>Title</TableHead>
                 <TableHead>Category</TableHead>
+                <TableHead>Source</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Views</TableHead>
                 <TableHead>Usage</TableHead>
                 <TableHead>Effectiveness</TableHead>
                 <TableHead>Created</TableHead>
@@ -654,7 +574,21 @@ export default function KnowledgeBase() {
                         {article.category || "general"}
                       </Badge>
                     </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          (article as any).source === "ai_generated"
+                            ? "destructive"
+                            : "default"
+                        }
+                      >
+                        {(article as any).source === "ai_generated"
+                          ? "AI"
+                          : "Manual"}
+                      </Badge>
+                    </TableCell>
                     <TableCell>{getStatusBadge(article)}</TableCell>
+                    <TableCell>{(article as any).viewCount || 0}</TableCell>
                     <TableCell>{article.usageCount || 0}</TableCell>
                     <TableCell>
                       {article.effectivenessScore
@@ -731,6 +665,109 @@ export default function KnowledgeBase() {
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={isArticleDialogOpen} onOpenChange={setIsArticleDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedArticle
+                ? "Edit Knowledge Article"
+                : "Create Knowledge Article"}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedArticle
+                ? "Update the knowledge article details below."
+                : "Create a new knowledge article for common issues and their resolutions."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="title">Title *</Label>
+              <Input
+                id="title"
+                value={articleTitle}
+                onChange={(e) => setArticleTitle(e.target.value)}
+                placeholder="e.g., How to reset password"
+              />
+            </div>
+            <div>
+              <Label htmlFor="summary">Summary</Label>
+              <Input
+                id="summary"
+                value={articleSummary}
+                onChange={(e) => setArticleSummary(e.target.value)}
+                placeholder="Brief description of the solution"
+              />
+            </div>
+            <div>
+              <Label htmlFor="category">Category</Label>
+              <Select
+                value={articleCategory}
+                onValueChange={setArticleCategory}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {knowledgeCategories.map((category) => (
+                    <SelectItem key={category} value={category}>
+                      <div className="flex items-center gap-2">
+                        {getCategoryIcon(category)}
+                        {category.charAt(0).toUpperCase() +
+                          category.slice(1).replace("-", " ")}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="tags">Tags</Label>
+              <Input
+                id="tags"
+                value={articleTags}
+                onChange={(e) => setArticleTags(e.target.value)}
+                placeholder="Comma-separated tags (e.g., password, authentication, login)"
+              />
+            </div>
+            <div>
+              <Label htmlFor="content">Content *</Label>
+              <Textarea
+                id="content"
+                value={articleContent}
+                onChange={(e) => setArticleContent(e.target.value)}
+                placeholder="Detailed step-by-step resolution..."
+                className="min-h-[200px]"
+              />
+            </div>
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="published"
+                checked={isPublished}
+                onCheckedChange={setIsPublished}
+              />
+              <Label htmlFor="published">Publish immediately</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsArticleDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveArticle}
+              disabled={saveArticleMutation.isPending}
+            >
+              {saveArticleMutation.isPending && (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              )}
+              {selectedArticle ? "Update" : "Create"} Article
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </MainWrapper>
   );
 }

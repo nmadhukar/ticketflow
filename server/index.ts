@@ -62,7 +62,7 @@ app.use((req, res, next) => {
       console.error("Failed to seed email templates:", error);
     }
 
-    // Seed default users, departments, teams, tickets, and knowledge articles on startup
+    // Seed default users, departments, teams, tickets, knowledge articles, and help/docs on startup
     try {
       const {
         seedUsers,
@@ -70,12 +70,14 @@ app.use((req, res, next) => {
         seedTeams,
         seedTickets,
         seedKnowledgeArticles,
+        seedHelpAndDocs,
       } = await import("./seed");
       await seedUsers();
       await seedDepartments();
       await seedTeams();
       await seedTickets();
       await seedKnowledgeArticles();
+      await seedHelpAndDocs();
     } catch (error) {
       console.error("Failed to run seeders:", error);
     }

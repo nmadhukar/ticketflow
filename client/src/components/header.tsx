@@ -18,7 +18,7 @@ import {
   UserCircle,
 } from "lucide-react";
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import SignOutButton from "./signOutButton";
 import {
@@ -41,6 +41,40 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
   const [location] = useLocation();
   const { data: companySettings } = useQuery({
     queryKey: ["/api/company-settings"],
+  });
+
+  // Unread notifications
+  interface UnreadNotification {
+    id: number;
+    title: string;
+    content: string;
+    type: string;
+    relatedTaskId?: number | null;
+    createdAt?: string;
+  }
+
+  const { data: unreadNotifications = [], refetch: refetchUnread } = useQuery<
+    UnreadNotification[]
+  >({
+    queryKey: ["/api/notifications", { read: false, limit: 5 }],
+    queryFn: async () => {
+      const res = await fetch(`/api/notifications?limit=5&read=false`, {
+        credentials: "include",
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    refetchOnMount: "always",
+  });
+
+  const markReadMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await fetch(`/api/notifications/${id}/read`, {
+        method: "PATCH",
+        credentials: "include",
+      });
+    },
+    onSuccess: () => refetchUnread(),
   });
 
   const userDropdownActions = useMemo(() => {
@@ -103,17 +137,55 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
         </DropdownMenu>
 
         {/* Notifications */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="relative"
-          onClick={() => (window.location.href = "/notifications")}
-        >
-          <Bell className="h-4 w-4" />
-          <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
-            3
-          </span>
-        </Button>
+        <DropdownMenu onOpenChange={() => refetchUnread()}>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="relative">
+              <Bell className="h-4 w-4" />
+              {unreadNotifications.length > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+                  {unreadNotifications.length}
+                </span>
+              )}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="w-80 p-0">
+            <div className="px-3 py-2 border-b text-sm font-medium">
+              Notifications
+            </div>
+            <div className="max-h-80 overflow-y-auto">
+              {unreadNotifications.length === 0 ? (
+                <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                  No unread notifications
+                </div>
+              ) : (
+                unreadNotifications.map((n) => (
+                  <DropdownMenuItem
+                    key={n.id}
+                    className="px-3 py-2 whitespace-normal cursor-pointer"
+                    onClick={() => {
+                      markReadMutation.mutate(n.id);
+                      window.location.href = "/notifications";
+                    }}
+                  >
+                    <div className="text-sm font-medium truncate">
+                      {n.title || "Notification"}
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {n.content}
+                    </div>
+                  </DropdownMenuItem>
+                ))
+              )}
+            </div>
+            <div className="border-t px-2 py-2">
+              <Link href="/notifications">
+                <Button variant="ghost" size="sm" className="w-full">
+                  View all
+                </Button>
+              </Link>
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Menubar className="items-center border-none">
           <MenubarMenu>
             <MenubarTrigger

@@ -5,19 +5,48 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { FileText, Upload, Trash2, Edit, Eye, Search, X, BookOpen } from "lucide-react";
+import {
+  FileText,
+  Upload,
+  Trash2,
+  Edit,
+  Eye,
+  Search,
+  X,
+  BookOpen,
+} from "lucide-react";
 import { Link } from "wouter";
 
 export default function HelpDocumentManager() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [uploadData, setUploadData] = useState({
     title: "",
@@ -27,7 +56,7 @@ export default function HelpDocumentManager() {
     content: "",
     fileData: "",
   });
-  
+
   const [editingDocument, setEditingDocument] = useState<any>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -36,6 +65,7 @@ export default function HelpDocumentManager() {
   const { data: documents, isLoading } = useQuery({
     queryKey: ["/api/admin/help"],
     retry: false,
+    refetchOnMount: "always",
   });
 
   // Upload document mutation
@@ -116,7 +146,7 @@ export default function HelpDocumentManager() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    if (!file.name.endsWith('.docx') && !file.name.endsWith('.doc')) {
+    if (!file.name.endsWith(".docx") && !file.name.endsWith(".doc")) {
       toast({
         title: "Error",
         description: "Please upload a Word document (.doc or .docx)",
@@ -127,13 +157,13 @@ export default function HelpDocumentManager() {
 
     const reader = new FileReader();
     reader.onloadend = () => {
-      const base64String = reader.result?.toString().split(',')[1] || "";
+      const base64String = reader.result?.toString().split(",")[1] || "";
       setUploadData({
         ...uploadData,
         file,
         fileData: base64String,
       });
-      
+
       // Extract text content from Word doc (simplified - in production you'd use a proper library)
       // For now, we'll ask the admin to provide a summary
       toast({
@@ -160,14 +190,17 @@ export default function HelpDocumentManager() {
       content: uploadData.content,
       fileData: uploadData.fileData,
       category: uploadData.category || "General",
-      tags: uploadData.tags.split(',').map(t => t.trim()).filter(t => t),
+      tags: uploadData.tags
+        .split(",")
+        .map((t) => t.trim())
+        .filter((t) => t),
     });
   };
 
   const handleEdit = (document: any) => {
     setEditingDocument({
       ...document,
-      tags: document.tags?.join(', ') || '',
+      tags: document.tags?.join(", ") || "",
     });
     setIsEditDialogOpen(true);
   };
@@ -180,7 +213,10 @@ export default function HelpDocumentManager() {
       data: {
         title: editingDocument.title,
         category: editingDocument.category,
-        tags: editingDocument.tags.split(',').map((t: string) => t.trim()).filter((t: string) => t),
+        tags: editingDocument.tags
+          .split(",")
+          .map((t: string) => t.trim())
+          .filter((t: string) => t),
         content: editingDocument.content,
       },
     });
@@ -192,10 +228,13 @@ export default function HelpDocumentManager() {
     }
   };
 
-  const filteredDocuments = documents?.filter((doc: any) => 
-    doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    doc.category?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    doc.tags?.some((tag: string) => tag.toLowerCase().includes(searchQuery.toLowerCase()))
+  const filteredDocuments = documents?.filter(
+    (doc: any) =>
+      doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      doc.category?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      doc.tags?.some((tag: string) =>
+        tag.toLowerCase().includes(searchQuery.toLowerCase())
+      )
   );
 
   return (
@@ -208,15 +247,11 @@ export default function HelpDocumentManager() {
             Word Document Help System
           </h4>
           <p className="text-sm text-muted-foreground">
-            Upload Word documents that users can reference for help. For interactive guides with videos and HTML content, use the User Guide Management system.
+            Upload Word documents that users can reference for help. For
+            interactive guides with videos and HTML content, use the User Guide
+            Management system.
           </p>
         </div>
-        <Link href="/admin/guides">
-          <Button variant="outline" size="sm" className="flex items-center gap-2">
-            <BookOpen className="h-4 w-4" />
-            User Guide Management
-          </Button>
-        </Link>
       </div>
 
       {/* Header with Upload button */}
@@ -230,7 +265,7 @@ export default function HelpDocumentManager() {
             className="pl-10"
           />
         </div>
-        <Button 
+        <Button
           onClick={() => setIsUploadDialogOpen(true)}
           className="flex items-center gap-2"
         >
@@ -275,12 +310,18 @@ export default function HelpDocumentManager() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="secondary">{doc.category || "General"}</Badge>
+                    <Badge variant="secondary">
+                      {doc.category || "General"}
+                    </Badge>
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1 flex-wrap">
                       {doc.tags?.map((tag: string, index: number) => (
-                        <Badge key={index} variant="outline" className="text-xs">
+                        <Badge
+                          key={index}
+                          variant="outline"
+                          className="text-xs"
+                        >
                           {tag}
                         </Badge>
                       ))}
@@ -327,7 +368,8 @@ export default function HelpDocumentManager() {
           <DialogHeader>
             <DialogTitle>Upload Help Document</DialogTitle>
             <DialogDescription>
-              Upload a Word document that users can reference before creating tickets
+              Upload a Word document that users can reference before creating
+              tickets
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -336,15 +378,19 @@ export default function HelpDocumentManager() {
               <Input
                 placeholder="e.g., How to Reset Your Password"
                 value={uploadData.title}
-                onChange={(e) => setUploadData({ ...uploadData, title: e.target.value })}
+                onChange={(e) =>
+                  setUploadData({ ...uploadData, title: e.target.value })
+                }
               />
             </div>
-            
+
             <div className="space-y-2">
               <Label>Category</Label>
               <Select
                 value={uploadData.category}
-                onValueChange={(value) => setUploadData({ ...uploadData, category: value })}
+                onValueChange={(value) =>
+                  setUploadData({ ...uploadData, category: value })
+                }
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select category" />
@@ -364,7 +410,9 @@ export default function HelpDocumentManager() {
               <Input
                 placeholder="e.g., password, security, account"
                 value={uploadData.tags}
-                onChange={(e) => setUploadData({ ...uploadData, tags: e.target.value })}
+                onChange={(e) =>
+                  setUploadData({ ...uploadData, tags: e.target.value })
+                }
               />
             </div>
 
@@ -400,21 +448,24 @@ export default function HelpDocumentManager() {
                 placeholder="Provide a searchable summary of the document content..."
                 rows={4}
                 value={uploadData.content}
-                onChange={(e) => setUploadData({ ...uploadData, content: e.target.value })}
+                onChange={(e) =>
+                  setUploadData({ ...uploadData, content: e.target.value })
+                }
               />
               <p className="text-xs text-muted-foreground">
-                This summary will be searchable and help users find relevant documents
+                This summary will be searchable and help users find relevant
+                documents
               </p>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsUploadDialogOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setIsUploadDialogOpen(false)}
+            >
               Cancel
             </Button>
-            <Button 
-              onClick={handleUpload} 
-              disabled={uploadMutation.isPending}
-            >
+            <Button onClick={handleUpload} disabled={uploadMutation.isPending}>
               Upload Document
             </Button>
           </DialogFooter>
@@ -436,15 +487,22 @@ export default function HelpDocumentManager() {
                 <Label>Document Title</Label>
                 <Input
                   value={editingDocument.title}
-                  onChange={(e) => setEditingDocument({ ...editingDocument, title: e.target.value })}
+                  onChange={(e) =>
+                    setEditingDocument({
+                      ...editingDocument,
+                      title: e.target.value,
+                    })
+                  }
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label>Category</Label>
                 <Select
                   value={editingDocument.category}
-                  onValueChange={(value) => setEditingDocument({ ...editingDocument, category: value })}
+                  onValueChange={(value) =>
+                    setEditingDocument({ ...editingDocument, category: value })
+                  }
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -463,7 +521,12 @@ export default function HelpDocumentManager() {
                 <Label>Tags (comma-separated)</Label>
                 <Input
                   value={editingDocument.tags}
-                  onChange={(e) => setEditingDocument({ ...editingDocument, tags: e.target.value })}
+                  onChange={(e) =>
+                    setEditingDocument({
+                      ...editingDocument,
+                      tags: e.target.value,
+                    })
+                  }
                 />
               </div>
 
@@ -472,19 +535,24 @@ export default function HelpDocumentManager() {
                 <Textarea
                   rows={4}
                   value={editingDocument.content}
-                  onChange={(e) => setEditingDocument({ ...editingDocument, content: e.target.value })}
+                  onChange={(e) =>
+                    setEditingDocument({
+                      ...editingDocument,
+                      content: e.target.value,
+                    })
+                  }
                 />
               </div>
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setIsEditDialogOpen(false)}
+            >
               Cancel
             </Button>
-            <Button 
-              onClick={handleUpdate} 
-              disabled={updateMutation.isPending}
-            >
+            <Button onClick={handleUpdate} disabled={updateMutation.isPending}>
               Save Changes
             </Button>
           </DialogFooter>
