@@ -24,7 +24,13 @@ services:
       # Core runtime
       NODE_ENV: ${NODE_ENV:-production}
       PORT: ${PORT:-5000}
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # Prefer explicit DATABASE_URL if provided; otherwise build from POSTGRES_*
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}
+
+      # Optional PG* variables for tools/clients inside the container
+      PGUSER: ${PGUSER:-}
+      PGPASSWORD: ${PGPASSWORD:-}
+      PGDATABASE: ${PGDATABASE:-}
 
       # Security & Auth
       SESSION_SECRET: ${SESSION_SECRET}
