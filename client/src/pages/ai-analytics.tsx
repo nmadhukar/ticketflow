@@ -1,14 +1,35 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Brain, Zap, Target, TrendingUp, Search, Play, CheckCircle, AlertTriangle } from "lucide-react";
+import {
+  Brain,
+  Zap,
+  Target,
+  TrendingUp,
+  Search,
+  Play,
+  CheckCircle,
+  AlertTriangle,
+} from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -18,19 +39,23 @@ export default function AIAnalyticsPage() {
     title: "",
     description: "",
     category: "support",
-    priority: "medium"
+    priority: "medium",
   });
 
   // Get AI system status
   const { data: aiStatus, isLoading: statusLoading } = useQuery({
     queryKey: ["/api/ai/status"],
-    refetchInterval: 30000 // Check every 30 seconds
+    refetchInterval: 30000, // Check every 30 seconds
   });
 
   // Test ticket analysis mutation
   const analyzeTicketMutation = useMutation({
     mutationFn: async (ticketData: any) => {
-      const response = await apiRequest("POST", "/api/ai/analyze-ticket", ticketData);
+      const response = await apiRequest(
+        "POST",
+        "/api/ai/analyze-ticket",
+        ticketData
+      );
       return response.json();
     },
     onSuccess: (analysis) => {
@@ -53,7 +78,7 @@ export default function AIAnalyticsPage() {
     mutationFn: async ({ ticketData, analysis }: any) => {
       const response = await apiRequest("POST", "/api/ai/generate-response", {
         ...ticketData,
-        analysis
+        analysis,
       });
       return response.json();
     },
@@ -75,7 +100,10 @@ export default function AIAnalyticsPage() {
   // Knowledge learning mutation
   const runKnowledgeLearningMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest("POST", "/api/ai/knowledge-learning/run");
+      const response = await apiRequest(
+        "POST",
+        "/api/ai/knowledge-learning/run"
+      );
       return response.json();
     },
     onSuccess: (results) => {
@@ -117,7 +145,7 @@ export default function AIAnalyticsPage() {
     }
     generateResponseMutation.mutate({
       ticketData: testTicket,
-      analysis: analyzeTicketMutation.data
+      analysis: analyzeTicketMutation.data,
     });
   };
 
@@ -137,7 +165,7 @@ export default function AIAnalyticsPage() {
   const systemStatus = aiStatus?.awsCredentials ? "operational" : "unavailable";
 
   return (
-    <div className="container mx-auto py-6 space-y-6">
+    <>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">AI Analytics & Testing</h1>
@@ -145,7 +173,7 @@ export default function AIAnalyticsPage() {
             Test and monitor the AI-powered helpdesk features
           </p>
         </div>
-        <Badge 
+        <Badge
           variant={systemStatus === "operational" ? "default" : "destructive"}
           className="text-sm"
         >
@@ -197,7 +225,9 @@ export default function AIAnalyticsPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Knowledge Learning</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              Knowledge Learning
+            </CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -252,15 +282,22 @@ export default function AIAnalyticsPage() {
                     id="title"
                     placeholder="e.g., Unable to login to account"
                     value={testTicket.title}
-                    onChange={(e) => setTestTicket(prev => ({ ...prev, title: e.target.value }))}
+                    onChange={(e) =>
+                      setTestTicket((prev) => ({
+                        ...prev,
+                        title: e.target.value,
+                      }))
+                    }
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="category">Category</Label>
-                  <Select 
-                    value={testTicket.category} 
-                    onValueChange={(value) => setTestTicket(prev => ({ ...prev, category: value }))}
+                  <Select
+                    value={testTicket.category}
+                    onValueChange={(value) =>
+                      setTestTicket((prev) => ({ ...prev, category: value }))
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -283,27 +320,43 @@ export default function AIAnalyticsPage() {
                   id="description"
                   placeholder="Describe the issue in detail..."
                   value={testTicket.description}
-                  onChange={(e) => setTestTicket(prev => ({ ...prev, description: e.target.value }))}
+                  onChange={(e) =>
+                    setTestTicket((prev) => ({
+                      ...prev,
+                      description: e.target.value,
+                    }))
+                  }
                   rows={4}
                 />
               </div>
 
               <div className="flex gap-2">
-                <Button 
+                <Button
                   onClick={handleTestAnalysis}
-                  disabled={analyzeTicketMutation.isPending || !aiStatus?.features?.ticketAnalysis}
+                  disabled={
+                    analyzeTicketMutation.isPending ||
+                    !aiStatus?.features?.ticketAnalysis
+                  }
                 >
                   <Brain className="h-4 w-4 mr-2" />
-                  {analyzeTicketMutation.isPending ? "Analyzing..." : "Analyze Ticket"}
+                  {analyzeTicketMutation.isPending
+                    ? "Analyzing..."
+                    : "Analyze Ticket"}
                 </Button>
 
-                <Button 
+                <Button
                   onClick={handleGenerateResponse}
-                  disabled={generateResponseMutation.isPending || !analyzeTicketMutation.data || !aiStatus?.features?.autoResponse}
+                  disabled={
+                    generateResponseMutation.isPending ||
+                    !analyzeTicketMutation.data ||
+                    !aiStatus?.features?.autoResponse
+                  }
                   variant="outline"
                 >
                   <Zap className="h-4 w-4 mr-2" />
-                  {generateResponseMutation.isPending ? "Generating..." : "Generate Response"}
+                  {generateResponseMutation.isPending
+                    ? "Generating..."
+                    : "Generate Response"}
                 </Button>
               </div>
 
@@ -340,18 +393,22 @@ export default function AIAnalyticsPage() {
                         </Badge>
                       </div>
                     </div>
-                    
+
                     <div>
-                      <strong>Estimated Resolution Time:</strong> {analyzeTicketMutation.data.estimatedResolutionTime} hours
+                      <strong>Estimated Resolution Time:</strong>{" "}
+                      {analyzeTicketMutation.data.estimatedResolutionTime} hours
                     </div>
-                    
+
                     <div>
-                      <strong>Tags:</strong> {analyzeTicketMutation.data.tags?.join(", ") || "None"}
+                      <strong>Tags:</strong>{" "}
+                      {analyzeTicketMutation.data.tags?.join(", ") || "None"}
                     </div>
-                    
+
                     <div>
                       <strong>AI Reasoning:</strong>
-                      <p className="mt-1 text-muted-foreground">{analyzeTicketMutation.data.reasoning}</p>
+                      <p className="mt-1 text-muted-foreground">
+                        {analyzeTicketMutation.data.reasoning}
+                      </p>
                     </div>
                   </CardContent>
                 </Card>
@@ -361,7 +418,9 @@ export default function AIAnalyticsPage() {
               {generateResponseMutation.data && (
                 <Card className="mt-4">
                   <CardHeader>
-                    <CardTitle className="text-lg">Generated Response</CardTitle>
+                    <CardTitle className="text-lg">
+                      Generated Response
+                    </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <div className="flex items-center gap-4">
@@ -372,19 +431,24 @@ export default function AIAnalyticsPage() {
                         <Badge variant="destructive">Escalation Needed</Badge>
                       )}
                     </div>
-                    
+
                     <div className="bg-muted p-4 rounded-lg">
                       <h4 className="font-medium mb-2">Auto-Response:</h4>
-                      <p className="whitespace-pre-wrap">{generateResponseMutation.data.response}</p>
+                      <p className="whitespace-pre-wrap">
+                        {generateResponseMutation.data.response}
+                      </p>
                     </div>
-                    
-                    {generateResponseMutation.data.followUpActions?.length > 0 && (
+
+                    {generateResponseMutation.data.followUpActions?.length >
+                      0 && (
                       <div>
                         <h4 className="font-medium mb-2">Follow-up Actions:</h4>
                         <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                          {generateResponseMutation.data.followUpActions.map((action: string, index: number) => (
-                            <li key={index}>{action}</li>
-                          ))}
+                          {generateResponseMutation.data.followUpActions.map(
+                            (action: string, index: number) => (
+                              <li key={index}>{action}</li>
+                            )
+                          )}
                         </ul>
                       </div>
                     )}
@@ -403,22 +467,30 @@ export default function AIAnalyticsPage() {
                 Knowledge Base Learning
               </CardTitle>
               <CardDescription>
-                Manually trigger the AI learning process to extract patterns from resolved tickets
+                Manually trigger the AI learning process to extract patterns
+                from resolved tickets
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                The knowledge learning system analyzes resolved tickets to identify common patterns and automatically 
-                creates knowledge base articles. This process normally runs every 24 hours but can be triggered manually here.
+                The knowledge learning system analyzes resolved tickets to
+                identify common patterns and automatically creates knowledge
+                base articles. This process normally runs every 24 hours but can
+                be triggered manually here.
               </p>
-              
-              <Button 
+
+              <Button
                 onClick={() => runKnowledgeLearningMutation.mutate()}
-                disabled={runKnowledgeLearningMutation.isPending || !aiStatus?.features?.knowledgeLearning}
+                disabled={
+                  runKnowledgeLearningMutation.isPending ||
+                  !aiStatus?.features?.knowledgeLearning
+                }
                 size="lg"
               >
                 <Play className="h-4 w-4 mr-2" />
-                {runKnowledgeLearningMutation.isPending ? "Learning..." : "Run Knowledge Learning"}
+                {runKnowledgeLearningMutation.isPending
+                  ? "Learning..."
+                  : "Run Knowledge Learning"}
               </Button>
 
               {runKnowledgeLearningMutation.data && (
@@ -432,19 +504,25 @@ export default function AIAnalyticsPage() {
                         <div className="text-2xl font-bold text-blue-600">
                           {runKnowledgeLearningMutation.data.patternsFound}
                         </div>
-                        <p className="text-sm text-muted-foreground">Patterns Found</p>
+                        <p className="text-sm text-muted-foreground">
+                          Patterns Found
+                        </p>
                       </div>
                       <div className="text-center">
                         <div className="text-2xl font-bold text-green-600">
                           {runKnowledgeLearningMutation.data.articlesCreated}
                         </div>
-                        <p className="text-sm text-muted-foreground">Articles Created</p>
+                        <p className="text-sm text-muted-foreground">
+                          Articles Created
+                        </p>
                       </div>
                       <div className="text-center">
                         <div className="text-2xl font-bold text-purple-600">
                           {runKnowledgeLearningMutation.data.articlesPublished}
                         </div>
-                        <p className="text-sm text-muted-foreground">Articles Published</p>
+                        <p className="text-sm text-muted-foreground">
+                          Articles Published
+                        </p>
                       </div>
                     </div>
                   </CardContent>
@@ -467,18 +545,22 @@ export default function AIAnalyticsPage() {
             </CardHeader>
             <CardContent>
               <p className="text-sm text-muted-foreground mb-4">
-                This feature uses AI to understand the context and meaning of search queries, 
-                providing more relevant results than traditional keyword matching.
+                This feature uses AI to understand the context and meaning of
+                search queries, providing more relevant results than traditional
+                keyword matching.
               </p>
-              
+
               <div className="text-center py-8 text-muted-foreground">
                 <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>Search functionality will be integrated with the Knowledge Base page</p>
+                <p>
+                  Search functionality will be integrated with the Knowledge
+                  Base page
+                </p>
               </div>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
-    </div>
+    </>
   );
 }

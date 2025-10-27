@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log
+dist
+.git
+.gitignore
+.DS_Store
+**/*.local
+**/*.env
+attached_assets
+docs
+server/__tests__
+client/src/__tests__
+config
+
+render.yaml
+
+

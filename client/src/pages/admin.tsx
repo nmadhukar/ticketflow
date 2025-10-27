@@ -656,7 +656,7 @@ export default function AdminPanel() {
             </TabsList>
 
             {/* Users Tab */}
-            <TabsContent value="users">
+            <TabsContent className="flex flex-col gap-2" value="users">
               <Card>
                 <CardHeader>
                   <div className="flex items-center justify-between">
@@ -852,7 +852,7 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* Teams Tab */}
-            <TabsContent value="teams">
+            <TabsContent className="flex flex-col gap-2" value="teams">
               <Card>
                 <CardHeader>
                   <div className="flex items-center justify-between">
@@ -904,7 +904,7 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* API Tab */}
-            <TabsContent value="api">
+            <TabsContent className="flex flex-col gap-2" value="api">
               <Card>
                 <CardHeader>
                   <CardTitle>API Keys</CardTitle>
@@ -1124,7 +1124,10 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* System Settings Tab */}
-            <TabsContent value="system-settings">
+            <TabsContent
+              className="flex flex-col gap-2"
+              value="system-settings"
+            >
               <Card>
                 <CardHeader>
                   <CardTitle>System Settings</CardTitle>
@@ -1194,7 +1197,7 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* Branding Tab */}
-            <TabsContent value="branding">
+            <TabsContent className="flex flex-col gap-2" value="branding">
               <Card>
                 <CardHeader>
                   <CardTitle>Company Branding</CardTitle>
@@ -1285,7 +1288,7 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* Help Tab */}
-            <TabsContent value="help">
+            <TabsContent className="flex flex-col gap-2" value="help">
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -1306,7 +1309,7 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* Policies Tab */}
-            <TabsContent value="policies">
+            <TabsContent className="flex flex-col gap-2" value="policies">
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -1326,7 +1329,7 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* SSO Tab */}
-            <TabsContent value="sso">
+            <TabsContent className="flex flex-col gap-2" value="sso">
               <Card>
                 <CardHeader>
                   <CardTitle>
@@ -1529,7 +1532,7 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* Email Tab */}
-            <TabsContent value="email">
+            <TabsContent className="flex flex-col gap-2" value="email">
               <Card>
                 <CardHeader>
                   <CardTitle>AWS Configuration</CardTitle>
@@ -1969,17 +1972,17 @@ export default function AdminPanel() {
             </TabsContent>
 
             {/* AI Settings Tab */}
-            <TabsContent value="ai-settings">
+            <TabsContent className="flex flex-col gap-2" value="ai-settings">
               <AISettings />
             </TabsContent>
 
             {/* AI Analytics Tab */}
-            <TabsContent value="ai-analytics">
+            <TabsContent className="flex flex-col gap-2" value="ai-analytics">
               <AiAnalytics />
             </TabsContent>
 
             {/* Invitations Tab */}
-            <TabsContent value="invitations">
+            <TabsContent className="flex flex-col gap-2" value="invitations">
               <Invitations />
             </TabsContent>
           </Tabs>
