@@ -1,22 +1,17 @@
-## 1) Builder stage - produces ./dist (client + server bundle)
-FROM node:20-alpine AS builder
+FROM node:20-alpine
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-# Build client (vite) and server bundle (esbuild)
-ENV NODE_ENV=production
-RUN npm run build
 
-## 2) Runtime stage - installs deps (incl. dev) and runs the server bundle
-FROM node:20-alpine AS runtime
-WORKDIR /app
+# 1) Install dependencies (include dev so vite/esbuild are available)
 COPY package*.json ./
-# Install with dev deps so dev-only imports (e.g., vite) resolve if referenced
 RUN npm ci --include=dev
+
+# 2) Copy source and build (produces ./dist)
+COPY . .
 ENV NODE_ENV=production \
     PORT=5000
-COPY --from=builder /app/dist ./dist
+RUN npm run build
+
+# 3) Run the server bundle
 EXPOSE 5000
 CMD ["node", "dist/index.js"]
 
