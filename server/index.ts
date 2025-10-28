@@ -10,6 +10,9 @@ import {
 
 const app = express();
 
+// Trust Nginx/reverse proxy so req.ip uses the real client IP via X-Forwarded-For
+app.set("trust proxy", 1);
+
 // Apply security middleware first
 applySecurity(app);
 
