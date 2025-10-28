@@ -1,6 +1,6 @@
 /**
  * Commercial Authentication System for TicketFlow
- * 
+ *
  * This module provides enterprise-grade authentication with the following features:
  * - Multi-strategy authentication (local email/password + Microsoft 365 SSO)
  * - Secure password hashing using scrypt with salt
@@ -34,7 +34,7 @@ const scryptAsync = promisify(scrypt);
 
 /**
  * Hash a password using scrypt with random salt
- * 
+ *
  * Uses Node.js crypto.scrypt for secure password hashing
  * Salt is generated randomly for each password
  * Returns format: "hash.salt" for storage
@@ -47,11 +47,14 @@ export async function hashPassword(password: string): Promise<string> {
 
 /**
  * Compare a supplied password with a stored hash
- * 
+ *
  * Extracts salt from stored hash and compares using timing-safe comparison
  * Prevents timing attacks by using crypto.timingSafeEqual
  */
-async function comparePasswords(supplied: string, stored: string): Promise<boolean> {
+async function comparePasswords(
+  supplied: string,
+  stored: string
+): Promise<boolean> {
   const [hashed, salt] = stored.split(".");
   const hashedBuf = Buffer.from(hashed, "hex");
   const suppliedBuf = (await scryptAsync(supplied, salt, 64)) as Buffer;
@@ -67,7 +70,7 @@ function generateToken(): string {
 
 /**
  * Input validation schemas using Zod
- * 
+ *
  * Provides client and server-side validation for:
  * - User registration with email format and password complexity
  * - Login credentials validation
@@ -109,14 +112,18 @@ export function setupAuth(app: Express) {
     tableName: "sessions",
   });
 
+  const cookieSecure =
+    (process.env.COOKIE_SECURE || "").toLowerCase() === "true";
+
   const sessionSettings: session.SessionOptions = {
-    secret: process.env.SESSION_SECRET || "your-secret-key-change-in-production",
+    secret:
+      process.env.SESSION_SECRET || "your-secret-key-change-in-production",
     store: sessionStore,
     resave: false,
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: cookieSecure,
       maxAge: sessionTtl,
       sameSite: "lax",
     },
@@ -155,7 +162,10 @@ export function setupAuth(app: Express) {
           }
 
           if (!user.isApproved) {
-            return done(null, false, { message: "Your account is pending admin approval. Please wait for approval before logging in." });
+            return done(null, false, {
+              message:
+                "Your account is pending admin approval. Please wait for approval before logging in.",
+            });
           }
 
           return done(null, user);
@@ -167,7 +177,7 @@ export function setupAuth(app: Express) {
   );
 
   passport.serializeUser((user, done) => done(null, user.id));
-  
+
   passport.deserializeUser(async (id: string, done) => {
     try {
       const user = await storage.getUser(id);
@@ -185,15 +195,18 @@ export function setupAuth(app: Express) {
   app.post("/api/auth/register", async (req, res) => {
     try {
       const validatedData = registerSchema.parse(req.body);
-      
+
       // Check if user already exists
       const existingUser = await storage.getUserByEmail(validatedData.email);
-      
+
       // Check if this email has a pending invitation
-      const invitations = await storage.getUserInvitations({ status: 'pending' });
-      const invitation = invitations.find(inv => 
-        inv.email === validatedData.email && 
-        new Date(inv.expiresAt) > new Date()
+      const invitations = await storage.getUserInvitations({
+        status: "pending",
+      });
+      const invitation = invitations.find(
+        (inv) =>
+          inv.email === validatedData.email &&
+          new Date(inv.expiresAt) > new Date()
       );
 
       // Handle existing user with invitation
@@ -201,14 +214,16 @@ export function setupAuth(app: Express) {
         // If user exists but has no password (e.g., created through SSO), allow password setup
         if (!existingUser.password) {
           const hashedPassword = await hashPassword(validatedData.password);
-          
+
           // Get department name if departmentId is provided
           let departmentName = existingUser.department;
           if (invitation.departmentId) {
-            const dept = await storage.getDepartmentById(invitation.departmentId);
+            const dept = await storage.getDepartmentById(
+              invitation.departmentId
+            );
             departmentName = dept?.name || existingUser.department;
           }
-          
+
           await storage.upsertUser({
             id: existingUser.id,
             email: existingUser.email,
@@ -220,11 +235,12 @@ export function setupAuth(app: Express) {
             isActive: existingUser.isActive,
             department: departmentName,
           });
-          
+
           await storage.markInvitationAccepted(invitation.id);
-          
+
           return res.status(201).json({
-            message: "Account activated successfully! You can now log in with your credentials.",
+            message:
+              "Account activated successfully! You can now log in with your credentials.",
             user: {
               id: existingUser.id,
               email: existingUser.email,
@@ -232,15 +248,16 @@ export function setupAuth(app: Express) {
               lastName: validatedData.lastName,
               role: invitation.role,
               isApproved: true,
-            }
+            },
           });
         } else {
-          return res.status(400).json({ 
-            message: "This email is already registered. Please sign in with your existing password." 
+          return res.status(400).json({
+            message:
+              "This email is already registered. Please sign in with your existing password.",
           });
         }
       }
-      
+
       // Check if user exists without invitation
       if (existingUser) {
         return res.status(400).json({ message: "Email already registered" });
@@ -277,7 +294,7 @@ export function setupAuth(app: Express) {
       }
 
       // Don't log in automatically unless auto-approved
-      const message = invitation 
+      const message = invitation
         ? "Registration successful! You can now log in with your credentials."
         : "Registration successful! Your account is pending admin approval. You will be notified once approved.";
 
@@ -290,13 +307,13 @@ export function setupAuth(app: Express) {
           lastName: user.lastName,
           role: user.role,
           isApproved: user.isApproved,
-        }
+        },
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          message: "Validation error", 
-          errors: error.errors 
+        return res.status(400).json({
+          message: "Validation error",
+          errors: error.errors,
         });
       }
       console.error("Registration error:", error);
@@ -308,22 +325,26 @@ export function setupAuth(app: Express) {
   app.post("/api/auth/login", async (req, res, next) => {
     try {
       const validatedData = loginSchema.parse(req.body);
-      
+
       passport.authenticate("local", (err: any, user: any, info: any) => {
         if (err) {
           console.error("Authentication error:", err);
           return res.status(500).json({ message: "Authentication error" });
         }
-        
+
         if (!user) {
-          return res.status(401).json({ message: info?.message || "Invalid credentials" });
+          return res
+            .status(401)
+            .json({ message: info?.message || "Invalid credentials" });
         }
 
         req.login(user, (err) => {
           if (err) {
-            return res.status(500).json({ message: "Failed to establish session" });
+            return res
+              .status(500)
+              .json({ message: "Failed to establish session" });
           }
-          
+
           res.json({
             id: user.id,
             email: user.email,
@@ -335,9 +356,9 @@ export function setupAuth(app: Express) {
       })(req, res, next);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          message: "Validation error", 
-          errors: error.errors 
+        return res.status(400).json({
+          message: "Validation error",
+          errors: error.errors,
         });
       }
       res.status(500).json({ message: "Login failed" });
@@ -386,11 +407,13 @@ export function setupAuth(app: Express) {
   app.post("/api/auth/forgot-password", async (req, res) => {
     try {
       const validatedData = forgotPasswordSchema.parse(req.body);
-      
+
       const user = await storage.getUserByEmail(validatedData.email);
       if (!user) {
         // Don't reveal if email exists
-        return res.json({ message: "If the email exists, a reset link has been sent" });
+        return res.json({
+          message: "If the email exists, a reset link has been sent",
+        });
       }
 
       // Generate reset token
@@ -407,9 +430,9 @@ export function setupAuth(app: Express) {
       res.json({ message: "If the email exists, a reset link has been sent" });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          message: "Validation error", 
-          errors: error.errors 
+        return res.status(400).json({
+          message: "Validation error",
+          errors: error.errors,
         });
       }
       console.error("Forgot password error:", error);
@@ -421,11 +444,13 @@ export function setupAuth(app: Express) {
   app.post("/api/auth/reset-password", async (req, res) => {
     try {
       const validatedData = resetPasswordSchema.parse(req.body);
-      
+
       // Find user by reset token
       const user = await storage.getUserByResetToken(validatedData.token);
       if (!user) {
-        return res.status(400).json({ message: "Invalid or expired reset token" });
+        return res
+          .status(400)
+          .json({ message: "Invalid or expired reset token" });
       }
 
       // Hash new password
@@ -438,9 +463,9 @@ export function setupAuth(app: Express) {
       res.json({ message: "Password reset successfully" });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          message: "Validation error", 
-          errors: error.errors 
+        return res.status(400).json({
+          message: "Validation error",
+          errors: error.errors,
         });
       }
       console.error("Reset password error:", error);
