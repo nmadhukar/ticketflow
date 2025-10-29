@@ -364,10 +364,9 @@ export default function AISettings() {
 
       <Card className="flex items-center justify-between">
         <CardHeader>
-          <CardTitle> AI Settings</CardTitle>
-          <CardDescription>
+          <CardTitle className="text-lg font-medium text-muted-foreground">
             Configure AI-powered features and thresholds for the helpdesk system
-          </CardDescription>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <Button

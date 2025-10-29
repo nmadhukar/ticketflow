@@ -239,21 +239,6 @@ export default function HelpDocumentManager() {
 
   return (
     <div className="space-y-4">
-      {/* Info Banner */}
-      <div className="bg-muted/50 border rounded-lg p-4 flex items-start justify-between">
-        <div className="flex-1">
-          <h4 className="font-medium flex items-center gap-2 mb-1">
-            <FileText className="h-4 w-4" />
-            Word Document Help System
-          </h4>
-          <p className="text-sm text-muted-foreground">
-            Upload Word documents that users can reference for help. For
-            interactive guides with videos and HTML content, use the User Guide
-            Management system.
-          </p>
-        </div>
-      </div>
-
       {/* Header with Upload button */}
       <div className="flex justify-between items-center">
         <div className="relative w-64">

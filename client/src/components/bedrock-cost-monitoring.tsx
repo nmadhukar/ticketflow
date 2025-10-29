@@ -5,7 +5,7 @@
  * notifications for AWS Bedrock usage to prevent unexpected charges on free-tier accounts.
  */
 
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -31,22 +31,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
   AlertTriangle,
   DollarSign,
   TrendingUp,
-  Download,
   RefreshCw,
   Shield,
   Clock,
-  Zap,
 } from "lucide-react";
 
 interface CostLimits {

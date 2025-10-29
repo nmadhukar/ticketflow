@@ -3,7 +3,7 @@ WORKDIR /app
 
 # 1) Install dependencies (include dev so vite/esbuild are available)
 COPY package*.json ./
-RUN npm ci --include=dev
+RUN npm install --include=dev --no-audit --no-fund
 
 # 2) Copy source and build (produces ./dist)
 COPY . .

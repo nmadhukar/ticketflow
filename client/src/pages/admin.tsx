@@ -72,7 +72,6 @@ import {
   BookOpen,
   FileText,
   Trash2,
-  Building,
   UserPlus,
   AlertCircle,
   FileEdit,
@@ -173,12 +172,6 @@ export default function AdminPanel() {
 
   const { data: users } = useQuery({
     queryKey: ["/api/admin/users"],
-    retry: false,
-    refetchOnMount: "always",
-  });
-
-  const { data: systemStats } = useQuery({
-    queryKey: ["/api/admin/stats"],
     retry: false,
     refetchOnMount: "always",
   });
@@ -868,10 +861,9 @@ export default function AdminPanel() {
   const renderApi = () => (
     <Card>
       <CardHeader>
-        <CardTitle>API Keys</CardTitle>
-        <CardDescription>
+        <CardTitle className="text-lg font-medium text-muted-foreground">
           Manage API keys for third-party integrations
-        </CardDescription>
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
         {/* Create New API Key */}
@@ -1186,16 +1178,6 @@ export default function AdminPanel() {
 
   const renderHelp = () => (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <BookOpen className="h-5 w-5" />
-          Help Documentation
-        </CardTitle>
-        <CardDescription>
-          Upload and manage Word documents that users can reference before
-          creating tickets
-        </CardDescription>
-      </CardHeader>
       <CardContent>
         <div className="space-y-6">
           <HelpDocumentManager />
@@ -1206,16 +1188,6 @@ export default function AdminPanel() {
 
   const renderPolicies = () => (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <FileText className="h-5 w-5" />
-          Company Policies
-        </CardTitle>
-        <CardDescription>
-          Upload and manage company policy documents. These documents will be
-          used by the AI chatbot to answer policy-related questions.
-        </CardDescription>
-      </CardHeader>
       <CardContent>
         <CompanyPolicyManager />
       </CardContent>
