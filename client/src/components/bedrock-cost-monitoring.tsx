@@ -96,6 +96,9 @@ export function BedrockCostMonitoring() {
       return response.json();
     },
     refetchInterval: 30000, // Refresh every 30 seconds
+    refetchOnMount: "always",
+    refetchOnReconnect: true,
+    staleTime: 0,
   });
 
   // Reset usage data mutation
@@ -163,6 +166,8 @@ export function BedrockCostMonitoring() {
     },
     onSuccess: (data) => {
       showConnectionTestNotification(true, data.costEstimate);
+      // Pull fresh stats/usage immediately after a successful connection test
+      queryClient.invalidateQueries({ queryKey: ["bedrock-cost-statistics"] });
     },
     onError: (error: any) => {
       showConnectionTestNotification(false, undefined, error.message);

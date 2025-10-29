@@ -22,6 +22,9 @@ export function BedrockUsageStats() {
       if (!res.ok) throw new Error('Failed to fetch usage summary');
       return res.json();
     },
+    refetchOnMount: 'always',
+    refetchOnReconnect: true,
+    staleTime: 0,
   });
   
   if (isLoading) {

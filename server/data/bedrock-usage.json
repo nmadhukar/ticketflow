@@ -43,5 +43,23 @@
     "estimatedCost": 0.000032800000000000004,
     "operation": "testConnection",
     "userId": "system"
+  },
+  {
+    "timestamp": "2025-10-29T18:48:35.562Z",
+    "modelId": "amazon.titan-text-express-v1",
+    "inputTokens": 17,
+    "outputTokens": 21,
+    "estimatedCost": 0.0000808,
+    "operation": "testConnection",
+    "userId": "system"
+  },
+  {
+    "timestamp": "2025-10-29T18:50:55.706Z",
+    "modelId": "amazon.titan-text-express-v1",
+    "inputTokens": 17,
+    "outputTokens": 16,
+    "estimatedCost": 0.0000648,
+    "operation": "testConnection",
+    "userId": "system"
   }
 ]

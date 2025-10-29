@@ -131,14 +131,27 @@ export default function AdminPanel() {
     setActiveTab(paramTab || "users");
   }, [matchTabRoute, (tabParams as any)?.tab]);
 
-  // Deep-link support for email tab sections via ?section=...
+  // Deep-link support for section navigation via ?section=... for any active tab
+  // Tries multiple id patterns to be resilient across sections/components
   useEffect(() => {
-    if (activeTab !== "email") return;
     const params = new URLSearchParams(window.location.search);
     const section = params.get("section");
-    if (section) {
-      const el = document.getElementById(`email-${section}`);
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (!section) return;
+
+    // Candidate element IDs to try
+    const candidates = [
+      `${activeTab}-${section}`, // e.g., ai-analytics-analytics
+      `${section}-${activeTab}`, // fallback
+      `${section}`, // generic id
+      `${activeTab}__${section}`, // alternate delimiter
+    ];
+
+    for (const id of candidates) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+        break;
+      }
     }
   }, [activeTab]);
 
