@@ -4718,9 +4718,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         process.env.AWS_REGION
       );
 
+      // Best-effort resolve active Bedrock model
+      let activeModelId: string | undefined = undefined;
+      if (awsConfigured) {
+        try {
+          const s = await storage.getBedrockSettings();
+          activeModelId = (s as any)?.bedrockModelId || undefined;
+        } catch {}
+      }
+
       res.json({
         awsCredentials: awsConfigured,
         bedrockAvailable: awsConfigured,
+        modelId: activeModelId,
         knowledgeLearning: awsConfigured,
         autoResponse: awsConfigured,
         features: {

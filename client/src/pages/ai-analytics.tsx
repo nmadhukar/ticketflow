@@ -43,7 +43,7 @@ export default function AIAnalyticsPage() {
   });
 
   // Get AI system status
-  const { data: aiStatus, isLoading: statusLoading } = useQuery({
+  const { data: aiStatus, isLoading: statusLoading } = useQuery<any>({
     queryKey: ["/api/ai/status"],
     refetchInterval: 30000, // Check every 30 seconds
   });
@@ -201,7 +201,9 @@ export default function AIAnalyticsPage() {
               {aiStatus?.bedrockAvailable ? "Connected" : "Offline"}
             </div>
             <p className="text-xs text-muted-foreground">
-              Claude 3 Sonnet Model
+              {aiStatus?.modelId
+                ? `Model: ${aiStatus.modelId}`
+                : "Model: not configured"}
             </p>
           </CardContent>
         </Card>
