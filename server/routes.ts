@@ -1713,7 +1713,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         settings = await storage.getBedrockSettings();
       } catch (e: any) {
         // If table doesn't exist yet (e.g., fresh DB without push), return empty settings
-        if (e?.code === "42P01") {
+        const code = String(e?.code || "");
+        const msg = String(e?.message || "");
+        if (code === "42P01" || msg.includes('relation "bedrock_settings"')) {
           return res.json({});
         }
         throw e;

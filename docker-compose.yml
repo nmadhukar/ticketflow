@@ -15,11 +15,24 @@ services:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
 
+  migrate:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}
+    command: ["npm", "run", "db:push"]
+    restart: "no"
+
   app:
     build: .
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       # Core runtime
       NODE_ENV: ${NODE_ENV:-production}
