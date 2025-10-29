@@ -165,34 +165,32 @@ export default function AIAnalyticsPage() {
   const systemStatus = aiStatus?.awsCredentials ? "operational" : "unavailable";
 
   return (
-    <>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">AI Analytics & Testing</h1>
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between">
           <p className="text-muted-foreground">
             Test and monitor the AI-powered helpdesk features
           </p>
-        </div>
-        <Badge
-          variant={systemStatus === "operational" ? "default" : "destructive"}
-          className="text-sm"
-        >
-          {systemStatus === "operational" ? (
-            <>
-              <CheckCircle className="h-4 w-4 mr-1" />
-              AI System Online
-            </>
-          ) : (
-            <>
-              <AlertTriangle className="h-4 w-4 mr-1" />
-              AI System Offline
-            </>
-          )}
-        </Badge>
-      </div>
 
-      {/* System Status Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Badge
+            variant={systemStatus === "operational" ? "default" : "destructive"}
+            className="text-sm"
+          >
+            {systemStatus === "operational" ? (
+              <>
+                <CheckCircle className="h-4 w-4 mr-1" />
+                AI System Online
+              </>
+            ) : (
+              <>
+                <AlertTriangle className="h-4 w-4 mr-1" />
+                AI System Offline
+              </>
+            )}
+          </Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">AWS Bedrock</CardTitle>
@@ -254,313 +252,326 @@ export default function AIAnalyticsPage() {
             </p>
           </CardContent>
         </Card>
-      </div>
+      </CardContent>
 
-      <Tabs defaultValue="analysis" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="analysis">Ticket Analysis</TabsTrigger>
-          <TabsTrigger value="learning">Knowledge Learning</TabsTrigger>
-          <TabsTrigger value="search">Smart Search</TabsTrigger>
-        </TabsList>
+      <CardContent>
+        <Tabs defaultValue="analysis" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="analysis">Ticket Analysis</TabsTrigger>
+            <TabsTrigger value="learning">Knowledge Learning</TabsTrigger>
+            <TabsTrigger value="search">Smart Search</TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="analysis" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Target className="h-5 w-5" />
-                Test Ticket Analysis
-              </CardTitle>
-              <CardDescription>
-                Test the AI analysis system with sample ticket data
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <TabsContent value="analysis" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Target className="h-5 w-5" />
+                  Test Ticket Analysis
+                </CardTitle>
+                <CardDescription>
+                  Test the AI analysis system with sample ticket data
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="title">Ticket Title</Label>
+                    <Input
+                      id="title"
+                      placeholder="e.g., Unable to login to account"
+                      value={testTicket.title}
+                      onChange={(e) =>
+                        setTestTicket((prev) => ({
+                          ...prev,
+                          title: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="category">Category</Label>
+                    <Select
+                      value={testTicket.category}
+                      onValueChange={(value) =>
+                        setTestTicket((prev) => ({ ...prev, category: value }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="bug">Bug</SelectItem>
+                        <SelectItem value="feature">Feature Request</SelectItem>
+                        <SelectItem value="support">Support</SelectItem>
+                        <SelectItem value="enhancement">Enhancement</SelectItem>
+                        <SelectItem value="incident">Incident</SelectItem>
+                        <SelectItem value="request">Request</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
                 <div className="space-y-2">
-                  <Label htmlFor="title">Ticket Title</Label>
-                  <Input
-                    id="title"
-                    placeholder="e.g., Unable to login to account"
-                    value={testTicket.title}
+                  <Label htmlFor="description">Description</Label>
+                  <Textarea
+                    id="description"
+                    placeholder="Describe the issue in detail..."
+                    value={testTicket.description}
                     onChange={(e) =>
                       setTestTicket((prev) => ({
                         ...prev,
-                        title: e.target.value,
+                        description: e.target.value,
                       }))
                     }
+                    rows={4}
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="category">Category</Label>
-                  <Select
-                    value={testTicket.category}
-                    onValueChange={(value) =>
-                      setTestTicket((prev) => ({ ...prev, category: value }))
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleTestAnalysis}
+                    disabled={
+                      analyzeTicketMutation.isPending ||
+                      !aiStatus?.features?.ticketAnalysis
                     }
                   >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="bug">Bug</SelectItem>
-                      <SelectItem value="feature">Feature Request</SelectItem>
-                      <SelectItem value="support">Support</SelectItem>
-                      <SelectItem value="enhancement">Enhancement</SelectItem>
-                      <SelectItem value="incident">Incident</SelectItem>
-                      <SelectItem value="request">Request</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    <Brain className="h-4 w-4 mr-2" />
+                    {analyzeTicketMutation.isPending
+                      ? "Analyzing..."
+                      : "Analyze Ticket"}
+                  </Button>
+
+                  <Button
+                    onClick={handleGenerateResponse}
+                    disabled={
+                      generateResponseMutation.isPending ||
+                      !analyzeTicketMutation.data ||
+                      !aiStatus?.features?.autoResponse
+                    }
+                    variant="outline"
+                  >
+                    <Zap className="h-4 w-4 mr-2" />
+                    {generateResponseMutation.isPending
+                      ? "Generating..."
+                      : "Generate Response"}
+                  </Button>
                 </div>
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="description">Description</Label>
-                <Textarea
-                  id="description"
-                  placeholder="Describe the issue in detail..."
-                  value={testTicket.description}
-                  onChange={(e) =>
-                    setTestTicket((prev) => ({
-                      ...prev,
-                      description: e.target.value,
-                    }))
-                  }
-                  rows={4}
-                />
-              </div>
-
-              <div className="flex gap-2">
-                <Button
-                  onClick={handleTestAnalysis}
-                  disabled={
-                    analyzeTicketMutation.isPending ||
-                    !aiStatus?.features?.ticketAnalysis
-                  }
-                >
-                  <Brain className="h-4 w-4 mr-2" />
-                  {analyzeTicketMutation.isPending
-                    ? "Analyzing..."
-                    : "Analyze Ticket"}
-                </Button>
-
-                <Button
-                  onClick={handleGenerateResponse}
-                  disabled={
-                    generateResponseMutation.isPending ||
-                    !analyzeTicketMutation.data ||
-                    !aiStatus?.features?.autoResponse
-                  }
-                  variant="outline"
-                >
-                  <Zap className="h-4 w-4 mr-2" />
-                  {generateResponseMutation.isPending
-                    ? "Generating..."
-                    : "Generate Response"}
-                </Button>
-              </div>
-
-              {/* Analysis Results */}
-              {analyzeTicketMutation.data && (
-                <Card className="mt-4">
-                  <CardHeader>
-                    <CardTitle className="text-lg">Analysis Results</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                      <div>
-                        <strong>Complexity:</strong>
-                        <Badge variant="outline" className="ml-2">
-                          {analyzeTicketMutation.data.complexity}
-                        </Badge>
+                {/* Analysis Results */}
+                {analyzeTicketMutation.data && (
+                  <Card className="mt-4">
+                    <CardHeader>
+                      <CardTitle className="text-lg">
+                        Analysis Results
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <strong>Complexity:</strong>
+                          <Badge variant="outline" className="ml-2">
+                            {analyzeTicketMutation.data.complexity}
+                          </Badge>
+                        </div>
+                        <div>
+                          <strong>Category:</strong>
+                          <Badge variant="outline" className="ml-2">
+                            {analyzeTicketMutation.data.category}
+                          </Badge>
+                        </div>
+                        <div>
+                          <strong>Priority:</strong>
+                          <Badge variant="outline" className="ml-2">
+                            {analyzeTicketMutation.data.priority}
+                          </Badge>
+                        </div>
+                        <div>
+                          <strong>Confidence:</strong>
+                          <Badge variant="outline" className="ml-2">
+                            {analyzeTicketMutation.data.confidence}%
+                          </Badge>
+                        </div>
                       </div>
+
                       <div>
-                        <strong>Category:</strong>
-                        <Badge variant="outline" className="ml-2">
-                          {analyzeTicketMutation.data.category}
-                        </Badge>
+                        <strong>Estimated Resolution Time:</strong>{" "}
+                        {analyzeTicketMutation.data.estimatedResolutionTime}{" "}
+                        hours
                       </div>
+
                       <div>
-                        <strong>Priority:</strong>
-                        <Badge variant="outline" className="ml-2">
-                          {analyzeTicketMutation.data.priority}
-                        </Badge>
+                        <strong>Tags:</strong>{" "}
+                        {analyzeTicketMutation.data.tags?.join(", ") || "None"}
                       </div>
+
                       <div>
-                        <strong>Confidence:</strong>
-                        <Badge variant="outline" className="ml-2">
-                          {analyzeTicketMutation.data.confidence}%
-                        </Badge>
+                        <strong>AI Reasoning:</strong>
+                        <p className="mt-1 text-muted-foreground">
+                          {analyzeTicketMutation.data.reasoning}
+                        </p>
                       </div>
-                    </div>
+                    </CardContent>
+                  </Card>
+                )}
 
-                    <div>
-                      <strong>Estimated Resolution Time:</strong>{" "}
-                      {analyzeTicketMutation.data.estimatedResolutionTime} hours
-                    </div>
+                {/* Auto-Response Results */}
+                {generateResponseMutation.data && (
+                  <Card className="mt-4">
+                    <CardHeader>
+                      <CardTitle className="text-lg">
+                        Generated Response
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="flex items-center gap-4">
+                        <Badge variant="outline">
+                          Confidence: {generateResponseMutation.data.confidence}
+                          %
+                        </Badge>
+                        {generateResponseMutation.data.escalationNeeded && (
+                          <Badge variant="destructive">Escalation Needed</Badge>
+                        )}
+                      </div>
 
-                    <div>
-                      <strong>Tags:</strong>{" "}
-                      {analyzeTicketMutation.data.tags?.join(", ") || "None"}
-                    </div>
+                      <div className="bg-muted p-4 rounded-lg">
+                        <h4 className="font-medium mb-2">Auto-Response:</h4>
+                        <p className="whitespace-pre-wrap">
+                          {generateResponseMutation.data.response}
+                        </p>
+                      </div>
 
-                    <div>
-                      <strong>AI Reasoning:</strong>
-                      <p className="mt-1 text-muted-foreground">
-                        {analyzeTicketMutation.data.reasoning}
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Auto-Response Results */}
-              {generateResponseMutation.data && (
-                <Card className="mt-4">
-                  <CardHeader>
-                    <CardTitle className="text-lg">
-                      Generated Response
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex items-center gap-4">
-                      <Badge variant="outline">
-                        Confidence: {generateResponseMutation.data.confidence}%
-                      </Badge>
-                      {generateResponseMutation.data.escalationNeeded && (
-                        <Badge variant="destructive">Escalation Needed</Badge>
+                      {generateResponseMutation.data.followUpActions?.length >
+                        0 && (
+                        <div>
+                          <h4 className="font-medium mb-2">
+                            Follow-up Actions:
+                          </h4>
+                          <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                            {generateResponseMutation.data.followUpActions.map(
+                              (action: string, index: number) => (
+                                <li key={index}>{action}</li>
+                              )
+                            )}
+                          </ul>
+                        </div>
                       )}
-                    </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-                    <div className="bg-muted p-4 rounded-lg">
-                      <h4 className="font-medium mb-2">Auto-Response:</h4>
-                      <p className="whitespace-pre-wrap">
-                        {generateResponseMutation.data.response}
-                      </p>
-                    </div>
-
-                    {generateResponseMutation.data.followUpActions?.length >
-                      0 && (
-                      <div>
-                        <h4 className="font-medium mb-2">Follow-up Actions:</h4>
-                        <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                          {generateResponseMutation.data.followUpActions.map(
-                            (action: string, index: number) => (
-                              <li key={index}>{action}</li>
-                            )
-                          )}
-                        </ul>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="learning" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5" />
-                Knowledge Base Learning
-              </CardTitle>
-              <CardDescription>
-                Manually trigger the AI learning process to extract patterns
-                from resolved tickets
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                The knowledge learning system analyzes resolved tickets to
-                identify common patterns and automatically creates knowledge
-                base articles. This process normally runs every 24 hours but can
-                be triggered manually here.
-              </p>
-
-              <Button
-                onClick={() => runKnowledgeLearningMutation.mutate()}
-                disabled={
-                  runKnowledgeLearningMutation.isPending ||
-                  !aiStatus?.features?.knowledgeLearning
-                }
-                size="lg"
-              >
-                <Play className="h-4 w-4 mr-2" />
-                {runKnowledgeLearningMutation.isPending
-                  ? "Learning..."
-                  : "Run Knowledge Learning"}
-              </Button>
-
-              {runKnowledgeLearningMutation.data && (
-                <Card className="mt-4">
-                  <CardHeader>
-                    <CardTitle className="text-lg">Learning Results</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-blue-600">
-                          {runKnowledgeLearningMutation.data.patternsFound}
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          Patterns Found
-                        </p>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-green-600">
-                          {runKnowledgeLearningMutation.data.articlesCreated}
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          Articles Created
-                        </p>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-purple-600">
-                          {runKnowledgeLearningMutation.data.articlesPublished}
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          Articles Published
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="search" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Search className="h-5 w-5" />
-                Intelligent Knowledge Search
-              </CardTitle>
-              <CardDescription>
-                Test the AI-powered semantic search capabilities
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground mb-4">
-                This feature uses AI to understand the context and meaning of
-                search queries, providing more relevant results than traditional
-                keyword matching.
-              </p>
-
-              <div className="text-center py-8 text-muted-foreground">
-                <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>
-                  Search functionality will be integrated with the Knowledge
-                  Base page
+          <TabsContent value="learning" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5" />
+                  Knowledge Base Learning
+                </CardTitle>
+                <CardDescription>
+                  Manually trigger the AI learning process to extract patterns
+                  from resolved tickets
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  The knowledge learning system analyzes resolved tickets to
+                  identify common patterns and automatically creates knowledge
+                  base articles. This process normally runs every 24 hours but
+                  can be triggered manually here.
                 </p>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-    </>
+
+                <Button
+                  onClick={() => runKnowledgeLearningMutation.mutate()}
+                  disabled={
+                    runKnowledgeLearningMutation.isPending ||
+                    !aiStatus?.features?.knowledgeLearning
+                  }
+                  size="lg"
+                >
+                  <Play className="h-4 w-4 mr-2" />
+                  {runKnowledgeLearningMutation.isPending
+                    ? "Learning..."
+                    : "Run Knowledge Learning"}
+                </Button>
+
+                {runKnowledgeLearningMutation.data && (
+                  <Card className="mt-4">
+                    <CardHeader>
+                      <CardTitle className="text-lg">
+                        Learning Results
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-blue-600">
+                            {runKnowledgeLearningMutation.data.patternsFound}
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            Patterns Found
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-green-600">
+                            {runKnowledgeLearningMutation.data.articlesCreated}
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            Articles Created
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-purple-600">
+                            {
+                              runKnowledgeLearningMutation.data
+                                .articlesPublished
+                            }
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            Articles Published
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="search" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Search className="h-5 w-5" />
+                  Intelligent Knowledge Search
+                </CardTitle>
+                <CardDescription>
+                  Test the AI-powered semantic search capabilities
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-4">
+                  This feature uses AI to understand the context and meaning of
+                  search queries, providing more relevant results than
+                  traditional keyword matching.
+                </p>
+
+                <div className="text-center py-8 text-muted-foreground">
+                  <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                  <p>
+                    Search functionality will be integrated with the Knowledge
+                    Base page
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
   );
 }

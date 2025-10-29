@@ -246,24 +246,13 @@ function LearningAnalytics() {
 export default function KnowledgeLearningQueue() {
   return (
     <div className="flex flex-col gap-6">
-      {/* Header */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Database className="h-5 w-5" />
-            Knowledge Base Learning Queue
-          </CardTitle>
-          <CardDescription>
-            Monitor and manage the self-learning knowledge base system
-          </CardDescription>
-        </CardHeader>
-      </Card>
-
       {/* Learning Queue Status */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            <span>Learning Queue Status</span>
+            <p className="text-muted-foreground">
+              Real-time status of the knowledge base learning queue
+            </p>
             <Button
               variant="outline"
               size="sm"
@@ -277,9 +266,6 @@ export default function KnowledgeLearningQueue() {
               Refresh
             </Button>
           </CardTitle>
-          <CardDescription>
-            Real-time status of the knowledge base learning queue
-          </CardDescription>
         </CardHeader>
         <CardContent>
           <QueueStatusDisplay />

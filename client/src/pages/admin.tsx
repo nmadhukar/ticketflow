@@ -1682,7 +1682,7 @@ export default function AdminPanel() {
     email: renderEmail(),
     "ai-settings": <AISettings />,
     "ai-analytics": <AiAnalytics />,
-    "knowledge-learning-queue": <KnowledgeLearningQueue />,
+    "learning-queue": <KnowledgeLearningQueue />,
   };
 
   const sectionToRender = sections[activeTab] ?? sections["users"];
