@@ -1,0 +1,38 @@
+[
+  {
+    "timestamp": "2025-10-28T19:42:43.599Z",
+    "modelId": "amazon.titan-text-express-v1",
+    "inputTokens": 17,
+    "outputTokens": 6,
+    "estimatedCost": 0.000032800000000000004,
+    "operation": "testConnection",
+    "userId": "system"
+  },
+  {
+    "timestamp": "2025-10-28T19:43:01.038Z",
+    "modelId": "amazon.titan-text-express-v1",
+    "inputTokens": 17,
+    "outputTokens": 28,
+    "estimatedCost": 0.00010320000000000001,
+    "operation": "testConnection",
+    "userId": "system"
+  },
+  {
+    "timestamp": "2025-10-28T20:50:17.002Z",
+    "modelId": "amazon.titan-text-express-v1",
+    "inputTokens": 17,
+    "outputTokens": 6,
+    "estimatedCost": 0.000032800000000000004,
+    "operation": "testConnection",
+    "userId": "system"
+  },
+  {
+    "timestamp": "2025-10-28T21:17:41.577Z",
+    "modelId": "amazon.titan-text-express-v1",
+    "inputTokens": 17,
+    "outputTokens": 62,
+    "estimatedCost": 0.00021200000000000003,
+    "operation": "testConnection",
+    "userId": "system"
+  }
+]

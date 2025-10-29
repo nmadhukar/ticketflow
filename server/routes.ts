@@ -93,6 +93,12 @@ import {
 } from "drizzle-orm";
 import { teams, departments, users } from "@shared/schema";
 import { logSecurityEvent } from "./security/rbac";
+import {
+  getAISettings,
+  saveAISettings,
+  validateAISettings,
+} from "./admin/aiSettings";
+import { bedrockIntegration } from "./bedrockIntegration";
 
 // Configure multer for file uploads
 const upload = multer({
@@ -1692,6 +1698,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
+  // Bedrock settings routes (admin only)
+  app.get("/api/bedrock/settings", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const settings = await storage.getBedrockSettings();
+      if (!settings) return res.json({});
+      res.json({
+        bedrockAccessKeyId: settings.bedrockAccessKeyId || "",
+        bedrockRegion: settings.bedrockRegion || "us-east-1",
+        bedrockModelId:
+          settings.bedrockModelId || "amazon.titan-text-express-v1",
+        hasBedrockSecret: !!settings.bedrockSecretAccessKey,
+      });
+    } catch (error) {
+      console.error("Error fetching Bedrock settings:", error);
+      res.status(500).json({ message: "Failed to fetch Bedrock settings" });
+    }
+  });
+
+  app.post("/api/bedrock/settings", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const current = await storage.getBedrockSettings();
+      const merged = {
+        bedrockAccessKeyId:
+          req.body.bedrockAccessKeyId ?? current?.bedrockAccessKeyId ?? "",
+        bedrockSecretAccessKey:
+          req.body.bedrockSecretAccessKey !== undefined &&
+          req.body.bedrockSecretAccessKey !== ""
+            ? req.body.bedrockSecretAccessKey
+            : current?.bedrockSecretAccessKey ?? "",
+        bedrockRegion:
+          req.body.bedrockRegion ?? current?.bedrockRegion ?? "us-east-1",
+        bedrockModelId:
+          req.body.bedrockModelId ??
+          current?.bedrockModelId ??
+          "amazon.titan-text-express-v1",
+        isActive: true,
+      };
+      const saved = await storage.updateBedrockSettings(merged as any, userId);
+      res.json({
+        bedrockAccessKeyId: saved.bedrockAccessKeyId || "",
+        bedrockRegion: saved.bedrockRegion || "us-east-1",
+        bedrockModelId: saved.bedrockModelId || "amazon.titan-text-express-v1",
+        hasBedrockSecret: !!saved.bedrockSecretAccessKey,
+      });
+    } catch (error) {
+      console.error("Error updating Bedrock settings:", error);
+      res.status(500).json({ message: "Failed to update Bedrock settings" });
+    }
+  });
+
   // SMTP settings routes (admin only)
   app.get("/api/smtp/settings", isAuthenticated, async (req: any, res) => {
     try {
@@ -1703,7 +1773,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const settings = await storage.getSmtpSettings();
-      res.json(settings || null);
+      if (!settings) return res.json({});
+      res.json({
+        awsAccessKeyId: settings.awsAccessKeyId || "",
+        awsRegion: settings.awsRegion || "us-east-1",
+        fromEmail: settings.fromEmail,
+        fromName: settings.fromName || "TicketFlow",
+        hasAwsSecret: !!settings.awsSecretAccessKey,
+      });
     } catch (error) {
       console.error("Error fetching SMTP settings:", error);
       res.status(500).json({ message: "Failed to fetch SMTP settings" });
@@ -1719,8 +1796,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
 
-      const settings = await storage.updateSmtpSettings(req.body, userId);
-      res.json(settings);
+      const current = await storage.getSmtpSettings();
+      const merged = {
+        awsAccessKeyId:
+          req.body.awsAccessKeyId ?? current?.awsAccessKeyId ?? "",
+        awsSecretAccessKey:
+          req.body.awsSecretAccessKey !== undefined &&
+          req.body.awsSecretAccessKey !== ""
+            ? req.body.awsSecretAccessKey
+            : current?.awsSecretAccessKey ?? "",
+        awsRegion: req.body.awsRegion ?? current?.awsRegion ?? "us-east-1",
+        fromEmail: req.body.fromEmail ?? current?.fromEmail ?? "",
+        fromName: req.body.fromName ?? current?.fromName ?? "TicketFlow",
+        useAwsSes: true,
+        isActive: true,
+      };
+      const saved = await storage.updateSmtpSettings(merged as any, userId);
+      res.json({
+        awsAccessKeyId: saved.awsAccessKeyId || "",
+        awsRegion: saved.awsRegion || "us-east-1",
+        fromEmail: saved.fromEmail,
+        fromName: saved.fromName || "TicketFlow",
+        hasAwsSecret: !!saved.awsSecretAccessKey,
+      });
     } catch (error) {
       console.error("Error updating SMTP settings:", error);
       res.status(500).json({ message: "Failed to update SMTP settings" });
@@ -1919,73 +2017,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get SMTP settings (admin only)
-  app.get("/api/smtp/settings", isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-
-      if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
-      }
-
-      const settings = await storage.getSmtpSettings();
-
-      // Return AWS SES settings in the format expected by frontend
-      if (settings) {
-        res.json({
-          awsAccessKeyId: settings.awsAccessKeyId,
-          awsSecretAccessKey: settings.awsSecretAccessKey,
-          awsRegion: settings.awsRegion || "us-east-1",
-          fromEmail: settings.fromEmail,
-          fromName: settings.fromName || "TicketFlow",
-        });
-      } else {
-        res.json({});
-      }
-    } catch (error) {
-      console.error("Error fetching SMTP settings:", error);
-      res.status(500).json({ message: "Failed to fetch SMTP settings" });
-    }
-  });
-
-  // Save SMTP settings (admin only)
-  app.post("/api/smtp/settings", isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-
-      if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
-      }
-
-      // Save AWS SES settings
-      const smtpSettings = {
-        awsAccessKeyId: req.body.awsAccessKeyId,
-        awsSecretAccessKey: req.body.awsSecretAccessKey,
-        awsRegion: req.body.awsRegion || "us-east-1",
-        fromEmail: req.body.fromEmail,
-        fromName: req.body.fromName || "TicketFlow",
-        useAwsSes: true,
-        isActive: true,
-      };
-
-      const settings = await storage.updateSmtpSettings(smtpSettings, userId);
-
-      // Return in the format expected by frontend
-      res.json({
-        awsAccessKeyId: settings.awsAccessKeyId,
-        awsSecretAccessKey: settings.awsSecretAccessKey,
-        awsRegion: settings.awsRegion,
-        fromEmail: settings.fromEmail,
-        fromName: settings.fromName,
-      });
-    } catch (error) {
-      console.error("Error saving SMTP settings:", error);
-      res.status(500).json({ message: "Failed to save SMTP settings" });
-    }
-  });
-
   // Test SMTP configuration
   app.post("/api/smtp/test", isAuthenticated, async (req, res) => {
     try {
@@ -2038,6 +2069,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to test SMTP configuration" });
     }
   });
+
+  // AI Settings (admin only)
+  app.get("/api/admin/ai-settings", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      if (!user || user.role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const settings = await getAISettings();
+      res.json(settings);
+    } catch (error) {
+      console.error("Error fetching AI settings:", error);
+      res.status(500).json({ message: "Failed to fetch AI settings" });
+    }
+  });
+
+  app.put("/api/admin/ai-settings", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      if (!user || user.role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const next = validateAISettings({
+        ...(await getAISettings()),
+        ...(req.body || {}),
+      });
+      const saved = await saveAISettings(next);
+      res.json(saved);
+    } catch (error) {
+      console.error("Error updating AI settings:", error);
+      res.status(500).json({ message: "Failed to update AI settings" });
+    }
+  });
+
+  app.post(
+    "/api/admin/ai-settings/test",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const ok = await bedrockIntegration.testConnection();
+        if (ok) {
+          return res.json({ success: true });
+        }
+        return res
+          .status(400)
+          .json({ success: false, message: "Bedrock test failed" });
+      } catch (error: any) {
+        console.error("Error testing Bedrock connection:", error);
+        res.status(500).json({
+          success: false,
+          message: error?.message || "Failed to test Bedrock",
+        });
+      }
+    }
+  );
 
   // Email template routes
 
@@ -2798,6 +2894,154 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .json({ message: "Failed to fetch Bedrock usage summary" });
     }
   });
+
+  // Cost monitoring and management endpoints
+  app.get(
+    "/api/bedrock/cost-statistics",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const stats = await bedrockIntegration.getCostStatistics();
+        res.json(stats);
+      } catch (error) {
+        console.error("Error fetching cost statistics:", error);
+        res.status(500).json({ message: "Failed to fetch cost statistics" });
+      }
+    }
+  );
+
+  app.put(
+    "/api/bedrock/cost-limits",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const {
+          dailyLimitUSD,
+          monthlyLimitUSD,
+          maxTokensPerRequest,
+          maxRequestsPerDay,
+          maxRequestsPerHour,
+          isFreeTierAccount,
+        } = req.body;
+
+        const updatedLimits = await bedrockIntegration.updateCostLimits({
+          dailyLimitUSD,
+          monthlyLimitUSD,
+          maxTokensPerRequest,
+          maxRequestsPerDay,
+          maxRequestsPerHour,
+          isFreeTierAccount,
+        });
+
+        res.json(updatedLimits);
+      } catch (error) {
+        console.error("Error updating cost limits:", error);
+        res.status(500).json({ message: "Failed to update cost limits" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/bedrock/reset-usage",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        await bedrockIntegration.resetUsageData();
+        res.json({ message: "Usage data reset successfully" });
+      } catch (error) {
+        console.error("Error resetting usage data:", error);
+        res.status(500).json({ message: "Failed to reset usage data" });
+      }
+    }
+  );
+
+  app.get(
+    "/api/bedrock/export-usage",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const { startDate, endDate } = req.query;
+        const usageData = await bedrockIntegration.exportUsageData(
+          startDate,
+          endDate
+        );
+
+        res.json({
+          data: usageData,
+          exportedAt: new Date().toISOString(),
+          dateRange: { startDate, endDate },
+        });
+      } catch (error) {
+        console.error("Error exporting usage data:", error);
+        res.status(500).json({ message: "Failed to export usage data" });
+      }
+    }
+  );
+
+  app.get(
+    "/api/bedrock/test-connection",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        if (user?.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const result = await bedrockIntegration.testConnection();
+
+        if (result.success) {
+          res.json({
+            success: true,
+            message: "Bedrock connection successful",
+            costEstimate: result.costEstimate,
+          });
+        } else {
+          res.status(400).json({
+            success: false,
+            message: result.error || "Bedrock test failed",
+            costEstimate: result.costEstimate,
+          });
+        }
+      } catch (error) {
+        console.error("Error testing Bedrock connection:", error);
+        res.status(500).json({
+          success: false,
+          message: error?.message || "Failed to test Bedrock connection",
+        });
+      }
+    }
+  );
 
   // FAQ cache endpoints
   app.get("/api/faq-cache", isAuthenticated, async (req, res) => {
@@ -4334,13 +4578,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .json({ message: "Title and description are required" });
       }
 
-      const analysis = await analyzeTicket({
-        title,
-        description,
-        category: category || "support",
-        priority: priority || "medium",
-        reporterId: userId,
-      });
+      const analysis = await analyzeTicket(
+        {
+          title,
+          description,
+          category: category || "support",
+          priority: priority || "medium",
+          reporterId: userId,
+        },
+        userId
+      );
 
       if (!analysis) {
         return res
@@ -4351,6 +4598,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(analysis);
     } catch (error) {
       console.error("AI analysis error:", error);
+
+      // Check if request was blocked due to cost limits
+      if ((error as any).isBlocked) {
+        return res.status(429).json({
+          message: "Request blocked due to cost limits",
+          reason: error.message,
+          costEstimate: (error as any).costEstimate,
+          isBlocked: true,
+        });
+      }
+
       res.status(500).json({ message: "Failed to analyze ticket" });
     }
   });

@@ -37,6 +37,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useBedrockCostNotifications } from "@/hooks/useBedrockCostNotifications";
 
 import {
   Card,
@@ -48,8 +49,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
 import {
   Select,
   SelectContent,
@@ -75,7 +76,6 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { format } from "date-fns";
 import { Progress } from "@/components/ui/progress";
 
 interface AISettings {
@@ -105,224 +105,22 @@ interface AISettings {
   maxRequestsPerDay: number;
 }
 
-// Queue Status Display Component
-function QueueStatusDisplay() {
-  const { data: queueStatus, isLoading } = useQuery({
-    queryKey: ["/api/admin/learning-queue"],
-  });
-
-  if (isLoading) {
-    return (
-      <div className="text-sm text-muted-foreground">
-        Loading queue status...
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid grid-cols-3 gap-4">
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Pending</p>
-              <p className="text-2xl font-bold">
-                {(queueStatus as any)?.pending || 0}
-              </p>
-            </div>
-            <Database className="h-8 w-8 text-muted-foreground" />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Processing</p>
-              <p className="text-2xl font-bold">
-                {(queueStatus as any)?.processing || 0}
-              </p>
-            </div>
-            <RefreshCw className="h-8 w-8 text-primary animate-spin" />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Completed Today</p>
-              <p className="text-2xl font-bold">
-                {(queueStatus as any)?.completedToday || 0}
-              </p>
-            </div>
-            <CheckCircle className="h-8 w-8 text-green-500" />
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-// Batch Processing Controls Component
-function BatchProcessingControls() {
-  const { toast } = useToast();
-  const [dateRange, setDateRange] = useState({
-    start: format(
-      new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-      "yyyy-MM-dd"
-    ),
-    end: format(new Date(), "yyyy-MM-dd"),
-  });
-
-  const processBatch = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest(
-        "POST",
-        "/api/admin/batch-process",
-        dateRange
-      );
-      return res.json();
-    },
-    onSuccess: (data) => {
-      toast({
-        title: "Batch processing started",
-        description: `Processing ${data.ticketCount} resolved tickets...`,
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Failed to start batch processing",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="start-date">Start Date</Label>
-          <Input
-            id="start-date"
-            type="date"
-            value={dateRange.start}
-            onChange={(e) =>
-              setDateRange((prev) => ({ ...prev, start: e.target.value }))
-            }
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="end-date">End Date</Label>
-          <Input
-            id="end-date"
-            type="date"
-            value={dateRange.end}
-            onChange={(e) =>
-              setDateRange((prev) => ({ ...prev, end: e.target.value }))
-            }
-          />
-        </div>
-      </div>
-
-      <Button
-        onClick={() => processBatch.mutate()}
-        disabled={processBatch.isPending}
-        className="w-full"
-      >
-        <Zap className="h-4 w-4 mr-2" />
-        {processBatch.isPending ? "Processing..." : "Start Batch Processing"}
-      </Button>
-    </div>
-  );
-}
-
-// Learning Analytics Component
-function LearningAnalytics() {
-  const { data: analytics, isLoading } = useQuery({
-    queryKey: ["/api/admin/ai-analytics"],
-  });
-
-  if (isLoading) {
-    return (
-      <div className="text-sm text-muted-foreground">Loading analytics...</div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              Articles Created
-            </span>
-            <span className="font-medium">
-              {(analytics as any)?.articlesCreated || 0}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              Avg. Effectiveness
-            </span>
-            <span className="font-medium">
-              {(((analytics as any)?.avgEffectiveness || 0) * 100).toFixed(1)}%
-            </span>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              Auto-Responses Sent
-            </span>
-            <span className="font-medium">
-              {(analytics as any)?.autoResponsesSent || 0}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              Tickets Resolved by AI
-            </span>
-            <span className="font-medium">
-              {(analytics as any)?.ticketsResolvedByAI || 0}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {(analytics as any)?.topCategories &&
-        (analytics as any).topCategories.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Top Knowledge Categories</p>
-            <div className="space-y-1">
-              {(analytics as any).topCategories.map(
-                (cat: any, index: number) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between text-sm"
-                  >
-                    <span className="text-muted-foreground">
-                      {cat.category}
-                    </span>
-                    <span>{cat.count} articles</span>
-                  </div>
-                )
-              )}
-            </div>
-          </div>
-        )}
-    </div>
-  );
-}
-
 export default function AISettings() {
   const { toast } = useToast();
+  const { handleApiError } = useBedrockCostNotifications();
   const [hasChanges, setHasChanges] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
+
+  // Cost limits state
+  const [isEditingCostLimits, setIsEditingCostLimits] = useState(false);
+  const [costLimits, setCostLimits] = useState({
+    dailyLimitUSD: 5.0,
+    monthlyLimitUSD: 50.0,
+    maxTokensPerRequest: 1000,
+    maxRequestsPerDay: 50,
+    maxRequestsPerHour: 10,
+    isFreeTierAccount: true,
+  });
 
   // Fetch current settings
   const { data: settings, isLoading } = useQuery({
@@ -339,6 +137,11 @@ export default function AISettings() {
     queryKey: ["/api/admin/api-keys"],
   });
 
+  // Fetch Bedrock settings
+  const { data: bedrockData } = useQuery({
+    queryKey: ["/api/bedrock/settings"],
+  });
+
   const [formData, setFormData] = useState<AISettings>({
     autoResponseEnabled: true,
     confidenceThreshold: 0.7,
@@ -350,19 +153,43 @@ export default function AISettings() {
     complexityThreshold: 70,
     escalationEnabled: true,
     escalationTeamId: undefined,
-    bedrockModel: "anthropic.claude-3-sonnet-20240229-v1:0",
+    bedrockModel: "amazon.titan-text-express-v1",
     temperature: 0.3,
     maxTokens: 2000,
     maxRequestsPerMinute: 20,
     maxRequestsPerDay: 1000,
   });
 
+  // Bedrock settings state
+  const [bedrockSettings, setBedrockSettings] = useState({
+    bedrockAccessKeyId: "",
+    bedrockSecretAccessKey: "",
+    bedrockRegion: "us-east-1",
+    bedrockModelId: "amazon.titan-text-express-v1",
+    hasBedrockSecret: false,
+  });
+
   // Load settings when data is fetched
   useEffect(() => {
     if (settings) {
-      setFormData(settings);
+      setFormData(settings as AISettings);
     }
   }, [settings]);
+
+  // Load Bedrock settings when data is fetched
+  useEffect(() => {
+    if (bedrockData && typeof bedrockData === "object") {
+      setBedrockSettings({
+        bedrockAccessKeyId: (bedrockData as any).bedrockAccessKeyId || "",
+        bedrockSecretAccessKey:
+          (bedrockData as any).bedrockSecretAccessKey || "",
+        bedrockRegion: (bedrockData as any).bedrockRegion || "us-east-1",
+        bedrockModelId:
+          (bedrockData as any).bedrockModelId || "amazon.titan-text-express-v1",
+        hasBedrockSecret: (bedrockData as any).hasBedrockSecret || false,
+      });
+    }
+  }, [bedrockData]);
 
   // Update settings mutation
   const updateSettings = useMutation({
@@ -387,6 +214,29 @@ export default function AISettings() {
     },
   });
 
+  // Update Bedrock settings mutation
+  const updateBedrockSettings = useMutation({
+    mutationFn: async (data: any) => {
+      const res = await apiRequest("POST", "/api/bedrock/settings", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bedrock/settings"] });
+      toast({
+        title: "Bedrock settings saved",
+        description: "AWS Bedrock configuration has been updated successfully.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to save Bedrock settings",
+        description:
+          error.message || "An error occurred while saving Bedrock settings.",
+        variant: "destructive",
+      });
+    },
+  });
+
   // Test Bedrock connection
   const testConnection = useMutation({
     mutationFn: async () => {
@@ -394,15 +244,47 @@ export default function AISettings() {
       return res.json();
     },
     onSuccess: (data) => {
+      if (data.success) {
+        toast({
+          title: "Connection successful",
+          description: `AWS Bedrock is properly configured and accessible. Cost: $${
+            data.costEstimate?.estimatedCost?.toFixed(4) || "0.0000"
+          }`,
+        });
+      } else {
+        toast({
+          title: "Connection failed",
+          description: data.message || "Failed to connect to Bedrock",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: Error) => {
+      handleApiError(error);
+    },
+  });
+
+  // Update cost limits mutation
+  const updateCostLimitsMutation = useMutation({
+    mutationFn: async (limits: any) => {
+      const res = await apiRequest("PUT", "/api/bedrock/cost-limits", limits);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["/api/bedrock/cost-statistics"],
+      });
+      setIsEditingCostLimits(false);
       toast({
-        title: "Connection successful",
-        description: "AWS Bedrock is properly configured and accessible.",
+        title: "Cost limits updated",
+        description: "Cost limits have been saved successfully.",
       });
     },
     onError: (error: Error) => {
       toast({
-        title: "Connection failed",
-        description: error.message,
+        title: "Failed to update cost limits",
+        description:
+          error.message || "An error occurred while updating cost limits.",
         variant: "destructive",
       });
     },
@@ -417,11 +299,35 @@ export default function AISettings() {
     await updateSettings.mutateAsync(formData);
   };
 
+  const handleBedrockChange = (field: string, value: any) => {
+    setBedrockSettings((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSaveBedrockSettings = async () => {
+    await updateBedrockSettings.mutateAsync(bedrockSettings);
+  };
+
   const handleTestConnection = async () => {
     setTestingConnection(true);
     await testConnection.mutateAsync();
     setTestingConnection(false);
   };
+
+  const handleSaveCostLimits = () => {
+    updateCostLimitsMutation.mutate(costLimits);
+  };
+
+  // Deep-link support: scroll to section via ?section=...
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const section = params.get("section");
+    if (section) {
+      const el = document.getElementById(`ai-${section}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+  }, []);
 
   const getConfidenceLabel = (value: number) => {
     if (value >= 0.8) return "High (80%+)";
@@ -453,7 +359,7 @@ export default function AISettings() {
   const bedrockConfigured = (apiKeys as any)?.bedrock?.configured;
 
   return (
-    <>
+    <div className="flex flex-col gap-4">
       {/* Header */}
 
       <Card className="flex items-center justify-between">
@@ -474,38 +380,135 @@ export default function AISettings() {
         </CardContent>
       </Card>
 
-      {/* AWS Bedrock Status */}
-      <Card>
+      {/* AWS Bedrock Configuration */}
+      <Card id="ai-bedrock">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Shield className="h-5 w-5" />
             AWS Bedrock Configuration
           </CardTitle>
+          <CardDescription>
+            Configure AWS Bedrock credentials and model settings for AI features
+          </CardDescription>
         </CardHeader>
-        <CardContent>
-          {bedrockConfigured ? (
-            <Alert className="mb-4">
-              <CheckCircle className="h-4 w-4" />
-              <AlertTitle>Bedrock Configured</AlertTitle>
-              <AlertDescription>
-                AWS Bedrock is properly configured and ready to use.
-              </AlertDescription>
-            </Alert>
-          ) : (
-            <Alert variant="destructive" className="mb-4">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Bedrock Not Configured</AlertTitle>
-              <AlertDescription>
-                Please configure AWS Bedrock credentials in the Admin Panel →
-                API Keys section.
-              </AlertDescription>
-            </Alert>
-          )}
-          <div className="flex items-center gap-2">
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="bedrockAccessKeyId">AWS Access Key ID</Label>
+              <Input
+                id="bedrockAccessKeyId"
+                type="text"
+                value={bedrockSettings.bedrockAccessKeyId}
+                onChange={(e) =>
+                  handleBedrockChange("bedrockAccessKeyId", e.target.value)
+                }
+                placeholder="AKIA..."
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bedrockSecretAccessKey">
+                AWS Secret Access Key
+              </Label>
+              <Input
+                id="bedrockSecretAccessKey"
+                type="password"
+                value={bedrockSettings.bedrockSecretAccessKey}
+                onChange={(e) =>
+                  handleBedrockChange("bedrockSecretAccessKey", e.target.value)
+                }
+                placeholder="Enter secret key..."
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="bedrockRegion">AWS Region</Label>
+              <Select
+                value={bedrockSettings.bedrockRegion}
+                onValueChange={(value) =>
+                  handleBedrockChange("bedrockRegion", value)
+                }
+              >
+                <SelectTrigger id="bedrockRegion">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="us-east-1">
+                    US East (N. Virginia)
+                  </SelectItem>
+                  <SelectItem value="us-west-2">US West (Oregon)</SelectItem>
+                  <SelectItem value="eu-central-1">
+                    Europe (Frankfurt)
+                  </SelectItem>
+                  <SelectItem value="ap-southeast-1">
+                    Asia Pacific (Singapore)
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bedrockModelId">Bedrock Model</Label>
+              <Select
+                value={bedrockSettings.bedrockModelId}
+                onValueChange={(value) =>
+                  handleBedrockChange("bedrockModelId", value)
+                }
+              >
+                <SelectTrigger id="bedrockModelId">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="amazon.titan-text-express-v1">
+                    Amazon Titan Text Express (Recommended)
+                  </SelectItem>
+                  <SelectItem value="amazon.titan-text-lite-v1">
+                    Amazon Titan Text Lite (Fast & Affordable)
+                  </SelectItem>
+                  <SelectItem value="ai21.j2-mid-v1">
+                    AI21 Jurassic Mid (Balanced)
+                  </SelectItem>
+                  <SelectItem value="ai21.j2-ultra-v1">
+                    AI21 Jurassic Ultra (Advanced)
+                  </SelectItem>
+                  <SelectItem value="meta.llama2-13b-chat-v1">
+                    Meta Llama 2 13B (Open Source)
+                  </SelectItem>
+                  <SelectItem value="meta.llama2-70b-chat-v1">
+                    Meta Llama 2 70B (Large)
+                  </SelectItem>
+                  <SelectItem value="meta.llama3-8b-instruct-v1:0">
+                    Meta Llama 3 8B (Latest)
+                  </SelectItem>
+                  <SelectItem value="meta.llama3-70b-instruct-v1:0">
+                    Meta Llama 3 70B (Latest Large)
+                  </SelectItem>
+                  <SelectItem value="anthropic.claude-3-sonnet-20240229-v1:0">
+                    Claude 3 Sonnet (Limited Regions)
+                  </SelectItem>
+                  <SelectItem value="anthropic.claude-3-haiku-20240307-v1:0">
+                    Claude 3 Haiku (Limited Regions)
+                  </SelectItem>
+                  <SelectItem value="anthropic.claude-3-opus-20240229-v1:0">
+                    Claude 3 Opus (Limited Regions)
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4 pt-4">
+            <Button
+              onClick={handleSaveBedrockSettings}
+              disabled={updateBedrockSettings.isPending}
+            >
+              <Save className="h-4 w-4 mr-2" />
+              Save Bedrock Settings
+            </Button>
             <Button
               onClick={handleTestConnection}
-              disabled={!bedrockConfigured || testingConnection}
-              variant={bedrockConfigured ? "default" : "secondary"}
+              disabled={testingConnection}
+              variant="outline"
             >
               <RefreshCw
                 className={cn(
@@ -515,15 +518,150 @@ export default function AISettings() {
               />
               Test Connection
             </Button>
-            <span className="text-sm text-muted-foreground">
-              Test the connection to AWS Bedrock
-            </span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Cost Limits Configuration */}
+      <Card id="ai-cost-limits">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Shield className="h-5 w-5" />
+            Cost Limits Configuration
+          </CardTitle>
+          <CardDescription>
+            Configure cost limits to prevent unexpected AWS Bedrock charges
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="dailyLimit">Daily Limit (USD)</Label>
+              <Input
+                id="dailyLimit"
+                type="number"
+                step="0.01"
+                value={costLimits.dailyLimitUSD || ""}
+                onChange={(e) =>
+                  setCostLimits((prev) => ({
+                    ...prev,
+                    dailyLimitUSD: parseFloat(e.target.value) || 0,
+                  }))
+                }
+                disabled={!isEditingCostLimits}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="monthlyLimit">Monthly Limit (USD)</Label>
+              <Input
+                id="monthlyLimit"
+                type="number"
+                step="0.01"
+                value={costLimits.monthlyLimitUSD || ""}
+                onChange={(e) =>
+                  setCostLimits((prev) => ({
+                    ...prev,
+                    monthlyLimitUSD: parseFloat(e.target.value) || 0,
+                  }))
+                }
+                disabled={!isEditingCostLimits}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="maxTokens">Max Tokens per Request</Label>
+              <Input
+                id="maxTokens"
+                type="number"
+                value={costLimits.maxTokensPerRequest || ""}
+                onChange={(e) =>
+                  setCostLimits((prev) => ({
+                    ...prev,
+                    maxTokensPerRequest: parseInt(e.target.value) || 0,
+                  }))
+                }
+                disabled={!isEditingCostLimits}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="maxRequestsDay">Max Requests per Day</Label>
+              <Input
+                id="maxRequestsDay"
+                type="number"
+                value={costLimits.maxRequestsPerDay || ""}
+                onChange={(e) =>
+                  setCostLimits((prev) => ({
+                    ...prev,
+                    maxRequestsPerDay: parseInt(e.target.value) || 0,
+                  }))
+                }
+                disabled={!isEditingCostLimits}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="maxRequestsHour">Max Requests per Hour</Label>
+              <Input
+                id="maxRequestsHour"
+                type="number"
+                value={costLimits.maxRequestsPerHour || ""}
+                onChange={(e) =>
+                  setCostLimits((prev) => ({
+                    ...prev,
+                    maxRequestsPerHour: parseInt(e.target.value) || 0,
+                  }))
+                }
+                disabled={!isEditingCostLimits}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="freeTier">Free Tier Account</Label>
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="freeTier"
+                  checked={costLimits.isFreeTierAccount || false}
+                  onCheckedChange={(checked) =>
+                    setCostLimits((prev) => ({
+                      ...prev,
+                      isFreeTierAccount: checked,
+                    }))
+                  }
+                  disabled={!isEditingCostLimits}
+                />
+                <span className="text-sm text-muted-foreground">
+                  Enable strict cost controls
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {!isEditingCostLimits ? (
+              <Button onClick={() => setIsEditingCostLimits(true)}>
+                <Settings className="h-4 w-4 mr-2" />
+                Edit Limits
+              </Button>
+            ) : (
+              <>
+                <Button
+                  onClick={handleSaveCostLimits}
+                  disabled={updateCostLimitsMutation.isPending}
+                >
+                  <Save className="h-4 w-4 mr-2" />
+                  Save Changes
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setIsEditingCostLimits(false)}
+                >
+                  Cancel
+                </Button>
+              </>
+            )}
           </div>
         </CardContent>
       </Card>
 
       {/* Auto-Response Settings */}
-      <Card>
+      <Card id="ai-configuration">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Zap className="h-5 w-5" />
@@ -615,7 +753,7 @@ export default function AISettings() {
       </Card>
 
       {/* Knowledge Base Settings */}
-      <Card>
+      <Card id="ai-learning">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Database className="h-5 w-5" />
@@ -687,7 +825,7 @@ export default function AISettings() {
       </Card>
 
       {/* Escalation Settings */}
-      <Card>
+      <Card id="ai-escalation">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5" />
@@ -771,7 +909,7 @@ export default function AISettings() {
       </Card>
 
       {/* Model Settings */}
-      <Card>
+      <Card id="ai-model">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Sliders className="h-5 w-5" />
@@ -790,14 +928,38 @@ export default function AISettings() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="amazon.titan-text-express-v1">
+                  Amazon Titan Text Express (Recommended)
+                </SelectItem>
+                <SelectItem value="amazon.titan-text-lite-v1">
+                  Amazon Titan Text Lite (Fast & Affordable)
+                </SelectItem>
+                <SelectItem value="ai21.j2-mid-v1">
+                  AI21 Jurassic Mid (Balanced)
+                </SelectItem>
+                <SelectItem value="ai21.j2-ultra-v1">
+                  AI21 Jurassic Ultra (Advanced)
+                </SelectItem>
+                <SelectItem value="meta.llama2-13b-chat-v1">
+                  Meta Llama 2 13B (Open Source)
+                </SelectItem>
+                <SelectItem value="meta.llama2-70b-chat-v1">
+                  Meta Llama 2 70B (Large)
+                </SelectItem>
+                <SelectItem value="meta.llama3-8b-instruct-v1:0">
+                  Meta Llama 3 8B (Latest)
+                </SelectItem>
+                <SelectItem value="meta.llama3-70b-instruct-v1:0">
+                  Meta Llama 3 70B (Latest Large)
+                </SelectItem>
                 <SelectItem value="anthropic.claude-3-sonnet-20240229-v1:0">
-                  Claude 3 Sonnet
+                  Claude 3 Sonnet (Limited Regions)
                 </SelectItem>
                 <SelectItem value="anthropic.claude-3-haiku-20240307-v1:0">
-                  Claude 3 Haiku (Faster, Lower Cost)
+                  Claude 3 Haiku (Limited Regions)
                 </SelectItem>
                 <SelectItem value="anthropic.claude-3-opus-20240229-v1:0">
-                  Claude 3 Opus (More Capable, Higher Cost)
+                  Claude 3 Opus (Limited Regions)
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -848,7 +1010,7 @@ export default function AISettings() {
       </Card>
 
       {/* Rate Limiting */}
-      <Card>
+      <Card id="ai-rate-limiting">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Globe className="h-5 w-5" />
@@ -894,64 +1056,6 @@ export default function AISettings() {
         </CardContent>
       </Card>
 
-      {/* Learning Queue Management */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Database className="h-5 w-5" />
-            Knowledge Base Learning Queue
-          </CardTitle>
-          <CardDescription>
-            Manage the self-learning knowledge base system
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Queue Status */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium">Learning Queue Status</h3>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  queryClient.invalidateQueries({
-                    queryKey: ["/api/admin/learning-queue"],
-                  })
-                }
-              >
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Refresh
-              </Button>
-            </div>
-
-            <QueueStatusDisplay />
-          </div>
-
-          <Separator />
-
-          {/* Batch Processing */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-medium">
-              Historical Ticket Processing
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Process resolved tickets from a specific date range to seed the
-              knowledge base.
-            </p>
-
-            <BatchProcessingControls />
-          </div>
-
-          <Separator />
-
-          {/* Learning Analytics */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-medium">Learning Analytics</h3>
-            <LearningAnalytics />
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Footer with Save Button */}
       <div className="flex items-center justify-between sticky bottom-6 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 p-4 rounded-lg border">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -970,6 +1074,6 @@ export default function AISettings() {
           {updateSettings.isPending ? "Saving..." : "Save Settings"}
         </Button>
       </div>
-    </>
+    </div>
   );
 }

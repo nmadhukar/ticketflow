@@ -74,6 +74,9 @@ import {
   notifications,
   type Notification,
   type InsertNotification,
+  bedrockSettings,
+  type BedrockSettings,
+  type InsertBedrockSettings,
 } from "@shared/schema";
 import { db } from "./db";
 import {
@@ -280,6 +283,13 @@ export interface IStorage {
   getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined>;
   updateApiKeyLastUsed(id: number): Promise<void>;
   revokeApiKey(id: number): Promise<void>;
+
+  // Bedrock settings operations
+  getBedrockSettings(): Promise<BedrockSettings | undefined>;
+  updateBedrockSettings(
+    settings: InsertBedrockSettings,
+    userId: string
+  ): Promise<BedrockSettings>;
 
   // SMTP settings operations
   getSmtpSettings(): Promise<SmtpSettings | undefined>;
@@ -1598,6 +1608,44 @@ export class DatabaseStorage implements IStorage {
     updates: { keyHash?: string; isActive?: boolean }
   ): Promise<void> {
     await db.update(apiKeys).set(updates).where(eq(apiKeys.id, id));
+  }
+
+  // Bedrock settings operations
+  async getBedrockSettings(): Promise<BedrockSettings | undefined> {
+    const [settings] = await db
+      .select()
+      .from(bedrockSettings)
+      .where(eq(bedrockSettings.isActive, true));
+    return settings;
+  }
+
+  async updateBedrockSettings(
+    settings: InsertBedrockSettings,
+    userId: string
+  ): Promise<BedrockSettings> {
+    const existingSettings = await this.getBedrockSettings();
+
+    if (existingSettings) {
+      const [updated] = await db
+        .update(bedrockSettings)
+        .set({
+          ...settings,
+          updatedBy: userId,
+          updatedAt: new Date(),
+        })
+        .where(eq(bedrockSettings.id, existingSettings.id))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db
+        .insert(bedrockSettings)
+        .values({
+          ...settings,
+          updatedBy: userId,
+        })
+        .returning();
+      return created;
+    }
   }
 
   // SMTP settings operations

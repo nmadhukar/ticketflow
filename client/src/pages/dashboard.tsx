@@ -26,6 +26,7 @@
 import MainWrapper from "@/components/main-wrapper";
 import StatsCard from "@/components/stats-card";
 import TaskModal from "@/components/task-modal";
+import { BedrockCostMonitoring } from "@/components/bedrock-cost-monitoring";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -222,10 +223,7 @@ export default function Dashboard() {
           </Card>
         </div>
       )}
-      {/* {ticketId ? (
-        <TicketDetail ticketId={ticketId} onClose={() => setLocation("/")} />
-      ) : (
-        <> */}
+
       {/* Stats Cards */}
       {hasManagerOrAdminRole ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -294,20 +292,12 @@ export default function Dashboard() {
         <></>
       )}
 
-      {/* Main Content Grid */}
-      {/* <div className="grid grid-cols-1 lg:grid-cols-4 gap-6"> */}
-      {/* Ticket List */}
-      {/* <div
-              className={hasCustomerRole ? "lg:col-span-4" : "lg:col-span-3"}
-            >
-              <TicketList
-                onTicketSelect={(ticket) =>
-                  setLocation(`/tickets/${ticket.id}`)
-                }
-                showAIInfo={true}
-                allowDragDrop={true}
-              />
-            </div> */}
+      {/* Admin-only Bedrock Cost Monitoring */}
+      {(user as any)?.role === "admin" && (
+        <div className="mb-8">
+          <BedrockCostMonitoring />
+        </div>
+      )}
 
       {/* Sidebar Content */}
       {!hasCustomerRole && (

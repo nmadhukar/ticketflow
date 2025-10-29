@@ -15,10 +15,16 @@ export function useWebSocket() {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const reconnectAttemptsRef = useRef(0);
+  const lastErrorAtRef = useRef<number>(0);
 
   const connect = useCallback(() => {
-    if (!isAuthenticated || socketRef.current?.readyState === WebSocket.OPEN) {
+    const rs = socketRef.current?.readyState;
+    if (
+      !isAuthenticated ||
+      rs === WebSocket.OPEN ||
+      rs === WebSocket.CONNECTING
+    ) {
       return;
     }
 
@@ -32,14 +38,14 @@ export function useWebSocket() {
       socket.onopen = () => {
         console.log("WebSocket connected");
         setIsConnected(true);
-        setReconnectAttempts(0);
+        reconnectAttemptsRef.current = 0;
 
         // Send authentication message
-        if (user?.id) {
+        if ((user as any)?.id) {
           socket.send(
             JSON.stringify({
               type: "auth",
-              userId: user.id,
+              userId: (user as any).id,
             })
           );
         }
@@ -56,6 +62,15 @@ export function useWebSocket() {
 
       socket.onerror = (error) => {
         console.error("WebSocket error:", error);
+        const now = Date.now();
+        if (now - lastErrorAtRef.current > 5000) {
+          lastErrorAtRef.current = now;
+          toast({
+            title: "Realtime connection issue",
+            description: "We’ll retry automatically in the background.",
+            variant: "default",
+          });
+        }
       };
 
       socket.onclose = () => {
@@ -64,12 +79,13 @@ export function useWebSocket() {
         socketRef.current = null;
 
         // Attempt to reconnect with exponential backoff
-        if (isAuthenticated && reconnectAttempts < 5) {
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+        const attempts = reconnectAttemptsRef.current;
+        if (isAuthenticated && attempts < 5) {
+          const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
           console.log(`Reconnecting in ${delay}ms...`);
 
           reconnectTimeoutRef.current = setTimeout(() => {
-            setReconnectAttempts((prev) => prev + 1);
+            reconnectAttemptsRef.current = attempts + 1;
             connect();
           }, delay);
         }
@@ -78,8 +94,26 @@ export function useWebSocket() {
       socketRef.current = socket;
     } catch (error) {
       console.error("Failed to create WebSocket connection:", error);
+      const now = Date.now();
+      if (now - lastErrorAtRef.current > 5000) {
+        lastErrorAtRef.current = now;
+        toast({
+          title: "Realtime connection failed",
+          description: "Retrying shortly…",
+          variant: "default",
+        });
+      }
+      // Trigger a backoff retry even when constructor throws
+      const attempts = reconnectAttemptsRef.current;
+      if (isAuthenticated && attempts < 5) {
+        const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
+        reconnectTimeoutRef.current = setTimeout(() => {
+          reconnectAttemptsRef.current = attempts + 1;
+          connect();
+        }, delay);
+      }
     }
-  }, [isAuthenticated, reconnectAttempts]);
+  }, [isAuthenticated]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -93,7 +127,7 @@ export function useWebSocket() {
     }
 
     setIsConnected(false);
-    setReconnectAttempts(0);
+    reconnectAttemptsRef.current = 0;
   }, []);
 
   const sendMessage = useCallback((type: string, data: any) => {
@@ -125,6 +159,9 @@ export function useWebSocket() {
     } catch {}
 
     switch (message.type) {
+      case "connected":
+        // Initial handshake from server
+        break;
       case "ticket:created":
         // Invalidate ticket queries to refresh the list
         queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });

@@ -3,6 +3,7 @@
  *
  * This module provides integration with AWS Bedrock using Claude 3 Sonnet
  * for intelligent ticket analysis, response generation, and knowledge base management.
+ * Includes comprehensive cost monitoring and request blocking for free-tier accounts.
  */
 
 import {
@@ -11,9 +12,18 @@ import {
 } from "@aws-sdk/client-bedrock-runtime";
 import { Task } from "@shared/schema";
 import { storage } from "./storage";
+import {
+  estimateCost,
+  estimateTokens,
+  recordUsage,
+  shouldBlockRequest,
+  CostEstimate,
+} from "./costMonitoring";
 
-// Bedrock model configuration
+// Bedrock model configuration - prioritize cheaper models for cost control
+const DEFAULT_MODEL_ID = "amazon.titan-text-express-v1"; // Globally available, cost-effective option
 const CLAUDE_3_SONNET_MODEL_ID = "anthropic.claude-3-sonnet-20240229-v1:0";
+const CLAUDE_3_OPUS_MODEL_ID = "anthropic.claude-3-opus-20240229-v1:0";
 
 // Initialize Bedrock client
 let bedrockClient: BedrockRuntimeClient | null = null;
@@ -46,7 +56,7 @@ export async function initializeBedrockClient() {
  */
 async function getBedrockConfig() {
   try {
-    const settings = await storage.getSmtpSettings();
+    const settings = await storage.getBedrockSettings();
     if (settings) {
       return {
         bedrockAccessKeyId: settings.bedrockAccessKeyId,
@@ -152,9 +162,20 @@ Format your response as JSON:
 };
 
 /**
- * Invoke Claude 3 Sonnet model with a prompt
+ * Invoke Claude model with cost monitoring and request blocking
  */
-async function invokeClaudeModel(prompt: string): Promise<string> {
+async function invokeClaudeModel(
+  prompt: string,
+  operation: string = "general",
+  modelId: string = DEFAULT_MODEL_ID,
+  maxTokens: number = 1000,
+  userId?: string,
+  ticketId?: string
+): Promise<{
+  response: string;
+  costEstimate: CostEstimate;
+  actualTokens: { input: number; output: number };
+}> {
   if (!bedrockClient) {
     bedrockClient = await initializeBedrockClient();
     if (!bedrockClient) {
@@ -162,13 +183,39 @@ async function invokeClaudeModel(prompt: string): Promise<string> {
     }
   }
 
-  const input = {
-    modelId: CLAUDE_3_SONNET_MODEL_ID,
-    contentType: "application/json",
-    accept: "application/json",
-    body: JSON.stringify({
+  // Estimate tokens before making the request
+  const estimatedInputTokens = estimateTokens(prompt);
+  const estimatedOutputTokens = Math.min(maxTokens, 1000); // Conservative estimate
+
+  // Check if request should be blocked
+  const blockCheck = shouldBlockRequest(
+    modelId,
+    estimatedInputTokens,
+    estimatedOutputTokens,
+    operation
+  );
+
+  if (blockCheck.blocked) {
+    const error = new Error(`Request blocked: ${blockCheck.reason}`);
+    (error as any).isBlocked = true;
+    (error as any).costEstimate = {
+      inputTokens: estimatedInputTokens,
+      outputTokens: estimatedOutputTokens,
+      estimatedCost: blockCheck.estimatedCost,
+      modelId,
+      operation,
+    };
+    throw error;
+  }
+
+  // Prepare request body based on model type
+  let requestBody: any;
+
+  if (modelId.startsWith("anthropic.claude")) {
+    // Claude models use Anthropic format
+    requestBody = {
       anthropic_version: "bedrock-2023-05-31",
-      max_tokens: 2000,
+      max_tokens: maxTokens,
       temperature: 0.3,
       messages: [
         {
@@ -176,7 +223,53 @@ async function invokeClaudeModel(prompt: string): Promise<string> {
           content: prompt,
         },
       ],
-    }),
+    };
+  } else if (modelId.startsWith("amazon.titan")) {
+    // Amazon Titan models use Titan format
+    requestBody = {
+      inputText: prompt,
+      textGenerationConfig: {
+        maxTokenCount: maxTokens,
+        temperature: 0.3,
+        topP: 0.9,
+      },
+    };
+  } else if (modelId.startsWith("ai21.j2")) {
+    // AI21 Jurassic models use AI21 format
+    requestBody = {
+      prompt: prompt,
+      maxTokens: maxTokens,
+      temperature: 0.3,
+      topP: 0.9,
+    };
+  } else if (modelId.startsWith("meta.llama")) {
+    // Meta Llama models use Llama format
+    requestBody = {
+      prompt: prompt,
+      max_gen_len: maxTokens,
+      temperature: 0.3,
+      top_p: 0.9,
+    };
+  } else {
+    // Fallback to Claude format for unknown models
+    requestBody = {
+      anthropic_version: "bedrock-2023-05-31",
+      max_tokens: maxTokens,
+      temperature: 0.3,
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    };
+  }
+
+  const input = {
+    modelId,
+    contentType: "application/json",
+    accept: "application/json",
+    body: JSON.stringify(requestBody),
   };
 
   try {
@@ -184,7 +277,82 @@ async function invokeClaudeModel(prompt: string): Promise<string> {
     const response = await bedrockClient.send(command);
 
     const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-    return responseBody.content[0].text;
+
+    // Parse response based on model type
+    let responseText: string;
+    let actualInputTokens: number;
+    let actualOutputTokens: number;
+
+    if (modelId.startsWith("anthropic.claude")) {
+      // Claude response format
+      responseText = responseBody.content[0].text;
+      actualInputTokens =
+        responseBody.usage?.input_tokens || estimatedInputTokens;
+      actualOutputTokens =
+        responseBody.usage?.output_tokens || estimateTokens(responseText);
+    } else if (modelId.startsWith("amazon.titan")) {
+      // Amazon Titan response format
+      responseText = responseBody.results[0].outputText;
+      actualInputTokens = responseBody.inputTokenCount || estimatedInputTokens;
+      actualOutputTokens =
+        responseBody.outputTokenCount || estimateTokens(responseText);
+    } else if (modelId.startsWith("ai21.j2")) {
+      // AI21 Jurassic response format
+      responseText = responseBody.completions[0].data.text;
+      actualInputTokens =
+        responseBody.prompt?.tokens?.length || estimatedInputTokens;
+      actualOutputTokens =
+        responseBody.completions[0].data.tokens?.length ||
+        estimateTokens(responseText);
+    } else if (modelId.startsWith("meta.llama")) {
+      // Meta Llama response format
+      responseText = responseBody.generation;
+      actualInputTokens =
+        responseBody.prompt_token_count || estimatedInputTokens;
+      actualOutputTokens =
+        responseBody.generation_token_count || estimateTokens(responseText);
+    } else {
+      // Fallback to Claude format
+      responseText =
+        responseBody.content?.[0]?.text ||
+        responseBody.generation ||
+        "No response";
+      actualInputTokens =
+        responseBody.usage?.input_tokens || estimatedInputTokens;
+      actualOutputTokens =
+        responseBody.usage?.output_tokens || estimateTokens(responseText);
+    }
+
+    // Record usage for billing analysis
+    recordUsage(
+      modelId,
+      actualInputTokens,
+      actualOutputTokens,
+      operation,
+      userId,
+      ticketId
+    );
+
+    const costEstimate: CostEstimate = {
+      inputTokens: actualInputTokens,
+      outputTokens: actualOutputTokens,
+      estimatedCost: estimateCost(
+        modelId,
+        actualInputTokens,
+        actualOutputTokens
+      ),
+      modelId,
+      operation,
+    };
+
+    return {
+      response: responseText,
+      costEstimate,
+      actualTokens: {
+        input: actualInputTokens,
+        output: actualOutputTokens,
+      },
+    };
   } catch (error) {
     console.error("Error invoking Claude model:", error);
     throw error;
@@ -194,30 +362,50 @@ async function invokeClaudeModel(prompt: string): Promise<string> {
 /**
  * Analyze a ticket to categorize and extract key information
  */
-export async function analyzeTicket(ticket: Task): Promise<{
+export async function analyzeTicket(
+  ticket: Task,
+  userId?: string
+): Promise<{
   keyIssues: string[];
   suggestedCategory: string;
   recommendedPriority: string;
   complexityScore: number;
   requiredExpertise: string[];
   estimatedHours: number;
+  costEstimate?: CostEstimate;
 }> {
   try {
     const prompt = PROMPT_TEMPLATES.analyzeTicket(ticket);
-    const response = await invokeClaudeModel(prompt);
+    const result = await invokeClaudeModel(
+      prompt,
+      "analyzeTicket",
+      DEFAULT_MODEL_ID, // Use cheapest model for analysis
+      500, // Limit output tokens for cost control
+      userId,
+      ticket.id?.toString()
+    );
 
     // Parse JSON response
-    const analysis = JSON.parse(response);
+    const analysis = JSON.parse(result.response);
 
     // Validate response structure
     if (!analysis.keyIssues || !analysis.complexityScore) {
       throw new Error("Invalid analysis response format");
     }
 
-    return analysis;
+    return {
+      ...analysis,
+      costEstimate: result.costEstimate,
+    };
   } catch (error) {
     console.error("Error analyzing ticket:", error);
-    // Return default analysis on error
+
+    // If request was blocked, re-throw with cost information
+    if ((error as any).isBlocked) {
+      throw error;
+    }
+
+    // Return default analysis on other errors
     return {
       keyIssues: ["Unable to analyze ticket"],
       suggestedCategory: ticket.category || "support",
@@ -234,11 +422,13 @@ export async function analyzeTicket(ticket: Task): Promise<{
  */
 export async function generateResponse(
   ticket: Task,
-  knowledgeBaseArticles: any[]
+  knowledgeBaseArticles: any[],
+  userId?: string
 ): Promise<{
   response: string;
   confidence: number;
   suggestedArticles: number[];
+  costEstimate?: CostEstimate;
 }> {
   try {
     // Format knowledge base content
@@ -247,18 +437,32 @@ export async function generateResponse(
       .join("\n");
 
     const prompt = PROMPT_TEMPLATES.generateResponse(ticket, knowledgeBase);
-    const response = await invokeClaudeModel(prompt);
+    const result = await invokeClaudeModel(
+      prompt,
+      "generateResponse",
+      DEFAULT_MODEL_ID, // Use cheapest model for responses
+      800, // Limit output tokens for cost control
+      userId,
+      ticket.id?.toString()
+    );
 
     // Calculate confidence based on knowledge base availability
     const confidence = knowledgeBaseArticles.length > 0 ? 0.8 : 0.5;
 
     return {
-      response,
+      response: result.response,
       confidence,
       suggestedArticles: knowledgeBaseArticles.map((a) => a.id),
+      costEstimate: result.costEstimate,
     };
   } catch (error) {
     console.error("Error generating response:", error);
+
+    // If request was blocked, re-throw with cost information
+    if ((error as any).isBlocked) {
+      throw error;
+    }
+
     return {
       response:
         "I'm unable to generate an automated response at this time. A support agent will assist you shortly.",
@@ -273,20 +477,29 @@ export async function generateResponse(
  */
 export async function updateKnowledgeBase(
   ticket: Task,
-  resolution: string
+  resolution: string,
+  userId?: string
 ): Promise<{
   title: string;
   summary: string;
   content: string;
   category: string;
   tags: string[];
+  costEstimate?: CostEstimate;
 }> {
   try {
     const prompt = PROMPT_TEMPLATES.extractKnowledge(ticket, resolution);
-    const response = await invokeClaudeModel(prompt);
+    const result = await invokeClaudeModel(
+      prompt,
+      "updateKnowledgeBase",
+      DEFAULT_MODEL_ID, // Use cheapest model for knowledge extraction
+      600, // Limit output tokens for cost control
+      userId,
+      ticket.id?.toString()
+    );
 
     // Parse JSON response
-    const knowledge = JSON.parse(response);
+    const knowledge = JSON.parse(result.response);
 
     // Validate response structure
     if (!knowledge.title || !knowledge.content) {
@@ -299,9 +512,16 @@ export async function updateKnowledgeBase(
       content: knowledge.content,
       category: knowledge.category || ticket.category || "general",
       tags: knowledge.tags || [],
+      costEstimate: result.costEstimate,
     };
   } catch (error) {
     console.error("Error extracting knowledge:", error);
+
+    // If request was blocked, re-throw with cost information
+    if ((error as any).isBlocked) {
+      throw error;
+    }
+
     throw error;
   }
 }
@@ -373,19 +593,86 @@ export async function calculateConfidence(
 }
 
 /**
- * Test Bedrock connection
+ * Test Bedrock connection with cost monitoring
  */
-export async function testBedrockConnection(): Promise<boolean> {
+export async function testBedrockConnection(): Promise<{
+  success: boolean;
+  costEstimate?: CostEstimate;
+  error?: string;
+}> {
   try {
     await initializeBedrockClient();
     const testPrompt =
       "Hello, this is a test. Please respond with 'Connection successful'.";
-    const response = await invokeClaudeModel(testPrompt);
-    return response.includes("successful");
+
+    const result = await invokeClaudeModel(
+      testPrompt,
+      "testConnection",
+      DEFAULT_MODEL_ID,
+      50, // Very small response for testing
+      "system"
+    );
+
+    return {
+      success: result.response.includes("successful"),
+      costEstimate: result.costEstimate,
+    };
   } catch (error) {
     console.error("Bedrock connection test failed:", error);
-    return false;
+
+    // If request was blocked, include cost information
+    if ((error as any).isBlocked) {
+      return {
+        success: false,
+        costEstimate: (error as any).costEstimate,
+        error: `Connection test blocked: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
+      };
+    }
+
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
   }
+}
+
+/**
+ * Get cost statistics for dashboard
+ */
+export async function getCostStatistics() {
+  const { getCostStatistics } = await import("./costMonitoring");
+  return getCostStatistics();
+}
+
+/**
+ * Update cost limits
+ */
+export async function updateCostLimits(
+  limits: Partial<import("./costMonitoring").CostLimits>
+) {
+  const { loadCostLimits, saveCostLimits } = await import("./costMonitoring");
+  const currentLimits = loadCostLimits();
+  const updatedLimits = { ...currentLimits, ...limits };
+  saveCostLimits(updatedLimits);
+  return updatedLimits;
+}
+
+/**
+ * Reset usage data (for testing or manual reset)
+ */
+export async function resetUsageData() {
+  const { resetUsageData } = await import("./costMonitoring");
+  return resetUsageData();
+}
+
+/**
+ * Export usage data for analysis
+ */
+export async function exportUsageData(startDate?: string, endDate?: string) {
+  const { exportUsageData } = await import("./costMonitoring");
+  return exportUsageData(startDate, endDate);
 }
 
 // Export initialization function
@@ -396,4 +683,8 @@ export const bedrockIntegration = {
   updateKnowledgeBase,
   calculateConfidence,
   testConnection: testBedrockConnection,
+  getCostStatistics,
+  updateCostLimits,
+  resetUsageData,
+  exportUsageData,
 };

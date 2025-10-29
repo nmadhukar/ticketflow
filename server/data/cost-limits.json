@@ -1,0 +1,8 @@
+{
+  "dailyLimitUSD": 5,
+  "monthlyLimitUSD": 50,
+  "maxTokensPerRequest": 1000,
+  "maxRequestsPerDay": 50,
+  "maxRequestsPerHour": 10,
+  "isFreeTierAccount": true
+}

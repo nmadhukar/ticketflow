@@ -74,7 +74,7 @@ export function Sidebar({ className }: SidebarProps) {
       icon: Brain,
       hrefBase: "/admin",
       section: "analytics",
-      items: ["AI Performance Analytics"],
+      items: ["AI Performance Analytics", "Knowledge Learning Queue"],
     },
     {
       title: "CONTENT & DOCUMENTATION",
@@ -88,7 +88,7 @@ export function Sidebar({ className }: SidebarProps) {
       icon: Plug,
       hrefBase: "/admin",
       section: "integrations",
-      items: ["Microsoft 365 SSO", "AWS & Email Settings"],
+      items: ["Microsoft 365 SSO", "Email"],
     },
   ] as const;
 
@@ -101,10 +101,11 @@ export function Sidebar({ className }: SidebarProps) {
     "API Keys": "api",
     "AI Settings": "ai-settings",
     "AI Performance Analytics": "ai-analytics",
+    "Knowledge Learning Queue": "knowledge-learning-queue",
     "Help Documentation": "help",
     "Company Policies": "policies",
     "Microsoft 365 SSO": "sso",
-    "AWS & Email Settings": "email",
+    Email: "email",
   };
 
   const itemAllowed: Record<string, Array<string>> = {
@@ -116,10 +117,11 @@ export function Sidebar({ className }: SidebarProps) {
     "API Keys": ["admin"],
     "AI Settings": ["admin"],
     "AI Performance Analytics": ["admin", "manager"],
+    "Knowledge Learning Queue": ["admin", "manager"],
     "Help Documentation": ["admin", "manager"],
     "Company Policies": ["admin", "manager"],
     "Microsoft 365 SSO": ["admin"],
-    "AWS & Email Settings": ["admin"],
+    Email: ["admin"],
   };
 
   return (
