@@ -1708,7 +1708,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
 
-      const settings = await storage.getBedrockSettings();
+      let settings: any = undefined;
+      try {
+        settings = await storage.getBedrockSettings();
+      } catch (e: any) {
+        // If table doesn't exist yet (e.g., fresh DB without push), return empty settings
+        if (e?.code === "42P01") {
+          return res.json({});
+        }
+        throw e;
+      }
       if (!settings) return res.json({});
       res.json({
         bedrockAccessKeyId: settings.bedrockAccessKeyId || "",
