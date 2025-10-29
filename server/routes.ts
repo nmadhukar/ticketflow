@@ -4712,20 +4712,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // AI System Status Route
   app.get("/api/ai/status", isAuthenticated, async (req: any, res) => {
     try {
-      const awsConfigured = !!(
+      // 1) Check env credentials
+      const envAwsConfigured = !!(
         process.env.AWS_ACCESS_KEY_ID &&
         process.env.AWS_SECRET_ACCESS_KEY &&
         process.env.AWS_REGION
       );
 
-      // Best-effort resolve active Bedrock model
-      let activeModelId: string | undefined = undefined;
-      if (awsConfigured) {
-        try {
-          const s = await storage.getBedrockSettings();
-          activeModelId = (s as any)?.bedrockModelId || undefined;
-        } catch {}
-      }
+      // 2) Check stored SMTP (SES) and Bedrock settings
+      let smtp = undefined as any;
+      let bedrock = undefined as any;
+      try {
+        smtp = await storage.getSmtpSettings();
+      } catch {}
+      try {
+        bedrock = await storage.getBedrockSettings();
+      } catch {}
+
+      const sesConfigured = !!(
+        smtp?.awsAccessKeyId &&
+        smtp?.awsSecretAccessKey &&
+        smtp?.awsRegion
+      );
+      const bedrockConfigured = !!(
+        bedrock?.bedrockAccessKeyId &&
+        bedrock?.bedrockSecretAccessKey &&
+        (bedrock?.bedrockRegion || process.env.AWS_REGION)
+      );
+
+      const awsConfigured =
+        envAwsConfigured || sesConfigured || bedrockConfigured;
+
+      // Active model id if available
+      const activeModelId: string | undefined =
+        bedrock?.bedrockModelId || undefined;
 
       res.json({
         awsCredentials: awsConfigured,
