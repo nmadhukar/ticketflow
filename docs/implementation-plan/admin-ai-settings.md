@@ -18,7 +18,7 @@
 ## Changes Applied
 
 - Added deep-linking by scrolling to `#ai-<section>` anchors on mount.
-  - Anchors: `ai-configuration`, `ai-learning`, `ai-escalation`, `ai-model`, `ai-rate-limiting`, `ai-queue`, `ai-bedrock`.
+  - Anchors: `ai-configuration`, `ai-learning`, `ai-escalation`, `ai-queue`, `ai-bedrock`.
 - Implemented server endpoints with admin-only access and validation:
   - `GET /api/admin/ai-settings` → returns saved settings (with sensible defaults).
   - `PUT /api/admin/ai-settings` → validates ranges server-side and persists.

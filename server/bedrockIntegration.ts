@@ -17,6 +17,7 @@ import {
   estimateTokens,
   recordUsage,
   shouldBlockRequest,
+  loadCostLimits,
   CostEstimate,
 } from "./costMonitoring";
 
@@ -185,7 +186,32 @@ async function invokeClaudeModel(
 
   // Estimate tokens before making the request
   const estimatedInputTokens = estimateTokens(prompt);
-  const estimatedOutputTokens = Math.min(maxTokens, 1000); // Conservative estimate
+
+  // Enforce per-request token budget (input + output)
+  const limits = loadCostLimits();
+  const budget = Number(limits.maxTokensPerRequest || 0);
+  const allowedOutputFromBudget =
+    budget > 0 ? Math.max(0, budget - estimatedInputTokens) : maxTokens;
+  if (budget > 0 && allowedOutputFromBudget <= 0) {
+    const error = new Error(
+      `Request exceeds max tokens per request. Prompt uses ${estimatedInputTokens} tokens; limit is ${budget}.`
+    );
+    (error as any).isBlocked = true;
+    (error as any).costEstimate = {
+      inputTokens: estimatedInputTokens,
+      outputTokens: 0,
+      estimatedCost: 0,
+      modelId,
+      operation,
+    } as CostEstimate;
+    throw error;
+  }
+
+  const effectiveMaxTokens = Math.max(
+    1,
+    Math.min(maxTokens, allowedOutputFromBudget)
+  );
+  const estimatedOutputTokens = Math.min(effectiveMaxTokens, 1000); // Conservative estimate
 
   // Check if request should be blocked
   const blockCheck = shouldBlockRequest(
@@ -215,7 +241,7 @@ async function invokeClaudeModel(
     // Claude models use Anthropic format
     requestBody = {
       anthropic_version: "bedrock-2023-05-31",
-      max_tokens: maxTokens,
+      max_tokens: effectiveMaxTokens,
       temperature: 0.3,
       messages: [
         {
@@ -229,7 +255,7 @@ async function invokeClaudeModel(
     requestBody = {
       inputText: prompt,
       textGenerationConfig: {
-        maxTokenCount: maxTokens,
+        maxTokenCount: effectiveMaxTokens,
         temperature: 0.3,
         topP: 0.9,
       },
@@ -238,7 +264,7 @@ async function invokeClaudeModel(
     // AI21 Jurassic models use AI21 format
     requestBody = {
       prompt: prompt,
-      maxTokens: maxTokens,
+      maxTokens: effectiveMaxTokens,
       temperature: 0.3,
       topP: 0.9,
     };
@@ -246,7 +272,7 @@ async function invokeClaudeModel(
     // Meta Llama models use Llama format
     requestBody = {
       prompt: prompt,
-      max_gen_len: maxTokens,
+      max_gen_len: effectiveMaxTokens,
       temperature: 0.3,
       top_p: 0.9,
     };
@@ -254,7 +280,7 @@ async function invokeClaudeModel(
     // Fallback to Claude format for unknown models
     requestBody = {
       anthropic_version: "bedrock-2023-05-31",
-      max_tokens: maxTokens,
+      max_tokens: effectiveMaxTokens,
       temperature: 0.3,
       messages: [
         {
@@ -654,7 +680,38 @@ export async function updateCostLimits(
 ) {
   const { loadCostLimits, saveCostLimits } = await import("./costMonitoring");
   const currentLimits = loadCostLimits();
-  const updatedLimits = { ...currentLimits, ...limits };
+  // Free-tier enforcement: cap values even if client attempts higher
+  let merged = { ...currentLimits, ...limits };
+  if (merged.isFreeTierAccount) {
+    const CAP = {
+      dailyUSD: 3,
+      monthlyUSD: 25,
+      tokensPerRequest: 3000,
+      requestsPerDay: 1500,
+      requestsPerHour: 300,
+    };
+    merged.dailyLimitUSD = Math.min(
+      merged.dailyLimitUSD || CAP.dailyUSD,
+      CAP.dailyUSD
+    );
+    merged.monthlyLimitUSD = Math.min(
+      merged.monthlyLimitUSD || CAP.monthlyUSD,
+      CAP.monthlyUSD
+    );
+    merged.maxTokensPerRequest = Math.min(
+      merged.maxTokensPerRequest || CAP.tokensPerRequest,
+      CAP.tokensPerRequest
+    );
+    merged.maxRequestsPerDay = Math.min(
+      merged.maxRequestsPerDay || CAP.requestsPerDay,
+      CAP.requestsPerDay
+    );
+    merged.maxRequestsPerHour = Math.min(
+      merged.maxRequestsPerHour || CAP.requestsPerHour,
+      CAP.requestsPerHour
+    );
+  }
+  const updatedLimits = merged;
   saveCostLimits(updatedLimits);
   return updatedLimits;
 }

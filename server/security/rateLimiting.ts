@@ -1,12 +1,12 @@
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { Request, Response } from "express";
 import { AuthenticatedRequest } from "./jwt";
+import { getAISettings } from "../admin/aiSettings";
 
-// Store for tracking AI API calls (in production, use Redis)
-const aiApiCallTracker = new Map<
-  string,
-  { count: number; resetTime: number }
->();
+// Stores for tracking AI API calls per window (in production, use Redis)
+const minuteTracker = new Map<string, { count: number; resetTime: number }>();
+const hourTracker = new Map<string, { count: number; resetTime: number }>();
+const dayTracker = new Map<string, { count: number; resetTime: number }>();
 
 // General API rate limiting
 export const generalRateLimit = rateLimit({
@@ -95,60 +95,128 @@ export const knowledgeCreationRateLimit = createRoleBasedRateLimit(
   }
 );
 
-// AI API call rate limiting
-export const aiApiRateLimit = (
+// AI API call rate limiting based on saved AI settings
+export const aiApiRateLimit = async (
   req: AuthenticatedRequest,
   res: Response,
   next: Function
 ) => {
-  const userId = (req.user?.userId as string) || req.ip;
-  const userRole = req.user?.role || "customer";
-  const now = Date.now();
+  try {
+    const userId = (req.user?.userId as string) || req.ip;
+    const now = Date.now();
+    const settings = await getAISettings();
 
-  // Define limits based on user role (per hour)
-  const roleLimits = {
-    customer: 20, // 20 AI requests per hour for customers
-    agent: 100, // 100 AI requests per hour for agents
-    admin: 200, // 200 AI requests per hour for admins
-  };
-
-  const maxRequests = roleLimits[userRole];
-  const windowMs = 60 * 60 * 1000; // 1 hour
-
-  // Get or create tracking entry
-  let tracker = aiApiCallTracker.get(String(userId));
-
-  if (!tracker || now > tracker.resetTime) {
-    // Reset counter
-    tracker = {
-      count: 0,
-      resetTime: now + windowMs,
+    const limits = {
+      perMinute: Math.max(1, Number(settings.maxRequestsPerMinute || 1)),
+      perHour: Math.max(0, Number(settings.maxRequestsPerHour || 0)), // 0 disables hourly cap
+      perDay: Math.max(10, Number(settings.maxRequestsPerDay || 10)),
     };
+
+    // Minute window
+    const minuteWindow = 60 * 1000;
+    let minEntry = minuteTracker.get(userId);
+    if (!minEntry || now > minEntry.resetTime) {
+      minEntry = { count: 0, resetTime: now + minuteWindow };
+    }
+    if (minEntry.count >= limits.perMinute) {
+      const retry = Math.ceil((minEntry.resetTime - now) / 1000);
+      return res.status(429).json({
+        error: "AI API rate limit exceeded",
+        message: `Too many AI requests. Limit: ${limits.perMinute}/minute reached.`,
+        retryAfterSeconds: retry,
+        limit: limits.perMinute,
+        remaining: 0,
+        resetTime: new Date(minEntry.resetTime).toISOString(),
+      });
+    }
+
+    // Hour window (optional)
+    const hourWindow = 60 * 60 * 1000;
+    let hourEntry = hourTracker.get(userId);
+    if (!hourEntry || now > hourEntry.resetTime) {
+      hourEntry = { count: 0, resetTime: now + hourWindow };
+    }
+    if (limits.perHour > 0 && hourEntry.count >= limits.perHour) {
+      const retry = Math.ceil((hourEntry.resetTime - now) / 1000);
+      return res.status(429).json({
+        error: "AI API rate limit exceeded",
+        message: `Too many AI requests. Limit: ${limits.perHour}/hour reached.`,
+        retryAfterSeconds: retry,
+        limit: limits.perHour,
+        remaining: 0,
+        resetTime: new Date(hourEntry.resetTime).toISOString(),
+      });
+    }
+
+    // Day window
+    const dayWindow = 24 * 60 * 60 * 1000;
+    let dayEntry = dayTracker.get(userId);
+    if (!dayEntry || now > dayEntry.resetTime) {
+      dayEntry = { count: 0, resetTime: now + dayWindow };
+    }
+    if (dayEntry.count >= limits.perDay) {
+      const retry = Math.ceil((dayEntry.resetTime - now) / 60 / 1000);
+      return res.status(429).json({
+        error: "AI API rate limit exceeded",
+        message: `Too many AI requests. Limit: ${limits.perDay}/day reached.`,
+        retryAfterMinutes: retry,
+        limit: limits.perDay,
+        remaining: 0,
+        resetTime: new Date(dayEntry.resetTime).toISOString(),
+      });
+    }
+
+    // Increment counters and persist entries
+    minEntry.count++;
+    minuteTracker.set(userId, minEntry);
+
+    if (limits.perHour > 0) {
+      hourEntry.count++;
+      hourTracker.set(userId, hourEntry);
+    }
+
+    dayEntry.count++;
+    dayTracker.set(userId, dayEntry);
+
+    // Add informative headers
+    res.setHeader("X-RateLimit-Minute-Limit", String(limits.perMinute));
+    res.setHeader(
+      "X-RateLimit-Minute-Remaining",
+      String(Math.max(0, limits.perMinute - minEntry.count))
+    );
+    res.setHeader(
+      "X-RateLimit-Minute-Reset",
+      new Date(minEntry.resetTime).toISOString()
+    );
+
+    if (limits.perHour > 0) {
+      res.setHeader("X-RateLimit-Hour-Limit", String(limits.perHour));
+      res.setHeader(
+        "X-RateLimit-Hour-Remaining",
+        String(Math.max(0, limits.perHour - hourEntry.count))
+      );
+      res.setHeader(
+        "X-RateLimit-Hour-Reset",
+        new Date(hourEntry.resetTime).toISOString()
+      );
+    }
+
+    res.setHeader("X-RateLimit-Day-Limit", String(limits.perDay));
+    res.setHeader(
+      "X-RateLimit-Day-Remaining",
+      String(Math.max(0, limits.perDay - dayEntry.count))
+    );
+    res.setHeader(
+      "X-RateLimit-Day-Reset",
+      new Date(dayEntry.resetTime).toISOString()
+    );
+
+    next();
+  } catch (err) {
+    // On error, fail open but log
+    console.error("aiApiRateLimit error", err);
+    next();
   }
-
-  // Check if limit exceeded
-  if (tracker.count >= maxRequests) {
-    const remainingTime = Math.ceil((tracker.resetTime - now) / 1000 / 60); // minutes
-    return res.status(429).json({
-      error: "AI API rate limit exceeded",
-      message: `Too many AI requests. Limit: ${maxRequests} per hour for ${userRole} role.`,
-      retryAfter: `${remainingTime} minutes`,
-      limit: maxRequests,
-      remaining: 0,
-      resetTime: new Date(tracker.resetTime).toISOString(),
-    });
-  }
-
-  // Increment counter
-  tracker.count++;
-  aiApiCallTracker.set(userId as string, tracker);
-
-  // Add rate limit headers
-  res.setHeader("X-RateLimit-Limit", maxRequests);
-  res.setHeader("X-RateLimit-Remaining", maxRequests - tracker.count);
-  res.setHeader("X-RateLimit-Reset", new Date(tracker.resetTime).toISOString());
-
-  next();
 };
 
 // File upload rate limiting
@@ -275,8 +343,23 @@ export const cleanupAiApiTracker = () => {
   }
 };
 
-// Set up periodic cleanup (every hour)
-setInterval(cleanupAiApiTracker, 60 * 60 * 1000);
+// Cleanup trackers periodically to prevent unbounded growth
+function cleanupTracker(
+  map: Map<string, { count: number; resetTime: number }>
+) {
+  const now = Date.now();
+  for (const [key, entry] of map.entries()) {
+    if (now > entry.resetTime) {
+      map.delete(key);
+    }
+  }
+}
+
+setInterval(() => {
+  cleanupTracker(minuteTracker);
+  cleanupTracker(hourTracker);
+  cleanupTracker(dayTracker);
+}, 60 * 60 * 1000);
 
 // Rate limiting configuration based on environment
 export const getRateLimitConfig = () => {

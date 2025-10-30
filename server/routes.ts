@@ -862,11 +862,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updates = insertTaskSchema.partial().parse(req.body);
       const updatedTask = await storage.updateTask(taskId, updates, userId);
 
-      // If task was resolved, trigger knowledge base learning
+      // If task was resolved, trigger knowledge base learning (policy-aware)
       if (updates.status === "resolved" && task.status !== "resolved") {
         try {
           const { knowledgeBaseService } = await import("./knowledgeBase");
-          await knowledgeBaseService.learnFromResolvedTicket(taskId);
+          const { getAISettings } = await import("./admin/aiSettings");
+          const aiSettings = await getAISettings();
+          if (aiSettings.autoLearnEnabled) {
+            await knowledgeBaseService.learnFromResolvedTicket(taskId, {
+              minScore: Math.max(
+                0,
+                Math.min(1, Number(aiSettings.minResolutionScore ?? 0))
+              ),
+              requireApproval: !!aiSettings.articleApprovalRequired,
+            });
+          }
           console.log(
             `Knowledge base learning triggered for resolved ticket ${updatedTask.ticketNumber}`
           );

@@ -171,7 +171,6 @@ export default function AIAnalyticsPage() {
           <p className="text-muted-foreground">
             Test and monitor the AI-powered helpdesk features
           </p>
-
           <Badge
             variant={systemStatus === "operational" ? "default" : "destructive"}
             className="text-sm"

@@ -20,6 +20,7 @@ export interface AISettings {
   maxTokens: number;
 
   maxRequestsPerMinute: number;
+  maxRequestsPerHour: number; // 0 disables hourly cap
   maxRequestsPerDay: number;
 }
 
@@ -42,6 +43,7 @@ const DEFAULT_SETTINGS: AISettings = {
   maxTokens: 2000,
 
   maxRequestsPerMinute: 20,
+  maxRequestsPerHour: 0,
   maxRequestsPerDay: 1000,
 };
 
@@ -108,6 +110,10 @@ export function validateAISettings(input: AISettings): AISettings {
     maxTokens: clamp(Number(input.maxTokens), 100, 4000),
 
     maxRequestsPerMinute: clamp(Number(input.maxRequestsPerMinute), 1, 100),
+    // allow 0 to disable hourly limit
+    maxRequestsPerHour: input.maxRequestsPerHour
+      ? clamp(Number(input.maxRequestsPerHour), 1, 2000)
+      : 0,
     maxRequestsPerDay: clamp(Number(input.maxRequestsPerDay), 10, 10000),
   };
 }

@@ -43,6 +43,7 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -74,6 +75,8 @@ import {
   Key,
   Globe,
   RefreshCw,
+  Pencil,
+  XIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
@@ -102,6 +105,7 @@ interface AISettings {
 
   // Rate Limiting
   maxRequestsPerMinute: number;
+  maxRequestsPerHour: number; // 0 disables hourly cap
   maxRequestsPerDay: number;
 }
 
@@ -157,6 +161,7 @@ export default function AISettings() {
     temperature: 0.3,
     maxTokens: 2000,
     maxRequestsPerMinute: 20,
+    maxRequestsPerHour: 0,
     maxRequestsPerDay: 1000,
   });
 
@@ -292,6 +297,7 @@ export default function AISettings() {
 
   const handleChange = (key: keyof AISettings, value: any) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
+    if (isRateField(key)) setRatePreset("Custom");
     setHasChanges(true);
   };
 
@@ -317,17 +323,130 @@ export default function AISettings() {
     updateCostLimitsMutation.mutate(costLimits);
   };
 
-  // Deep-link support: scroll to section via ?section=...
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const section = params.get("section");
-    if (section) {
-      const el = document.getElementById(`ai-${section}`);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
+  // Rate limit presets
+  type RatePreset = "Strict" | "Balanced" | "Generous" | "Custom";
+  const [ratePreset, setRatePreset] = useState<RatePreset>("Balanced");
+  const applyPreset = (preset: RatePreset) => {
+    setRatePreset(preset);
+    if (preset === "Strict") {
+      setFormData((p) => ({
+        ...p,
+        maxRequestsPerMinute: 10,
+        maxRequestsPerHour: 100,
+        maxRequestsPerDay: 500,
+      }));
+      // Apply free-tier cost limits alongside rate limits
+      setCostLimits((c) => ({
+        ...c,
+        dailyLimitUSD: 1,
+        monthlyLimitUSD: 10,
+        maxTokensPerRequest: 1000,
+      }));
+    } else if (preset === "Balanced") {
+      setFormData((p) => ({
+        ...p,
+        maxRequestsPerMinute: 20,
+        maxRequestsPerHour: 0,
+        maxRequestsPerDay: 1000,
+      }));
+      setCostLimits((c) => ({
+        ...c,
+        dailyLimitUSD: 2,
+        monthlyLimitUSD: 15,
+        maxTokensPerRequest: 2000,
+      }));
+    } else if (preset === "Generous") {
+      setFormData((p) => ({
+        ...p,
+        maxRequestsPerMinute: 60,
+        maxRequestsPerHour: 600,
+        maxRequestsPerDay: 5000,
+      }));
+      setCostLimits((c) => ({
+        ...c,
+        dailyLimitUSD: 3,
+        monthlyLimitUSD: 25,
+        maxTokensPerRequest: 3000,
+      }));
     }
-  }, []);
+  };
+
+  // Inline validation for rate limits
+  const [rateErrors, setRateErrors] = useState<{
+    minute?: string;
+    hour?: string;
+    day?: string;
+    relation?: string;
+  }>({});
+
+  useEffect(() => {
+    const errs: typeof rateErrors = {};
+    if (
+      formData.maxRequestsPerMinute < 1 ||
+      formData.maxRequestsPerMinute > 100
+    ) {
+      errs.minute = "Must be between 1 and 100";
+    }
+    if (
+      formData.maxRequestsPerHour !== 0 &&
+      (formData.maxRequestsPerHour < 1 || formData.maxRequestsPerHour > 2000)
+    ) {
+      errs.hour = "Must be 0 (disabled) or between 1 and 2000";
+    }
+    if (formData.maxRequestsPerDay < 10 || formData.maxRequestsPerDay > 10000) {
+      errs.day = "Must be between 10 and 10000";
+    }
+    // Relationship hints
+    if (formData.maxRequestsPerHour > 0) {
+      const minToHour = formData.maxRequestsPerMinute * 60;
+      if (formData.maxRequestsPerHour < minToHour) {
+        errs.relation =
+          "Hourly cap is lower than 60× per-minute; it may never be reached.";
+      } else if (formData.maxRequestsPerHour > formData.maxRequestsPerDay) {
+        errs.relation =
+          "Hourly cap exceeds daily cap; hourly limit may be redundant.";
+      }
+    } else if (
+      formData.maxRequestsPerMinute * 60 >
+      formData.maxRequestsPerDay
+    ) {
+      errs.relation =
+        "Per-minute × 60 exceeds daily cap; requests may be throttled before hourly/day windows.";
+    }
+    setRateErrors(errs);
+  }, [
+    formData.maxRequestsPerMinute,
+    formData.maxRequestsPerHour,
+    formData.maxRequestsPerDay,
+  ]);
+
+  const isRateField = (k: keyof AISettings) =>
+    k === "maxRequestsPerMinute" ||
+    k === "maxRequestsPerHour" ||
+    k === "maxRequestsPerDay";
+
+  // Workflow (Auto-Response, Escalation, Learning) edit management
+  const [isEditingWorkflow, setIsEditingWorkflow] = useState(false);
+  const [workflowSnapshot, setWorkflowSnapshot] =
+    useState<Partial<AISettings> | null>(null);
+  const workflowFields: (keyof AISettings)[] = [
+    "autoResponseEnabled",
+    "confidenceThreshold",
+    "maxResponseLength",
+    "responseTimeout",
+    "escalationEnabled",
+    "complexityThreshold",
+    "escalationTeamId",
+    "autoLearnEnabled",
+    "minResolutionScore",
+    "articleApprovalRequired",
+  ];
+  const isWorkflowDirty = (() => {
+    if (!workflowSnapshot) return false;
+    return workflowFields.some(
+      (k) => (formData as any)[k] !== (workflowSnapshot as any)[k]
+    );
+  })();
 
   const getConfidenceLabel = (value: number) => {
     if (value >= 0.8) return "High (80%+)";
@@ -359,149 +478,197 @@ export default function AISettings() {
   const bedrockConfigured = (apiKeys as any)?.bedrock?.configured;
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Header */}
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          <p className="text-muted-foreground">
+            Configure AI-powered features and thresholds for the help-desk
+            system
+          </p>
+        </CardTitle>
+      </CardHeader>
 
-      <Card className="flex items-center justify-between">
-        <CardHeader>
-          <CardTitle className="text-lg font-medium text-muted-foreground">
-            Configure AI-powered features and thresholds for the helpdesk system
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Button
-            onClick={handleSave}
-            disabled={!hasChanges || updateSettings.isPending}
-          >
-            <Save className="h-4 w-4" />
-            Save Changes
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* AWS Bedrock Configuration */}
-      <Card id="ai-bedrock">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Shield className="h-5 w-5" />
-            AWS Bedrock Configuration
-          </CardTitle>
-          <CardDescription>
-            Configure AWS Bedrock credentials and model settings for AI features
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="bedrockAccessKeyId">AWS Access Key ID</Label>
-              <Input
-                id="bedrockAccessKeyId"
-                type="text"
-                value={bedrockSettings.bedrockAccessKeyId}
-                onChange={(e) =>
-                  handleBedrockChange("bedrockAccessKeyId", e.target.value)
-                }
-                placeholder="AKIA..."
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="bedrockSecretAccessKey">
-                AWS Secret Access Key
+      <CardContent className="flex flex-col gap-10">
+        {/* AWS Bedrock Configuration */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Shield className="h-5 w-5" />
+              <Label className="text-lg font-medium">
+                AWS Bedrock Configuration
               </Label>
-              <Input
-                id="bedrockSecretAccessKey"
-                type="password"
-                value={bedrockSettings.bedrockSecretAccessKey}
-                onChange={(e) =>
-                  handleBedrockChange("bedrockSecretAccessKey", e.target.value)
-                }
-                placeholder="Enter secret key..."
-              />
+            </CardTitle>
+            <CardDescription>
+              Configure AWS Bedrock credentials and model settings for AI
+              features
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {!bedrockConfigured && (
+              <Alert variant="destructive">
+                <AlertTitle>AWS Bedrock not configured</AlertTitle>
+                <AlertDescription>
+                  Add credentials to enable AI features. Rate limits will not be
+                  exercised until configured.
+                </AlertDescription>
+              </Alert>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+              <div className="space-y-2">
+                <Label htmlFor="bedrockAccessKeyId">AWS Access Key ID</Label>
+                <Input
+                  id="bedrockAccessKeyId"
+                  type="text"
+                  value={bedrockSettings.bedrockAccessKeyId}
+                  onChange={(e) =>
+                    handleBedrockChange("bedrockAccessKeyId", e.target.value)
+                  }
+                  placeholder="AKIA..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="bedrockSecretAccessKey">
+                  AWS Secret Access Key
+                </Label>
+                <Input
+                  id="bedrockSecretAccessKey"
+                  type="password"
+                  value={bedrockSettings.bedrockSecretAccessKey}
+                  onChange={(e) =>
+                    handleBedrockChange(
+                      "bedrockSecretAccessKey",
+                      e.target.value
+                    )
+                  }
+                  placeholder="Enter secret key..."
+                />
+              </div>
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="bedrockRegion">AWS Region</Label>
-              <Select
-                value={bedrockSettings.bedrockRegion}
-                onValueChange={(value) =>
-                  handleBedrockChange("bedrockRegion", value)
-                }
-              >
-                <SelectTrigger id="bedrockRegion">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="us-east-1">
-                    US East (N. Virginia)
-                  </SelectItem>
-                  <SelectItem value="us-west-2">US West (Oregon)</SelectItem>
-                  <SelectItem value="eu-central-1">
-                    Europe (Frankfurt)
-                  </SelectItem>
-                  <SelectItem value="ap-southeast-1">
-                    Asia Pacific (Singapore)
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+              <div className="space-y-2">
+                <Label htmlFor="bedrockRegion">AWS Region</Label>
+                <Select
+                  value={bedrockSettings.bedrockRegion}
+                  onValueChange={(value) =>
+                    handleBedrockChange("bedrockRegion", value)
+                  }
+                >
+                  <SelectTrigger id="bedrockRegion">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="us-east-1">
+                      US East (N. Virginia)
+                    </SelectItem>
+                    <SelectItem value="us-west-2">US West (Oregon)</SelectItem>
+                    <SelectItem value="eu-central-1">
+                      Europe (Frankfurt)
+                    </SelectItem>
+                    <SelectItem value="ap-southeast-1">
+                      Asia Pacific (Singapore)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="bedrockModelId">Bedrock Model</Label>
+                <Select
+                  value={bedrockSettings.bedrockModelId}
+                  onValueChange={(value) =>
+                    handleBedrockChange("bedrockModelId", value)
+                  }
+                >
+                  <SelectTrigger id="bedrockModelId">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="amazon.titan-text-express-v1">
+                      Amazon Titan Text Express (Recommended)
+                    </SelectItem>
+                    <SelectItem value="amazon.titan-text-lite-v1">
+                      Amazon Titan Text Lite (Fast & Affordable)
+                    </SelectItem>
+                    <SelectItem value="ai21.j2-mid-v1">
+                      AI21 Jurassic Mid (Balanced)
+                    </SelectItem>
+                    <SelectItem value="ai21.j2-ultra-v1">
+                      AI21 Jurassic Ultra (Advanced)
+                    </SelectItem>
+                    <SelectItem value="meta.llama2-13b-chat-v1">
+                      Meta Llama 2 13B (Open Source)
+                    </SelectItem>
+                    <SelectItem value="meta.llama2-70b-chat-v1">
+                      Meta Llama 2 70B (Large)
+                    </SelectItem>
+                    <SelectItem value="meta.llama3-8b-instruct-v1:0">
+                      Meta Llama 3 8B (Latest)
+                    </SelectItem>
+                    <SelectItem value="meta.llama3-70b-instruct-v1:0">
+                      Meta Llama 3 70B (Latest Large)
+                    </SelectItem>
+                    <SelectItem value="anthropic.claude-3-sonnet-20240229-v1:0">
+                      Claude 3 Sonnet (Limited Regions)
+                    </SelectItem>
+                    <SelectItem value="anthropic.claude-3-haiku-20240307-v1:0">
+                      Claude 3 Haiku (Limited Regions)
+                    </SelectItem>
+                    <SelectItem value="anthropic.claude-3-opus-20240229-v1:0">
+                      Claude 3 Opus (Limited Regions)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="bedrockModelId">Bedrock Model</Label>
-              <Select
-                value={bedrockSettings.bedrockModelId}
-                onValueChange={(value) =>
-                  handleBedrockChange("bedrockModelId", value)
-                }
-              >
-                <SelectTrigger id="bedrockModelId">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="amazon.titan-text-express-v1">
-                    Amazon Titan Text Express (Recommended)
-                  </SelectItem>
-                  <SelectItem value="amazon.titan-text-lite-v1">
-                    Amazon Titan Text Lite (Fast & Affordable)
-                  </SelectItem>
-                  <SelectItem value="ai21.j2-mid-v1">
-                    AI21 Jurassic Mid (Balanced)
-                  </SelectItem>
-                  <SelectItem value="ai21.j2-ultra-v1">
-                    AI21 Jurassic Ultra (Advanced)
-                  </SelectItem>
-                  <SelectItem value="meta.llama2-13b-chat-v1">
-                    Meta Llama 2 13B (Open Source)
-                  </SelectItem>
-                  <SelectItem value="meta.llama2-70b-chat-v1">
-                    Meta Llama 2 70B (Large)
-                  </SelectItem>
-                  <SelectItem value="meta.llama3-8b-instruct-v1:0">
-                    Meta Llama 3 8B (Latest)
-                  </SelectItem>
-                  <SelectItem value="meta.llama3-70b-instruct-v1:0">
-                    Meta Llama 3 70B (Latest Large)
-                  </SelectItem>
-                  <SelectItem value="anthropic.claude-3-sonnet-20240229-v1:0">
-                    Claude 3 Sonnet (Limited Regions)
-                  </SelectItem>
-                  <SelectItem value="anthropic.claude-3-haiku-20240307-v1:0">
-                    Claude 3 Haiku (Limited Regions)
-                  </SelectItem>
-                  <SelectItem value="anthropic.claude-3-opus-20240229-v1:0">
-                    Claude 3 Opus (Limited Regions)
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
 
-          <div className="flex items-center gap-4 pt-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+              <div className="space-y-2">
+                <Label>Temperature</Label>
+                <p className="text-sm text-muted-foreground">
+                  Controls randomness (0 = focused, 1 = creative)
+                </p>
+                <div className="flex items-center gap-2">
+                  <Slider
+                    value={[formData.temperature]}
+                    onValueChange={([value]) =>
+                      handleChange("temperature", value)
+                    }
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    className="flex-1"
+                  />
+                  <span className="w-12 text-right font-medium">
+                    {formData.temperature.toFixed(1)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="maxTokens">Max Tokens (model output)</Label>
+                <Input
+                  id="maxTokens"
+                  type="number"
+                  value={formData.maxTokens}
+                  onChange={(e) =>
+                    handleChange("maxTokens", parseInt(e.target.value))
+                  }
+                  min={100}
+                  max={4000}
+                  step={100}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Upper bound for AI response length.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+          <CardFooter className="flex items-center gap-5">
             <Button
               onClick={handleSaveBedrockSettings}
               disabled={updateBedrockSettings.isPending}
             >
-              <Save className="h-4 w-4 mr-2" />
+              <Save className="h-4 w-4" />
               Save Bedrock Settings
             </Button>
             <Button
@@ -510,132 +677,258 @@ export default function AISettings() {
               variant="outline"
             >
               <RefreshCw
-                className={cn(
-                  "h-4 w-4 mr-2",
-                  testingConnection && "animate-spin"
-                )}
+                className={cn("h-4 w-4", testingConnection && "animate-spin")}
               />
               Test Connection
             </Button>
-          </div>
-        </CardContent>
-      </Card>
+          </CardFooter>
+        </Card>
 
-      {/* Cost Limits Configuration */}
-      <Card id="ai-cost-limits">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Shield className="h-5 w-5" />
-            Cost Limits Configuration
-          </CardTitle>
-          <CardDescription>
-            Configure cost limits to prevent unexpected AWS Bedrock charges
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="dailyLimit">Daily Limit (USD)</Label>
-              <Input
-                id="dailyLimit"
-                type="number"
-                step="0.01"
-                value={costLimits.dailyLimitUSD || ""}
-                onChange={(e) =>
-                  setCostLimits((prev) => ({
-                    ...prev,
-                    dailyLimitUSD: parseFloat(e.target.value) || 0,
-                  }))
-                }
-                disabled={!isEditingCostLimits}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="monthlyLimit">Monthly Limit (USD)</Label>
-              <Input
-                id="monthlyLimit"
-                type="number"
-                step="0.01"
-                value={costLimits.monthlyLimitUSD || ""}
-                onChange={(e) =>
-                  setCostLimits((prev) => ({
-                    ...prev,
-                    monthlyLimitUSD: parseFloat(e.target.value) || 0,
-                  }))
-                }
-                disabled={!isEditingCostLimits}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="maxTokens">Max Tokens per Request</Label>
-              <Input
-                id="maxTokens"
-                type="number"
-                value={costLimits.maxTokensPerRequest || ""}
-                onChange={(e) =>
-                  setCostLimits((prev) => ({
-                    ...prev,
-                    maxTokensPerRequest: parseInt(e.target.value) || 0,
-                  }))
-                }
-                disabled={!isEditingCostLimits}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="maxRequestsDay">Max Requests per Day</Label>
-              <Input
-                id="maxRequestsDay"
-                type="number"
-                value={costLimits.maxRequestsPerDay || ""}
-                onChange={(e) =>
-                  setCostLimits((prev) => ({
-                    ...prev,
-                    maxRequestsPerDay: parseInt(e.target.value) || 0,
-                  }))
-                }
-                disabled={!isEditingCostLimits}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="maxRequestsHour">Max Requests per Hour</Label>
-              <Input
-                id="maxRequestsHour"
-                type="number"
-                value={costLimits.maxRequestsPerHour || ""}
-                onChange={(e) =>
-                  setCostLimits((prev) => ({
-                    ...prev,
-                    maxRequestsPerHour: parseInt(e.target.value) || 0,
-                  }))
-                }
-                disabled={!isEditingCostLimits}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="freeTier">Free Tier Account</Label>
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="freeTier"
-                  checked={costLimits.isFreeTierAccount || false}
-                  onCheckedChange={(checked) =>
+        {/* Cost Limits Configuration */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Shield className="h-5 w-5" />
+              <Label className="text-lg font-medium">
+                Cost Limits Configuration
+              </Label>
+            </CardTitle>
+            <CardDescription>
+              Configure cost limits to prevent unexpected AWS Bedrock charges
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-10">
+              <div className="space-y-2">
+                <Label htmlFor="dailyLimit">Daily Limit (USD)</Label>
+                <Input
+                  id="dailyLimit"
+                  type="number"
+                  step="0.01"
+                  value={costLimits.dailyLimitUSD || ""}
+                  onChange={(e) =>
                     setCostLimits((prev) => ({
                       ...prev,
-                      isFreeTierAccount: checked,
+                      dailyLimitUSD: parseFloat(e.target.value) || 0,
                     }))
                   }
-                  disabled={!isEditingCostLimits}
+                  disabled={
+                    !isEditingCostLimits || costLimits.isFreeTierAccount
+                  }
                 />
-                <span className="text-sm text-muted-foreground">
-                  Enable strict cost controls
-                </span>
+                {costLimits.isFreeTierAccount && (
+                  <p className="text-xs text-muted-foreground">
+                    Managed by Free Tier policy
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="monthlyLimit">Monthly Limit (USD)</Label>
+                <Input
+                  id="monthlyLimit"
+                  type="number"
+                  step="0.01"
+                  value={costLimits.monthlyLimitUSD || ""}
+                  onChange={(e) =>
+                    setCostLimits((prev) => ({
+                      ...prev,
+                      monthlyLimitUSD: parseFloat(e.target.value) || 0,
+                    }))
+                  }
+                  disabled={
+                    !isEditingCostLimits || costLimits.isFreeTierAccount
+                  }
+                />
+                {costLimits.isFreeTierAccount && (
+                  <p className="text-xs text-muted-foreground">
+                    Managed by Free Tier policy
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="maxTokens">
+                  Max Tokens per Request (budget)
+                </Label>
+                <Input
+                  id="maxTokens"
+                  type="number"
+                  value={costLimits.maxTokensPerRequest || ""}
+                  onChange={(e) =>
+                    setCostLimits((prev) => ({
+                      ...prev,
+                      maxTokensPerRequest: parseInt(e.target.value) || 0,
+                    }))
+                  }
+                  disabled={
+                    !isEditingCostLimits || costLimits.isFreeTierAccount
+                  }
+                />
+                {costLimits.isFreeTierAccount && (
+                  <p className="text-xs text-muted-foreground">
+                    Managed by Free Tier policy
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="freeTier">Free Tier Account</Label>
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="freeTier"
+                    checked={costLimits.isFreeTierAccount || false}
+                    onCheckedChange={(checked) => {
+                      setCostLimits((prev) => ({
+                        ...prev,
+                        isFreeTierAccount: checked,
+                      }));
+                      if (checked) {
+                        // Apply strict preset immediately when enabling strict controls
+                        applyPreset("Strict");
+                        setIsEditingCostLimits(false);
+                      }
+                    }}
+                    disabled={!isEditingCostLimits}
+                  />
+                  <span className="text-sm text-muted-foreground">
+                    Enable strict cost controls
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
-
-          <div className="flex items-center gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-10">
+              <div className="space-y-2">
+                <Label htmlFor="ratePreset">Policy Preset</Label>
+                <Select
+                  value={ratePreset}
+                  onValueChange={(v) => applyPreset(v as any)}
+                >
+                  <SelectTrigger id="ratePreset">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Strict">Strict</SelectItem>
+                    <SelectItem value="Balanced">Balanced</SelectItem>
+                    <SelectItem value="Generous">Generous</SelectItem>
+                    {!costLimits.isFreeTierAccount && (
+                      <SelectItem value="Custom">Custom</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    Presets fill minute/hour/day. Any manual change switches to
+                    Custom.
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      applyPreset("Balanced");
+                      setIsEditingCostLimits(true);
+                    }}
+                    className="text-xs"
+                  >
+                    Reset to defaults
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="maxRequestsPerMinute">
+                  Max Requests per Minute
+                </Label>
+                <Input
+                  id="maxRequestsPerMinute"
+                  type="number"
+                  value={formData.maxRequestsPerMinute}
+                  onChange={(e) =>
+                    handleChange(
+                      "maxRequestsPerMinute",
+                      parseInt(e.target.value)
+                    )
+                  }
+                  min={1}
+                  max={100}
+                  disabled={costLimits.isFreeTierAccount}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Protects against short spikes.
+                </p>
+                {rateErrors.minute && (
+                  <p className="text-xs text-destructive">
+                    {rateErrors.minute}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="maxRequestsPerHour">
+                  Max Requests per Hour
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="enableHourCap"
+                    checked={!!formData.maxRequestsPerHour}
+                    onCheckedChange={(checked) =>
+                      handleChange("maxRequestsPerHour", checked ? 100 : 0)
+                    }
+                    disabled={costLimits.isFreeTierAccount}
+                  />
+                  <Input
+                    id="maxRequestsPerHour"
+                    type="number"
+                    value={formData.maxRequestsPerHour || 0}
+                    onChange={(e) =>
+                      handleChange(
+                        "maxRequestsPerHour",
+                        parseInt(e.target.value)
+                      )
+                    }
+                    min={0}
+                    max={2000}
+                    disabled={
+                      !formData.maxRequestsPerHour ||
+                      costLimits.isFreeTierAccount
+                    }
+                    className="max-w-[200px]"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Turn off to disable hourly cap
+                </p>
+                {rateErrors.hour && (
+                  <p className="text-xs text-destructive">{rateErrors.hour}</p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="maxRequestsPerDay">Max Requests per Day</Label>
+                <Input
+                  id="maxRequestsPerDay"
+                  type="number"
+                  value={formData.maxRequestsPerDay}
+                  onChange={(e) =>
+                    handleChange("maxRequestsPerDay", parseInt(e.target.value))
+                  }
+                  min={10}
+                  max={10000}
+                  step={10}
+                  disabled={costLimits.isFreeTierAccount}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Budget cap for the entire request (prompt + response).
+                </p>
+                {rateErrors.day && (
+                  <p className="text-xs text-destructive">{rateErrors.day}</p>
+                )}
+              </div>
+              {rateErrors.relation && (
+                <div className="text-xs text-amber-600 -mt-2 col-span-1 md:col-span-4">
+                  {rateErrors.relation}
+                </div>
+              )}
+            </div>
+          </CardContent>
+          <CardFooter className="flex items-center gap-5">
             {!isEditingCostLimits ? (
               <Button onClick={() => setIsEditingCostLimits(true)}>
-                <Settings className="h-4 w-4 mr-2" />
+                <Settings className="h-3 w-3" />
                 Edit Limits
               </Button>
             ) : (
@@ -644,435 +937,313 @@ export default function AISettings() {
                   onClick={handleSaveCostLimits}
                   disabled={updateCostLimitsMutation.isPending}
                 >
-                  <Save className="h-4 w-4 mr-2" />
-                  Save Changes
+                  <Save className="h-4 w-4" />
+                  Save Limits
                 </Button>
                 <Button
                   variant="outline"
                   onClick={() => setIsEditingCostLimits(false)}
                 >
+                  <XIcon className="h-4 w-4" />
                   Cancel
                 </Button>
               </>
             )}
-          </div>
-        </CardContent>
-      </Card>
+          </CardFooter>
+        </Card>
 
-      {/* Auto-Response Settings */}
-      <Card id="ai-configuration">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Zap className="h-5 w-5" />
-            Auto-Response Configuration
-          </CardTitle>
-          <CardDescription>
-            Configure how AI automatically responds to tickets
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Enable Auto-Response</Label>
-              <p className="text-sm text-muted-foreground">
-                Automatically generate responses for new tickets
-              </p>
-            </div>
-            <Switch
-              checked={formData.autoResponseEnabled}
-              onCheckedChange={(checked) =>
-                handleChange("autoResponseEnabled", checked)
-              }
-            />
-          </div>
-
-          <Separator />
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Confidence Threshold</Label>
-              <p className="text-sm text-muted-foreground">
-                Minimum confidence score required to apply auto-response
-              </p>
-              <div className="flex items-center gap-4">
-                <Slider
-                  value={[formData.confidenceThreshold]}
-                  onValueChange={([value]) =>
-                    handleChange("confidenceThreshold", value)
-                  }
-                  min={0}
-                  max={1}
-                  step={0.1}
-                  className="flex-1"
-                />
-                <div className="w-32 text-right">
-                  <span className="font-medium">
-                    {(formData.confidenceThreshold * 100).toFixed(0)}%
-                  </span>
-                  <span className="text-sm text-muted-foreground ml-2">
-                    {getConfidenceLabel(formData.confidenceThreshold)}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="maxResponseLength">Max Response Length</Label>
-                <Input
-                  id="maxResponseLength"
-                  type="number"
-                  value={formData.maxResponseLength}
-                  onChange={(e) =>
-                    handleChange("maxResponseLength", parseInt(e.target.value))
-                  }
-                  min={100}
-                  max={5000}
-                />
-                <p className="text-xs text-muted-foreground">Characters</p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="responseTimeout">Response Timeout</Label>
-                <Input
-                  id="responseTimeout"
-                  type="number"
-                  value={formData.responseTimeout}
-                  onChange={(e) =>
-                    handleChange("responseTimeout", parseInt(e.target.value))
-                  }
-                  min={5}
-                  max={120}
-                />
-                <p className="text-xs text-muted-foreground">Seconds</p>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Knowledge Base Settings */}
-      <Card id="ai-learning">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Database className="h-5 w-5" />
-            Knowledge Base Learning
-          </CardTitle>
-          <CardDescription>
-            Configure how AI learns from resolved tickets
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Enable Auto-Learning</Label>
-              <p className="text-sm text-muted-foreground">
-                Automatically create knowledge articles from resolved tickets
-              </p>
-            </div>
-            <Switch
-              checked={formData.autoLearnEnabled}
-              onCheckedChange={(checked) =>
-                handleChange("autoLearnEnabled", checked)
-              }
-            />
-          </div>
-
-          <Separator />
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Minimum Resolution Score</Label>
-              <p className="text-sm text-muted-foreground">
-                Only learn from tickets with high resolution quality
-              </p>
-              <div className="flex items-center gap-4">
-                <Slider
-                  value={[formData.minResolutionScore]}
-                  onValueChange={([value]) =>
-                    handleChange("minResolutionScore", value)
-                  }
-                  min={0}
-                  max={1}
-                  step={0.1}
-                  className="flex-1"
-                />
-                <div className="w-24 text-right">
-                  <span className="font-medium">
-                    {(formData.minResolutionScore * 100).toFixed(0)}%
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Require Article Approval</Label>
-                <p className="text-sm text-muted-foreground">
-                  Knowledge articles need manual approval before publishing
-                </p>
-              </div>
-              <Switch
-                checked={formData.articleApprovalRequired}
-                onCheckedChange={(checked) =>
-                  handleChange("articleApprovalRequired", checked)
-                }
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Escalation Settings */}
-      <Card id="ai-escalation">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5" />
-            Escalation Configuration
-          </CardTitle>
-          <CardDescription>
-            Configure when tickets should be escalated to human agents
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Enable Auto-Escalation</Label>
-              <p className="text-sm text-muted-foreground">
-                Automatically escalate complex tickets
-              </p>
-            </div>
-            <Switch
-              checked={formData.escalationEnabled}
-              onCheckedChange={(checked) =>
-                handleChange("escalationEnabled", checked)
-              }
-            />
-          </div>
-
-          <Separator />
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Complexity Threshold</Label>
-              <p className="text-sm text-muted-foreground">
-                Tickets above this complexity score will be escalated
-              </p>
-              <div className="flex items-center gap-4">
-                <Slider
-                  value={[formData.complexityThreshold]}
-                  onValueChange={([value]) =>
-                    handleChange("complexityThreshold", value)
-                  }
-                  min={0}
-                  max={100}
-                  step={10}
-                  className="flex-1"
-                />
-                <div className="w-32 text-right">
-                  <span className="font-medium">
-                    {formData.complexityThreshold}
-                  </span>
-                  <span className="text-sm text-muted-foreground ml-2">
-                    {getComplexityLabel(formData.complexityThreshold)}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="escalationTeam">Escalation Team</Label>
-              <Select
-                value={formData.escalationTeamId?.toString() || ""}
-                onValueChange={(value) =>
-                  handleChange(
-                    "escalationTeamId",
-                    value ? parseInt(value) : undefined
-                  )
-                }
-              >
-                <SelectTrigger id="escalationTeam">
-                  <SelectValue placeholder="Select team for escalations" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(teams as any)?.map((team: any) => (
-                    <SelectItem key={team.id} value={team.id.toString()}>
-                      {team.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Model Settings */}
-      <Card id="ai-model">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Sliders className="h-5 w-5" />
-            Model Configuration
-          </CardTitle>
-          <CardDescription>Configure AI model parameters</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="bedrockModel">Bedrock Model</Label>
-            <Select
-              value={formData.bedrockModel}
-              onValueChange={(value) => handleChange("bedrockModel", value)}
-            >
-              <SelectTrigger id="bedrockModel">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="amazon.titan-text-express-v1">
-                  Amazon Titan Text Express (Recommended)
-                </SelectItem>
-                <SelectItem value="amazon.titan-text-lite-v1">
-                  Amazon Titan Text Lite (Fast & Affordable)
-                </SelectItem>
-                <SelectItem value="ai21.j2-mid-v1">
-                  AI21 Jurassic Mid (Balanced)
-                </SelectItem>
-                <SelectItem value="ai21.j2-ultra-v1">
-                  AI21 Jurassic Ultra (Advanced)
-                </SelectItem>
-                <SelectItem value="meta.llama2-13b-chat-v1">
-                  Meta Llama 2 13B (Open Source)
-                </SelectItem>
-                <SelectItem value="meta.llama2-70b-chat-v1">
-                  Meta Llama 2 70B (Large)
-                </SelectItem>
-                <SelectItem value="meta.llama3-8b-instruct-v1:0">
-                  Meta Llama 3 8B (Latest)
-                </SelectItem>
-                <SelectItem value="meta.llama3-70b-instruct-v1:0">
-                  Meta Llama 3 70B (Latest Large)
-                </SelectItem>
-                <SelectItem value="anthropic.claude-3-sonnet-20240229-v1:0">
-                  Claude 3 Sonnet (Limited Regions)
-                </SelectItem>
-                <SelectItem value="anthropic.claude-3-haiku-20240307-v1:0">
-                  Claude 3 Haiku (Limited Regions)
-                </SelectItem>
-                <SelectItem value="anthropic.claude-3-opus-20240229-v1:0">
-                  Claude 3 Opus (Limited Regions)
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Temperature</Label>
-              <p className="text-sm text-muted-foreground">
-                Controls randomness (0 = focused, 1 = creative)
-              </p>
-              <div className="flex items-center gap-2">
-                <Slider
-                  value={[formData.temperature]}
-                  onValueChange={([value]) =>
-                    handleChange("temperature", value)
-                  }
-                  min={0}
-                  max={1}
-                  step={0.1}
-                  className="flex-1"
-                />
-                <span className="w-12 text-right font-medium">
-                  {formData.temperature.toFixed(1)}
-                </span>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="maxTokens">Max Tokens</Label>
-              <Input
-                id="maxTokens"
-                type="number"
-                value={formData.maxTokens}
-                onChange={(e) =>
-                  handleChange("maxTokens", parseInt(e.target.value))
-                }
-                min={100}
-                max={4000}
-                step={100}
-              />
-              <p className="text-xs text-muted-foreground">
-                Maximum response length
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Rate Limiting */}
-      <Card id="ai-rate-limiting">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Globe className="h-5 w-5" />
-            Rate Limiting
-          </CardTitle>
-          <CardDescription>
-            Prevent excessive API usage and control costs
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="maxRequestsPerMinute">
-                Max Requests per Minute
+        {/* AI Workflow: Auto-Response, Escalation, Learning */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sliders className="h-5 w-5" />
+              <Label className="text-lg font-medium">
+                AI Workflow: Auto-Response, Escalation, Learning
               </Label>
-              <Input
-                id="maxRequestsPerMinute"
-                type="number"
-                value={formData.maxRequestsPerMinute}
-                onChange={(e) =>
-                  handleChange("maxRequestsPerMinute", parseInt(e.target.value))
-                }
-                min={1}
-                max={100}
-              />
+            </CardTitle>
+            <CardDescription>
+              Configure thresholds and behavior for the AI ticket workflow
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+            {/* Auto-Response */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label>Enable Auto-Response</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Automatically generate responses for new tickets
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.autoResponseEnabled}
+                  onCheckedChange={(checked) =>
+                    handleChange("autoResponseEnabled", checked)
+                  }
+                  disabled={!isEditingWorkflow}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Confidence Threshold</Label>
+                <p className="text-sm text-muted-foreground">
+                  Minimum confidence score required to apply auto-response
+                </p>
+                <div className="flex items-center gap-4">
+                  <Slider
+                    value={[formData.confidenceThreshold]}
+                    onValueChange={([value]) =>
+                      handleChange("confidenceThreshold", value)
+                    }
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    className="flex-1"
+                    disabled={!isEditingWorkflow}
+                  />
+                  <div className="w-32 text-right">
+                    <span className="font-medium">
+                      {(formData.confidenceThreshold * 100).toFixed(0)}%
+                    </span>
+                    <span className="text-sm text-muted-foreground ml-2">
+                      {getConfidenceLabel(formData.confidenceThreshold)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="maxResponseLength">Max Response Length</Label>
+                  <Input
+                    id="maxResponseLength"
+                    type="number"
+                    value={formData.maxResponseLength}
+                    onChange={(e) =>
+                      handleChange(
+                        "maxResponseLength",
+                        parseInt(e.target.value)
+                      )
+                    }
+                    min={100}
+                    max={5000}
+                    disabled={!isEditingWorkflow}
+                  />
+                  <p className="text-xs text-muted-foreground">Characters</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="responseTimeout">Response Timeout</Label>
+                  <Input
+                    id="responseTimeout"
+                    type="number"
+                    value={formData.responseTimeout}
+                    onChange={(e) =>
+                      handleChange("responseTimeout", parseInt(e.target.value))
+                    }
+                    min={5}
+                    max={120}
+                    disabled={!isEditingWorkflow}
+                  />
+                  <p className="text-xs text-muted-foreground">Seconds</p>
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="maxRequestsPerDay">Max Requests per Day</Label>
-              <Input
-                id="maxRequestsPerDay"
-                type="number"
-                value={formData.maxRequestsPerDay}
-                onChange={(e) =>
-                  handleChange("maxRequestsPerDay", parseInt(e.target.value))
-                }
-                min={10}
-                max={10000}
-                step={10}
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            {/* Escalation */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label>Enable Auto-Escalation</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Automatically escalate complex tickets
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.escalationEnabled}
+                  onCheckedChange={(checked) =>
+                    handleChange("escalationEnabled", checked)
+                  }
+                  disabled={!isEditingWorkflow}
+                />
+              </div>
 
-      {/* Footer with Save Button */}
-      <div className="flex items-center justify-between sticky bottom-6 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 p-4 rounded-lg border">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          {hasChanges && (
-            <>
-              <AlertTriangle className="h-4 w-4 text-amber-500" />
-              You have unsaved changes
-            </>
-          )}
-        </div>
-        <Button
-          onClick={handleSave}
-          disabled={!hasChanges || updateSettings.isPending}
-        >
-          <Save className="h-4 w-4 mr-2" />
-          {updateSettings.isPending ? "Saving..." : "Save Settings"}
-        </Button>
-      </div>
-    </div>
+              <div className="space-y-2">
+                <Label>Complexity Threshold</Label>
+                <p className="text-sm text-muted-foreground">
+                  Tickets above this complexity score will be escalated
+                </p>
+                <div className="flex items-center gap-4">
+                  <Slider
+                    value={[formData.complexityThreshold]}
+                    onValueChange={([value]) =>
+                      handleChange("complexityThreshold", value)
+                    }
+                    min={0}
+                    max={100}
+                    step={10}
+                    className="flex-1"
+                    disabled={!isEditingWorkflow}
+                  />
+                  <div className="w-32 text-right">
+                    <span className="font-medium">
+                      {formData.complexityThreshold}
+                    </span>
+                    <span className="text-sm text-muted-foreground ml-2">
+                      {getComplexityLabel(formData.complexityThreshold)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="escalationTeam">Escalation Team</Label>
+                <Select
+                  value={formData.escalationTeamId?.toString() || ""}
+                  onValueChange={(value) =>
+                    handleChange(
+                      "escalationTeamId",
+                      value ? parseInt(value) : undefined
+                    )
+                  }
+                  disabled={!isEditingWorkflow}
+                >
+                  <SelectTrigger id="escalationTeam">
+                    <SelectValue placeholder="Select team for escalations" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(teams as any)?.map((team: any) => (
+                      <SelectItem key={team.id} value={team.id.toString()}>
+                        {team.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Knowledge Learning */}
+            <div className="space-y-4 col-span-1 md:col-span-2 lg:col-span-1">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label>Enable Auto-Learning</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Automatically create knowledge articles from resolved
+                    tickets
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.autoLearnEnabled}
+                  onCheckedChange={(checked) =>
+                    handleChange("autoLearnEnabled", checked)
+                  }
+                  disabled={!isEditingWorkflow}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Minimum Resolution Score</Label>
+                <p className="text-sm text-muted-foreground">
+                  Only learn from tickets with high resolution quality
+                </p>
+                <div className="flex items-center gap-4">
+                  <Slider
+                    value={[formData.minResolutionScore]}
+                    onValueChange={([value]) =>
+                      handleChange("minResolutionScore", value)
+                    }
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    className="flex-1"
+                    disabled={!isEditingWorkflow}
+                  />
+                  <div className="w-24 text-right">
+                    <span className="font-medium">
+                      {(formData.minResolutionScore * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label>Require Article Approval</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Knowledge articles need manual approval before publishing
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.articleApprovalRequired}
+                  onCheckedChange={(checked) =>
+                    handleChange("articleApprovalRequired", checked)
+                  }
+                  disabled={!isEditingWorkflow}
+                />
+              </div>
+            </div>
+          </CardContent>
+          <CardFooter className="flex items-center gap-10">
+            {isWorkflowDirty && (
+              <p className="flex items-center gap-2 ext-muted-foreground">
+                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                You have unsaved workflow changes
+              </p>
+            )}
+
+            <div className="flex items-center gap-5">
+              {!isEditingWorkflow ? (
+                <Button
+                  variant="default"
+                  onClick={() => {
+                    setWorkflowSnapshot(
+                      workflowFields.reduce((acc, k) => {
+                        (acc as any)[k] = (formData as any)[k];
+                        return acc;
+                      }, {} as Partial<AISettings>)
+                    );
+                    setIsEditingWorkflow(true);
+                  }}
+                >
+                  <Pencil className="h-4 w-4 mr-1" />
+                  Edit AI Workflow
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    onClick={async () => {
+                      await updateSettings.mutateAsync(formData);
+                      setIsEditingWorkflow(false);
+                      setWorkflowSnapshot(null);
+                    }}
+                    disabled={!isWorkflowDirty || updateSettings.isPending}
+                  >
+                    <Save className="h-4 w-4" />
+                    Save Workflow
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      if (workflowSnapshot) {
+                        const restored: any = { ...formData };
+                        workflowFields.forEach((k) => {
+                          (restored as any)[k] = (workflowSnapshot as any)[k];
+                        });
+                        setFormData(restored);
+                      }
+                      setIsEditingWorkflow(false);
+                      setWorkflowSnapshot(null);
+                    }}
+                  >
+                    <XIcon className="h-4 w-4" />
+                    Cancel
+                  </Button>
+                </>
+              )}
+            </div>
+          </CardFooter>
+        </Card>
+      </CardContent>
+    </Card>
   );
 }
