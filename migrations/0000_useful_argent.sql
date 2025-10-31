@@ -1,4 +1,4 @@
-CREATE TABLE "ai_chat_messages" (
+CREATE TABLE IF NOT EXISTS "ai_chat_messages" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"user_id" varchar NOT NULL,
 	"session_id" varchar NOT NULL,
@@ -8,7 +8,7 @@ CREATE TABLE "ai_chat_messages" (
 	"created_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
-CREATE TABLE "api_keys" (
+CREATE TABLE IF NOT EXISTS "api_keys" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"user_id" varchar NOT NULL,
 	"name" varchar(255) NOT NULL,
@@ -21,7 +21,7 @@ CREATE TABLE "api_keys" (
 	"created_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
-CREATE TABLE "company_settings" (
+CREATE TABLE IF NOT EXISTS "company_settings" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"company_name" varchar(255) DEFAULT 'TicketFlow' NOT NULL,
 	"logo_url" text,
@@ -30,7 +30,7 @@ CREATE TABLE "company_settings" (
 	"updated_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
-CREATE TABLE "email_templates" (
+CREATE TABLE IF NOT EXISTS "email_templates" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"name" varchar(100) NOT NULL,
 	"subject" varchar(255) NOT NULL,
@@ -42,7 +42,7 @@ CREATE TABLE "email_templates" (
 	CONSTRAINT "email_templates_name_unique" UNIQUE("name")
 );
 --> statement-breakpoint
-CREATE TABLE "help_documents" (
+CREATE TABLE IF NOT EXISTS "help_documents" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"title" varchar NOT NULL,
 	"filename" varchar NOT NULL,
@@ -56,13 +56,13 @@ CREATE TABLE "help_documents" (
 	"updated_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
-CREATE TABLE "sessions" (
+CREATE TABLE IF NOT EXISTS "sessions" (
 	"sid" varchar PRIMARY KEY NOT NULL,
 	"sess" jsonb NOT NULL,
 	"expire" timestamp NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "smtp_settings" (
+CREATE TABLE IF NOT EXISTS "smtp_settings" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"host" varchar(255) NOT NULL,
 	"port" integer DEFAULT 587 NOT NULL,
@@ -76,7 +76,7 @@ CREATE TABLE "smtp_settings" (
 	"updated_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
-CREATE TABLE "task_attachments" (
+CREATE TABLE IF NOT EXISTS "task_attachments" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"task_id" integer NOT NULL,
 	"user_id" varchar NOT NULL,
@@ -87,7 +87,7 @@ CREATE TABLE "task_attachments" (
 	"created_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
-CREATE TABLE "task_comments" (
+CREATE TABLE IF NOT EXISTS "task_comments" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"task_id" integer NOT NULL,
 	"user_id" varchar NOT NULL,
@@ -95,7 +95,7 @@ CREATE TABLE "task_comments" (
 	"created_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
-CREATE TABLE "task_history" (
+CREATE TABLE IF NOT EXISTS "task_history" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"task_id" integer NOT NULL,
 	"user_id" varchar NOT NULL,
@@ -106,7 +106,7 @@ CREATE TABLE "task_history" (
 	"created_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
-CREATE TABLE "tasks" (
+CREATE TABLE IF NOT EXISTS "tasks" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"ticket_number" varchar(20) NOT NULL,
 	"title" varchar(255) NOT NULL,
@@ -131,7 +131,7 @@ CREATE TABLE "tasks" (
 	CONSTRAINT "tasks_ticket_number_unique" UNIQUE("ticket_number")
 );
 --> statement-breakpoint
-CREATE TABLE "team_members" (
+CREATE TABLE IF NOT EXISTS "team_members" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"team_id" integer NOT NULL,
 	"user_id" varchar NOT NULL,
@@ -139,7 +139,7 @@ CREATE TABLE "team_members" (
 	"joined_at" timestamp DEFAULT now()
 );
 --> statement-breakpoint
-CREATE TABLE "teams" (
+CREATE TABLE IF NOT EXISTS "teams" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"name" varchar(255) NOT NULL,
 	"description" text,
@@ -147,7 +147,7 @@ CREATE TABLE "teams" (
 	"created_by" varchar
 );
 --> statement-breakpoint
-CREATE TABLE "user_guide_categories" (
+CREATE TABLE IF NOT EXISTS "user_guide_categories" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"name" varchar(100) NOT NULL,
 	"description" text,
@@ -157,7 +157,7 @@ CREATE TABLE "user_guide_categories" (
 	CONSTRAINT "user_guide_categories_name_unique" UNIQUE("name")
 );
 --> statement-breakpoint
-CREATE TABLE "user_guides" (
+CREATE TABLE IF NOT EXISTS "user_guides" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"title" varchar(255) NOT NULL,
 	"description" text,
@@ -208,4 +208,4 @@ ALTER TABLE "team_members" ADD CONSTRAINT "team_members_team_id_teams_id_fk" FOR
 ALTER TABLE "team_members" ADD CONSTRAINT "team_members_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "teams" ADD CONSTRAINT "teams_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_guides" ADD CONSTRAINT "user_guides_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "IDX_session_expire" ON "sessions" USING btree ("expire");
+CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "sessions" USING btree ("expire");

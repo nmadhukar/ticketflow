@@ -2603,10 +2603,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getUserId(req);
       const { sessionId, message } = req.body;
 
-      if (!sessionId || !message) {
+      // Strict input validation
+      if (!sessionId) {
+        return res.status(400).json({ message: "Session ID is required" });
+      }
+      const rawMessage =
+        typeof message === "string" ? message : String(message ?? "");
+      const trimmedMessage = rawMessage.trim();
+      if (trimmedMessage.length === 0 || trimmedMessage.length > 2000) {
         return res
           .status(400)
-          .json({ message: "Session ID and message are required" });
+          .json({ message: "Message must be 1-2000 characters" });
       }
 
       // Save user message
@@ -2614,11 +2621,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId,
         sessionId,
         role: "user",
-        content: message,
+        content: trimmedMessage,
       });
 
       // Check FAQ cache first
-      const normalizedQuestion = normalizeQuestion(message);
+      const normalizedQuestion = normalizeQuestion(trimmedMessage);
       const questionHash = calculateQuestionHash(normalizedQuestion);
 
       const cachedAnswer = await storage.getFaqCacheEntry(questionHash);
@@ -2642,15 +2649,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Check if we have AWS Bedrock credentials
-      const smtpSettings = await storage.getSmtpSettings();
+      // Check if we have AWS Bedrock credentials (from Bedrock settings or env)
+      const bedrock = await storage.getBedrockSettings();
       const hasBedrockCredentials =
-        (smtpSettings?.bedrockAccessKeyId &&
-          smtpSettings?.bedrockSecretAccessKey &&
-          smtpSettings?.bedrockRegion) ||
-        (smtpSettings?.awsAccessKeyId &&
-          smtpSettings?.awsSecretAccessKey &&
-          smtpSettings?.awsRegion);
+        bedrock?.bedrockAccessKeyId &&
+        bedrock?.bedrockSecretAccessKey &&
+        (bedrock?.bedrockRegion || "us-east-1") &&
+        bedrock?.isActive;
 
       let response = "";
       const relevantDocIds: number[] = [];
@@ -2665,7 +2670,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           );
 
           // Get help documents for context
-          const helpDocs = await storage.searchHelpDocuments(message);
+          const helpDocs = await storage.searchHelpDocuments(trimmedMessage);
           let context = "";
 
           if (helpDocs.length > 0) {
@@ -2680,21 +2685,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
 
-          // Configure AWS Bedrock client - use Bedrock-specific credentials if available, otherwise fall back to SES credentials
+          // Configure AWS Bedrock client using Bedrock settings or environment variables
           const bedrockClient = new BedrockRuntimeClient({
             region:
-              smtpSettings.bedrockRegion ||
-              smtpSettings.awsRegion ||
-              "us-east-1",
+              bedrock?.bedrockRegion || process.env.AWS_REGION || "us-east-1",
             credentials: {
-              accessKeyId:
-                smtpSettings.bedrockAccessKeyId ||
-                smtpSettings.awsAccessKeyId ||
-                "",
-              secretAccessKey:
-                smtpSettings.bedrockSecretAccessKey ||
-                smtpSettings.awsSecretAccessKey ||
-                "",
+              accessKeyId: bedrock?.bedrockAccessKeyId || "",
+              secretAccessKey: bedrock?.bedrockSecretAccessKey || "",
             },
           });
 
@@ -2702,39 +2699,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const systemMessage =
             "You are a helpful assistant for TicketFlow, a ticketing system. Answer questions based on the provided context when available. Be concise and helpful.";
 
-          let userMessage = message;
+          let userMessage = trimmedMessage;
           if (context) {
-            userMessage = `Context:\n${context}\n\nUser question: ${message}`;
+            userMessage = `Context:\n${context}\n\nUser question: ${trimmedMessage}`;
           }
 
-          // Try different models based on availability
-          // Using Claude Instant v1 which has broader availability
-          let modelId = "anthropic.claude-instant-v1";
-          let modelPayload: any = {
-            anthropic_version: "bedrock-2023-05-31",
-            max_tokens: 1000,
-            temperature: 0.2,
-            system: systemMessage,
-            messages: [
-              {
-                role: "user",
-                content: userMessage,
+          // Enforce selected model only from Bedrock settings
+          const modelId = bedrock?.bedrockModelId || "";
+          if (!modelId) {
+            const currentUser = await storage.getUser(userId);
+            const msg =
+              currentUser?.role === "admin"
+                ? "No active AI model configured. Please select a model in AI Settings."
+                : "AI service is not configured. Please contact an administrator.";
+            return res.status(409).json({ message: msg });
+          }
+
+          // Validate against supported model families
+          const supportedFamilies = [
+            "amazon.titan",
+            "anthropic.claude",
+            "ai21.j2",
+            "meta.llama",
+          ];
+          if (!supportedFamilies.some((p) => modelId.startsWith(p))) {
+            const currentUser = await storage.getUser(userId);
+            const msg =
+              currentUser?.role === "admin"
+                ? `Selected model '${modelId}' is not supported. Choose a supported model (e.g., amazon.titan-text-express-v1).`
+                : "The selected AI model is not available. Please contact an administrator.";
+            return res.status(409).json({ message: msg });
+          }
+
+          // Build payload based on model family
+          let commandBody: any;
+          if (modelId.startsWith("amazon.titan")) {
+            commandBody = {
+              inputText: `${systemMessage}\n\n${userMessage}`,
+              textGenerationConfig: {
+                maxTokenCount: 1000,
+                temperature: 0.2,
+                topP: 0.9,
               },
-            ],
-          };
-
-          // Check if we should use a different model based on settings or fallback
-          const companySettings = await storage.getCompanySettings();
-          if (companySettings?.bedrockModelId) {
-            modelId = companySettings.bedrockModelId;
+            };
+          } else if (modelId.startsWith("anthropic.claude")) {
+            commandBody = {
+              anthropic_version: "bedrock-2023-05-31",
+              max_tokens: 1000,
+              temperature: 0.2,
+              system: systemMessage,
+              messages: [
+                {
+                  role: "user",
+                  content: userMessage,
+                },
+              ],
+            };
+          } else {
+            // Fallback to Claude-style payload if unknown
+            commandBody = {
+              anthropic_version: "bedrock-2023-05-31",
+              max_tokens: 1000,
+              temperature: 0.2,
+              system: systemMessage,
+              messages: [
+                {
+                  role: "user",
+                  content: userMessage,
+                },
+              ],
+            };
           }
 
-          // Create the request payload based on model type
           const command = new InvokeModelCommand({
             modelId,
             contentType: "application/json",
             accept: "application/json",
-            body: JSON.stringify(modelPayload),
+            body: JSON.stringify(commandBody),
           });
 
           // Invoke the model
@@ -2742,7 +2783,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const responseBody = JSON.parse(
             new TextDecoder().decode(bedrockResponse.body)
           );
-          response = responseBody.content[0].text;
+          if (modelId.startsWith("amazon.titan")) {
+            response = responseBody?.results?.[0]?.outputText || "";
+          } else {
+            response = responseBody.content?.[0]?.text || "";
+          }
 
           // Track usage
           const inputTokens = estimateTokenCount(systemMessage + userMessage);
@@ -2771,15 +2816,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         } catch (error: any) {
           console.error("Error calling AWS Bedrock:", error);
-          console.error("Error details:", error.message, error.name);
-          // Fallback to simple response
-          response =
-            "I apologize, but I'm having trouble processing your request. Please try again later or contact support.";
+          console.error("Error details:", error?.message, error?.name);
+          const currentUser = await storage.getUser(userId);
+          const isAdmin = currentUser?.role === "admin";
+          const unsupportedRegion =
+            typeof error?.message === "string" &&
+            /unsupported countries|unsupported regions|ValidationException/i.test(
+              error.message
+            );
+          if (unsupportedRegion) {
+            const adminMsg = `Selected model '${bedrock?.bedrockModelId}' is not available in this region. Please choose Amazon Titan Text Express or another supported model in AI Settings.`;
+            const userMsg =
+              "The AI model is not available right now. An administrator needs to adjust AI Settings.";
+            return res
+              .status(409)
+              .json({ message: isAdmin ? adminMsg : userMsg });
+          }
+
+          const adminMsg = `Failed to invoke model '${bedrock?.bedrockModelId}'. Check model access/permissions in AWS Bedrock or select a different model.`;
+          const userMsg =
+            "The AI service is temporarily unavailable. Please try again later.";
+          return res
+            .status(409)
+            .json({ message: isAdmin ? adminMsg : userMsg });
         }
       } else {
         // No AWS credentials configured - use simple fallback
         try {
-          const helpDocs = await storage.searchHelpDocuments(message);
+          // 1) Try company help documents
+          const helpDocs = await storage.searchHelpDocuments(trimmedMessage);
 
           if (helpDocs.length > 0) {
             response = "I found some relevant documentation:\n\n";
@@ -2794,8 +2859,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
               response += `${contentPreview}\n\n`;
             }
           } else {
-            response =
-              "I'm here to help! However, the AI service is not configured. Please ask your administrator to configure AWS credentials in the Admin Panel > Email Settings tab.";
+            // 2) Fallback to Knowledge Base articles (published)
+            const kbArticles = await storage.searchKnowledgeBase(
+              trimmedMessage
+            );
+            if (kbArticles.length > 0) {
+              response = "Here are relevant knowledge base articles:\n\n";
+              const topKb = kbArticles.slice(0, 3);
+              for (const art of topKb) {
+                response += `**${art.title}**\n`;
+                const contentPreview =
+                  (art.summary || art.content || "").substring(0, 300) +
+                  ((art.summary || art.content || "").length > 300
+                    ? "..."
+                    : "");
+                response += `${contentPreview}\n\n`;
+              }
+            } else {
+              response =
+                "I'm here to help! However, the AI service is not configured and I couldn't find any matching documents yet.";
+            }
           }
         } catch (error) {
           console.error("Error searching help documents:", error);
@@ -2858,6 +2941,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to fetch chat sessions" });
     }
   });
+
+  // API aliases for documentation parity
+  // POST /api/ai/chat -> /api/chat (preserve method/body with 307)
+  app.post("/api/ai/chat", isAuthenticated, async (req, res) => {
+    return res.redirect(307, "/api/chat");
+  });
+
+  // GET /api/ai/chat/history/:sessionId -> /api/chat/:sessionId
+  app.get(
+    "/api/ai/chat/history/:sessionId",
+    isAuthenticated,
+    async (req, res) => {
+      const { sessionId } = req.params as any;
+      return res.redirect(307, `/api/chat/${sessionId}`);
+    }
+  );
 
   // Bedrock usage endpoints
   app.get("/api/bedrock/usage", isAuthenticated, async (req, res) => {

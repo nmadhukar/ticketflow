@@ -23,6 +23,7 @@ import { storage } from "./storage";
 import { User as SelectUser, InsertUser } from "@shared/schema";
 import { z } from "zod";
 import { randomUUID } from "crypto";
+import * as client from "openid-client";
 
 declare global {
   namespace Express {
@@ -515,4 +516,46 @@ export function requireRole(...roles: string[]): RequestHandler {
 
     next();
   };
+}
+
+export function getSession() {
+  const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
+  const pgStore = connectPg(session);
+  const sessionStore = new pgStore({
+    conString: process.env.DATABASE_URL,
+    createTableIfMissing: false,
+    ttl: sessionTtl,
+    tableName: "sessions",
+  });
+  return session({
+    secret: process.env.SESSION_SECRET!,
+    store: sessionStore,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      secure: true,
+      maxAge: sessionTtl,
+    },
+  });
+}
+
+function updateUserSession(
+  user: any,
+  tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers
+) {
+  user.claims = tokens.claims();
+  user.access_token = tokens.access_token;
+  user.refresh_token = tokens.refresh_token;
+  user.expires_at = user.claims?.exp;
+}
+
+async function upsertUser(claims: any) {
+  await storage.upsertUser({
+    id: claims["sub"],
+    email: claims["email"],
+    firstName: claims["first_name"],
+    lastName: claims["last_name"],
+    profileImageUrl: claims["profile_image_url"],
+  });
 }

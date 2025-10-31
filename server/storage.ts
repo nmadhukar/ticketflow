@@ -89,6 +89,7 @@ import {
   sql,
   isNotNull,
   inArray,
+  ilike,
 } from "drizzle-orm";
 
 /**
@@ -2681,24 +2682,45 @@ export class DatabaseStorage implements IStorage {
     query: string,
     category?: string
   ): Promise<KnowledgeArticle[]> {
-    const conditions = [
-      eq(knowledgeArticles.isPublished, true),
+    // Tokenize the query and perform case-insensitive partial matching
+    const searchTerms = (query || "")
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((t) => t.length > 2);
+
+    const baseConditions: any[] = [
+      // Only search published content
       or(
-        like(knowledgeArticles.title, `%${query}%`),
-        like(knowledgeArticles.content, `%${query}%`),
-        like(knowledgeArticles.summary, `%${query}%`)
+        eq(knowledgeArticles.isPublished, true),
+        eq(knowledgeArticles.status as any, "published")
       ),
     ];
 
+    if (searchTerms.length > 0) {
+      const searchConditions = searchTerms.map((term) =>
+        or(
+          ilike(knowledgeArticles.title, `%${term}%`),
+          ilike(knowledgeArticles.content, `%${term}%`),
+          ilike(knowledgeArticles.summary, `%${term}%`)
+        )
+      );
+      baseConditions.push(or(...searchConditions));
+    }
+
     if (category) {
-      conditions.push(eq(knowledgeArticles.category, category));
+      baseConditions.push(eq(knowledgeArticles.category, category));
     }
 
     return await db
       .select()
       .from(knowledgeArticles)
-      .where(and(...conditions))
-      .orderBy(desc(knowledgeArticles.usageCount));
+      .where(and(...baseConditions))
+      .orderBy(
+        // Rank by effectiveness first, then usage
+        desc(knowledgeArticles.effectivenessScore),
+        desc(knowledgeArticles.usageCount)
+      )
+      .limit(50);
   }
 
   async findSimilarKnowledgeArticle(

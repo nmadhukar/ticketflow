@@ -26,6 +26,39 @@ interface SeedArticle {
 
 const DUMMY_ARTICLES: SeedArticle[] = [
   {
+    title: "FAQ: Reset Password via Email Link",
+    summary: "Use the emailed link to reset your password if you forgot it.",
+    content:
+      "If you receive a reset email: 1) Open the link within 15 minutes, 2) Set a new 12+ character password (mixed case, number, symbol), 3) Re-sign in on all devices. If the link expired, request a new reset from the login page.",
+    category: "accounts",
+    tags: ["password", "reset", "email"],
+    isPublished: true,
+    status: "published",
+    source: "manual",
+  },
+  {
+    title: "Quick Fixes: VPN Not Connecting",
+    summary: "Immediate checks when VPN fails on Windows or macOS.",
+    content:
+      "Try: 1) Verify internet access, 2) Correct system date/time, 3) Update VPN client, 4) Reboot device, 5) Ensure UDP/1194 (or IKEv2) open, 6) On macOS approve keychain prompts. If still failing, capture timestamp and error code.",
+    category: "network",
+    tags: ["vpn", "connectivity", "windows", "macos"],
+    isPublished: true,
+    status: "published",
+    source: "manual",
+  },
+  {
+    title: "Reference: IMAP/SMTP Settings",
+    summary: "Standard mail server settings for company email clients.",
+    content:
+      "IMAP: imap.ticketflow.local:993 (SSL)\nSMTP: smtp.ticketflow.local:587 (STARTTLS)\nUsername: your company email\nAuthentication: required\nIf you see auth errors, verify MFA/app password requirements.",
+    category: "email",
+    tags: ["imap", "smtp", "email", "settings"],
+    isPublished: true,
+    status: "published",
+    source: "manual",
+  },
+  {
     title: "Password Reset (Self-Service)",
     summary: "Reset your account password using the self-service portal.",
     content:

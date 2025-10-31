@@ -475,7 +475,7 @@ export default function AISettings() {
     );
   }
 
-  const bedrockConfigured = (apiKeys as any)?.bedrock?.configured;
+  const bedrockConfigured = (bedrockData as any)?.hasBedrockSecret || false;
 
   return (
     <Card>
@@ -698,7 +698,7 @@ export default function AISettings() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-10">
+            <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4 gap-10">
               <div className="space-y-2">
                 <Label htmlFor="dailyLimit">Daily Limit (USD)</Label>
                 <Input
@@ -795,7 +795,7 @@ export default function AISettings() {
                 </div>
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-10">
+            <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4 gap-10">
               <div className="space-y-2">
                 <Label htmlFor="ratePreset">Policy Preset</Label>
                 <Select
@@ -814,7 +814,7 @@ export default function AISettings() {
                     )}
                   </SelectContent>
                 </Select>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <p className="text-xs text-muted-foreground">
                     Presets fill minute/hour/day. Any manual change switches to
                     Custom.
@@ -918,12 +918,12 @@ export default function AISettings() {
                   <p className="text-xs text-destructive">{rateErrors.day}</p>
                 )}
               </div>
-              {rateErrors.relation && (
-                <div className="text-xs text-amber-600 -mt-2 col-span-1 md:col-span-4">
-                  {rateErrors.relation}
-                </div>
-              )}
             </div>
+            {rateErrors.relation && (
+              <div className="text-xs text-amber-600 -mt-2">
+                {rateErrors.relation}
+              </div>
+            )}
           </CardContent>
           <CardFooter className="flex items-center gap-5">
             {!isEditingCostLimits ? (
@@ -965,7 +965,7 @@ export default function AISettings() {
               Configure thresholds and behavior for the AI ticket workflow
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+          <CardContent className="grid grid-cols-1 gap-10">
             {/* Auto-Response */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
