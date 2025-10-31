@@ -22,7 +22,7 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       # Use DATABASE_URL if provided, otherwise construct from individual vars
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}
       command: ["npm", "run", "db:migrate"]
 
   app:
