@@ -435,7 +435,7 @@ export function BedrockCostMonitoring() {
                 <TableHead>Cost</TableHead>
               </TableRow>
             </TableHeader>
-            <TableBody>
+            <TableBody className="max-h-[30vh] overflow-y-auto">
               {recentUsage.map((record: UsageRecord, index: number) => (
                 <TableRow key={index}>
                   <TableCell className="text-sm">

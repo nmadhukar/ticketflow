@@ -16,8 +16,10 @@ app.set("trust proxy", 1);
 // Apply security middleware first
 applySecurity(app);
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+// Increase JSON body parser limit to handle base64 file uploads (logo, etc.)
+// Default is 100kb, we need at least 10MB to match multer's file size limit
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: false, limit: "10mb" }));
 
 app.use((req, res, next) => {
   const start = Date.now();

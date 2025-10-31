@@ -76,7 +76,7 @@ export default function Landing() {
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button
               size="lg"
-              onClick={() => (window.location.href = "/api/login")}
+              onClick={() => (window.location.href = "/login")}
               className="bg-blue-600 hover:bg-blue-700 text-lg px-8 py-3"
             >
               Get Started Free
@@ -140,7 +140,7 @@ export default function Landing() {
           </p>
           <Button
             size="lg"
-            onClick={() => (window.location.href = "/api/login")}
+            onClick={() => (window.location.href = "/login")}
             className="bg-white text-blue-600 hover:bg-slate-100 text-lg px-8 py-3"
           >
             Start Your Free Trial

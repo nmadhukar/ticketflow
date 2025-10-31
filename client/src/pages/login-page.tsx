@@ -1,5 +1,12 @@
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  CardFooter,
+} from "@/components/ui/card";
 import { Building2 } from "lucide-react";
 import { useState } from "react";
 import {
@@ -13,7 +20,9 @@ import {
 
 export default function LoginPage() {
   const [showForgotDialog, setShowForgotDialog] = useState(false);
-  const [forgotType, setForgotType] = useState<"username" | "password" | null>(null);
+  const [forgotType, setForgotType] = useState<"username" | "password" | null>(
+    null
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-muted/20 flex items-center justify-center p-4">
@@ -27,25 +36,29 @@ export default function LoginPage() {
 
         <Card className="shadow-business">
           <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl font-bold text-center">Welcome back</CardTitle>
+            <CardTitle className="text-2xl font-bold text-center">
+              Welcome back
+            </CardTitle>
             <CardDescription className="text-center">
               Sign in to your account to continue
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Button 
+            <Button
               className="w-full h-12 text-base font-medium"
-              onClick={() => window.location.href = "/api/login"}
+              onClick={() => (window.location.href = "/login")}
             >
               Sign in with Replit
             </Button>
-            
+
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
                 <span className="w-full border-t" />
               </div>
               <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground">Need help?</span>
+                <span className="bg-background px-2 text-muted-foreground">
+                  Need help?
+                </span>
               </div>
             </div>
 
@@ -73,7 +86,10 @@ export default function LoginPage() {
           <CardFooter>
             <p className="text-center text-sm text-muted-foreground w-full">
               Don't have an account?{" "}
-              <a href="/api/login" className="text-primary hover:text-primary/80 hover:underline transition-colors">
+              <a
+                href="/login"
+                className="text-primary hover:text-primary/80 hover:underline transition-colors"
+              >
                 Sign up
               </a>
             </p>
@@ -84,25 +100,29 @@ export default function LoginPage() {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>
-                {forgotType === "username" ? "Forgot Username" : "Forgot Password"}
+                {forgotType === "username"
+                  ? "Forgot Username"
+                  : "Forgot Password"}
               </DialogTitle>
               <DialogDescription>
-                {forgotType === "username" 
+                {forgotType === "username"
                   ? "Your username is the email address associated with your Replit account. If you can't remember which email you used, please check your email accounts for messages from Replit."
                   : "To reset your password, please visit your Replit account settings. TicketFlow uses Replit's secure authentication system, so password resets must be done through Replit."}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               {forgotType === "password" && (
-                <Button 
+                <Button
                   className="w-full"
-                  onClick={() => window.open("https://replit.com/account", "_blank")}
+                  onClick={() =>
+                    window.open("https://replit.com/account", "_blank")
+                  }
                 >
                   Go to Replit Account Settings
                 </Button>
               )}
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className="w-full"
                 onClick={() => setShowForgotDialog(false)}
               >

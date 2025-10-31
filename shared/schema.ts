@@ -44,6 +44,7 @@ import {
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
+import { TICKET_PRIORITIES } from "./constants";
 
 // Session storage table for Replit Auth
 export const sessions = pgTable(
@@ -192,6 +193,15 @@ export const companySettings = pgTable("company_settings", {
   ticketPrefix: varchar("ticket_prefix", { length: 10 })
     .notNull()
     .default("TKT"), // Configurable ticket prefix
+  defaultTicketPriority: varchar("default_ticket_priority", { length: 20 })
+    .notNull()
+    .default("medium"), // low, medium, high, urgent
+  autoCloseDays: integer("auto_close_days").default(7), // Days after resolved to auto-close (null = disabled)
+  timezone: varchar("timezone", { length: 50 }).default("UTC"), // Company timezone (e.g., 'America/New_York', 'Europe/London')
+  dateFormat: varchar("date_format", { length: 20 }).default("YYYY-MM-DD"), // Date display format
+  timeFormat: varchar("time_format", { length: 10 }).default("24h"), // '12h' or '24h'
+  maxFileUploadSize: integer("max_file_upload_size").default(10), // Maximum file upload size in MB
+  maintenanceMode: boolean("maintenance_mode").default(false), // System maintenance flag
   updatedBy: varchar("updated_by").references(() => users.id),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

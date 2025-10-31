@@ -483,6 +483,14 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+  // Company settings cache (in-memory with TTL)
+  private companySettingsCache: {
+    data: CompanySettings | undefined;
+    expiresAt: number;
+  } | null = null;
+
+  private readonly COMPANY_SETTINGS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes in milliseconds
+
   // User operations
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
@@ -1519,7 +1527,24 @@ export class DatabaseStorage implements IStorage {
 
   // Company settings operations
   async getCompanySettings(): Promise<CompanySettings | undefined> {
+    // Check cache first
+    const now = Date.now();
+    if (
+      this.companySettingsCache &&
+      this.companySettingsCache.expiresAt > now
+    ) {
+      return this.companySettingsCache.data;
+    }
+
+    // Cache miss or expired - fetch from database
     const [settings] = await db.select().from(companySettings).limit(1);
+
+    // Update cache
+    this.companySettingsCache = {
+      data: settings,
+      expiresAt: now + this.COMPANY_SETTINGS_CACHE_TTL,
+    };
+
     return settings;
   }
 
@@ -1528,6 +1553,8 @@ export class DatabaseStorage implements IStorage {
     userId: string
   ): Promise<CompanySettings> {
     const existingSettings = await this.getCompanySettings();
+
+    let result: CompanySettings;
 
     if (existingSettings) {
       const [updated] = await db
@@ -1539,7 +1566,7 @@ export class DatabaseStorage implements IStorage {
         })
         .where(eq(companySettings.id, existingSettings.id))
         .returning();
-      return updated;
+      result = updated;
     } else {
       const [created] = await db
         .insert(companySettings)
@@ -1548,8 +1575,17 @@ export class DatabaseStorage implements IStorage {
           updatedBy: userId,
         })
         .returning();
-      return created;
+      result = created;
     }
+
+    // Invalidate and update cache with new data
+    const now = Date.now();
+    this.companySettingsCache = {
+      data: result,
+      expiresAt: now + this.COMPANY_SETTINGS_CACHE_TTL,
+    };
+
+    return result;
   }
 
   // API key operations

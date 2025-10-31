@@ -29,10 +29,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
+import { TICKET_PRIORITIES } from "@shared/constants";
 import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -82,6 +84,7 @@ import {
   Plus,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { useLocation, Link, useRoute } from "wouter";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -560,11 +563,13 @@ export default function AdminPanel() {
       return;
     }
 
-    // Check file size (5MB limit)
-    if (file.size > 5 * 1024 * 1024) {
+    // Check file size using maxFileUploadSize from company settings
+    const maxSizeMB = (companySettingsLocal as any)?.maxFileUploadSize || 10;
+    const maxSizeBytes = maxSizeMB * 1024 * 1024;
+    if (file.size > maxSizeBytes) {
       toast({
         title: "Error",
-        description: "File size must be less than 5MB",
+        description: `File size must be less than ${maxSizeMB}MB`,
         variant: "destructive",
       });
       return;
@@ -645,7 +650,6 @@ export default function AdminPanel() {
     });
   };
 
-  // Section render helpers
   const renderUsers = () => (
     <Card>
       <CardHeader>
@@ -1031,161 +1035,348 @@ export default function AdminPanel() {
     </Card>
   );
 
-  const renderSystemSettings = () => (
+  const renderCompanyConsole = () => (
     <Card>
       <CardHeader>
-        <CardTitle>System Settings</CardTitle>
-        <CardDescription>
-          Configure system-wide settings and preferences
-        </CardDescription>
+        <CardTitle>
+          <p className="text-muted-foreground">
+            Manage company branding, settings, and preferences
+          </p>
+        </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label>Ticket Number Prefix</Label>
+      <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-10">
+        <div className="space-y-2 md:col-span-2">
+          <Label>Company Name</Label>
           <Input
-            value={(companySettingsLocal as any)?.ticketPrefix || "TKT"}
+            value={companyName}
             onChange={(e) => {
-              const value = e.target.value
-                .toUpperCase()
-                .replace(/[^A-Z0-9]/g, "")
-                .slice(0, 10);
+              setCompanyName(e.target.value);
               setCompanySettingsLocal({
                 ...(companySettingsLocal as any),
-                ticketPrefix: value,
+                companyName: e.target.value,
               });
             }}
-            placeholder="TKT"
-            maxLength={10}
+            placeholder="Enter company name"
           />
+        </div>
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <Label>Timezone</Label>
+            <Select
+              value={(companySettingsLocal as any)?.timezone || "UTC"}
+              onValueChange={(value) => {
+                setCompanySettingsLocal({
+                  ...(companySettingsLocal as any),
+                  timezone: value,
+                });
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select timezone" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="UTC">
+                  UTC (Coordinated Universal Time)
+                </SelectItem>
+                <SelectItem value="America/New_York">
+                  America/New_York (EST/EDT)
+                </SelectItem>
+                <SelectItem value="America/Chicago">
+                  America/Chicago (CST/CDT)
+                </SelectItem>
+                <SelectItem value="America/Denver">
+                  America/Denver (MST/MDT)
+                </SelectItem>
+                <SelectItem value="America/Los_Angeles">
+                  America/Los_Angeles (PST/PDT)
+                </SelectItem>
+                <SelectItem value="Europe/London">
+                  Europe/London (GMT/BST)
+                </SelectItem>
+                <SelectItem value="Europe/Paris">
+                  Europe/Paris (CET/CEST)
+                </SelectItem>
+                <SelectItem value="Asia/Tokyo">Asia/Tokyo (JST)</SelectItem>
+                <SelectItem value="Asia/Shanghai">
+                  Asia/Shanghai (CST)
+                </SelectItem>
+                <SelectItem value="Australia/Sydney">
+                  Australia/Sydney (AEST/AEDT)
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-sm text-muted-foreground">
+              System timezone for date and time display
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label>Date Format</Label>
+            <Select
+              value={(companySettingsLocal as any)?.dateFormat || "YYYY-MM-DD"}
+              onValueChange={(value) => {
+                setCompanySettingsLocal({
+                  ...(companySettingsLocal as any),
+                  dateFormat: value,
+                });
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select date format" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="YYYY-MM-DD">
+                  YYYY-MM-DD (2024-01-15)
+                </SelectItem>
+                <SelectItem value="MM/DD/YYYY">
+                  MM/DD/YYYY (01/15/2024)
+                </SelectItem>
+                <SelectItem value="DD/MM/YYYY">
+                  DD/MM/YYYY (15/01/2024)
+                </SelectItem>
+                <SelectItem value="DD-MM-YYYY">
+                  DD-MM-YYYY (15-01-2024)
+                </SelectItem>
+                <SelectItem value="MMM DD, YYYY">
+                  MMM DD, YYYY (Jan 15, 2024)
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-sm text-muted-foreground">
+              Format for displaying dates throughout the application
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label>Time Format</Label>
+            <Select
+              value={(companySettingsLocal as any)?.timeFormat || "24h"}
+              onValueChange={(value) => {
+                setCompanySettingsLocal({
+                  ...(companySettingsLocal as any),
+                  timeFormat: value,
+                });
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select time format" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="24h">24-hour (14:30)</SelectItem>
+                <SelectItem value="12h">12-hour (2:30 PM)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-sm text-muted-foreground">
+              Format for displaying times throughout the application
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label>Max File Upload Size (MB)</Label>
+            <Input
+              type="number"
+              min="1"
+              max="100"
+              value={(companySettingsLocal as any)?.maxFileUploadSize || 10}
+              onChange={(e) => {
+                const value = parseInt(e.target.value, 10);
+                if (!isNaN(value) && value >= 1 && value <= 100) {
+                  setCompanySettingsLocal({
+                    ...(companySettingsLocal as any),
+                    maxFileUploadSize: value,
+                  });
+                }
+              }}
+              placeholder="10"
+            />
+            <p className="text-sm text-muted-foreground">
+              Maximum file upload size in megabytes (1-100 MB)
+            </p>
+          </div>
+        </div>
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <Label>Ticket Number Prefix</Label>
+            <Input
+              value={(companySettingsLocal as any)?.ticketPrefix || "TKT"}
+              onChange={(e) => {
+                const value = e.target.value
+                  .toUpperCase()
+                  .replace(/[^A-Z0-9]/g, "")
+                  .slice(0, 10);
+                setCompanySettingsLocal({
+                  ...(companySettingsLocal as any),
+                  ticketPrefix: value,
+                });
+              }}
+              placeholder="TKT"
+              maxLength={10}
+            />
+            <p className="text-sm text-muted-foreground">
+              Prefix used for generating ticket numbers (max 10 characters,
+              letters and numbers only)
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label>Default Ticket Priority</Label>
+            <Select
+              value={
+                (companySettingsLocal as any)?.defaultTicketPriority || "medium"
+              }
+              onValueChange={(value) => {
+                setCompanySettingsLocal({
+                  ...(companySettingsLocal as any),
+                  defaultTicketPriority: value,
+                });
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select default priority" />
+              </SelectTrigger>
+              <SelectContent>
+                {TICKET_PRIORITIES.map((priority) => (
+                  <SelectItem key={priority} value={priority}>
+                    {priority.charAt(0).toUpperCase() + priority.slice(1)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-sm text-muted-foreground">
+              Default priority assigned to new tickets when not specified
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label>Auto-close Resolved Tickets After</Label>
+            <Input
+              type="number"
+              min="1"
+              max="365"
+              value={(companySettingsLocal as any)?.autoCloseDays ?? ""}
+              onChange={(e) => {
+                const value =
+                  e.target.value === "" ? null : parseInt(e.target.value, 10);
+                setCompanySettingsLocal({
+                  ...(companySettingsLocal as any),
+                  autoCloseDays: value || null,
+                });
+              }}
+              placeholder="Enter days or leave empty to disable"
+            />
+            <p className="text-sm text-muted-foreground">
+              Days after which resolved tickets are automatically closed
+              (1-365). Leave empty to disable auto-close.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label>Maintenance Mode</Label>
+                <p className="text-sm text-muted-foreground">
+                  When enabled, the system will be in maintenance mode and users
+                  will see a maintenance message
+                </p>
+              </div>
+              <Switch
+                checked={
+                  (companySettingsLocal as any)?.maintenanceMode || false
+                }
+                onCheckedChange={(checked) => {
+                  setCompanySettingsLocal({
+                    ...(companySettingsLocal as any),
+                    maintenanceMode: checked,
+                  });
+                }}
+              />
+            </div>
+            {(companySettingsLocal as any)?.maintenanceMode && (
+              <Alert className="mt-2">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Maintenance Mode Active</AlertTitle>
+                <AlertDescription>
+                  Users will see a maintenance message when this mode is
+                  enabled.
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
+        </div>
+        <div className="space-y-2 md:col-span-2">
+          <Label>Company Logo</Label>
+          <div className="flex items-center gap-4">
+            {(companySettingsLocal as any)?.logoUrl ? (
+              <div className="relative w-48 h-24 border rounded-lg overflow-hidden bg-gray-50">
+                <img
+                  src={(companySettingsLocal as any).logoUrl}
+                  alt="Company Logo"
+                  className="w-full h-full object-contain"
+                />
+              </div>
+            ) : (
+              <div className="w-48 h-24 border-2 border-dashed rounded-lg flex items-center justify-center bg-gray-50">
+                <Palette className="h-8 w-8 text-gray-400" />
+              </div>
+            )}
+            <div className="flex flex-col gap-2">
+              <Button
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadLogoMutation.isPending}
+                className="flex items-center gap-2"
+              >
+                <Upload className="h-4 w-4" />
+                {uploadLogoMutation.isPending ? "Uploading..." : "Upload Logo"}
+              </Button>
+              <p className="text-sm text-muted-foreground">
+                JPG or PNG, max{" "}
+                {(companySettingsLocal as any)?.maxFileUploadSize || 10}MB
+              </p>
+            </div>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/jpg,image/png"
+            onChange={handleLogoUpload}
+            className="hidden"
+          />
+
           <p className="text-sm text-muted-foreground">
-            Prefix used for generating ticket numbers (max 10 characters,
-            letters and numbers only)
+            Your logo will appear in the navigation bar and on customer-facing
+            documents.
           </p>
         </div>
-        <div className="space-y-2">
-          <Label>Default Ticket Priority</Label>
-          <Select defaultValue="medium">
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="low">Low</SelectItem>
-              <SelectItem value="medium">Medium</SelectItem>
-              <SelectItem value="high">High</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label>Auto-close Resolved Tickets After</Label>
-          <Input type="number" defaultValue="7" />
-          <p className="text-sm text-muted-foreground">
-            Days after which resolved tickets are automatically closed
-          </p>
-        </div>
+      </CardContent>
+
+      <CardFooter className="pt-4 border-t">
         <Button
-          className="mt-4"
-          onClick={() =>
-            updateCompanySettingsMutation.mutate({
+          className="w-full sm:w-auto"
+          onClick={() => {
+            const settingsToSave = {
               ...(companySettingsLocal as any),
+              companyName:
+                companyName || (companySettingsLocal as any)?.companyName,
               ticketPrefix:
                 (companySettingsLocal as any)?.ticketPrefix || "TKT",
-            })
-          }
+              defaultTicketPriority:
+                (companySettingsLocal as any)?.defaultTicketPriority ||
+                "medium",
+              autoCloseDays:
+                (companySettingsLocal as any)?.autoCloseDays ?? null,
+              timezone: (companySettingsLocal as any)?.timezone || "UTC",
+              dateFormat:
+                (companySettingsLocal as any)?.dateFormat || "YYYY-MM-DD",
+              timeFormat: (companySettingsLocal as any)?.timeFormat || "24h",
+              maxFileUploadSize:
+                (companySettingsLocal as any)?.maxFileUploadSize || 10,
+              maintenanceMode:
+                (companySettingsLocal as any)?.maintenanceMode || false,
+            };
+            updateCompanySettingsMutation.mutate(settingsToSave);
+          }}
           disabled={updateCompanySettingsMutation.isPending}
         >
           {updateCompanySettingsMutation.isPending
             ? "Saving..."
-            : "Save Settings"}
+            : "Save All Settings"}
         </Button>
-      </CardContent>
-    </Card>
-  );
-
-  const renderBranding = () => (
-    <Card>
-      <CardHeader>
-        <CardTitle>Company Branding</CardTitle>
-        <CardDescription>
-          Manage your company logo and branding settings
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label>Company Name</Label>
-            <div className="flex gap-2">
-              <Input
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
-                placeholder="Enter company name"
-              />
-              <Button
-                onClick={() =>
-                  updateCompanySettingsMutation.mutate({
-                    companyName,
-                  })
-                }
-                disabled={
-                  updateCompanySettingsMutation.isPending ||
-                  companyName === (companySettingsLocal as any)?.companyName
-                }
-              >
-                {updateCompanySettingsMutation.isPending ? "Saving..." : "Save"}
-              </Button>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <Label>Company Logo</Label>
-            <div className="flex items-center gap-4">
-              {(companySettingsLocal as any)?.logoUrl ? (
-                <div className="relative w-48 h-24 border rounded-lg overflow-hidden bg-gray-50">
-                  <img
-                    src={(companySettingsLocal as any).logoUrl}
-                    alt="Company Logo"
-                    className="w-full h-full object-contain"
-                  />
-                </div>
-              ) : (
-                <div className="w-48 h-24 border-2 border-dashed rounded-lg flex items-center justify-center bg-gray-50">
-                  <Palette className="h-8 w-8 text-gray-400" />
-                </div>
-              )}
-              <div className="flex flex-col gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploadLogoMutation.isPending}
-                  className="flex items-center gap-2"
-                >
-                  <Upload className="h-4 w-4" />
-                  {uploadLogoMutation.isPending
-                    ? "Uploading..."
-                    : "Upload Logo"}
-                </Button>
-                <p className="text-sm text-muted-foreground">
-                  JPG or PNG, max 5MB
-                </p>
-              </div>
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/jpeg,image/jpg,image/png"
-              onChange={handleLogoUpload}
-              className="hidden"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Logo Usage</Label>
-            <p className="text-sm text-muted-foreground">
-              Your logo will appear in the navigation bar and on customer-facing
-              documents.
-            </p>
-          </div>
-        </div>
-      </CardContent>
+      </CardFooter>
     </Card>
   );
 
@@ -1659,8 +1850,7 @@ export default function AdminPanel() {
     invitations: <Invitations />,
     teams: renderTeams(),
     api: renderApi(),
-    "system-settings": renderSystemSettings(),
-    branding: renderBranding(),
+    "company-console": renderCompanyConsole(),
     help: renderHelp(),
     policies: renderPolicies(),
     sso: renderSso(),
@@ -1675,7 +1865,7 @@ export default function AdminPanel() {
   return (
     <MainWrapper
       title="Admin Panel"
-      subTitle="Manage Users, Teams, Invitations, Api, Policies, Branding, AI Analytics, AI Settings and System settings"
+      subTitle="Manage Users, Teams, Invitations, Api, Policies, Configuration, AI Analytics, AI Settings and more"
     >
       {/* System Overview moved to Dashboard (admin-only) */}
 

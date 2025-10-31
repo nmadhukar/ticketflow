@@ -132,7 +132,7 @@ export default function KnowledgeBase() {
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/api/login";
+        window.location.href = "/login";
       }, 500);
       return;
     }
@@ -202,7 +202,7 @@ export default function KnowledgeBase() {
           variant: "destructive",
         });
         setTimeout(() => {
-          window.location.href = "/api/login";
+          window.location.href = "/login";
         }, 500);
         return;
       }
@@ -234,7 +234,7 @@ export default function KnowledgeBase() {
           variant: "destructive",
         });
         setTimeout(() => {
-          window.location.href = "/api/login";
+          window.location.href = "/login";
         }, 500);
         return;
       }
@@ -412,24 +412,26 @@ export default function KnowledgeBase() {
       title="Knowledge Base Management"
       subTitle="Manage knowledge articles for common issues and resolutions"
       action={
-        <div className="flex items-center gap-3">
-          <Button
-            onClick={() => triggerLearningMutation.mutate()}
-            disabled={triggerLearningMutation.isPending}
-            variant="outline"
-          >
-            {triggerLearningMutation.isPending ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Brain className="h-4 w-4 mr-2" />
-            )}
-            AI Learning
-          </Button>
-          <Button onClick={() => resetArticleForm()}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Article
-          </Button>
-        </div>
+        (user as any)?.role === "admin" && (
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={() => triggerLearningMutation.mutate()}
+              disabled={triggerLearningMutation.isPending}
+              variant="outline"
+            >
+              {triggerLearningMutation.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Brain className="h-4 w-4 mr-2" />
+              )}
+              AI Learning
+            </Button>
+            <Button onClick={() => resetArticleForm()}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Article
+            </Button>
+          </div>
+        )
       }
     >
       {/* Filters and Search */}
