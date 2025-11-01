@@ -12,20 +12,19 @@ COPY . .
 ENV NODE_ENV=production
 RUN npm run build
 
-# Migrate stage: For running database migrations
+# Migrate stage: For running database migrations (uses npx, no full install needed)
 FROM node:20-alpine AS migrate
 WORKDIR /app
 
-# Copy package files
+# Copy only what's needed for migrations
 COPY package.json package-lock.json* ./
-# Install all dependencies including dev (needed for drizzle-kit)
-RUN npm install --include=dev --no-audit --no-fund
+COPY drizzle.config.ts ./
+COPY migrations/ ./migrations/
+COPY shared/schema.ts ./shared/schema.ts
 
-# Copy source files (migrations, drizzle.config.ts, etc.)
-COPY . .
-
-# Default command (can be overridden in docker-compose)
-CMD ["npm", "run", "db:migrate"]
+# Use npx to run drizzle-kit without installing all dev dependencies
+# npx will download and cache drizzle-kit on first run
+CMD ["npx", "drizzle-kit", "migrate"]
 
 # Runtime stage: Only production dependencies
 FROM node:20-alpine AS runtime
