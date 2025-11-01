@@ -17,7 +17,7 @@ services:
   migrate:
     build:
       context: .
-      target: builder # Use builder stage to include dev dependencies (drizzle-kit)
+      target: migrate # Use dedicated migrate stage with dev dependencies
     depends_on:
       postgres:
         condition: service_healthy
