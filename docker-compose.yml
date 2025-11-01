@@ -15,7 +15,9 @@ services:
     restart: unless-stopped
 
   migrate:
-    build: .
+    build:
+      context: .
+      target: builder # Use builder stage to include dev dependencies (drizzle-kit)
     depends_on:
       postgres:
         condition: service_healthy

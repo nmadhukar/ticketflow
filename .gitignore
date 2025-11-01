@@ -18,6 +18,9 @@ vite.config.ts.*
 logs
 *.log
 npm-debug.log*
+build.log
+deployment.log
+app.log
 
 # Editor
 .vscode
@@ -32,5 +35,8 @@ Thumbs.db
 # Temporary files
 /tmp
 *.tmp
+
+# Deployment operations guide (contains sensitive commands)
+DEPLOYMENT_OPS.md
 
 config
