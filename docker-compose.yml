@@ -15,17 +15,17 @@ services:
     restart: unless-stopped
 
   migrate:
-    build:
-      context: .
-      target: migrate # Use dedicated migrate stage with dev dependencies
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - .:/app:ro
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       NODE_ENV: ${NODE_ENV:-production}
-      # Use DATABASE_URL if provided, otherwise construct from individual vars
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}
-    command: ["npx", "drizzle-kit", "migrate"]
+    command: sh -c "npx drizzle-kit migrate"
     restart: "no"
 
   app:
