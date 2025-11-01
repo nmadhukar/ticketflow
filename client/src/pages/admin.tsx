@@ -82,9 +82,15 @@ import {
   EyeOff,
   Copy,
   Plus,
+  Loader2,
+  CheckCircle2,
+  TestTube,
+  ExternalLink,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useLocation, Link, useRoute } from "wouter";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -163,6 +169,12 @@ export default function AdminPanel() {
     clientSecret: "",
     tenantId: "",
   });
+
+  // Teams Integration state
+  const [teamsWebhookUrl, setTeamsWebhookUrl] = useState("");
+  const [teamsNotificationTypes, setTeamsNotificationTypes] = useState<
+    string[]
+  >([]);
 
   // API Keys state
   const [newApiKeyName, setNewApiKeyName] = useState("");
@@ -286,6 +298,19 @@ export default function AdminPanel() {
       });
     }
   }, [smtpSettingsData]);
+
+  const { data: teamsIntegrationSettings } = useQuery({
+    queryKey: ["/api/teams-integration/settings"],
+    retry: false,
+  });
+
+  useEffect(() => {
+    const data: any = teamsIntegrationSettings;
+    if (data) {
+      setTeamsWebhookUrl(data.webhookUrl || "");
+      setTeamsNotificationTypes(data.notificationTypes || []);
+    }
+  }, [teamsIntegrationSettings]);
 
   const updateUserMutation = useMutation({
     mutationFn: async (userData: any) => {
@@ -548,6 +573,65 @@ export default function AdminPanel() {
       toast({
         title: "Error",
         description: "Failed to save SSO configuration",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateTeamsIntegrationMutation = useMutation({
+    mutationFn: async (data: any) => {
+      return await apiRequest("POST", "/api/teams-integration/settings", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["/api/teams-integration/settings"],
+      });
+      toast({
+        title: "Settings Updated",
+        description: "Your Teams integration settings have been saved.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update settings. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const disableTeamsIntegrationMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest("DELETE", "/api/teams-integration/settings");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["/api/teams-integration/settings"],
+      });
+      setTeamsWebhookUrl("");
+      setTeamsNotificationTypes([]);
+      toast({
+        title: "Integration Disabled",
+        description: "Teams integration has been disabled.",
+      });
+    },
+  });
+
+  const testTeamsNotificationMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest("POST", "/api/teams-integration/test");
+    },
+    onSuccess: () => {
+      toast({
+        title: "Test Sent",
+        description: "A test notification has been sent to your Teams channel.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Test Failed",
+        description:
+          "Failed to send test notification. Please check your settings.",
         variant: "destructive",
       });
     },
@@ -927,7 +1011,7 @@ export default function AdminPanel() {
     </Card>
   );
 
-  const renderApi = () => (
+  const renderDeveloperResources = () => (
     <Card>
       <CardHeader>
         <CardTitle className="text-lg font-medium text-muted-foreground">
@@ -1096,435 +1180,719 @@ export default function AdminPanel() {
           </p>
         </CardTitle>
       </CardHeader>
-      <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-10">
-        <div className="space-y-2 md:col-span-2">
-          <Label>Company Name</Label>
-          <Input
-            data-field="companyName"
-            value={companySettingsLocal.companyName || ""}
-            onChange={(e) => {
-              const value = e.target.value;
-              setCompanySettingsLocal((prev: typeof companySettingsLocal) => ({
-                ...prev,
-                companyName: value,
-              }));
-              // Clear error when user types
-              if (validationErrors.companyName) {
-                setValidationErrors((prev) => {
-                  const next = { ...prev };
-                  delete next.companyName;
-                  return next;
-                });
-              }
-            }}
-            placeholder="Enter company name"
-            className={validationErrors.companyName ? "border-destructive" : ""}
-          />
-          {validationErrors.companyName && (
-            <p className="text-sm text-destructive">
-              {validationErrors.companyName}
-            </p>
-          )}
-        </div>
-        <div className="space-y-6">
-          <div className="space-y-2">
-            <Label>Timezone</Label>
-            <Select
-              data-field="timezone"
-              value={companySettingsLocal.timezone || "UTC"}
-              onValueChange={(value) => {
-                setCompanySettingsLocal(
-                  (prev: typeof companySettingsLocal) => ({
-                    ...prev,
-                    timezone: value,
-                  })
-                );
-                // Clear error when user selects
-                if (validationErrors.timezone) {
-                  setValidationErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.timezone;
-                    return next;
-                  });
-                }
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select timezone" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="UTC">
-                  UTC (Coordinated Universal Time)
-                </SelectItem>
-                <SelectItem value="America/New_York">
-                  America/New_York (EST/EDT)
-                </SelectItem>
-                <SelectItem value="America/Chicago">
-                  America/Chicago (CST/CDT)
-                </SelectItem>
-                <SelectItem value="America/Denver">
-                  America/Denver (MST/MDT)
-                </SelectItem>
-                <SelectItem value="America/Los_Angeles">
-                  America/Los_Angeles (PST/PDT)
-                </SelectItem>
-                <SelectItem value="Europe/London">
-                  Europe/London (GMT/BST)
-                </SelectItem>
-                <SelectItem value="Europe/Paris">
-                  Europe/Paris (CET/CEST)
-                </SelectItem>
-                <SelectItem value="Asia/Tokyo">Asia/Tokyo (JST)</SelectItem>
-                <SelectItem value="Asia/Shanghai">
-                  Asia/Shanghai (CST)
-                </SelectItem>
-                <SelectItem value="Australia/Sydney">
-                  Australia/Sydney (AEST/AEDT)
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-sm text-muted-foreground">
-              System timezone for date and time display
-            </p>
-            {validationErrors.timezone && (
-              <p className="text-sm text-destructive">
-                {validationErrors.timezone}
-              </p>
-            )}
-          </div>
-          <div className="space-y-2">
-            <Label>Date Format</Label>
-            <Select
-              data-field="dateFormat"
-              value={companySettingsLocal.dateFormat || "YYYY-MM-DD"}
-              onValueChange={(value) => {
-                setCompanySettingsLocal(
-                  (prev: typeof companySettingsLocal) => ({
-                    ...prev,
-                    dateFormat: value,
-                  })
-                );
-                // Clear error when user selects
-                if (validationErrors.dateFormat) {
-                  setValidationErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.dateFormat;
-                    return next;
-                  });
-                }
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select date format" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="YYYY-MM-DD">
-                  YYYY-MM-DD (2024-01-15)
-                </SelectItem>
-                <SelectItem value="MM/DD/YYYY">
-                  MM/DD/YYYY (01/15/2024)
-                </SelectItem>
-                <SelectItem value="DD/MM/YYYY">
-                  DD/MM/YYYY (15/01/2024)
-                </SelectItem>
-                <SelectItem value="DD-MM-YYYY">
-                  DD-MM-YYYY (15-01-2024)
-                </SelectItem>
-                <SelectItem value="MMM DD, YYYY">
-                  MMM DD, YYYY (Jan 15, 2024)
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-sm text-muted-foreground">
-              Format for displaying dates throughout the application
-            </p>
-            {validationErrors.dateFormat && (
-              <p className="text-sm text-destructive">
-                {validationErrors.dateFormat}
-              </p>
-            )}
-          </div>
-          <div className="space-y-2">
-            <Label>Time Format</Label>
-            <Select
-              data-field="timeFormat"
-              value={companySettingsLocal.timeFormat || "24h"}
-              onValueChange={(value) => {
-                setCompanySettingsLocal(
-                  (prev: typeof companySettingsLocal) => ({
-                    ...prev,
-                    timeFormat: value,
-                  })
-                );
-                // Clear error when user selects
-                if (validationErrors.timeFormat) {
-                  setValidationErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.timeFormat;
-                    return next;
-                  });
-                }
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select time format" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="24h">24-hour (14:30)</SelectItem>
-                <SelectItem value="12h">12-hour (2:30 PM)</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-sm text-muted-foreground">
-              Format for displaying times throughout the application
-            </p>
-            {validationErrors.timeFormat && (
-              <p className="text-sm text-destructive">
-                {validationErrors.timeFormat}
-              </p>
-            )}
-          </div>
-          <div className="space-y-2">
-            <Label>Max File Upload Size (MB)</Label>
-            <Input
-              data-field="maxFileUploadSize"
-              type="number"
-              min="1"
-              max="100"
-              value={companySettingsLocal.maxFileUploadSize || 10}
-              onChange={(e) => {
-                const value = parseInt(e.target.value, 10);
-                if (!isNaN(value) && value >= 1 && value <= 100) {
+      <CardContent>
+        <Tabs defaultValue="settings" className="space-y-6">
+          <TabsList>
+            <TabsTrigger value="settings">Company Settings</TabsTrigger>
+            <TabsTrigger value="email">Email</TabsTrigger>
+          </TabsList>
+
+          <TabsContent
+            value="settings"
+            className="grid grid-cols-1 md:grid-cols-2 gap-10"
+          >
+            <div className="space-y-2 md:col-span-2">
+              <Label>Company Name</Label>
+              <Input
+                data-field="companyName"
+                value={companySettingsLocal.companyName || ""}
+                onChange={(e) => {
+                  const value = e.target.value;
                   setCompanySettingsLocal(
                     (prev: typeof companySettingsLocal) => ({
                       ...prev,
-                      maxFileUploadSize: value,
+                      companyName: value,
                     })
                   );
-                  // Clear error when user types valid value
-                  if (validationErrors.maxFileUploadSize) {
+                  // Clear error when user types
+                  if (validationErrors.companyName) {
                     setValidationErrors((prev) => {
                       const next = { ...prev };
-                      delete next.maxFileUploadSize;
+                      delete next.companyName;
                       return next;
                     });
                   }
-                }
-              }}
-              placeholder="10"
-              className={
-                validationErrors.maxFileUploadSize ? "border-destructive" : ""
-              }
-            />
-            <p className="text-sm text-muted-foreground">
-              Maximum file upload size in megabytes (1-100 MB)
-            </p>
-            {validationErrors.maxFileUploadSize && (
-              <p className="text-sm text-destructive">
-                {validationErrors.maxFileUploadSize}
-              </p>
-            )}
-          </div>
-        </div>
-        <div className="space-y-6">
-          <div className="space-y-2">
-            <Label>Ticket Number Prefix</Label>
-            <Input
-              data-field="ticketPrefix"
-              value={companySettingsLocal.ticketPrefix || "TKT"}
-              onChange={(e) => {
-                const value = e.target.value
-                  .toUpperCase()
-                  .replace(/[^A-Z0-9]/g, "")
-                  .slice(0, 10);
-                setCompanySettingsLocal(
-                  (prev: typeof companySettingsLocal) => ({
-                    ...prev,
-                    ticketPrefix: value,
-                  })
-                );
-                // Clear error when user types
-                if (validationErrors.ticketPrefix) {
-                  setValidationErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.ticketPrefix;
-                    return next;
-                  });
-                }
-              }}
-              placeholder="TKT"
-              maxLength={10}
-              className={
-                validationErrors.ticketPrefix ? "border-destructive" : ""
-              }
-            />
-            <p className="text-sm text-muted-foreground">
-              Prefix used for generating ticket numbers (max 10 characters,
-              letters and numbers only)
-            </p>
-            {validationErrors.ticketPrefix && (
-              <p className="text-sm text-destructive">
-                {validationErrors.ticketPrefix}
-              </p>
-            )}
-          </div>
-          <div className="space-y-2">
-            <Label>Default Ticket Priority</Label>
-            <Select
-              data-field="defaultTicketPriority"
-              value={companySettingsLocal.defaultTicketPriority}
-              onValueChange={(value) => {
-                setCompanySettingsLocal(
-                  (prev: typeof companySettingsLocal) => ({
-                    ...prev,
-                    defaultTicketPriority: value,
-                  })
-                );
-                // Clear error when user selects
-                if (validationErrors.defaultTicketPriority) {
-                  setValidationErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.defaultTicketPriority;
-                    return next;
-                  });
-                }
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select default priority" />
-              </SelectTrigger>
-              <SelectContent>
-                {TICKET_PRIORITIES.map((priority) => (
-                  <SelectItem key={priority} value={priority}>
-                    {priority.charAt(0).toUpperCase() + priority.slice(1)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-sm text-muted-foreground">
-              Default priority assigned to new tickets when not specified
-            </p>
-            {validationErrors.defaultTicketPriority && (
-              <p className="text-sm text-destructive">
-                {validationErrors.defaultTicketPriority}
-              </p>
-            )}
-          </div>
-          <div className="space-y-2">
-            <Label>Auto-close Resolved Tickets After</Label>
-            <Input
-              type="number"
-              min="1"
-              max="365"
-              value={companySettingsLocal.autoCloseDays ?? ""}
-              onChange={(e) => {
-                const value =
-                  e.target.value === "" ? null : parseInt(e.target.value, 10);
-                setCompanySettingsLocal(
-                  (prev: typeof companySettingsLocal) => ({
-                    ...prev,
-                    autoCloseDays: value || null,
-                  })
-                );
-              }}
-              placeholder="Enter days or leave empty to disable"
-            />
-            <p className="text-sm text-muted-foreground">
-              Days after which resolved tickets are automatically closed
-              (1-365). Leave empty to disable auto-close.
-            </p>
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Maintenance Mode</Label>
-                <p className="text-sm text-muted-foreground">
-                  When enabled, the system will be in maintenance mode and users
-                  will see a maintenance message
-                </p>
-              </div>
-              <Switch
-                checked={companySettingsLocal.maintenanceMode || false}
-                onCheckedChange={(checked) => {
-                  setCompanySettingsLocal(
-                    (prev: typeof companySettingsLocal) => ({
-                      ...prev,
-                      maintenanceMode: checked,
-                    })
-                  );
                 }}
+                placeholder="Enter company name"
+                className={
+                  validationErrors.companyName ? "border-destructive" : ""
+                }
               />
+              {validationErrors.companyName && (
+                <p className="text-sm text-destructive">
+                  {validationErrors.companyName}
+                </p>
+              )}
             </div>
-            {companySettingsLocal.maintenanceMode && (
-              <Alert className="mt-2">
-                <AlertCircle className="h-4 w-4" />
-                <AlertTitle>Maintenance Mode Active</AlertTitle>
-                <AlertDescription>
-                  Users will see a maintenance message when this mode is
-                  enabled.
-                </AlertDescription>
-              </Alert>
-            )}
-          </div>
-        </div>
-        <div className="space-y-2 md:col-span-2">
-          <Label>Company Logo</Label>
-          <div className="flex items-center gap-4">
-            {logoPreviewUrl || companySettingsLocal.logoUrl ? (
-              <div className="relative w-48 h-24 border rounded-lg overflow-hidden bg-gray-50">
-                <img
-                  src={logoPreviewUrl || companySettingsLocal.logoUrl}
-                  alt="Company Logo"
-                  className="w-full h-full object-contain"
-                />
-              </div>
-            ) : (
-              <div className="w-48 h-24 border-2 border-dashed rounded-lg flex items-center justify-center bg-gray-50">
-                <Palette className="h-8 w-8 text-gray-400" />
-              </div>
-            )}
-            <div className="flex flex-col gap-2">
-              <Button
-                variant="outline"
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2"
-              >
-                <Upload className="h-4 w-4" />
-                {selectedLogoFile ? "Change Logo" : "Select Logo"}
-              </Button>
-              {selectedLogoFile && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setSelectedLogoFile(null);
-                    setLogoPreviewUrl(null);
-                    if (fileInputRef.current) {
-                      fileInputRef.current.value = "";
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <Label>Timezone</Label>
+                <Select
+                  data-field="timezone"
+                  value={companySettingsLocal.timezone || "UTC"}
+                  onValueChange={(value) => {
+                    setCompanySettingsLocal(
+                      (prev: typeof companySettingsLocal) => ({
+                        ...prev,
+                        timezone: value,
+                      })
+                    );
+                    // Clear error when user selects
+                    if (validationErrors.timezone) {
+                      setValidationErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.timezone;
+                        return next;
+                      });
                     }
                   }}
-                  className="text-xs text-destructive"
                 >
-                  Clear
-                </Button>
-              )}
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select timezone" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="UTC">
+                      UTC (Coordinated Universal Time)
+                    </SelectItem>
+                    <SelectItem value="America/New_York">
+                      America/New_York (EST/EDT)
+                    </SelectItem>
+                    <SelectItem value="America/Chicago">
+                      America/Chicago (CST/CDT)
+                    </SelectItem>
+                    <SelectItem value="America/Denver">
+                      America/Denver (MST/MDT)
+                    </SelectItem>
+                    <SelectItem value="America/Los_Angeles">
+                      America/Los_Angeles (PST/PDT)
+                    </SelectItem>
+                    <SelectItem value="Europe/London">
+                      Europe/London (GMT/BST)
+                    </SelectItem>
+                    <SelectItem value="Europe/Paris">
+                      Europe/Paris (CET/CEST)
+                    </SelectItem>
+                    <SelectItem value="Asia/Tokyo">Asia/Tokyo (JST)</SelectItem>
+                    <SelectItem value="Asia/Shanghai">
+                      Asia/Shanghai (CST)
+                    </SelectItem>
+                    <SelectItem value="Australia/Sydney">
+                      Australia/Sydney (AEST/AEDT)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  System timezone for date and time display
+                </p>
+                {validationErrors.timezone && (
+                  <p className="text-sm text-destructive">
+                    {validationErrors.timezone}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>Date Format</Label>
+                <Select
+                  data-field="dateFormat"
+                  value={companySettingsLocal.dateFormat || "YYYY-MM-DD"}
+                  onValueChange={(value) => {
+                    setCompanySettingsLocal(
+                      (prev: typeof companySettingsLocal) => ({
+                        ...prev,
+                        dateFormat: value,
+                      })
+                    );
+                    // Clear error when user selects
+                    if (validationErrors.dateFormat) {
+                      setValidationErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.dateFormat;
+                        return next;
+                      });
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select date format" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="YYYY-MM-DD">
+                      YYYY-MM-DD (2024-01-15)
+                    </SelectItem>
+                    <SelectItem value="MM/DD/YYYY">
+                      MM/DD/YYYY (01/15/2024)
+                    </SelectItem>
+                    <SelectItem value="DD/MM/YYYY">
+                      DD/MM/YYYY (15/01/2024)
+                    </SelectItem>
+                    <SelectItem value="DD-MM-YYYY">
+                      DD-MM-YYYY (15-01-2024)
+                    </SelectItem>
+                    <SelectItem value="MMM DD, YYYY">
+                      MMM DD, YYYY (Jan 15, 2024)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  Format for displaying dates throughout the application
+                </p>
+                {validationErrors.dateFormat && (
+                  <p className="text-sm text-destructive">
+                    {validationErrors.dateFormat}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>Time Format</Label>
+                <Select
+                  data-field="timeFormat"
+                  value={companySettingsLocal.timeFormat || "24h"}
+                  onValueChange={(value) => {
+                    setCompanySettingsLocal(
+                      (prev: typeof companySettingsLocal) => ({
+                        ...prev,
+                        timeFormat: value,
+                      })
+                    );
+                    // Clear error when user selects
+                    if (validationErrors.timeFormat) {
+                      setValidationErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.timeFormat;
+                        return next;
+                      });
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select time format" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="24h">24-hour (14:30)</SelectItem>
+                    <SelectItem value="12h">12-hour (2:30 PM)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  Format for displaying times throughout the application
+                </p>
+                {validationErrors.timeFormat && (
+                  <p className="text-sm text-destructive">
+                    {validationErrors.timeFormat}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>Max File Upload Size (MB)</Label>
+                <Input
+                  data-field="maxFileUploadSize"
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={companySettingsLocal.maxFileUploadSize || 10}
+                  onChange={(e) => {
+                    const value = parseInt(e.target.value, 10);
+                    if (!isNaN(value) && value >= 1 && value <= 100) {
+                      setCompanySettingsLocal(
+                        (prev: typeof companySettingsLocal) => ({
+                          ...prev,
+                          maxFileUploadSize: value,
+                        })
+                      );
+                      // Clear error when user types valid value
+                      if (validationErrors.maxFileUploadSize) {
+                        setValidationErrors((prev) => {
+                          const next = { ...prev };
+                          delete next.maxFileUploadSize;
+                          return next;
+                        });
+                      }
+                    }
+                  }}
+                  placeholder="10"
+                  className={
+                    validationErrors.maxFileUploadSize
+                      ? "border-destructive"
+                      : ""
+                  }
+                />
+                <p className="text-sm text-muted-foreground">
+                  Maximum file upload size in megabytes (1-100 MB)
+                </p>
+                {validationErrors.maxFileUploadSize && (
+                  <p className="text-sm text-destructive">
+                    {validationErrors.maxFileUploadSize}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <Label>Ticket Number Prefix</Label>
+                <Input
+                  data-field="ticketPrefix"
+                  value={companySettingsLocal.ticketPrefix || "TKT"}
+                  onChange={(e) => {
+                    const value = e.target.value
+                      .toUpperCase()
+                      .replace(/[^A-Z0-9]/g, "")
+                      .slice(0, 10);
+                    setCompanySettingsLocal(
+                      (prev: typeof companySettingsLocal) => ({
+                        ...prev,
+                        ticketPrefix: value,
+                      })
+                    );
+                    // Clear error when user types
+                    if (validationErrors.ticketPrefix) {
+                      setValidationErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.ticketPrefix;
+                        return next;
+                      });
+                    }
+                  }}
+                  placeholder="TKT"
+                  maxLength={10}
+                  className={
+                    validationErrors.ticketPrefix ? "border-destructive" : ""
+                  }
+                />
+                <p className="text-sm text-muted-foreground">
+                  Prefix used for generating ticket numbers (max 10 characters,
+                  letters and numbers only)
+                </p>
+                {validationErrors.ticketPrefix && (
+                  <p className="text-sm text-destructive">
+                    {validationErrors.ticketPrefix}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>Default Ticket Priority</Label>
+                <Select
+                  data-field="defaultTicketPriority"
+                  value={companySettingsLocal.defaultTicketPriority}
+                  onValueChange={(value) => {
+                    setCompanySettingsLocal(
+                      (prev: typeof companySettingsLocal) => ({
+                        ...prev,
+                        defaultTicketPriority: value,
+                      })
+                    );
+                    // Clear error when user selects
+                    if (validationErrors.defaultTicketPriority) {
+                      setValidationErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.defaultTicketPriority;
+                        return next;
+                      });
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select default priority" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TICKET_PRIORITIES.map((priority) => (
+                      <SelectItem key={priority} value={priority}>
+                        {priority.charAt(0).toUpperCase() + priority.slice(1)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  Default priority assigned to new tickets when not specified
+                </p>
+                {validationErrors.defaultTicketPriority && (
+                  <p className="text-sm text-destructive">
+                    {validationErrors.defaultTicketPriority}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>Auto-close Resolved Tickets After</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="365"
+                  value={companySettingsLocal.autoCloseDays ?? ""}
+                  onChange={(e) => {
+                    const value =
+                      e.target.value === ""
+                        ? null
+                        : parseInt(e.target.value, 10);
+                    setCompanySettingsLocal(
+                      (prev: typeof companySettingsLocal) => ({
+                        ...prev,
+                        autoCloseDays: value || null,
+                      })
+                    );
+                  }}
+                  placeholder="Enter days or leave empty to disable"
+                />
+                <p className="text-sm text-muted-foreground">
+                  Days after which resolved tickets are automatically closed
+                  (1-365). Leave empty to disable auto-close.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label>Maintenance Mode</Label>
+                    <p className="text-sm text-muted-foreground">
+                      When enabled, the system will be in maintenance mode and
+                      users will see a maintenance message
+                    </p>
+                  </div>
+                  <Switch
+                    checked={companySettingsLocal.maintenanceMode || false}
+                    onCheckedChange={(checked) => {
+                      setCompanySettingsLocal(
+                        (prev: typeof companySettingsLocal) => ({
+                          ...prev,
+                          maintenanceMode: checked,
+                        })
+                      );
+                    }}
+                  />
+                </div>
+                {companySettingsLocal.maintenanceMode && (
+                  <Alert className="mt-2">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Maintenance Mode Active</AlertTitle>
+                    <AlertDescription>
+                      Users will see a maintenance message when this mode is
+                      enabled.
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label>Company Logo</Label>
+              <div className="flex items-center gap-4">
+                {logoPreviewUrl || companySettingsLocal.logoUrl ? (
+                  <div className="relative w-48 h-24 border rounded-lg overflow-hidden bg-gray-50">
+                    <img
+                      src={logoPreviewUrl || companySettingsLocal.logoUrl}
+                      alt="Company Logo"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-48 h-24 border-2 border-dashed rounded-lg flex items-center justify-center bg-gray-50">
+                    <Palette className="h-8 w-8 text-gray-400" />
+                  </div>
+                )}
+                <div className="flex flex-col gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-2"
+                  >
+                    <Upload className="h-4 w-4" />
+                    {selectedLogoFile ? "Change Logo" : "Select Logo"}
+                  </Button>
+                  {selectedLogoFile && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedLogoFile(null);
+                        setLogoPreviewUrl(null);
+                        if (fileInputRef.current) {
+                          fileInputRef.current.value = "";
+                        }
+                      }}
+                      className="text-xs text-destructive"
+                    >
+                      Clear
+                    </Button>
+                  )}
+                  <p className="text-sm text-muted-foreground">
+                    JPG or PNG, max{" "}
+                    {companySettingsLocal.maxFileUploadSize || 10}MB
+                  </p>
+                </div>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/jpg,image/png"
+                onChange={handleLogoUpload}
+                className="hidden"
+              />
+
               <p className="text-sm text-muted-foreground">
-                JPG or PNG, max {companySettingsLocal.maxFileUploadSize || 10}MB
+                Your logo will appear in the navigation bar and on
+                customer-facing documents.
               </p>
             </div>
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/jpeg,image/jpg,image/png"
-            onChange={handleLogoUpload}
-            className="hidden"
-          />
+          </TabsContent>
 
-          <p className="text-sm text-muted-foreground">
-            Your logo will appear in the navigation bar and on customer-facing
-            documents.
-          </p>
-        </div>
+          <TabsContent value="email" className="space-y-6">
+            <Alert className="border-blue-200 bg-blue-50">
+              <AlertCircle className="h-4 w-4 text-blue-600" />
+              <AlertTitle className="text-blue-800">
+                AWS Services Configuration
+              </AlertTitle>
+              <AlertDescription className="text-blue-700">
+                <p className="mb-2">
+                  TicketFlow uses AWS SES for email delivery functionality:
+                </p>
+                <ul className="list-disc list-inside space-y-1 text-sm">
+                  <li>
+                    <strong>AWS SES (Simple Email Service):</strong> For sending
+                    system emails
+                  </li>
+                </ul>
+                <p className="mt-2 text-xs text-orange-700">
+                  Configure AWS credentials for email functionality.
+                </p>
+              </AlertDescription>
+            </Alert>
+
+            {/* AWS SES Configuration */}
+            <div id="email-integrations" className="space-y-4">
+              <h3 className="text-lg font-semibold border-b pb-2">
+                AWS SES Configuration (Email)
+              </h3>
+
+              <div className="space-y-2">
+                <Label htmlFor="aws-access-key">AWS Access Key ID (SES)</Label>
+                <Input
+                  id="aws-access-key"
+                  placeholder="Enter your AWS Access Key ID for SES"
+                  value={emailSettings?.awsAccessKeyId || ""}
+                  onChange={(e) =>
+                    setEmailSettings({
+                      ...emailSettings,
+                      awsAccessKeyId: e.target.value,
+                    })
+                  }
+                />
+                <p className="text-sm text-muted-foreground">
+                  IAM user access key with ses:SendEmail and ses:SendRawEmail
+                  permissions
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="aws-secret-key">
+                  AWS Secret Access Key (SES)
+                </Label>
+                <Input
+                  id="aws-secret-key"
+                  type="password"
+                  placeholder="Enter your AWS Secret Access Key for SES"
+                  value={emailSettings?.awsSecretAccessKey || ""}
+                  onChange={(e) =>
+                    setEmailSettings({
+                      ...emailSettings,
+                      awsSecretAccessKey: e.target.value,
+                    })
+                  }
+                />
+                <p className="text-sm text-muted-foreground">
+                  Your AWS IAM user secret key for SES
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="aws-region">AWS Region (SES)</Label>
+                <Select
+                  value={emailSettings?.awsRegion || "us-east-1"}
+                  onValueChange={(value) =>
+                    setEmailSettings({
+                      ...emailSettings,
+                      awsRegion: value,
+                    })
+                  }
+                >
+                  <SelectTrigger id="aws-region">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="us-east-1">
+                      US East (N. Virginia)
+                    </SelectItem>
+                    <SelectItem value="us-west-2">US West (Oregon)</SelectItem>
+                    <SelectItem value="eu-west-1">EU (Ireland)</SelectItem>
+                    <SelectItem value="eu-central-1">EU (Frankfurt)</SelectItem>
+                    <SelectItem value="ap-southeast-1">
+                      Asia Pacific (Singapore)
+                    </SelectItem>
+                    <SelectItem value="ap-southeast-2">
+                      Asia Pacific (Sydney)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  The AWS region where SES is configured
+                </p>
+              </div>
+            </div>
+
+            <div className="border-t pt-4">
+              <h3 className="text-lg font-semibold mb-4">Service Status</h3>
+              <div className="space-y-3">
+                <div className="flex items-center space-x-2">
+                  <div
+                    className={`w-3 h-3 rounded-full ${
+                      emailSettings?.awsAccessKeyId &&
+                      emailSettings?.awsSecretAccessKey &&
+                      emailSettings?.awsRegion
+                        ? "bg-green-500"
+                        : "bg-yellow-500"
+                    }`}
+                  ></div>
+                  <span className="text-sm">
+                    {emailSettings?.awsAccessKeyId &&
+                    emailSettings?.awsSecretAccessKey &&
+                    emailSettings?.awsRegion
+                      ? "AWS SES configured - Email features enabled"
+                      : "AWS SES not configured - Email features disabled"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div id="email-sender" className="border-t pt-4">
+              <h3 className="text-lg font-semibold mb-4">
+                Sender Configuration
+              </h3>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="from-email">From Email Address</Label>
+                  <Input
+                    id="from-email"
+                    type="email"
+                    placeholder="noreply@yourcompany.com"
+                    value={emailSettings?.fromEmail || ""}
+                    onChange={(e) =>
+                      setEmailSettings({
+                        ...emailSettings,
+                        fromEmail: e.target.value,
+                      })
+                    }
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    This email must be verified in AWS SES
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="from-name">From Name</Label>
+                  <Input
+                    id="from-name"
+                    placeholder="TicketFlow System"
+                    value={emailSettings?.fromName || "TicketFlow"}
+                    onChange={(e) =>
+                      setEmailSettings({
+                        ...emailSettings,
+                        fromName: e.target.value,
+                      })
+                    }
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    The display name for system emails
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div id="email-test" className="border-t pt-4">
+              <h3 className="text-lg font-semibold mb-4">Email Test</h3>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="test-email">Test Email Address</Label>
+                  <Input
+                    id="test-email"
+                    type="email"
+                    placeholder="test@example.com"
+                    value={testEmailAddress}
+                    onChange={(e) => setTestEmailAddress(e.target.value)}
+                  />
+                  <p className="text-sm text-muted-foreground">
+                    Send a test email to verify configuration
+                  </p>
+                </div>
+
+                <Button
+                  variant="outline"
+                  onClick={() => testEmailMutation.mutate()}
+                  disabled={!testEmailAddress || testEmailMutation.isPending}
+                >
+                  {testEmailMutation.isPending
+                    ? "Sending..."
+                    : "Send Test Email"}
+                </Button>
+              </div>
+            </div>
+
+            <div id="email-templates" className="border-t pt-4">
+              <h3 className="text-lg font-semibold mb-4">Email Templates</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Customize email templates for different system notifications
+              </p>
+              <div className="space-y-4">
+                <Select
+                  value={selectedTemplate?.name || ""}
+                  onValueChange={(value) => {
+                    const list: any[] = (emailTemplates as any) || [];
+                    const template = list.find((t: any) => t.name === value);
+                    setSelectedTemplate(template);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a template to edit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="user_invitation">
+                      User Invitation
+                    </SelectItem>
+                    <SelectItem value="password_reset">
+                      Password Reset
+                    </SelectItem>
+                    <SelectItem value="ticket_created">
+                      Ticket Created
+                    </SelectItem>
+                    <SelectItem value="ticket_updated">
+                      Ticket Updated
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {selectedTemplate && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setIsEditTemplateOpen(true);
+                      }}
+                    >
+                      <FileEdit className="h-4 w-4 mr-2" />
+                      Edit Template
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-4 pt-4">
+              <Button
+                className="bg-primary hover:bg-primary/90"
+                onClick={() => saveEmailSettingsMutation.mutate()}
+                disabled={saveEmailSettingsMutation.isPending}
+              >
+                {saveEmailSettingsMutation.isPending
+                  ? "Saving..."
+                  : "Save Configuration"}
+              </Button>
+            </div>
+          </TabsContent>
+        </Tabs>
       </CardContent>
 
       <CardFooter className="pt-4 border-t flex flex-col gap-4">
@@ -2181,16 +2549,218 @@ export default function AdminPanel() {
     </Card>
   );
 
+  const notificationTypes = [
+    { id: "ticket_created", label: "New Ticket Created" },
+    { id: "ticket_updated", label: "Ticket Updated" },
+    { id: "ticket_assigned", label: "Ticket Assigned to Me" },
+    { id: "ticket_resolved", label: "Ticket Resolved" },
+    { id: "ticket_commented", label: "New Comment Added" },
+  ];
+
+  const handleTeamsWebhookSubmit = () => {
+    const currentWebhookUrl =
+      teamsWebhookUrl || (teamsIntegrationSettings as any)?.webhookUrl || "";
+    const currentNotificationTypes =
+      teamsNotificationTypes.length > 0
+        ? teamsNotificationTypes
+        : (teamsIntegrationSettings as any)?.notificationTypes || [];
+
+    if (!currentWebhookUrl || currentNotificationTypes.length === 0) {
+      toast({
+        title: "Missing Information",
+        description:
+          "Please provide a webhook URL and select at least one notification type.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    updateTeamsIntegrationMutation.mutate({
+      enabled: true,
+      webhookUrl: currentWebhookUrl,
+      notificationTypes: currentNotificationTypes,
+    });
+  };
+
+  const renderTeamsIntegration = () => {
+    const settings: any = teamsIntegrationSettings;
+    const isEnabled = settings?.enabled || false;
+    const currentWebhookUrl = teamsWebhookUrl || settings?.webhookUrl || "";
+    const currentNotificationTypes =
+      teamsNotificationTypes.length > 0
+        ? teamsNotificationTypes
+        : settings?.notificationTypes || [];
+
+    return (
+      <div className="space-y-6">
+        {isEnabled ? (
+          <Alert>
+            <CheckCircle2 className="h-4 w-4" />
+            <AlertTitle>Teams Integration Active</AlertTitle>
+            <AlertDescription>
+              Notifications are being sent to your configured Teams channel.
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Teams Integration Not Configured</AlertTitle>
+            <AlertDescription>
+              Set up Teams integration to receive ticket notifications in
+              Microsoft Teams.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Microsoft Teams Integration</CardTitle>
+            <CardDescription>
+              Connect TicketFlow with Microsoft Teams to receive real-time
+              notifications about tickets.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <Tabs defaultValue="webhook" className="space-y-4">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="webhook">Webhook Integration</TabsTrigger>
+                <TabsTrigger value="microsoft" disabled>
+                  Microsoft Graph (Coming Soon)
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="webhook">
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="webhook-url">Webhook URL</Label>
+                    <Input
+                      id="webhook-url"
+                      type="url"
+                      placeholder="https://outlook.office.com/webhook/..."
+                      value={currentWebhookUrl}
+                      onChange={(e) => setTeamsWebhookUrl(e.target.value)}
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      <a
+                        href="https://learn.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/add-incoming-webhook"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary hover:underline"
+                      >
+                        Learn how to create an incoming webhook
+                        <ExternalLink className="inline-block ml-1 h-3 w-3" />
+                      </a>
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label>Notification Types</Label>
+                    <div className="space-y-2">
+                      {notificationTypes.map((type) => (
+                        <div
+                          key={type.id}
+                          className="flex items-center space-x-2"
+                        >
+                          <Checkbox
+                            id={type.id}
+                            checked={currentNotificationTypes.includes(type.id)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setTeamsNotificationTypes([
+                                  ...currentNotificationTypes,
+                                  type.id,
+                                ]);
+                              } else {
+                                setTeamsNotificationTypes(
+                                  currentNotificationTypes.filter(
+                                    (t: string) => t !== type.id
+                                  )
+                                );
+                              }
+                            }}
+                          />
+                          <Label
+                            htmlFor={type.id}
+                            className="text-sm font-normal cursor-pointer"
+                          >
+                            {type.label}
+                          </Label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <Button
+                      onClick={handleTeamsWebhookSubmit}
+                      disabled={updateTeamsIntegrationMutation.isPending}
+                    >
+                      {updateTeamsIntegrationMutation.isPending && (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      )}
+                      Save Settings
+                    </Button>
+
+                    {isEnabled && (
+                      <>
+                        <Button
+                          variant="outline"
+                          onClick={() => testTeamsNotificationMutation.mutate()}
+                          disabled={testTeamsNotificationMutation.isPending}
+                        >
+                          {testTeamsNotificationMutation.isPending ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <TestTube className="mr-2 h-4 w-4" />
+                          )}
+                          Send Test
+                        </Button>
+
+                        <Button
+                          variant="destructive"
+                          onClick={() =>
+                            disableTeamsIntegrationMutation.mutate()
+                          }
+                          disabled={disableTeamsIntegrationMutation.isPending}
+                        >
+                          {disableTeamsIntegrationMutation.isPending && (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          )}
+                          Disable Integration
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="microsoft">
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Coming Soon</AlertTitle>
+                  <AlertDescription>
+                    Direct Microsoft Graph integration is under development.
+                    Please use webhook integration for now.
+                  </AlertDescription>
+                </Alert>
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
+
   const sections: Record<string, JSX.Element> = {
     users: renderUsers(),
     invitations: <Invitations />,
     teams: renderTeams(),
-    api: renderApi(),
+    "developer-resources": renderDeveloperResources(),
     "company-console": renderCompanyConsole(),
     help: renderHelp(),
     policies: renderPolicies(),
     sso: renderSso(),
-    email: renderEmail(),
+    "ms-teams-integration": renderTeamsIntegration(),
     "ai-settings": <AISettings />,
     "ai-analytics": <AiAnalytics />,
     "learning-queue": <KnowledgeLearningQueue />,

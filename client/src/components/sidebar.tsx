@@ -67,7 +67,7 @@ export function Sidebar({ className }: SidebarProps) {
       icon: Settings,
       hrefBase: "/admin",
       section: "configuration",
-      items: ["Company Console", "API Keys", "AI Settings"],
+      items: ["Company Console", "AI Settings"],
     },
     {
       title: "Analytics & Insights",
@@ -88,7 +88,7 @@ export function Sidebar({ className }: SidebarProps) {
       icon: Plug,
       hrefBase: "/admin",
       section: "integrations",
-      items: ["Microsoft 365 SSO", "Email"],
+      items: ["Microsoft 365 SSO", "Microsoft Teams", "Developer Resources"],
     },
   ] as const;
 
@@ -97,14 +97,14 @@ export function Sidebar({ className }: SidebarProps) {
     Invitations: "invitations",
     "Team Management": "teams",
     "Company Console": "company-console",
-    "API Keys": "api",
+    "Developer Resources": "developer-resources",
     "AI Settings": "ai-settings",
     "AI Performance": "ai-analytics",
     "Learning Queue": "learning-queue",
     "Help Documentation": "help",
     "Company Policies": "policies",
     "Microsoft 365 SSO": "sso",
-    Email: "email",
+    "Microsoft Teams": "ms-teams-integration",
   };
 
   const itemAllowed: Record<string, Array<string>> = {
@@ -112,14 +112,14 @@ export function Sidebar({ className }: SidebarProps) {
     Invitations: ["admin"],
     "Team Management": ["admin"],
     "Company Console": ["admin"],
-    "API Keys": ["admin"],
+    "Developer Resources": ["admin"],
     "AI Settings": ["admin"],
     "AI Performance": ["admin", "manager"],
     "Learning Queue": ["admin", "manager"],
     "Help Documentation": ["admin", "manager"],
     "Company Policies": ["admin", "manager"],
     "Microsoft 365 SSO": ["admin"],
-    Email: ["admin"],
+    "Microsoft Teams": ["admin"],
   };
 
   return (

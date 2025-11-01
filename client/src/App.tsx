@@ -59,7 +59,6 @@ import AuthPage from "@/pages/auth-page";
 import UserGuides from "@/pages/user-guides";
 import AdminGuides from "@/pages/admin-guides";
 import Departments from "@/pages/departments";
-import TeamsIntegration from "@/pages/teams-integration";
 import KnowledgeBase from "@/pages/knowledge-base";
 import { WebSocketProvider } from "@/hooks/useWebSocket";
 
@@ -121,10 +120,6 @@ function Router() {
                     <KnowledgeBase />
                   </ProtectedRoute>
                 </Route>
-                <Route
-                  path="/ms-teams-integration"
-                  component={TeamsIntegration}
-                />
                 <Route path="/settings" component={Settings} />
                 <Route path="/notifications" component={Notifications} />
                 <Route path="/guides" component={UserGuides} />

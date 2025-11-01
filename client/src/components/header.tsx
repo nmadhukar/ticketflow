@@ -12,7 +12,6 @@ import {
   BookOpen,
   ChevronDown,
   Globe,
-  MessageSquare,
   Settings,
   TicketIcon,
   UserCircle,
@@ -81,11 +80,6 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
     return (user as any)?.role === "admin"
       ? [
           { name: "Admin Guides", href: "/admin-guides", icon: BookOpen },
-          {
-            name: "Microsoft Teams Integration",
-            href: "/ms-teams-integration",
-            icon: MessageSquare,
-          },
           { name: "Settings", href: "/settings", icon: Settings },
         ]
       : [
