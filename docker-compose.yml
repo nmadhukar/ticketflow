@@ -1,3 +1,4 @@
+version: "3.9"
 services:
   postgres:
     image: postgres:16-alpine
@@ -15,17 +16,14 @@ services:
     restart: unless-stopped
 
   migrate:
-    image: node:20-alpine
-    working_dir: /app
-    volumes:
-      - .:/app:ro
+    build: .
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}
-    command: sh -c "npx drizzle-kit migrate"
+    command: ["npm", "run", "db:push"]
     restart: "no"
 
   app:
@@ -66,16 +64,6 @@ services:
       # Input validation
       INPUT_VALIDATION_ENABLED: ${INPUT_VALIDATION_ENABLED:-true}
       VALIDATION_STRICT_MODE: ${VALIDATION_STRICT_MODE:-true}
-
-      # AWS (SES/Bedrock)
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-
-      # Microsoft SSO (optional)
-      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
-      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
-      MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-}
 
       # DB driver override (optional: neon | pg)
       DB_DRIVER: ${DB_DRIVER:-}
