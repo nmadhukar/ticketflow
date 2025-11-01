@@ -1,17 +1,33 @@
-FROM node:20-alpine
+# Builder stage: Install all dependencies (including dev) and build
+FROM node:20-alpine AS builder
 WORKDIR /app
 
-# 1) Install dependencies (include dev so vite/esbuild are available)
-COPY package*.json ./
+# Install dependencies (including dev dependencies for build tools)
+# Explicitly copy both package files to ensure lock file is included
+COPY package.json package-lock.json* ./
 RUN npm install --include=dev --no-audit --no-fund
 
-# 2) Copy source and build (produces ./dist)
+# Copy source and build
 COPY . .
-ENV NODE_ENV=production \
-    PORT=5000
+ENV NODE_ENV=production
 RUN npm run build
 
-# 3) Run the server bundle
+# Runtime stage: Only production dependencies
+FROM node:20-alpine AS runtime
+WORKDIR /app
+
+# Install only production dependencies
+# Explicitly copy both package files to ensure lock file is included
+COPY package.json package-lock.json* ./
+RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+
+# Copy built artifacts from builder
+COPY --from=builder /app/dist ./dist
+
+# Runtime environment
+ENV NODE_ENV=production \
+    PORT=5000
+
 EXPOSE 5000
 CMD ["node", "dist/index.js"]
 
