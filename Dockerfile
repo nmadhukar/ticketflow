@@ -2,14 +2,16 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Install dependencies (including dev dependencies for build tools)
-# Explicitly copy both package files to ensure lock file is included
-COPY package.json package-lock.json* ./
-RUN npm install --include=dev --no-audit --no-fund
+# Install dependencies with better caching (copy package files first for layer caching)
+COPY package.json package-lock.json ./
+# Use npm ci for faster, reproducible installs (requires package-lock.json)
+# --mount=type=cache improves build speed by caching npm cache
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --include=dev --no-audit --no-fund
 
-# Copy source and build
+# Copy source and build (this layer changes more often, so placed after dependency install)
 COPY . .
-ENV NODE_ENV=production
+# Don't set NODE_ENV=production in builder stage (can interfere with build tools)
 RUN npm run build
 
 # Migrate stage: For running database migrations (uses npx, no full install needed)
@@ -17,7 +19,7 @@ FROM node:20-alpine AS migrate
 WORKDIR /app
 
 # Copy only what's needed for migrations
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json ./
 COPY drizzle.config.ts ./
 COPY migrations/ ./migrations/
 COPY shared/schema.ts ./shared/schema.ts
@@ -30,10 +32,11 @@ CMD ["npx", "drizzle-kit", "migrate"]
 FROM node:20-alpine AS runtime
 WORKDIR /app
 
-# Install only production dependencies
-# Explicitly copy both package files to ensure lock file is included
-COPY package.json package-lock.json* ./
-RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+# Install only production dependencies with caching
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev --no-audit --no-fund && \
+    npm cache clean --force
 
 # Copy built artifacts from builder
 COPY --from=builder /app/dist ./dist
