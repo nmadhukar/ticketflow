@@ -48,7 +48,7 @@ describe("Cost Monitoring", () => {
     mockedFs.existsSync.mockReturnValue(false);
     mockedFs.readFileSync.mockReturnValue("[]");
     mockedFs.writeFileSync.mockImplementation(() => {});
-    mockedFs.mkdirSync.mockImplementation(() => {});
+    mockedFs.mkdirSync.mockImplementation(() => undefined);
   });
 
   describe("estimateCost", () => {

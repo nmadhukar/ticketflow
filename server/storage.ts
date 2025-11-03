@@ -8,7 +8,7 @@ import {
   taskAttachments,
   companySettings,
   apiKeys,
-  smtpSettings,
+  emailProviders,
   emailTemplates,
   helpDocuments,
   aiChatMessages,
@@ -35,8 +35,8 @@ import {
   type InsertCompanySettings,
   type ApiKey,
   type InsertApiKey,
-  type SmtpSettings,
-  type InsertSmtpSettings,
+  type EmailProvider,
+  type InsertEmailProvider,
   type EmailTemplate,
   type InsertEmailTemplate,
   type HelpDocument,
@@ -292,12 +292,16 @@ export interface IStorage {
     userId: string
   ): Promise<BedrockSettings>;
 
-  // SMTP settings operations
-  getSmtpSettings(): Promise<SmtpSettings | undefined>;
-  updateSmtpSettings(
-    settings: InsertSmtpSettings,
+  // Email provider operations
+  getActiveEmailProvider(): Promise<EmailProvider | undefined>;
+  upsertEmailProvider(
+    provider: InsertEmailProvider,
     userId: string
-  ): Promise<SmtpSettings>;
+  ): Promise<EmailProvider>;
+  setActiveEmailProvider(id: number): Promise<void>;
+  updateActiveEmailProvider(
+    updates: Partial<{ fromEmail: string; fromName: string; metadata: any }>
+  ): Promise<EmailProvider>;
 
   // Email template operations
   getEmailTemplates(): Promise<EmailTemplate[]>;
@@ -1685,42 +1689,69 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  // SMTP settings operations
-  async getSmtpSettings(): Promise<SmtpSettings | undefined> {
-    const [settings] = await db
+  // Email provider operations
+  async getActiveEmailProvider(): Promise<EmailProvider | undefined> {
+    const [row] = await db
       .select()
-      .from(smtpSettings)
-      .where(eq(smtpSettings.isActive, true));
-    return settings;
+      .from(emailProviders)
+      .where(eq(emailProviders.isActive, true))
+      .orderBy(desc(emailProviders.updatedAt))
+      .limit(1);
+    return row as EmailProvider | undefined;
   }
 
-  async updateSmtpSettings(
-    settings: InsertSmtpSettings,
+  async upsertEmailProvider(
+    provider: InsertEmailProvider,
     userId: string
-  ): Promise<SmtpSettings> {
-    const existingSettings = await this.getSmtpSettings();
-
-    if (existingSettings) {
-      const [updated] = await db
-        .update(smtpSettings)
-        .set({
-          ...settings,
-          updatedBy: userId,
-          updatedAt: new Date(),
-        })
-        .where(eq(smtpSettings.id, existingSettings.id))
-        .returning();
-      return updated;
-    } else {
-      const [created] = await db
-        .insert(smtpSettings)
-        .values({
-          ...settings,
-          updatedBy: userId,
-        })
-        .returning();
-      return created;
+  ): Promise<EmailProvider> {
+    // single active provider policy: deactivate others if this is active
+    if (provider.isActive) {
+      await db.update(emailProviders).set({ isActive: false });
     }
+
+    const [result] = await db
+      .insert(emailProviders)
+      .values({ ...provider, updatedBy: userId })
+      .returning();
+    return result as EmailProvider;
+  }
+
+  async setActiveEmailProvider(id: number): Promise<void> {
+    await db.update(emailProviders).set({ isActive: false });
+    await db
+      .update(emailProviders)
+      .set({ isActive: true, updatedAt: new Date() })
+      .where(eq(emailProviders.id, id));
+  }
+
+  async updateActiveEmailProvider(
+    updates: Partial<{ fromEmail: string; fromName: string; metadata: any }>
+  ): Promise<EmailProvider> {
+    const [active] = await db
+      .select()
+      .from(emailProviders)
+      .where(eq(emailProviders.isActive, true))
+      .limit(1);
+    if (!active) {
+      throw new Error("No active email provider to update");
+    }
+    const [result] = await db
+      .update(emailProviders)
+      .set({
+        ...(updates.fromEmail !== undefined
+          ? { fromEmail: updates.fromEmail }
+          : {}),
+        ...(updates.fromName !== undefined
+          ? { fromName: updates.fromName }
+          : {}),
+        ...(updates.metadata !== undefined
+          ? { metadata: updates.metadata }
+          : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(emailProviders.id, (active as any).id))
+      .returning();
+    return result as EmailProvider;
   }
 
   // Email template operations

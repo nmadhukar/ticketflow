@@ -46,3 +46,36 @@ export const USER_ROLES = {
 } as const;
 
 export type UserRole = (typeof USER_ROLES)[keyof typeof USER_ROLES];
+
+export const DEFAULT_COMPANY = {
+  NAME: "TicketFlow",
+  BRANDING: {
+    PRIMARY_COLOR: "#3b82f6",
+    MAX_UPLOAD_MB: 10,
+  },
+  TICKETS: {
+    AUTO_CLOSE_DAYS: 7,
+    DEFAULT_PRIORITY: "medium" as const,
+  },
+  PREFERENCES: {
+    TIMEZONE: "UTC",
+    DATE_FORMAT: "YYYY-MM-DD",
+    TIME_FORMAT: "24h" as const,
+  },
+  EMAIL: {
+    FROM_EMAIL: "noreply@dsigsoftware.com",
+    FROM_NAME: "Helpdesk Support",
+  },
+};
+
+export const EMAIL_PROVIDERS = {
+  MAILTRAP: "mailtrap",
+  AWS: "aws-ses",
+  SMTP: "smtp",
+  MAILGUN: "mailgun",
+  SENDGRID: "sendgrid",
+  CUSTOM: "custom",
+} as const;
+
+export type EmailProviderId =
+  (typeof EMAIL_PROVIDERS)[keyof typeof EMAIL_PROVIDERS];

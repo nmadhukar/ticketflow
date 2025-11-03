@@ -16,7 +16,7 @@ import {
   TicketIcon,
   UserCircle,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import SignOutButton from "./signOutButton";
@@ -38,9 +38,20 @@ interface HeaderProps {
 export default function Header({ title, subtitle, action }: HeaderProps) {
   const { user } = useAuth();
   const [location] = useLocation();
-  const { data: companySettings } = useQuery({
-    queryKey: ["/api/company-settings"],
+  const { data: companyBranding } = useQuery({
+    queryKey: ["/api/company-settings/branding"],
   });
+
+  // Apply branding primary color to CSS variables so UI updates globally
+  useEffect(() => {
+    const primary = (companyBranding as any)?.primaryColor as
+      | string
+      | undefined;
+    if (!primary) return;
+    const root = document.documentElement;
+    root.style.setProperty("--primary", primary);
+    root.style.setProperty("--ring", primary);
+  }, [companyBranding]);
 
   // Unread notifications
   interface UnreadNotification {
@@ -91,17 +102,17 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
   return (
     <header className="bg-card shadow-business p-5 sticky top-0 backdrop-blur-md flex items-center justify-between z-50">
       <div className="flex items-center gap-3 ml-2">
-        {(companySettings as any)?.logoUrl ? (
+        {(companyBranding as any)?.logoUrl ? (
           <img
-            src={(companySettings as any).logoUrl}
-            alt={(companySettings as any).companyName || "Company Logo"}
+            src={(companyBranding as any).logoUrl}
+            alt={(companyBranding as any).companyName || "Company Logo"}
             className="h-8 w-auto object-contain max-w-[120px]"
           />
         ) : (
           <TicketIcon className="h-10 w-auto text-primary" />
         )}
         <span className="text-foreground text-lg">
-          {(companySettings as any)?.companyName || "TicketFlow"}
+          {(companyBranding as any)?.companyName || "TicketFlow"}
         </span>
       </div>
       <div className="flex items-center space-x-4">

@@ -7,6 +7,7 @@
 
 import type { Express } from "express";
 import { registerSettingsRoutes } from "./settings";
+import { registerCompanySettingsRoutes } from "./companySettings";
 // Import other route modules as they are created
 // import { registerUsersRoutes } from "./users";
 // import { registerKnowledgeRoutes } from "./knowledge";
@@ -20,7 +21,10 @@ import { registerSettingsRoutes } from "./settings";
  * to register all administrative endpoints.
  */
 export function registerAdminRoutes(app: Express): void {
-  // Register settings routes (company settings, branding, SMTP, SSO, email templates)
+  // Register company settings (branding, tickets, preferences, email)
+  registerCompanySettingsRoutes(app);
+
+  // Register remaining settings routes (SSO, email templates, etc.)
   registerSettingsRoutes(app);
 
   // Register other admin route modules here as they are created:

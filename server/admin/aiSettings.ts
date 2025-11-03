@@ -1,28 +1,6 @@
+import { AISettings } from "@shared/interfaces";
 import fs from "fs";
 import path from "path";
-
-export interface AISettings {
-  autoResponseEnabled: boolean;
-  confidenceThreshold: number; // 0..1
-  maxResponseLength: number;
-  responseTimeout: number; // seconds
-
-  autoLearnEnabled: boolean;
-  minResolutionScore: number; // 0..1
-  articleApprovalRequired: boolean;
-
-  complexityThreshold: number; // 0..100
-  escalationEnabled: boolean;
-  escalationTeamId?: number;
-
-  bedrockModel: string;
-  temperature: number; // 0..1
-  maxTokens: number;
-
-  maxRequestsPerMinute: number;
-  maxRequestsPerHour: number; // 0 disables hourly cap
-  maxRequestsPerDay: number;
-}
 
 const DEFAULT_SETTINGS: AISettings = {
   autoResponseEnabled: true,
@@ -38,7 +16,7 @@ const DEFAULT_SETTINGS: AISettings = {
   escalationEnabled: true,
   escalationTeamId: undefined,
 
-  bedrockModel: "anthropic.claude-3-sonnet-20240229-v1:0",
+  bedrockModel: "",
   temperature: 0.3,
   maxTokens: 2000,
 

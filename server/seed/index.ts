@@ -4,3 +4,4 @@ export { seedTeams } from "./seedTeams";
 export { seedTickets } from "./seedTickets";
 export { seedKnowledgeArticles } from "./seedKnowledge";
 export { seedHelpAndDocs } from "./seedHelpAndDocs";
+export { seedEmailTemplates } from "./seedEmailTemplates";

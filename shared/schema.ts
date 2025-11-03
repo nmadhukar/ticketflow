@@ -239,27 +239,25 @@ export const bedrockSettings = pgTable("bedrock_settings", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-// SMTP settings for email notifications (also used for AWS SES)
-export const smtpSettings = pgTable("smtp_settings", {
+// Multi-provider email configuration
+export const emailProviders = pgTable("email_providers", {
   id: serial("id").primaryKey(),
-  // AWS SES settings
-  awsAccessKeyId: varchar("aws_access_key_id", { length: 255 }),
-  awsSecretAccessKey: varchar("aws_secret_access_key", { length: 255 }), // encrypted
-  awsRegion: varchar("aws_region", { length: 50 }).default("us-east-1"),
-  // SMTP settings (can be used as fallback) - nullable for AWS SES usage
-  host: varchar("host", { length: 255 }),
-  port: integer("port").default(587),
-  username: varchar("username", { length: 255 }),
-  password: varchar("password", { length: 255 }), // encrypted
+  // one active provider at a time
+  provider: varchar("provider", { length: 20 }) // mailtrap | aws-ses | smtp | mailgun | sendgrid | custom
+    .notNull()
+    .default("mailtrap"),
   fromEmail: varchar("from_email", { length: 255 }).notNull(),
   fromName: varchar("from_name", { length: 255 })
     .notNull()
     .default("TicketFlow"),
-  encryption: varchar("encryption", { length: 10 }).default("tls"), // tls, ssl, none
-  useAwsSes: boolean("use_aws_ses").default(true), // Toggle between AWS SES and SMTP
-  isActive: boolean("is_active").default(true),
+  metadata: jsonb("metadata")
+    .$type<Record<string, any>>()
+    .notNull()
+    .default({}),
+  isActive: boolean("is_active").notNull().default(true),
   updatedBy: varchar("updated_by").references(() => users.id),
   updatedAt: timestamp("updated_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 // Email templates
@@ -441,8 +439,11 @@ export const insertBedrockSettingsSchema = createInsertSchema(
   createdAt: true,
 });
 
-export const insertSmtpSettingsSchema = createInsertSchema(smtpSettings).omit({
+export const insertEmailProviderSchema = createInsertSchema(
+  emailProviders
+).omit({
   id: true,
+  createdAt: true,
   updatedAt: true,
 });
 
@@ -465,6 +466,8 @@ export const insertUserSchema = createInsertSchema(users).omit({
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
+export type EmailProvider = typeof emailProviders.$inferSelect;
+export type InsertEmailProvider = z.infer<typeof insertEmailProviderSchema>;
 
 // Help documentation table
 export const helpDocuments = pgTable("help_documents", {
@@ -597,8 +600,6 @@ export type ApiKey = typeof apiKeys.$inferSelect;
 export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
 export type BedrockSettings = typeof bedrockSettings.$inferSelect;
 export type InsertBedrockSettings = z.infer<typeof insertBedrockSettingsSchema>;
-export type SmtpSettings = typeof smtpSettings.$inferSelect;
-export type InsertSmtpSettings = z.infer<typeof insertSmtpSettingsSchema>;
 export type EmailTemplate = typeof emailTemplates.$inferSelect;
 export type InsertEmailTemplate = z.infer<typeof insertEmailTemplateSchema>;
 
