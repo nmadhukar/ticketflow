@@ -717,9 +717,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Task not found" });
       }
       const { canUpdateTicket } = await import("./permissions/tickets");
-      const result = await canUpdateTicket({ user, ticket: task, payload: req.body });
+      const result = await canUpdateTicket({
+        user,
+        ticket: task,
+        payload: req.body,
+      });
       if (!result.allowed) {
-        return res.status(403).json({ message: "Access denied", reason: result.reason });
+        return res
+          .status(403)
+          .json({ message: "Access denied", reason: result.reason });
       }
 
       // Optional: enforce simple status transitions, except for admin
@@ -831,7 +837,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { canDeleteTicket } = await import("./permissions/tickets");
       const verdict = canDeleteTicket({ user, ticket: task });
       if (!verdict.allowed) {
-        return res.status(403).json({ message: "Access denied", reason: verdict.reason });
+        return res
+          .status(403)
+          .json({ message: "Access denied", reason: verdict.reason });
       }
       await storage.deleteTask(taskId);
       res.status(204).send();

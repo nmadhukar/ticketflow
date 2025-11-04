@@ -78,7 +78,7 @@ import {
   type BedrockSettings,
   type InsertBedrockSettings,
 } from "@shared/schema";
-import { db } from "./db";
+import { db } from "../db";
 import {
   eq,
   desc,
@@ -91,6 +91,7 @@ import {
   inArray,
   ilike,
 } from "drizzle-orm";
+import { IStorage } from "./storage.inteface";
 
 /**
  * Database Storage Layer for TicketFlow
@@ -105,386 +106,7 @@ import {
  * - Admin features (company settings, API keys, email templates)
  * - Security features (audit trails, access control)
  *
- * This interface defines all database operations for the application.
- * Implementations should handle database transactions, error handling,
- * and maintain data integrity across all operations.
- *
- * @interface IStorage
  */
-export interface IStorage {
-  // User operations (mandatory for Replit Auth)
-
-  /**
-   * Retrieves a user by their unique identifier
-   * @param id - User ID (from authentication provider)
-   * @returns User object or undefined if not found
-   */
-  getUser(id: string): Promise<User | undefined>;
-
-  /**
-   * Creates or updates a user record
-   * @param user - User data to insert or update
-   * @returns Updated user object
-   */
-  upsertUser(user: UpsertUser): Promise<User>;
-
-  /**
-   * Retrieves all users in the system
-   * @returns Array of all users
-   */
-  getAllUsers(): Promise<User[]>;
-
-  /**
-   * Creates a new user
-   * @param user - User data to insert
-   * @returns Created user object
-   */
-  createUser(user: InsertUser): Promise<User>;
-
-  /**
-   * Retrieves a user by email
-   * @param email - User email address
-   * @returns User object or undefined if not found
-   */
-  getUserByEmail(email: string): Promise<User | undefined>;
-
-  /**
-   * Sets password reset token for a user
-   * @param userId - User ID
-   * @param token - Reset token
-   * @param expires - Token expiration date
-   */
-  setPasswordResetToken(
-    userId: string,
-    token: string,
-    expires: Date
-  ): Promise<void>;
-
-  /**
-   * Retrieves a user by password reset token
-   * @param token - Reset token
-   * @returns User object or undefined if not found or token expired
-   */
-  getUserByResetToken(token: string): Promise<User | undefined>;
-
-  /**
-   * Updates user password
-   * @param userId - User ID
-   * @param hashedPassword - New hashed password
-   */
-  updateUserPassword(userId: string, hashedPassword: string): Promise<void>;
-
-  /**
-   * Clears password reset token for a user
-   * @param userId - User ID
-   */
-  clearPasswordResetToken(userId: string): Promise<void>;
-
-  // Task operations
-  createTask(task: InsertTask): Promise<Task>;
-  getTask(id: number): Promise<Task | undefined>;
-  getTasks(filters?: {
-    status?: string;
-    category?: string;
-    assigneeId?: string;
-    createdBy?: string;
-    search?: string;
-    limit?: number;
-    offset?: number;
-  }): Promise<Task[]>;
-  updateTask(
-    id: number,
-    updates: Partial<InsertTask>,
-    userId: string
-  ): Promise<Task>;
-  deleteTask(id: number): Promise<void>;
-
-  // Team operations
-  createTeam(team: InsertTeam): Promise<Team>;
-  getTeam(id: number): Promise<Team | undefined>;
-  getTeams(): Promise<Team[]>;
-  getUserTeams(userId: string): Promise<Team[]>;
-  addTeamMember(teamMember: InsertTeamMember): Promise<TeamMember>;
-  removeTeamMember(teamId: number, userId: string): Promise<void>;
-  getTeamMembers(teamId: number): Promise<(TeamMember & { user: User })[]>;
-
-  // Comment operations
-  addTaskComment(comment: InsertTaskComment): Promise<TaskComment>;
-  getTaskComments(
-    taskId: number
-  ): Promise<(TaskComment & { userName?: string })[]>;
-
-  // Statistics
-  getTaskStats(userId?: string): Promise<{
-    total: number;
-    open: number;
-    inProgress: number;
-    resolved: number;
-    closed: number;
-    highPriority: number;
-  }>;
-
-  // Activity
-  getRecentActivity(limit?: number): Promise<TaskHistory[]>;
-
-  // Admin operations
-  getAdminStats(): Promise<{
-    totalUsers: number;
-    activeUsers: number;
-    totalTeams: number;
-    openTickets: number;
-    urgentTickets: number;
-    avgResolutionTime: number | null;
-  }>;
-  updateUserProfile(
-    userId: string,
-    updates: {
-      firstName?: string;
-      lastName?: string;
-      email?: string;
-      role?: string;
-      department?: string;
-      phone?: string;
-      isActive?: boolean;
-    }
-  ): Promise<User>;
-  toggleUserStatus(userId: string): Promise<User>;
-  approveUser(userId: string): Promise<User>;
-  assignUserToTeam(
-    userId: string,
-    teamId: number,
-    role?: string
-  ): Promise<TeamMember>;
-  removeUserFromTeam(userId: string, teamId: number): Promise<void>;
-  updateTeamMemberRole(
-    userId: string,
-    teamId: number,
-    role: string
-  ): Promise<TeamMember>;
-  getDepartments(): Promise<string[]>;
-  resetUserPassword(userId: string): Promise<{ tempPassword: string }>;
-
-  // Attachment operations
-  addTaskAttachment(attachment: InsertTaskAttachment): Promise<TaskAttachment>;
-  getTaskAttachments(taskId: number): Promise<TaskAttachment[]>;
-  deleteTaskAttachment(id: number): Promise<void>;
-
-  // Company settings operations
-  getCompanySettings(): Promise<CompanySettings | undefined>;
-  updateCompanySettings(
-    settings: Partial<InsertCompanySettings>,
-    userId: string
-  ): Promise<CompanySettings>;
-
-  // API key operations
-  createApiKey(
-    apiKey: InsertApiKey
-  ): Promise<{ apiKey: ApiKey; plainKey: string }>;
-  getApiKeys(userId: string): Promise<ApiKey[]>;
-  getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined>;
-  updateApiKeyLastUsed(id: number): Promise<void>;
-  revokeApiKey(id: number): Promise<void>;
-
-  // Bedrock settings operations
-  getBedrockSettings(): Promise<BedrockSettings | undefined>;
-  updateBedrockSettings(
-    settings: InsertBedrockSettings,
-    userId: string
-  ): Promise<BedrockSettings>;
-
-  // Email provider operations
-  getActiveEmailProvider(): Promise<EmailProvider | undefined>;
-  upsertEmailProvider(
-    provider: InsertEmailProvider,
-    userId: string
-  ): Promise<EmailProvider>;
-  setActiveEmailProvider(id: number): Promise<void>;
-  updateActiveEmailProvider(
-    updates: Partial<{ fromEmail: string; fromName: string; metadata: any }>
-  ): Promise<EmailProvider>;
-
-  // Email template operations
-  getEmailTemplates(): Promise<EmailTemplate[]>;
-  getEmailTemplate(name: string): Promise<EmailTemplate | undefined>;
-  updateEmailTemplate(
-    name: string,
-    template: Partial<InsertEmailTemplate>,
-    userId: string
-  ): Promise<EmailTemplate>;
-
-  // Help Document operations
-  createHelpDocument(doc: InsertHelpDocument): Promise<HelpDocument>;
-  getHelpDocuments(): Promise<HelpDocument[]>;
-  getHelpDocument(id: number): Promise<HelpDocument | undefined>;
-  updateHelpDocument(
-    id: number,
-    doc: Partial<InsertHelpDocument>
-  ): Promise<HelpDocument>;
-  deleteHelpDocument(id: number): Promise<void>;
-  incrementViewCount(id: number): Promise<void>;
-  searchHelpDocuments(query: string): Promise<HelpDocument[]>;
-
-  // AI Chat operations
-  createChatMessage(message: InsertAiChatMessage): Promise<AiChatMessage>;
-  getChatMessages(userId: string, sessionId: string): Promise<AiChatMessage[]>;
-  getChatSessions(
-    userId: string
-  ): Promise<{ sessionId: string; lastMessage: string; createdAt: Date }[]>;
-
-  // User Guide operations
-  createUserGuide(guide: InsertUserGuide): Promise<UserGuide>;
-  updateUserGuide(
-    id: number,
-    guide: Partial<InsertUserGuide>
-  ): Promise<UserGuide>;
-  deleteUserGuide(id: number): Promise<void>;
-  getUserGuides(filters?: {
-    category?: string;
-    type?: string;
-    isPublished?: boolean;
-  }): Promise<UserGuide[]>;
-  getUserGuideById(id: number): Promise<UserGuide | undefined>;
-  incrementGuideViewCount(id: number): Promise<void>;
-
-  // User Guide Category operations
-  createUserGuideCategory(
-    category: InsertUserGuideCategory
-  ): Promise<UserGuideCategory>;
-  updateUserGuideCategory(
-    id: number,
-    category: Partial<InsertUserGuideCategory>
-  ): Promise<UserGuideCategory>;
-  deleteUserGuideCategory(id: number): Promise<void>;
-  getUserGuideCategories(): Promise<UserGuideCategory[]>;
-
-  // Department operations
-  createDepartment(department: InsertDepartment): Promise<Department>;
-  updateDepartment(
-    id: number,
-    department: Partial<InsertDepartment>
-  ): Promise<Department>;
-  deleteDepartment(id: number): Promise<void>;
-  getAllDepartments(): Promise<Department[]>;
-  getDepartmentById(id: number): Promise<Department | undefined>;
-
-  // User Invitation operations
-  createUserInvitation(
-    invitation: InsertUserInvitation
-  ): Promise<UserInvitation>;
-  getUserInvitations(filters?: { status?: string }): Promise<UserInvitation[]>;
-  getUserInvitationByToken(token: string): Promise<UserInvitation | undefined>;
-  markInvitationAccepted(id: number): Promise<UserInvitation>;
-  deleteExpiredInvitations(): Promise<void>;
-
-  // Teams Integration operations
-  getTeamsIntegrationSettings(
-    userId: string
-  ): Promise<TeamsIntegrationSettings | undefined>;
-  upsertTeamsIntegrationSettings(
-    settings: InsertTeamsIntegrationSettings
-  ): Promise<TeamsIntegrationSettings>;
-  deleteTeamsIntegrationSettings(userId: string): Promise<void>;
-
-  // SSO Configuration operations
-  getSsoConfiguration(): Promise<SsoConfiguration | undefined>;
-  upsertSsoConfiguration(
-    config: InsertSsoConfiguration
-  ): Promise<SsoConfiguration>;
-
-  // Bedrock usage tracking
-  trackBedrockUsage(usage: InsertBedrockUsage): Promise<BedrockUsage>;
-  getBedrockUsageByUser(
-    userId: string,
-    startDate?: Date,
-    endDate?: Date
-  ): Promise<BedrockUsage[]>;
-  getBedrockUsageSummary(
-    startDate?: Date,
-    endDate?: Date
-  ): Promise<{
-    totalCost: number;
-    totalTokens: number;
-    userCount: number;
-    requestCount: number;
-  }>;
-
-  // FAQ cache operations
-  getFaqCacheEntry(questionHash: string): Promise<FaqCache | undefined>;
-  createFaqCacheEntry(entry: InsertFaqCache): Promise<FaqCache>;
-  updateFaqCacheHit(id: number): Promise<void>;
-  getPopularFaqs(limit?: number): Promise<FaqCache[]>;
-  clearFaqCache(): Promise<void>;
-
-  // Company Policy operations
-  createCompanyPolicy(policy: InsertCompanyPolicy): Promise<CompanyPolicy>;
-  updateCompanyPolicy(
-    id: number,
-    policy: Partial<InsertCompanyPolicy>
-  ): Promise<CompanyPolicy>;
-  deleteCompanyPolicy(id: number): Promise<void>;
-  getCompanyPolicyById(id: number): Promise<CompanyPolicy | undefined>;
-  getAllCompanyPolicies(includeInactive?: boolean): Promise<CompanyPolicy[]>;
-  toggleCompanyPolicyStatus(id: number): Promise<CompanyPolicy>;
-
-  // Notifications operations
-  getUnreadNotifications(
-    userId: string,
-    limit?: number
-  ): Promise<Notification[]>;
-  markNotificationRead(id: number): Promise<void>;
-  markAllNotificationsRead(userId: string): Promise<void>;
-  createNotification(notification: InsertNotification): Promise<Notification>;
-
-  // Knowledge Base operations
-  createKnowledgeArticle(
-    article: InsertKnowledgeArticle
-  ): Promise<KnowledgeArticle>;
-  updateKnowledgeArticle(
-    id: number,
-    article: Partial<InsertKnowledgeArticle>
-  ): Promise<KnowledgeArticle>;
-  deleteKnowledgeArticle(id: number): Promise<void>;
-  getKnowledgeArticle(id: number): Promise<KnowledgeArticle | undefined>;
-  getAllKnowledgeArticles(filters?: {
-    category?: string;
-    isPublished?: boolean;
-    createdBy?: string;
-    status?: string;
-    source?: string;
-  }): Promise<KnowledgeArticle[]>;
-  getPublishedKnowledgeArticles(category?: string): Promise<KnowledgeArticle[]>;
-  searchKnowledgeBase(
-    query: string,
-    category?: string
-  ): Promise<KnowledgeArticle[]>;
-  findSimilarKnowledgeArticle(
-    title: string
-  ): Promise<KnowledgeArticle | undefined>;
-  toggleKnowledgeArticleStatus(id: number): Promise<KnowledgeArticle>;
-  incrementKnowledgeArticleUsage(id: number): Promise<void>;
-  updateArticleEffectiveness(id: number, rating: number): Promise<void>;
-  setKnowledgeArticleStatus(
-    id: number,
-    status: "draft" | "published" | "archived"
-  ): Promise<KnowledgeArticle>;
-  incrementKnowledgeArticleView(id: number): Promise<void>;
-
-  // Learning Queue operations
-  addToLearningQueue(ticketId: number): Promise<LearningQueue>;
-  getLearningQueueItems(status?: string): Promise<LearningQueue[]>;
-  updateLearningQueueItem(
-    id: number,
-    updates: Partial<InsertLearningQueue>
-  ): Promise<LearningQueue>;
-
-  // AI Analysis and Learning Methods (legacy compatibility)
-  saveTicketAnalysis(userId: string, analysis: any): Promise<void>;
-  saveAutoResponse(data: any): Promise<void>;
-  saveComplexityScore(data: any): Promise<void>;
-  saveAIAnalytics(analytics: any): Promise<void>;
-  getRecentResolvedTickets(days: number): Promise<Task[]>;
-  updateKnowledgeLearningStats(stats: any): Promise<void>;
-}
 
 export class DatabaseStorage implements IStorage {
   // Company settings cache (in-memory with TTL)
@@ -803,14 +425,14 @@ export class DatabaseStorage implements IStorage {
     const whereAll =
       filters.length > 0 ? and(...filters, visibility) : visibility;
 
-    let idQuery = db
+    let idQuery: any = db
       .select({ id: tasks.id })
       .from(tasks)
       .where(whereAll)
       .orderBy(desc(tasks.createdAt));
-    if (limit) idQuery = idQuery.limit(limit);
-    if (offset) idQuery = idQuery.offset(offset);
-    const ids = (await idQuery).map((r) => r.id);
+    if (limit) idQuery = (idQuery as any).limit(limit);
+    if (offset) idQuery = (idQuery as any).offset(offset);
+    const ids = (await idQuery).map((r: { id: number }) => r.id);
     if (ids.length === 0) return [];
 
     const taskResults = await db
@@ -919,20 +541,20 @@ export class DatabaseStorage implements IStorage {
     }
 
     // First get the tasks
-    let taskQuery = db.select().from(tasks);
+    let taskQuery: any = db.select().from(tasks);
 
     if (conditions.length > 0) {
-      taskQuery = taskQuery.where(and(...conditions));
+      taskQuery = (taskQuery as any).where(and(...conditions));
     }
 
-    taskQuery = taskQuery.orderBy(desc(tasks.createdAt));
+    taskQuery = (taskQuery as any).orderBy(desc(tasks.createdAt));
 
     if (filters.limit) {
-      taskQuery = taskQuery.limit(filters.limit);
+      taskQuery = (taskQuery as any).limit(filters.limit);
     }
 
     if (filters.offset) {
-      taskQuery = taskQuery.offset(filters.offset);
+      taskQuery = (taskQuery as any).offset(filters.offset);
     }
 
     const taskResults = await taskQuery;
@@ -1077,6 +699,7 @@ export class DatabaseStorage implements IStorage {
         id: teams.id,
         name: teams.name,
         description: teams.description,
+        departmentId: teams.departmentId,
         createdAt: teams.createdAt,
         createdBy: teams.createdBy,
         memberCount: count(teamMembers.id),
@@ -1087,6 +710,7 @@ export class DatabaseStorage implements IStorage {
         teams.id,
         teams.name,
         teams.description,
+        teams.departmentId,
         teams.createdAt,
         teams.createdBy
       )
@@ -1439,18 +1063,17 @@ export class DatabaseStorage implements IStorage {
 
     const statuses = await statusQuery;
 
-    let highPriorityQuery = db
+    let highPriorityBase = and(eq(tasks.priority, "high"));
+    if (userId) {
+      highPriorityBase = and(
+        highPriorityBase,
+        or(eq(tasks.assigneeId, userId), eq(tasks.createdBy, userId))
+      );
+    }
+    const [highPriorityResult] = await db
       .select({ count: count() })
       .from(tasks)
-      .where(eq(tasks.priority, "high"));
-
-    if (userId) {
-      highPriorityQuery = highPriorityQuery.where(
-        or(eq(tasks.assigneeId, userId), eq(tasks.createdBy, userId))
-      ) as any;
-    }
-
-    const [highPriorityResult] = await highPriorityQuery;
+      .where(highPriorityBase);
 
     const statusCounts = statuses.reduce((acc, { status, count }) => {
       acc[status] = count;
@@ -1605,10 +1228,12 @@ export class DatabaseStorage implements IStorage {
     // In production, you'd hash the key before storing
     const keyHash = plainKey; // TODO: Use bcrypt or similar
 
+    const { expiresAt, ...restApiKey } = apiKey as any;
     const [newApiKey] = await db
       .insert(apiKeys)
       .values({
-        ...apiKey,
+        ...(restApiKey as any),
+        expiresAt: expiresAt ? new Date(expiresAt as any) : null,
         keyHash: keyHash,
         keyPrefix: keyPrefix,
       })
@@ -2082,10 +1707,14 @@ export class DatabaseStorage implements IStorage {
   ): Promise<UserInvitation> {
     const token =
       Math.random().toString(36).substring(2) + Date.now().toString(36);
+    const { expiresAt, ...rest } = invitation as any;
     const [created] = await db
       .insert(userInvitations)
       .values({
-        ...invitation,
+        ...(rest as any),
+        expiresAt: expiresAt
+          ? new Date(expiresAt as any)
+          : new Date(Date.now() + 7 * 24 * 3600 * 1000),
         invitationToken: token,
       })
       .returning();
@@ -2224,16 +1853,20 @@ export class DatabaseStorage implements IStorage {
     startDate?: Date,
     endDate?: Date
   ): Promise<BedrockUsage[]> {
-    let query = db
+    let query: any = db
       .select()
       .from(bedrockUsage)
       .where(eq(bedrockUsage.userId, userId));
 
     if (startDate) {
-      query = query.where(sql`${bedrockUsage.createdAt} >= ${startDate}`);
+      query = (query as any).where(
+        sql`${bedrockUsage.createdAt} >= ${startDate}`
+      );
     }
     if (endDate) {
-      query = query.where(sql`${bedrockUsage.createdAt} <= ${endDate}`);
+      query = (query as any).where(
+        sql`${bedrockUsage.createdAt} <= ${endDate}`
+      );
     }
 
     return await query.orderBy(desc(bedrockUsage.createdAt));
@@ -2585,8 +2218,8 @@ export class DatabaseStorage implements IStorage {
     const article = await this.getKnowledgeArticle(id);
     if (!article) return;
 
-    const currentScore = article.effectivenessScore || 0;
-    const newScore = (currentScore + rating) / 2; // Simple average
+    const currentScore = Number(article.effectivenessScore || 0);
+    const newScore = (currentScore + Number(rating)) / 2; // Simple average
 
     await db
       .update(knowledgeArticles)
@@ -2594,6 +2227,30 @@ export class DatabaseStorage implements IStorage {
         effectivenessScore: newScore.toString(),
         updatedAt: new Date(),
       })
+      .where(eq(knowledgeArticles.id, id));
+  }
+
+  async setKnowledgeArticleStatus(
+    id: number,
+    status: "draft" | "published" | "archived"
+  ): Promise<KnowledgeArticle> {
+    const [updated] = await db
+      .update(knowledgeArticles)
+      .set({
+        status,
+        isPublished: status === "published",
+        archivedAt: status === "archived" ? new Date() : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(knowledgeArticles.id, id))
+      .returning();
+    return updated;
+  }
+
+  async incrementKnowledgeArticleView(id: number): Promise<void> {
+    await db
+      .update(knowledgeArticles)
+      .set({ viewCount: sql`${knowledgeArticles.viewCount} + 1` })
       .where(eq(knowledgeArticles.id, id));
   }
 
@@ -2660,221 +2317,7 @@ export class DatabaseStorage implements IStorage {
     console.log("Saving AI analytics:", analytics);
   }
 
-  // Knowledge Base operations implementation
-  async createKnowledgeArticle(
-    article: InsertKnowledgeArticle
-  ): Promise<KnowledgeArticle> {
-    const [created] = await db
-      .insert(knowledgeArticles)
-      .values({
-        ...article,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        usageCount: 0,
-      })
-      .returning();
-    return created;
-  }
-
-  async updateKnowledgeArticle(
-    id: number,
-    article: Partial<InsertKnowledgeArticle>
-  ): Promise<KnowledgeArticle> {
-    const [updated] = await db
-      .update(knowledgeArticles)
-      .set({
-        ...article,
-        updatedAt: new Date(),
-      })
-      .where(eq(knowledgeArticles.id, id))
-      .returning();
-    return updated;
-  }
-
-  async deleteKnowledgeArticle(id: number): Promise<void> {
-    await db.delete(knowledgeArticles).where(eq(knowledgeArticles.id, id));
-  }
-
-  async getKnowledgeArticle(id: number): Promise<KnowledgeArticle | undefined> {
-    const [article] = await db
-      .select()
-      .from(knowledgeArticles)
-      .where(eq(knowledgeArticles.id, id));
-    return article;
-  }
-
-  async getAllKnowledgeArticles(filters?: {
-    category?: string;
-    isPublished?: boolean;
-    createdBy?: string;
-  }): Promise<KnowledgeArticle[]> {
-    const conditions = [];
-
-    if (filters?.category) {
-      conditions.push(eq(knowledgeArticles.category, filters.category));
-    }
-
-    if (filters?.isPublished !== undefined) {
-      conditions.push(eq(knowledgeArticles.isPublished, filters.isPublished));
-    }
-
-    if (filters?.createdBy) {
-      conditions.push(eq(knowledgeArticles.createdBy, filters.createdBy));
-    }
-
-    return await db
-      .select()
-      .from(knowledgeArticles)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
-      .orderBy(desc(knowledgeArticles.createdAt));
-  }
-
-  async getPublishedKnowledgeArticles(
-    category?: string
-  ): Promise<KnowledgeArticle[]> {
-    const conditions = [eq(knowledgeArticles.isPublished, true)];
-
-    if (category) {
-      conditions.push(eq(knowledgeArticles.category, category));
-    }
-
-    return await db
-      .select()
-      .from(knowledgeArticles)
-      .where(and(...conditions))
-      .orderBy(desc(knowledgeArticles.usageCount));
-  }
-
-  async searchKnowledgeBase(
-    query: string,
-    category?: string
-  ): Promise<KnowledgeArticle[]> {
-    // Tokenize the query and perform case-insensitive partial matching
-    const searchTerms = (query || "")
-      .toLowerCase()
-      .split(/\s+/)
-      .filter((t) => t.length > 2);
-
-    const baseConditions: any[] = [
-      // Only search published content
-      or(
-        eq(knowledgeArticles.isPublished, true),
-        eq(knowledgeArticles.status as any, "published")
-      ),
-    ];
-
-    if (searchTerms.length > 0) {
-      const searchConditions = searchTerms.map((term) =>
-        or(
-          ilike(knowledgeArticles.title, `%${term}%`),
-          ilike(knowledgeArticles.content, `%${term}%`),
-          ilike(knowledgeArticles.summary, `%${term}%`)
-        )
-      );
-      baseConditions.push(or(...searchConditions));
-    }
-
-    if (category) {
-      baseConditions.push(eq(knowledgeArticles.category, category));
-    }
-
-    return await db
-      .select()
-      .from(knowledgeArticles)
-      .where(and(...baseConditions))
-      .orderBy(
-        // Rank by effectiveness first, then usage
-        desc(knowledgeArticles.effectivenessScore),
-        desc(knowledgeArticles.usageCount)
-      )
-      .limit(50);
-  }
-
-  async findSimilarKnowledgeArticle(
-    title: string
-  ): Promise<KnowledgeArticle | undefined> {
-    const [article] = await db
-      .select()
-      .from(knowledgeArticles)
-      .where(
-        and(
-          eq(knowledgeArticles.isPublished, true),
-          like(knowledgeArticles.title, `%${title}%`)
-        )
-      )
-      .limit(1);
-    return article;
-  }
-
-  async toggleKnowledgeArticleStatus(id: number): Promise<KnowledgeArticle> {
-    const article = await this.getKnowledgeArticle(id);
-    if (!article) {
-      throw new Error("Article not found");
-    }
-
-    const [updated] = await db
-      .update(knowledgeArticles)
-      .set({
-        isPublished: !article.isPublished,
-        status: !article.isPublished ? "published" : "draft",
-        updatedAt: new Date(),
-      })
-      .where(eq(knowledgeArticles.id, id))
-      .returning();
-    return updated;
-  }
-
-  async incrementKnowledgeArticleUsage(id: number): Promise<void> {
-    await db
-      .update(knowledgeArticles)
-      .set({
-        usageCount: sql`${knowledgeArticles.usageCount} + 1`,
-        lastUsed: new Date(),
-      })
-      .where(eq(knowledgeArticles.id, id));
-  }
-
-  async updateArticleEffectiveness(id: number, rating: number): Promise<void> {
-    const article = await this.getKnowledgeArticle(id);
-    if (!article) return;
-
-    const helpful = (article as any).helpfulVotes || 0;
-    const unhelpful = (article as any).unhelpfulVotes || 0;
-    const total = helpful + unhelpful;
-    const newScore = total > 0 ? helpful / total : 0;
-
-    await db
-      .update(knowledgeArticles)
-      .set({
-        effectivenessScore: newScore.toString(),
-        updatedAt: new Date(),
-      })
-      .where(eq(knowledgeArticles.id, id));
-  }
-
-  async setKnowledgeArticleStatus(
-    id: number,
-    status: "draft" | "published" | "archived"
-  ): Promise<KnowledgeArticle> {
-    const [updated] = await db
-      .update(knowledgeArticles)
-      .set({
-        status,
-        isPublished: status === "published",
-        archivedAt: status === "archived" ? new Date() : null,
-        updatedAt: new Date(),
-      })
-      .where(eq(knowledgeArticles.id, id))
-      .returning();
-    return updated;
-  }
-
-  async incrementKnowledgeArticleView(id: number): Promise<void> {
-    await db
-      .update(knowledgeArticles)
-      .set({ viewCount: sql`${knowledgeArticles.viewCount} + 1` })
-      .where(eq(knowledgeArticles.id, id));
-  }
+  // (Duplicate Knowledge Base methods removed; primary implementations defined earlier in file)
 
   // Learning Queue operations implementation
   // Notifications operations
@@ -2916,18 +2359,6 @@ export class DatabaseStorage implements IStorage {
       .values({ ...notification, createdAt: new Date() })
       .returning();
     return result;
-  }
-
-  async addToLearningQueue(ticketId: number): Promise<LearningQueue> {
-    const [queued] = await db
-      .insert(learningQueue)
-      .values({
-        ticketId,
-        processStatus: "pending",
-        createdAt: new Date(),
-      })
-      .returning();
-    return queued;
   }
 }
 
