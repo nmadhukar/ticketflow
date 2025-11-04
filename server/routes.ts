@@ -729,7 +729,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Optional: enforce simple status transitions, except for admin
-      if (user?.role !== "admin" && "status" in result.prunedPayload) {
+      if (user?.role !== "admin" && "status" in result?.prunedPayload) {
         const transitionMap: Record<string, string[]> = {
           open: ["in_progress", "on_hold"],
           in_progress: ["resolved", "on_hold"],
@@ -977,25 +977,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/teams/my", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-
-      // Customers cannot access teams
-      if (user?.role === "customer") {
-        return res
-          .status(403)
-          .json({ message: "Customers cannot access teams" });
-      }
-
-      const teams = await storage.getUserTeams(userId);
-      res.json(teams);
-    } catch (error) {
-      console.error("Error fetching user teams:", error);
-      res.status(500).json({ message: "Failed to fetch user teams" });
-    }
-  });
+  // Team Members API disabled (commented out)
+  // app.get("/api/teams/my", isAuthenticated, async (req: any, res) => {
+  //   try {
+  //     const userId = getUserId(req);
+  //     const user = await storage.getUser(userId);
+  //     if (user?.role === "customer") {
+  //       return res.status(403).json({ message: "Customers cannot access teams" });
+  //     }
+  //     const teams = await storage.getUserTeams(userId);
+  //     res.json(teams);
+  //   } catch (error) {
+  //     console.error("Error fetching user teams:", error);
+  //     res.status(500).json({ message: "Failed to fetch user teams" });
+  //   }
+  // });
 
   app.post("/api/teams", isAuthenticated, async (req: any, res) => {
     try {
@@ -1031,16 +1027,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/teams/:id/members", isAuthenticated, async (req, res) => {
-    try {
-      const teamId = parseInt(req.params.id);
-      const members = await storage.getTeamMembers(teamId);
-      res.json(members);
-    } catch (error) {
-      console.error("Error fetching team members:", error);
-      res.status(500).json({ message: "Failed to fetch team members" });
-    }
-  });
+  // app.get("/api/teams/:id/members", isAuthenticated, async (req, res) => {
+  //   try {
+  //     const teamId = parseInt(req.params.id);
+  //     const members = await storage.getTeamMembers(teamId);
+  //     res.json(members);
+  //   } catch (error) {
+  //     console.error("Error fetching team members:", error);
+  //     res.status(500).json({ message: "Failed to fetch team members" });
+  //   }
+  // });
 
   // Update team member role
   app.patch(

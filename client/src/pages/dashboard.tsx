@@ -26,7 +26,7 @@
 import MainWrapper from "@/components/main-wrapper";
 import StatsCard from "@/components/stats-card";
 import { BedrockCostMonitoring } from "@/components/bedrock-cost-monitoring";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+// import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -96,15 +96,16 @@ export default function Dashboard() {
     enabled: isAuthenticated && !hasCustomerRole,
   });
 
-  const { data: teamMembers = [], isLoading: membersLoading } = useQuery<any[]>(
-    {
-      queryKey: ["/api/teams/my"],
-      retry: false,
-      enabled: isAuthenticated && !hasCustomerRole,
-      initialData: [],
-      refetchOnMount: "always",
-    }
-  );
+  // Team Members feature removed
+  // const { data: teamMembers = [], isLoading: membersLoading } = useQuery<any[]>(
+  //   {
+  //     queryKey: ["/api/teams/my"],
+  //     retry: false,
+  //     enabled: isAuthenticated && !hasCustomerRole,
+  //     initialData: [],
+  //     refetchOnMount: "always",
+  //   }
+  // );
 
   const { data: activity, isLoading: activityLoading } = useQuery<any[]>({
     queryKey: ["/api/activity"],
@@ -134,84 +135,83 @@ export default function Dashboard() {
       )}
 
       {/* Admin-only System Overview Cards */}
-      {(user as any)?.role === "admin" && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
-          <Card className="hover:shadow-business transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                {t("dashboard:admin.totalUsers")}
-              </CardTitle>
-              <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Users className="h-4 w-4 text-primary" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {(systemStats as any)?.totalUsers || 0}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {(systemStats as any)?.activeUsers || 0}{" "}
-                {t("dashboard:admin.activeUsers")}
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="hover:shadow-business transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                {t("dashboard:admin.totalTeams")}
-              </CardTitle>
-              <div className="h-8 w-8 rounded-lg bg-secondary/10 flex items-center justify-center">
-                <UserCog className="h-4 w-4 text-secondary-foreground" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {(systemStats as any)?.totalTeams || 0}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {t("dashboard:admin.acrossDepartments")}
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="hover:shadow-business transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                {t("dashboard:admin.openTickets")}
-              </CardTitle>
-              <div className="h-8 w-8 rounded-lg bg-accent/10 flex items-center justify-center">
-                <BarChart3 className="h-4 w-4 text-accent-foreground" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {(systemStats as any)?.openTickets || 0}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {(systemStats as any)?.urgentTickets || 0}{" "}
-                {t("dashboard:admin.highPriority")}
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="hover:shadow-business transition-shadow">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                {t("dashboard:admin.avgResolutionTime")}
-              </CardTitle>
-              <div className="h-8 w-8 rounded-lg bg-muted/10 flex items-center justify-center">
-                <Settings className="h-4 w-4 text-muted-foreground" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {(systemStats as any)?.avgResolutionTime || "N/A"}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {t("dashboard:admin.hours")}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
+        <Card className="hover:shadow-business transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              {t("dashboard:admin.totalUsers")}
+            </CardTitle>
+            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+              <Users className="h-4 w-4 text-primary" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {(systemStats as any)?.totalUsers || 0}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {(systemStats as any)?.activeUsers || 0}{" "}
+              {t("dashboard:admin.activeUsers")}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="hover:shadow-business transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              {t("dashboard:admin.totalTeams")}
+            </CardTitle>
+            <div className="h-8 w-8 rounded-lg bg-secondary/10 flex items-center justify-center">
+              <UserCog className="h-4 w-4 text-secondary-foreground" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {(systemStats as any)?.totalTeams || 0}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {t("dashboard:admin.acrossDepartments")}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="hover:shadow-business transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              {t("dashboard:admin.openTickets")}
+            </CardTitle>
+            <div className="h-8 w-8 rounded-lg bg-accent/10 flex items-center justify-center">
+              <BarChart3 className="h-4 w-4 text-accent-foreground" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {(systemStats as any)?.openTickets || 0}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {(systemStats as any)?.urgentTickets || 0}{" "}
+              {t("dashboard:admin.highPriority")}
+            </p>
+          </CardContent>
+        </Card>
+        <Card className="hover:shadow-business transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              {t("dashboard:admin.avgResolutionTime")}
+            </CardTitle>
+            <div className="h-8 w-8 rounded-lg bg-muted/10 flex items-center justify-center">
+              <Settings className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {(systemStats as any)?.avgResolutionTime || "N/A"}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {t("dashboard:admin.hours")}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Stats Cards */}
       {hasManagerOrAdminRole ? (
@@ -285,105 +285,63 @@ export default function Dashboard() {
         <></>
       )}
 
-      {/* Admin-only Bedrock Cost Monitoring */}
-      {(user as any)?.role === "admin" && (
-        <div className="mb-8">
+      <div className="grid grid-cols-3 gap-10">
+        <div className="col-span-2">
           <BedrockCostMonitoring />
         </div>
-      )}
-
-      {/* Sidebar Content */}
-      {!hasCustomerRole && (
-        <div className="grid grid-cols-2 gap-6">
-          {/* Team Members */}
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("dashboard:teamMembers.title")}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {membersLoading ? (
-                <div className="text-center py-4">{t("actions.loading")}</div>
-              ) : teamMembers?.length ? (
-                teamMembers?.slice(0, 5).map((team: any) => (
-                  <div key={team.id} className="flex items-center space-x-3">
-                    <Avatar>
-                      <AvatarImage src="/placeholder-avatar.jpg" />
-                      <AvatarFallback>
-                        {team.name?.charAt(0) || "T"}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1">
-                      <p className="font-medium text-slate-800">{team.name}</p>
-                      <p className="text-sm text-slate-600">
-                        {team.description || "Team"}
-                      </p>
-                    </div>
-                    <div className="w-3 h-3 bg-green-500 rounded-full" />
+        <Card className="min-h-[60vh] flex flex-col">
+          <CardHeader>
+            <CardTitle>{t("dashboard:recentActivity.title")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 flex-1">
+            {activityLoading ? (
+              <div className="text-center py-4">{t("actions.loading")}</div>
+            ) : activity && activity.length > 0 ? (
+              activity.slice(0, 5).map((item: any) => (
+                <div
+                  key={item.id}
+                  className="flex space-x-3 cursor-pointer hover:bg-muted/30 p-2 rounded-md transition-colors"
+                >
+                  <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                    {item.action === "created" && (
+                      <Plus className="h-4 w-4 text-blue-600" />
+                    )}
+                    {item.action === "completed" && (
+                      <CheckCircle className="h-4 w-4 text-green-600" />
+                    )}
+                    {item.action === "commented" && (
+                      <MessageCircle className="h-4 w-4 text-yellow-600" />
+                    )}
+                    {item.action === "updated" && (
+                      <UserCheck className="h-4 w-4 text-purple-600" />
+                    )}
                   </div>
-                ))
-              ) : (
-                <div className="text-center py-4 text-slate-500">
-                  {t("dashboard:teamMembers.noMembers")}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Recent Activity */}
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("dashboard:recentActivity.title")}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {activityLoading ? (
-                <div className="text-center py-4">{t("actions.loading")}</div>
-              ) : activity && activity.length > 0 ? (
-                activity.slice(0, 5).map((item: any) => (
-                  <div
-                    key={item.id}
-                    className="flex space-x-3 cursor-pointer hover:bg-muted/30 p-2 rounded-md transition-colors"
-                  >
-                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                      {item.action === "created" && (
-                        <Plus className="h-4 w-4 text-blue-600" />
-                      )}
-                      {item.action === "completed" && (
-                        <CheckCircle className="h-4 w-4 text-green-600" />
-                      )}
-                      {item.action === "commented" && (
-                        <MessageCircle className="h-4 w-4 text-yellow-600" />
-                      )}
-                      {item.action === "updated" && (
-                        <UserCheck className="h-4 w-4 text-purple-600" />
-                      )}
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm text-slate-800">
-                        <span className="font-medium">
-                          {item.userName || item.userId}
-                        </span>{" "}
-                        {item.action} a ticket
+                  <div className="flex-1">
+                    <p className="text-sm text-slate-800">
+                      <span className="font-medium">
+                        {item.userName || item.userId}
+                      </span>{" "}
+                      {item.action} a ticket
+                    </p>
+                    {item.taskTitle && (
+                      <p className="text-xs text-muted-foreground font-medium hover:text-primary">
+                        {item.taskTitle}
                       </p>
-                      {item.taskTitle && (
-                        <p className="text-xs text-muted-foreground font-medium hover:text-primary">
-                          {item.taskTitle}
-                        </p>
-                      )}
-                      <p className="text-xs text-slate-500">
-                        {new Date(item.createdAt).toLocaleDateString()}
-                      </p>
-                    </div>
+                    )}
+                    <p className="text-xs text-slate-500">
+                      {new Date(item.createdAt).toLocaleDateString()}
+                    </p>
                   </div>
-                ))
-              ) : (
-                <div className="text-center py-4 text-slate-500">
-                  {t("dashboard:recentActivity.noActivity")}
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
+              ))
+            ) : (
+              <div className="text-center py-4 text-slate-500">
+                {t("dashboard:recentActivity.noActivity")}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </MainWrapper>
   );
 }
