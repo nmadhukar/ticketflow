@@ -35,21 +35,19 @@ export function Sidebar({ className }: SidebarProps) {
     }
     if (role === "manager") {
       return [
-        { name: t("dashboard"), href: "/", icon: LayoutDashboard },
-        { name: t("tickets"), href: "/tasks", icon: FolderOpen },
+        { name: t("tickets"), href: "/", icon: FolderOpen },
         { name: t("departments"), href: "/departments", icon: Building },
         { name: t("teams"), href: "/teams", icon: Users },
       ];
     }
     if (role === "agent") {
       return [
-        { name: t("dashboard"), href: "/", icon: LayoutDashboard },
-        { name: t("tickets"), href: "/tasks", icon: FolderOpen },
+        { name: t("tickets"), href: "/", icon: FolderOpen },
         { name: t("teams"), href: "/teams", icon: Users },
       ];
     }
 
-    return [{ name: t("tickets"), href: "/", icon: LayoutDashboard }];
+    return [{ name: t("tickets"), href: "/", icon: FolderOpen }];
   })();
 
   const adminGroups = [

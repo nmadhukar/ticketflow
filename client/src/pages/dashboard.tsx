@@ -25,10 +25,8 @@
 
 import MainWrapper from "@/components/main-wrapper";
 import StatsCard from "@/components/stats-card";
-import TaskModal from "@/components/task-modal";
 import { BedrockCostMonitoring } from "@/components/bedrock-cost-monitoring";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -47,7 +45,6 @@ import {
   Settings,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import Tasks from "./tasks";
 import { useTranslation } from "react-i18next";
 
 export default function Dashboard() {
@@ -57,8 +54,6 @@ export default function Dashboard() {
   const { isConnected } = useWebSocketContext();
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<string | null>(null);
-  const [selectedTask, setSelectedTask] = useState<any>(null);
-  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
 
   const hasCustomerRole = (user as any)?.role === "customer";
 
@@ -125,26 +120,10 @@ export default function Dashboard() {
     );
   }
 
-  if (hasCustomerRole) {
-    return <Tasks />;
-  }
-
   return (
     <MainWrapper
       title={t("dashboard:title")}
       subTitle={t("dashboard:subtitle")}
-      action={
-        !tasksLoading && hasCustomerRole ? (
-          <Button
-            onClick={() => {
-              setIsTaskModalOpen(true);
-            }}
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            {t("tickets:newTicket")}
-          </Button>
-        ) : null
-      }
     >
       {/* WebSocket Connection Status */}
       {isConnected && (
@@ -363,16 +342,6 @@ export default function Dashboard() {
                   <div
                     key={item.id}
                     className="flex space-x-3 cursor-pointer hover:bg-muted/30 p-2 rounded-md transition-colors"
-                    onClick={() => {
-                      // Find the task in recentTasks based on taskId
-                      const task = recentTasks?.find(
-                        (t: any) => t.id === item.taskId
-                      );
-                      if (task) {
-                        setSelectedTask(task);
-                        setIsTaskModalOpen(true);
-                      }
-                    }}
                   >
                     <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
                       {item.action === "created" && (

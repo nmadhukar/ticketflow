@@ -36,7 +36,8 @@
  * - Accessibility compliance and keyboard navigation
  */
 
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
+import { useEffect } from "react";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -61,8 +62,20 @@ import KnowledgeBase from "@/pages/knowledge-base";
 import { WebSocketProvider } from "@/hooks/useWebSocket";
 import AdminPanel from "./pages/admin";
 
+function RedirectHome() {
+  const [, setLocation] = useLocation();
+  useEffect(() => setLocation("/"), [setLocation]);
+  return null;
+}
+
+function TasksRoute() {
+  const { user } = useAuth();
+  const role = (user as any)?.role;
+  return role !== "admin" ? <RedirectHome /> : <Tasks />;
+}
+
 function Router() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
 
   if (isLoading) {
     return null; // or a loading spinner
@@ -83,12 +96,22 @@ function Router() {
           <WebSocketProvider>
             <Layout>
               <Switch>
-                <Route path="/" component={Dashboard} />
+                <Route path="/">
+                  <ProtectedRoute
+                    allowedRoles={["admin", "manager", "agent", "customer"]}
+                  >
+                    {(user as any)?.role === "admin" ? (
+                      <Dashboard />
+                    ) : (
+                      <Tasks />
+                    )}
+                  </ProtectedRoute>
+                </Route>
                 <Route path="/tasks">
                   <ProtectedRoute
                     allowedRoles={["admin", "manager", "agent", "customer"]}
                   >
-                    <Tasks />
+                    <TasksRoute />
                   </ProtectedRoute>
                 </Route>
                 <Route path="/teams">
