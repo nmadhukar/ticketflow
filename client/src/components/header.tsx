@@ -113,20 +113,22 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
 
   return (
     <header className="relative bg-card shadow-business p-5 sticky top-0 backdrop-blur-md flex items-center justify-between z-50">
-      <div className="flex items-center gap-3 ml-2">
-        {(companyBranding as any)?.logoUrl ? (
-          <img
-            src={(companyBranding as any).logoUrl}
-            alt={(companyBranding as any).companyName || "Company Logo"}
-            className="h-8 w-auto object-contain max-w-[120px]"
-          />
-        ) : (
-          <TicketIcon className="h-10 w-auto text-primary" />
-        )}
-        <span className="text-foreground text-lg">
-          {(companyBranding as any)?.companyName || "TicketFlow"}
-        </span>
-      </div>
+      <Link href="/">
+        <div className="flex items-center gap-3 ml-2 cursor-pointer select-none">
+          {(companyBranding as any)?.logoUrl ? (
+            <img
+              src={(companyBranding as any).logoUrl}
+              alt={(companyBranding as any).companyName || "Company Logo"}
+              className="h-8 w-auto object-contain max-w-[120px]"
+            />
+          ) : (
+            <TicketIcon className="h-10 w-auto text-primary" />
+          )}
+          <span className="text-foreground text-lg">
+            {(companyBranding as any)?.companyName || "TicketFlow"}
+          </span>
+        </div>
+      </Link>
       <div className="flex items-center space-x-4">
         {/* Action Button */}
         {action}

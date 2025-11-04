@@ -151,7 +151,8 @@ export default function Tasks() {
   const queryClient = useQueryClient();
   const { t } = useTranslation(["common", "tickets"]);
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
-  const [editingTask, setEditingTask] = useState(null);
+  const [editingTask, setEditingTask] = useState<any>(null);
+  const [isViewOnly, setIsViewOnly] = useState(false);
   const [viewMode, setViewMode] = useState("cards"); // cards or table
   const [filters, setFilters] = useState({
     search: "",
@@ -687,7 +688,11 @@ export default function Tasks() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleEditTask(task)}
+                            onClick={() => {
+                              setEditingTask(task);
+                              setIsViewOnly(true);
+                              setIsTaskModalOpen(true);
+                            }}
                             className="h-8 w-8 p-0"
                           >
                             <Eye className="h-4 w-4" />
@@ -704,7 +709,10 @@ export default function Tasks() {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                               <DropdownMenuItem
-                                onClick={() => handleEditTask(task)}
+                                onClick={() => {
+                                  handleEditTask(task);
+                                  setIsViewOnly(false);
+                                }}
                               >
                                 <Edit3 className="h-4 w-4 mr-2" />
                                 {t("tickets:editTicket")}
@@ -773,8 +781,10 @@ export default function Tasks() {
         onClose={() => {
           setIsTaskModalOpen(false);
           setEditingTask(null);
+          setIsViewOnly(false);
         }}
         task={editingTask}
+        viewOnly={isViewOnly}
       />
     </MainWrapper>
   );

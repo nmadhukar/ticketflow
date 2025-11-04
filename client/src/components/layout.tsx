@@ -1,10 +1,12 @@
 import { PropsWithChildren } from "react";
 import { Sidebar } from "./sidebar";
+import { useAuth } from "@/hooks/useAuth";
 
 export function Layout({ children }: PropsWithChildren) {
+  const { user } = useAuth();
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar />
+      {(user as any)?.role !== "customer" ? <Sidebar /> : null}
       <main className="flex-1 overflow-y-auto bg-gray-50/50">{children}</main>
     </div>
   );

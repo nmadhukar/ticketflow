@@ -46,14 +46,10 @@ export function Sidebar({ className }: SidebarProps) {
         { name: t("dashboard"), href: "/", icon: LayoutDashboard },
         { name: t("tickets"), href: "/tasks", icon: FolderOpen },
         { name: t("teams"), href: "/teams", icon: Users },
-        { name: t("knowledge_base"), href: "/knowledge-base", icon: BookOpen },
       ];
     }
 
-    return [
-      { name: t("tickets"), href: "/", icon: LayoutDashboard },
-      { name: t("knowledge_base"), href: "/knowledge-base", icon: BookOpen },
-    ];
+    return [{ name: t("tickets"), href: "/", icon: LayoutDashboard }];
   })();
 
   const adminGroups = [

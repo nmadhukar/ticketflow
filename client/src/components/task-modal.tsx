@@ -74,6 +74,7 @@ interface TaskModalProps {
   isOpen: boolean;
   onClose: () => void;
   task?: any;
+  viewOnly?: boolean;
 }
 
 const getPriorityIcon = (priority: string) => {
@@ -121,7 +122,12 @@ const getStatusColor = (status: string) => {
   }
 };
 
-export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
+export default function TaskModal({
+  isOpen,
+  onClose,
+  task,
+  viewOnly,
+}: TaskModalProps) {
   const { toast } = useToast();
   const { user } = useAuth() as { user?: { role?: string } } as any;
   const queryClient = useQueryClient();
@@ -202,6 +208,41 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     if (!Array.isArray(allowed)) return true; // fail-open for UX; server still enforces
     return allowed.includes(field);
   };
+
+  // Determine editability summary for current user/role when editing
+  const editableKeys = [
+    "title",
+    "description",
+    "category",
+    "priority",
+    "status",
+    "notes",
+    "assigneeId",
+    "assigneeType",
+    "assigneeTeamId",
+    "dueDate",
+    "departmentId",
+    "teamId",
+  ];
+  const canEditAnything = (() => {
+    if (!task) return true; // creating is always editable (server validates)
+    if ((user as any)?.role === "admin") return true;
+    if (!Array.isArray(permissions?.allowedFields)) return true;
+    return editableKeys.some((k) => canEditField(k));
+  })();
+  const canEditStatus = task
+    ? canEditField("status") || (user as any)?.role === "admin"
+    : false;
+  const canEditAssignment = task
+    ? [
+        "assigneeType",
+        "assigneeId",
+        "assigneeTeamId",
+        "departmentId",
+        "teamId",
+        "dueDate",
+      ].some((k) => canEditField(k)) || (user as any)?.role === "admin"
+    : true;
 
   const { data: taskComments } = useQuery<any[]>({
     queryKey: ["/api/tasks", task?.id, "comments"],
@@ -600,9 +641,11 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                 <div className="flex-1">
                   <DialogTitle className="text-xl font-semibold text-slate-900">
                     {task
-                      ? t("tickets:modal.editTitle", {
-                          ticketNumber: task.ticketNumber || "",
-                        })
+                      ? viewOnly
+                        ? task.title || task.ticketNumber || ""
+                        : t("tickets:modal.editTitle", {
+                            ticketNumber: task.ticketNumber || "",
+                          })
                       : t("tickets:modal.createTitle")}
                   </DialogTitle>
                   <DialogDescription className="text-slate-600 mt-1">
@@ -832,7 +875,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                     </Card>
 
                     {/* Status & Priority - only show status when editing */}
-                    {task && (
+                    {task && canEditStatus && (
                       <Card className="border-l-4 border-l-yellow-500">
                         <CardHeader className="pb-3">
                           <CardTitle className="text-lg flex items-center gap-2">
@@ -887,190 +930,198 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                     )}
 
                     {/* Assignment & Timeline */}
-                    <Card className="border-l-4 border-l-green-500">
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-lg flex items-center gap-2">
-                          <Users className="h-5 w-5 text-green-600" />
-                          {t("tickets:modal.sections.assignment")}
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label className="text-sm font-medium text-slate-700 flex items-center gap-2">
-                              <User className="h-4 w-4" />
-                              {t("tickets:modal.fields.assignmentType")}
-                            </Label>
-                            <Select
-                              value={formData.assigneeType}
-                              onValueChange={(value) =>
-                                handleInputChange("assigneeType", value)
-                              }
-                              disabled={!!task && !canEditField("assigneeType")}
-                            >
-                              <SelectTrigger className="mt-2">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="user">
-                                  <div className="flex items-center gap-2">
-                                    <User className="h-4 w-4" />
-                                    {t("tickets:modal.fields.individualUser")}
-                                  </div>
-                                </SelectItem>
-                                <SelectItem value="team">
-                                  <div className="flex items-center gap-2">
-                                    <Users className="h-4 w-4" />
-                                    {t("tickets:modal.fields.team")}
-                                  </div>
-                                </SelectItem>
-                              </SelectContent>
-                            </Select>
+                    {(!task ||
+                      ((user as any)?.role !== "customer" &&
+                        canEditAssignment)) && (
+                      <Card className="border-l-4 border-l-green-500">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-lg flex items-center gap-2">
+                            <Users className="h-5 w-5 text-green-600" />
+                            {t("tickets:modal.sections.assignment")}
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <Label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                                <User className="h-4 w-4" />
+                                {t("tickets:modal.fields.assignmentType")}
+                              </Label>
+                              <Select
+                                value={formData.assigneeType}
+                                onValueChange={(value) =>
+                                  handleInputChange("assigneeType", value)
+                                }
+                                disabled={
+                                  !!task && !canEditField("assigneeType")
+                                }
+                              >
+                                <SelectTrigger className="mt-2">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="user">
+                                    <div className="flex items-center gap-2">
+                                      <User className="h-4 w-4" />
+                                      {t("tickets:modal.fields.individualUser")}
+                                    </div>
+                                  </SelectItem>
+                                  <SelectItem value="team">
+                                    <div className="flex items-center gap-2">
+                                      <Users className="h-4 w-4" />
+                                      {t("tickets:modal.fields.team")}
+                                    </div>
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div>
+                              <Label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                                <Calendar className="h-4 w-4" />
+                                {t("tickets:modal.fields.dueDate")}
+                              </Label>
+                              <Input
+                                type="date"
+                                value={formData.dueDate}
+                                onChange={(e) =>
+                                  handleInputChange("dueDate", e.target.value)
+                                }
+                                className="mt-2"
+                                disabled={!!task && !canEditField("dueDate")}
+                              />
+                            </div>
                           </div>
 
-                          <div>
-                            <Label className="text-sm font-medium text-slate-700 flex items-center gap-2">
-                              <Calendar className="h-4 w-4" />
-                              {t("tickets:modal.fields.dueDate")}
-                            </Label>
-                            <Input
-                              type="date"
-                              value={formData.dueDate}
-                              onChange={(e) =>
-                                handleInputChange("dueDate", e.target.value)
-                              }
-                              className="mt-2"
-                              disabled={!!task && !canEditField("dueDate")}
-                            />
-                          </div>
-                        </div>
+                          {formData.assigneeType === "team" &&
+                            (
+                              effectivePermissions?.allowedAssigneeTypes || []
+                            )?.includes("team") && (
+                              <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                  <Label className="text-sm font-medium text-slate-700">
+                                    {t("tickets:modal.fields.department")} *
+                                  </Label>
+                                  <Select
+                                    value={formData.departmentId}
+                                    onValueChange={(value) => {
+                                      handleInputChange("departmentId", value);
+                                      // When department changes, clear team to force re-select
+                                      handleInputChange("teamId", "");
+                                    }}
+                                    disabled={
+                                      !!task && !canEditField("assigneeTeamId")
+                                    }
+                                  >
+                                    <SelectTrigger className="mt-2">
+                                      <SelectValue
+                                        placeholder={t(
+                                          "tickets:modal.placeholders.selectDept"
+                                        )}
+                                      />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {departments?.map((dept: any) => (
+                                        <SelectItem
+                                          key={dept.id}
+                                          value={dept.id.toString()}
+                                        >
+                                          {dept.name}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div>
+                                  <Label className="text-sm font-medium text-slate-700">
+                                    {t("tickets:modal.fields.teamReq")} *
+                                  </Label>
+                                  <Select
+                                    value={formData.teamId}
+                                    onValueChange={(value) =>
+                                      handleInputChange("teamId", value)
+                                    }
+                                    disabled={
+                                      !!task && !canEditField("assigneeTeamId")
+                                    }
+                                  >
+                                    <SelectTrigger className="mt-2">
+                                      <SelectValue
+                                        placeholder={t(
+                                          "tickets:modal.placeholders.selectTeam"
+                                        )}
+                                      />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {teams
+                                        ?.filter(
+                                          (t: any) =>
+                                            !formData.departmentId ||
+                                            t.departmentId?.toString() ===
+                                              formData.departmentId
+                                        )
+                                        ?.map((team: any) => (
+                                          <SelectItem
+                                            key={team.id}
+                                            value={team.id.toString()}
+                                          >
+                                            {team.name}
+                                          </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                            )}
 
-                        {formData.assigneeType === "team" &&
-                          (
-                            effectivePermissions?.allowedAssigneeTypes || []
-                          )?.includes("team") && (
-                            <div className="grid grid-cols-2 gap-4">
-                              <div>
+                          {formData.assigneeType !== "team" &&
+                            (
+                              effectivePermissions?.allowedAssigneeTypes || []
+                            )?.includes("user") && (
+                              <div className="col-span-2">
                                 <Label className="text-sm font-medium text-slate-700">
-                                  {t("tickets:modal.fields.department")} *
+                                  {t("tickets:modal.fields.assignToUser")}
                                 </Label>
                                 <Select
-                                  value={formData.departmentId}
-                                  onValueChange={(value) => {
-                                    handleInputChange("departmentId", value);
-                                    // When department changes, clear team to force re-select
-                                    handleInputChange("teamId", "");
-                                  }}
+                                  value={formData.assigneeId}
+                                  onValueChange={(value) =>
+                                    handleInputChange("assigneeId", value)
+                                  }
                                   disabled={
-                                    !!task && !canEditField("assigneeTeamId")
+                                    !!task && !canEditField("assigneeId")
                                   }
                                 >
                                   <SelectTrigger className="mt-2">
                                     <SelectValue
                                       placeholder={t(
-                                        "tickets:modal.placeholders.selectDept"
+                                        "tickets:modal.placeholders.searchUser"
                                       )}
                                     />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    {departments?.map((dept: any) => (
-                                      <SelectItem
-                                        key={dept.id}
-                                        value={dept.id.toString()}
-                                      >
-                                        {dept.name}
+                                    <SelectItem value="unassigned">
+                                      <div className="flex items-center gap-2">
+                                        <User className="h-4 w-4" />
+                                        {t("tickets:modal.fields.unassigned")}
+                                      </div>
+                                    </SelectItem>
+                                    {assignableUsers?.map((user: any) => (
+                                      <SelectItem key={user.id} value={user.id}>
+                                        <div className="flex items-center gap-2">
+                                          <User className="h-4 w-4" />
+                                          {user.firstName && user.lastName
+                                            ? `${user.firstName} ${user.lastName}`
+                                            : user.email}
+                                        </div>
                                       </SelectItem>
                                     ))}
                                   </SelectContent>
                                 </Select>
                               </div>
-                              <div>
-                                <Label className="text-sm font-medium text-slate-700">
-                                  {t("tickets:modal.fields.teamReq")} *
-                                </Label>
-                                <Select
-                                  value={formData.teamId}
-                                  onValueChange={(value) =>
-                                    handleInputChange("teamId", value)
-                                  }
-                                  disabled={
-                                    !!task && !canEditField("assigneeTeamId")
-                                  }
-                                >
-                                  <SelectTrigger className="mt-2">
-                                    <SelectValue
-                                      placeholder={t(
-                                        "tickets:modal.placeholders.selectTeam"
-                                      )}
-                                    />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {teams
-                                      ?.filter(
-                                        (t: any) =>
-                                          !formData.departmentId ||
-                                          t.departmentId?.toString() ===
-                                            formData.departmentId
-                                      )
-                                      ?.map((team: any) => (
-                                        <SelectItem
-                                          key={team.id}
-                                          value={team.id.toString()}
-                                        >
-                                          {team.name}
-                                        </SelectItem>
-                                      ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-                          )}
-
-                        {formData.assigneeType !== "team" &&
-                          (
-                            effectivePermissions?.allowedAssigneeTypes || []
-                          )?.includes("user") && (
-                            <div className="col-span-2">
-                              <Label className="text-sm font-medium text-slate-700">
-                                {t("tickets:modal.fields.assignToUser")}
-                              </Label>
-                              <Select
-                                value={formData.assigneeId}
-                                onValueChange={(value) =>
-                                  handleInputChange("assigneeId", value)
-                                }
-                                disabled={!!task && !canEditField("assigneeId")}
-                              >
-                                <SelectTrigger className="mt-2">
-                                  <SelectValue
-                                    placeholder={t(
-                                      "tickets:modal.placeholders.searchUser"
-                                    )}
-                                  />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="unassigned">
-                                    <div className="flex items-center gap-2">
-                                      <User className="h-4 w-4" />
-                                      {t("tickets:modal.fields.unassigned")}
-                                    </div>
-                                  </SelectItem>
-                                  {assignableUsers?.map((user: any) => (
-                                    <SelectItem key={user.id} value={user.id}>
-                                      <div className="flex items-center gap-2">
-                                        <User className="h-4 w-4" />
-                                        {user.firstName && user.lastName
-                                          ? `${user.firstName} ${user.lastName}`
-                                          : user.email}
-                                      </div>
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          )}
-                      </CardContent>
-                    </Card>
+                            )}
+                        </CardContent>
+                      </Card>
+                    )}
 
                     {/* Additional Notes */}
                     <Card className="border-l-4 border-l-purple-500">
@@ -1296,28 +1347,36 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
           </div>
 
           {/* Footer */}
-          <div className="border-t bg-slate-50 px-6 py-4">
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={onClose}>
-                {t("tickets:modal.buttons.cancel")}
-              </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={
-                  createTaskMutation.isPending || updateTaskMutation.isPending
-                }
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                {createTaskMutation.isPending || updateTaskMutation.isPending
-                  ? task
-                    ? t("tickets:modal.buttons.updating")
-                    : t("tickets:modal.buttons.creating")
-                  : task
-                  ? t("tickets:modal.buttons.update")
-                  : t("tickets:modal.buttons.create")}
-              </Button>
-            </DialogFooter>
-          </div>
+          {!viewOnly && (
+            <div className="border-t bg-slate-50 px-6 py-4">
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={onClose}>
+                  {t("tickets:modal.buttons.cancel")}
+                </Button>
+                {task && !canEditAnything ? (
+                  <></>
+                ) : (
+                  <Button
+                    onClick={handleSubmit}
+                    disabled={
+                      createTaskMutation.isPending ||
+                      updateTaskMutation.isPending
+                    }
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    {createTaskMutation.isPending ||
+                    updateTaskMutation.isPending
+                      ? task
+                        ? t("tickets:modal.buttons.updating")
+                        : t("tickets:modal.buttons.creating")
+                      : task
+                      ? t("tickets:modal.buttons.update")
+                      : t("tickets:modal.buttons.create")}
+                  </Button>
+                )}
+              </DialogFooter>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

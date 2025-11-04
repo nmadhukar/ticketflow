@@ -11,6 +11,21 @@ function nextTicketNumber(last?: string): string {
   return `TKT-${year}-${seq.toString().padStart(4, "0")}`;
 }
 
+async function nextUniqueTicketNumber(currentLast?: string): Promise<string> {
+  // Ensure uniqueness by checking existence and incrementing until free
+  let candidate = nextTicketNumber(currentLast);
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const existing = await db
+      .select({ ticketNumber: tasks.ticketNumber })
+      .from(tasks)
+      .where(eq(tasks.ticketNumber, candidate))
+      .limit(1);
+    if (!existing?.length) return candidate;
+    candidate = nextTicketNumber(candidate);
+  }
+}
+
 export async function seedTickets() {
   try {
     console.log("Seeding tickets...");
@@ -62,19 +77,13 @@ export async function seedTickets() {
         : never
     > = [] as any;
 
-    function pushTicket(partial: Partial<typeof tasks.$inferInsert>) {
-      lastTicketNo = nextTicketNumber(lastTicketNo);
-      seedRows.push({
-        ticketNumber: lastTicketNo,
-        title: partial.title || "Seeded Ticket",
-      } as any);
-    }
+    // Note: pushTicket helper removed; we insert directly with unique numbers
 
     // Customers create tickets assigned to a team
     for (let i = 0; i < Math.min(3, customers.length, myTeams.length); i++) {
       const creator = customers[i].id;
       const team = myTeams[i];
-      lastTicketNo = nextTicketNumber(lastTicketNo);
+      lastTicketNo = await nextUniqueTicketNumber(lastTicketNo);
       await db.insert(tasks).values({
         ticketNumber: lastTicketNo,
         title: `Customer issue #${i + 1}`,
@@ -94,7 +103,7 @@ export async function seedTickets() {
     // Agent/user assigned directly
     for (let i = 0; i < agents.length; i++) {
       const assignee = agents[i].id;
-      lastTicketNo = nextTicketNumber(lastTicketNo);
+      lastTicketNo = await nextUniqueTicketNumber(lastTicketNo);
       await db.insert(tasks).values({
         ticketNumber: lastTicketNo,
         title: `Agent task #${i + 1}`,
@@ -114,7 +123,7 @@ export async function seedTickets() {
     // Mixed: team with later user assignment left null
     for (let i = 0; i < Math.min(2, myTeams.length); i++) {
       const team = myTeams[i];
-      lastTicketNo = nextTicketNumber(lastTicketNo);
+      lastTicketNo = await nextUniqueTicketNumber(lastTicketNo);
       await db.insert(tasks).values({
         ticketNumber: lastTicketNo,
         title: `Team queue item #${i + 1}`,
@@ -125,7 +134,8 @@ export async function seedTickets() {
         assigneeType: "team",
         assigneeTeamId: team.id,
         assigneeId: null,
-        createdBy: admin?.id || myTeams[0]?.id, // fallback
+        createdBy:
+          admin?.id || agents[0]?.id || customers[0]?.id || "seed@system",
       });
       console.log(
         `✓ Created team-queue ticket ${lastTicketNo} -> team ${team.name}`

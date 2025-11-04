@@ -112,6 +112,26 @@ export default function KnowledgeBase() {
   const [articleTags, setArticleTags] = useState("");
   const [isPublished, setIsPublished] = useState(false);
 
+  // Learning Queue status (admin only)
+  const {
+    data: learningStatus,
+    isLoading: learningStatusLoading,
+    refetch: refetchLearningStatus,
+    error: learningStatusError,
+  } = useQuery<any>({
+    queryKey: ["/api/admin/learning-queue/status"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/learning-queue/status", {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to fetch learning status");
+      return res.json();
+    },
+    retry: false,
+    enabled: isAuthenticated && (user as any)?.role === "admin",
+    refetchOnMount: "always",
+  });
+
   // Predefined categories for common issue types
   const knowledgeCategories = [
     "troubleshooting",
@@ -284,6 +304,7 @@ export default function KnowledgeBase() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/knowledge"] });
+      refetchLearningStatus();
       toast({
         title: t("knowledge:toasts.aiComplete"),
         description: `Found ${data.patternsFound} patterns, created ${data.articlesCreated} articles (${data.articlesPublished} published)`,
@@ -417,11 +438,16 @@ export default function KnowledgeBase() {
       title={t("knowledge:title")}
       subTitle={t("knowledge:subtitle")}
       action={
-        (user as any)?.role === "admin" && (
+        (user as any)?.role === "admin" &&
+        !learningStatusError && (
           <div className="flex items-center gap-3">
             <Button
               onClick={() => triggerLearningMutation.mutate()}
-              disabled={triggerLearningMutation.isPending}
+              disabled={
+                triggerLearningMutation.isPending ||
+                learningStatusLoading ||
+                Boolean(learningStatus?.status === "processing")
+              }
               variant="outline"
             >
               {triggerLearningMutation.isPending ? (
@@ -431,6 +457,21 @@ export default function KnowledgeBase() {
               )}
               {t("knowledge:actions.aiLearning")}
             </Button>
+            {!learningStatusLoading && learningStatus && (
+              <div className="text-xs text-muted-foreground">
+                {learningStatus.status
+                  ? `Status: ${learningStatus.status}`
+                  : ""}
+                {typeof learningStatus.queueLength === "number"
+                  ? ` • Queue: ${learningStatus.queueLength}`
+                  : ""}
+                {typeof learningStatus.lastRunAt === "string"
+                  ? ` • Last run: ${new Date(
+                      learningStatus.lastRunAt
+                    ).toLocaleString()}`
+                  : ""}
+              </div>
+            )}
             <Button
               onClick={() => {
                 resetArticleForm();
@@ -446,30 +487,11 @@ export default function KnowledgeBase() {
     >
       <Card>
         <CardHeader>
-          <div className="w-full flex items-start justify-between">
-            <div className="flex flex-col gap-1">
-              <CardTitle>
-                {t("knowledge:table.title", { count: filteredArticles.length })}
-              </CardTitle>
-              {(user as any)?.role === "admin" && (
-                <CardDescription>{t("knowledge:table.manage")}</CardDescription>
-              )}
-            </div>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setSearchQuery("");
-                setCategoryFilter("all");
-                setStatusFilter("all");
-              }}
-            >
-              {t("knowledge:actions.clearFilters")}
-            </Button>
-          </div>
+          <CardDescription>{t("knowledge:table.manage")}</CardDescription>
         </CardHeader>
         <CardContent>
           <Card>
-            <div className="grid grid-cols-1 md:grid-cols-7 p-5 gap-8">
+            <div className="grid grid-cols-1 md:grid-cols-8 p-5 gap-8">
               <div className="relative col-span-1 md:col-span-4">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
@@ -542,6 +564,16 @@ export default function KnowledgeBase() {
                   </SelectItem>
                 </SelectContent>
               </Select>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setSearchQuery("");
+                  setCategoryFilter("all");
+                  setStatusFilter("all");
+                }}
+              >
+                {t("knowledge:actions.clearFilters")}
+              </Button>
             </div>
           </Card>
         </CardContent>

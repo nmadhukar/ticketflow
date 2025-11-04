@@ -716,129 +716,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!task) {
         return res.status(404).json({ message: "Task not found" });
       }
-
-      // Build context
-      const myTeams = await storage.getUserTeams(userId);
-      const userTeamIds = (myTeams || []).map((t: any) => t.id);
-      const isTicketOwner = task.createdBy === userId;
-      const isAssigneeUser =
-        task.assigneeType === "user" && task.assigneeId === userId;
-      const isInTicketTeam =
-        task.assigneeType === "team" && task.assigneeTeamId
-          ? userTeamIds.includes(task.assigneeTeamId as any)
-          : false;
-      const updateFields =
-        req.body && typeof req.body === "object" ? Object.keys(req.body) : [];
-
-      // Allowed fields by role/context
-      let allowedFields: string[] = [];
-      if (user?.role === "admin") {
-        allowedFields = [
-          "title",
-          "description",
-          "category",
-          "priority",
-          "status",
-          "notes",
-          "assigneeId",
-          "assigneeType",
-          "assigneeTeamId",
-          "dueDate",
-        ];
-      } else if (user?.role === "customer") {
-        if (!isTicketOwner) {
-          try {
-            logSecurityEvent(req as any, "update", "ticket", false, {
-              reason: "customer_not_owner",
-              taskId,
-            });
-          } catch {}
-          return res.status(403).json({ message: "Access denied" });
-        }
-        allowedFields = ["title", "description"];
-      } else if (user?.role === "agent") {
-        if (isAssigneeUser || isInTicketTeam) {
-          // Team members can change status/priority/dueDate; only assignee can reassign
-          allowedFields = ["status", "priority", "dueDate", "notes"];
-          if (isAssigneeUser) {
-            allowedFields.push("assigneeType", "assigneeId", "assigneeTeamId");
-          }
-        } else {
-          // Not part of the ticket team nor assignee
-          allowedFields = [];
-        }
-      } else {
-        // Unknown role
-        return res.status(403).json({ message: "Access denied" });
-      }
-
-      // Reject if attempting to modify fields outside allowed set (unless admin)
-      if (user?.role !== "admin") {
-        const hasDisallowed = updateFields.some(
-          (f) => !allowedFields.includes(f)
-        );
-        if (hasDisallowed) {
-          try {
-            logSecurityEvent(req as any, "update", "ticket", false, {
-              reason: "disallowed_fields",
-              fields: updateFields.filter((f) => !allowedFields.includes(f)),
-              taskId,
-            });
-          } catch {}
-          return res.status(403).json({
-            message: "You do not have permission to modify one or more fields",
-          });
-        }
-      }
-
-      // Enforce assignment constraints for non-admins and only when assignment fields present
-      if (
-        user?.role !== "admin" &&
-        ("assigneeType" in req.body ||
-          "assigneeId" in req.body ||
-          "assigneeTeamId" in req.body)
-      ) {
-        if (!isAssigneeUser) {
-          try {
-            logSecurityEvent(req as any, "assign", "ticket", false, {
-              reason: "not_current_assignee",
-              taskId,
-            });
-          } catch {}
-          return res
-            .status(403)
-            .json({ message: "Only the current assignee can reassign" });
-        }
-        const desiredType = req.body.assigneeType;
-        if (desiredType === "user") {
-          if (req.body.assigneeId !== userId) {
-            try {
-              logSecurityEvent(req as any, "assign", "ticket", false, {
-                reason: "assign_user_not_self",
-                taskId,
-              });
-            } catch {}
-            return res.status(403).json({
-              message: "You can only assign to yourself or your team",
-            });
-          }
-        } else if (desiredType === "team") {
-          if (!userTeamIds.includes(req.body.assigneeTeamId)) {
-            try {
-              logSecurityEvent(req as any, "assign", "ticket", false, {
-                reason: "assign_team_not_member",
-                taskId,
-              });
-            } catch {}
-            return res
-              .status(403)
-              .json({ message: "You can only assign to your own team" });
-          }
-        }
+      const { canUpdateTicket } = await import("./permissions/tickets");
+      const result = await canUpdateTicket({ user, ticket: task, payload: req.body });
+      if (!result.allowed) {
+        return res.status(403).json({ message: "Access denied", reason: result.reason });
       }
 
       // Optional: enforce simple status transitions, except for admin
-      if (user?.role !== "admin" && "status" in req.body) {
+      if (user?.role !== "admin" && "status" in result.prunedPayload) {
         const transitionMap: Record<string, string[]> = {
           open: ["in_progress", "on_hold"],
           in_progress: ["resolved", "on_hold"],
@@ -847,7 +732,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           closed: [],
         };
         const current = (task as any).status || "open";
-        const next = req.body.status;
+        const next = result.prunedPayload.status;
         const allowedNext = transitionMap[current] || [];
         if (!allowedNext.includes(next)) {
           try {
@@ -862,8 +747,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
       }
-
-      const updates = insertTaskSchema.partial().parse(req.body);
+      const updates = insertTaskSchema.partial().parse(result.prunedPayload);
       const updatedTask = await storage.updateTask(taskId, updates, userId);
 
       // If task was resolved, trigger knowledge base learning (policy-aware)
@@ -942,14 +826,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const taskId = parseInt(req.params.id);
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-
-      // Customers cannot delete tasks
-      if (user?.role === "customer") {
-        return res
-          .status(403)
-          .json({ message: "Customers cannot delete tickets" });
+      const task = await storage.getTask(taskId);
+      if (!task) return res.status(404).json({ message: "Task not found" });
+      const { canDeleteTicket } = await import("./permissions/tickets");
+      const verdict = canDeleteTicket({ user, ticket: task });
+      if (!verdict.allowed) {
+        return res.status(403).json({ message: "Access denied", reason: verdict.reason });
       }
-
       await storage.deleteTask(taskId);
       res.status(204).send();
     } catch (error) {
