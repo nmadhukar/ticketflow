@@ -11,7 +11,6 @@ import {
   Bell,
   BookOpen,
   ChevronDown,
-  Globe,
   Settings,
   TicketIcon,
   UserCircle,
@@ -21,6 +20,7 @@ import { useTranslation } from "react-i18next";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import SignOutButton from "./signOutButton";
+import { setThemeFromPrimary } from "@/theme/color";
 import {
   Menubar,
   MenubarContent,
@@ -44,15 +44,28 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
     queryKey: ["/api/company-settings/branding"],
   });
 
+  // Map language -> country for flag display
+  const LOCALE_COUNTRY: Record<string, string> = {
+    en: "US",
+    es: "ES",
+    fr: "FR",
+    de: "DE",
+    zh: "CN",
+  };
+
+  const getFlagUrl = (langCode: string) => {
+    const cc = (LOCALE_COUNTRY[langCode] || "US").toLowerCase();
+    // Use FlagCDN SVGs to avoid OS emoji issues
+    return `https://flagcdn.com/${cc}.svg`;
+  };
+
   // Apply branding primary color to CSS variables so UI updates globally
   useEffect(() => {
     const primary = (companyBranding as any)?.primaryColor as
       | string
       | undefined;
     if (!primary) return;
-    const root = document.documentElement;
-    root.style.setProperty("--primary", primary);
-    root.style.setProperty("--ring", primary);
+    setThemeFromPrimary(primary);
   }, [companyBranding]);
 
   // Unread notifications
@@ -91,10 +104,7 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
 
   const userDropdownActions = useMemo(() => {
     return (user as any)?.role === "admin"
-      ? [
-          { name: t("nav.adminGuides"), href: "/admin-guides", icon: BookOpen },
-          { name: t("nav.settings"), href: "/settings", icon: Settings },
-        ]
+      ? [{ name: t("nav.settings"), href: "/settings", icon: Settings }]
       : [
           { name: t("nav.userGuides"), href: "/guides", icon: BookOpen },
           { name: t("nav.settings"), href: "/settings", icon: Settings },
@@ -102,7 +112,7 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
   }, [user]);
 
   return (
-    <header className="bg-card shadow-business p-5 sticky top-0 backdrop-blur-md flex items-center justify-between z-50">
+    <header className="relative bg-card shadow-business p-5 sticky top-0 backdrop-blur-md flex items-center justify-between z-50">
       <div className="flex items-center gap-3 ml-2">
         {(companyBranding as any)?.logoUrl ? (
           <img
@@ -129,25 +139,58 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
               size="sm"
               className="flex items-center space-x-2"
             >
-              <Globe className="h-4 w-4" />
-              <span>{i18n.language?.toUpperCase?.() || "EN"}</span>
+              <span className="flex items-center gap-2">
+                <img
+                  src={getFlagUrl(i18n.language?.split?.("-")?.[0] || "en")}
+                  alt="flag"
+                  className="h-3.5 w-5 rounded-sm object-cover"
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                />
+                <span>{i18n.language?.toUpperCase?.() || "EN"}</span>
+              </span>
               <ChevronDown className="h-3 w-3" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent>
             <DropdownMenuItem onClick={() => i18n.changeLanguage("en")}>
+              <img
+                src={getFlagUrl("en")}
+                alt="US"
+                className="h-3.5 w-5 mr-2 rounded-sm object-cover"
+              />
               English
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => i18n.changeLanguage("es")}>
+              <img
+                src={getFlagUrl("es")}
+                alt="ES"
+                className="h-3.5 w-5 mr-2 rounded-sm object-cover"
+              />
               Español
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => i18n.changeLanguage("fr")}>
+              <img
+                src={getFlagUrl("fr")}
+                alt="FR"
+                className="h-3.5 w-5 mr-2 rounded-sm object-cover"
+              />
               Français
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => i18n.changeLanguage("de")}>
+              <img
+                src={getFlagUrl("de")}
+                alt="DE"
+                className="h-3.5 w-5 mr-2 rounded-sm object-cover"
+              />
               Deutsch
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => i18n.changeLanguage("zh")}>
+              <img
+                src={getFlagUrl("zh")}
+                alt="CN"
+                className="h-3.5 w-5 mr-2 rounded-sm object-cover"
+              />
               中文
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -249,6 +292,11 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
           </MenubarMenu>
         </Menubar>
       </div>
+      {/* Primary accent line */}
+      <div
+        className="absolute inset-x-0 bottom-0 h-[2px]"
+        style={{ background: "var(--primary)" }}
+      />
     </header>
   );
 }

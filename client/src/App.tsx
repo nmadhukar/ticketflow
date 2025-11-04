@@ -51,16 +51,15 @@ import Dashboard from "@/pages/dashboard";
 import Tasks from "@/pages/tasks";
 import Teams from "@/pages/teams";
 import TeamDetail from "@/pages/team-detail";
-import AdminPanel from "@/pages/admin";
 import Settings from "@/pages/settings";
 import Notifications from "@/pages/notifications";
 import ApiDocs from "@/pages/api-docs";
 import AuthPage from "@/pages/auth-page";
 import UserGuides from "@/pages/user-guides";
-import AdminGuides from "@/pages/admin-guides";
 import Departments from "@/pages/departments";
 import KnowledgeBase from "@/pages/knowledge-base";
 import { WebSocketProvider } from "@/hooks/useWebSocket";
+import AdminPanel from "./pages/admin";
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -99,7 +98,7 @@ function Router() {
                 </Route>
                 <Route
                   path="/teams/:id"
-                  component={(params) => (
+                  component={() => (
                     <ProtectedRoute allowedRoles={["admin", "manager"]}>
                       <TeamDetail />
                     </ProtectedRoute>
@@ -107,7 +106,7 @@ function Router() {
                 />
                 <Route
                   path="/departments"
-                  component={(params) => (
+                  component={() => (
                     <ProtectedRoute allowedRoles={["admin", "manager"]}>
                       <Departments />
                     </ProtectedRoute>
@@ -123,8 +122,6 @@ function Router() {
                 <Route path="/settings" component={Settings} />
                 <Route path="/notifications" component={Notifications} />
                 <Route path="/guides" component={UserGuides} />
-
-                <Route path="/admin-guides" component={AdminGuides} />
                 <Route path="/admin/:tab">
                   <ProtectedRoute allowedRoles={["admin"]}>
                     <AdminPanel />

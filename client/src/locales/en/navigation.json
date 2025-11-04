@@ -15,8 +15,9 @@
   "ai-settings": "AI Settings",
   "ai-analytics": "AI Performance",
   "learning-queue": "Learning Queue",
-  "help": "Help Documentation",
-  "policies": "Company Policies",
+  "help": "Help Docs",
+  "policies": "Policies",
+  "guidelines": "Guidelines",
   "developer-resources": "Developer Resources",
   "sso": "Microsoft 365 SSO",
   "ms-teams-integration": "Microsoft Teams"

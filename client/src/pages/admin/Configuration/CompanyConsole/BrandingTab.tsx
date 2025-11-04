@@ -301,14 +301,6 @@ const BrandingTab = () => {
                 placeholder={DEFAULT_COMPANY.BRANDING.PRIMARY_COLOR}
                 className="w-36"
               />
-              <div
-                className="h-6 w-12 rounded border"
-                style={{
-                  backgroundColor:
-                    companySettingsLocal.primaryColor ||
-                    DEFAULT_COMPANY.BRANDING.PRIMARY_COLOR,
-                }}
-              />
             </div>
             <p className="text-sm text-muted-foreground">
               Used for accents and buttons across the app.

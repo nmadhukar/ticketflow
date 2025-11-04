@@ -1,8 +1,13 @@
-import { useState, useRef } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -20,29 +25,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  FileText,
-  Upload,
-  Trash2,
-  Edit,
-  Eye,
-  Search,
-  X,
-  BookOpen,
-} from "lucide-react";
-import { Link } from "wouter";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Edit, Eye, FileText, Search, Trash2, Upload } from "lucide-react";
+import { useRef, useState } from "react";
 
-export default function HelpDocumentManager() {
+export default function HelpDocs() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -228,7 +218,7 @@ export default function HelpDocumentManager() {
     }
   };
 
-  const filteredDocuments = documents?.filter(
+  const filteredDocuments = (documents as any)?.filter(
     (doc: any) =>
       doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       doc.category?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -238,7 +228,7 @@ export default function HelpDocumentManager() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {/* Header with Upload button */}
       <div className="flex justify-between items-center">
         <div className="relative w-64">

@@ -125,6 +125,10 @@ export default function Dashboard() {
     );
   }
 
+  if (hasCustomerRole) {
+    return <Tasks />;
+  }
+
   return (
     <MainWrapper
       title={t("dashboard:title")}
@@ -149,8 +153,6 @@ export default function Dashboard() {
           {t("dashboard:realtimeUpdates")}
         </div>
       )}
-
-      {hasCustomerRole ? <Tasks /> : <></>}
 
       {/* Admin-only System Overview Cards */}
       {(user as any)?.role === "admin" && (

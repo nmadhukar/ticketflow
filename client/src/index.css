@@ -3,7 +3,8 @@
 @tailwind utilities;
 
 :root {
-  --background: hsl(0, 0%, 100%);
+  /* Light overall app background (slate-50-ish) for better contrast with cards */
+  --background: hsl(210, 40%, 98%);
   --foreground: hsl(222, 47%, 11%);
   --muted: hsl(210, 40%, 96.1%);
   --muted-foreground: hsl(215, 16%, 46.9%);
@@ -22,6 +23,8 @@
   --destructive: hsl(0, 84.2%, 60.2%);
   --destructive-foreground: hsl(0, 0%, 98%);
   --ring: hsl(221, 83%, 53%);
+  /* Derived from --primary at runtime */
+  --primary-hover: hsl(221, 83%, 46%);
   --radius: 0.5rem;
 }
 
@@ -45,6 +48,8 @@
   --destructive: hsl(0, 63%, 31%);
   --destructive-foreground: hsl(213, 31%, 91%);
   --ring: hsl(213, 94%, 68%);
+  /* Derived from --primary at runtime for dark surfaces */
+  --primary-hover: hsl(213, 94%, 74%);
   --radius: 0.5rem;
 }
 

@@ -76,14 +76,14 @@ export function Sidebar({ className }: SidebarProps) {
       icon: Brain,
       hrefBase: "/admin",
       section: "analytics",
-      items: ["ai-analytics", "learning-queue"],
+      items: ["ai-analytics", "learning-analytics"],
     },
     {
       titleKey: "content_title",
       icon: BookOpen,
       hrefBase: "/admin",
       section: "content",
-      items: ["help", "policies"],
+      items: ["help", "policies", "guidelines"],
     },
     {
       titleKey: "integrations_title",
@@ -104,19 +104,17 @@ export function Sidebar({ className }: SidebarProps) {
     "developer-resources": ["admin"],
     "ai-settings": ["admin"],
     "ai-analytics": ["admin", "manager"],
-    "learning-queue": ["admin", "manager"],
+    "learning-analytics": ["admin", "manager"],
     help: ["admin", "manager"],
     policies: ["admin", "manager"],
+    guidelines: ["admin", "manager"],
     sso: ["admin"],
     "ms-teams-integration": ["admin"],
   };
 
   return (
     <div
-      className={cn(
-        "flex h-full w-64 flex-col border-r bg-background",
-        className
-      )}
+      className={cn("flex h-full w-64 flex-col border-r bg-muted", className)}
     >
       <div className="flex-1 overflow-y-auto py-4">
         <nav className="space-y-1 px-3">
@@ -144,7 +142,7 @@ export function Sidebar({ className }: SidebarProps) {
               <Separator className="my-4" />
               {adminGroups.map((group) => (
                 <div key={group.section} className="px-3 pt-4 pb-2">
-                  <h3 className="mb-2 text-xs font-semibold text-muted-foreground uppercase flex items-center gap-2 line-clamp-1">
+                  <h3 className="mb-2 text-xs font-semibold text-muted-foreground uppercase flex items-center gap-3 line-clamp-1">
                     <group.icon className="h-4 w-4" />
                     {t(group.titleKey)}
                   </h3>
@@ -163,7 +161,7 @@ export function Sidebar({ className }: SidebarProps) {
                             key={tabKey}
                             href={href}
                             className={cn(
-                              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors cursor-pointer line-clamp-1",
+                              "flex items-center gap-3 rounded-lg px-4 py-1 text-sm font-medium transition-colors cursor-pointer line-clamp-1",
                               isActive
                                 ? "bg-primary text-primary-foreground"
                                 : "hover:bg-accent hover:text-accent-foreground"
