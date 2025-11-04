@@ -81,6 +81,7 @@ export default function Landing() {
             >
               Get Started Free
             </Button>
+            {/** SSO temporarily disabled
             <Button
               size="lg"
               variant="outline"
@@ -90,6 +91,7 @@ export default function Landing() {
               <Building2 className="mr-2 h-5 w-5" />
               Sign in with Microsoft 365
             </Button>
+            */}
           </div>
         </div>
       </section>
