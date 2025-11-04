@@ -21,10 +21,12 @@ import {
 } from "@/components/ui/select";
 import { User, Bell, Shield, Palette } from "lucide-react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import MainWrapper from "@/components/main-wrapper";
 
 export default function Settings() {
   const { user } = useAuth();
+  const { i18n, t } = useTranslation();
 
   const [notifications, setNotifications] = useState({
     email: true,
@@ -36,16 +38,15 @@ export default function Settings() {
 
   const [preferences, setPreferences] = useState({
     theme: "light",
-    language: "en",
+    language:
+      (typeof window !== "undefined" && localStorage.getItem("i18nextLng")) ||
+      "en",
     timezone: "UTC",
     dateFormat: "MM/DD/YYYY",
   });
 
   return (
-    <MainWrapper
-      title="Settings"
-      subTitle="Manage your account settings and preferences"
-    >
+    <MainWrapper title={t("settings.title")} subTitle={t("settings.subtitle")}>
       <Tabs defaultValue="profile" className="space-y-6">
         <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="profile" className="flex items-center gap-2">
@@ -262,22 +263,23 @@ export default function Settings() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="language">Language</Label>
+                  <Label htmlFor="language">{t("settings.language")}</Label>
                   <Select
                     value={preferences.language}
-                    onValueChange={(value) =>
-                      setPreferences((prev) => ({ ...prev, language: value }))
-                    }
+                    onValueChange={(value) => {
+                      setPreferences((prev) => ({ ...prev, language: value }));
+                      i18n.changeLanguage(value);
+                    }}
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="en">English</SelectItem>
-                      <SelectItem value="es">Español</SelectItem>
-                      <SelectItem value="fr">Français</SelectItem>
-                      <SelectItem value="de">Deutsch</SelectItem>
-                      <SelectItem value="zh">中文</SelectItem>
+                      <SelectItem value="en">{t("language.en")}</SelectItem>
+                      <SelectItem value="es">{t("language.es")}</SelectItem>
+                      <SelectItem value="fr">{t("language.fr")}</SelectItem>
+                      <SelectItem value="de">{t("language.de")}</SelectItem>
+                      <SelectItem value="zh">{t("language.zh")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -389,7 +391,7 @@ export default function Settings() {
                 variant="outline"
                 onClick={() => (window.location.href = "/api/logout")}
               >
-                Sign Out
+                {t("actions.signOut", { defaultValue: "Sign Out" })}
               </Button>
             </CardContent>
           </Card>

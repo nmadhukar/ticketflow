@@ -1,0 +1,157 @@
+{
+  "title": "Tickets",
+  "subtitle": "Gestiona y sigue todos los tickets de tus proyectos",
+  "newTicket": "Nuevo Ticket",
+  "createTicket": "Crear Ticket",
+  "editTicket": "Editar Ticket",
+  "deleteTicket": "Eliminar Ticket",
+  "taskDeleted": "Ticket eliminado correctamente",
+  "failedToDelete": "No se pudo eliminar el ticket",
+  "confirmDelete": "¿Seguro que quieres eliminar este ticket?",
+  "filters": {
+    "all": "Todos",
+    "status": "Estado",
+    "category": "Categoría",
+    "priority": "Prioridad",
+    "search": "Buscar tickets...",
+    "searchPlaceholder": "Buscar por título, descripción o número de ticket...",
+    "onlyMyTickets": "Solo mis tickets",
+    "clearFilters": "Limpiar filtros",
+    "page": "Página",
+    "prev": "Anterior",
+    "next": "Siguiente",
+    "of": "de",
+    "tickets": "tickets"
+  },
+  "status": {
+    "all": "Todos los estados",
+    "open": "Abierto",
+    "in_progress": "En progreso",
+    "resolved": "Resuelto",
+    "closed": "Cerrado",
+    "on_hold": "En espera"
+  },
+  "category": {
+    "all": "Todas las categorías",
+    "bug": "Error",
+    "feature": "Funcionalidad",
+    "support": "Soporte",
+    "enhancement": "Mejora",
+    "incident": "Incidente",
+    "request": "Solicitud"
+  },
+  "priority": {
+    "all": "Todas las prioridades",
+    "low": "Baja",
+    "medium": "Media",
+    "high": "Alta",
+    "urgent": "Urgente"
+  },
+  "assignee": {
+    "none": "Sin asignar",
+    "assignedTo": "Asignado a",
+    "assignTo": "Asignar a",
+    "assignToUser": "Asignar a Usuario",
+    "assignToTeam": "Asignar a Equipo"
+  },
+  "details": {
+    "title": "Título",
+    "description": "Descripción",
+    "notes": "Notas",
+    "dueDate": "Fecha límite",
+    "createdAt": "Creado",
+    "updatedAt": "Actualizado",
+    "createdBy": "Creado por",
+    "ticketNumber": "Ticket #"
+  },
+  "view": {
+    "cards": "Tarjetas",
+    "table": "Tabla",
+    "showMine": "Mostrar mis tickets"
+  },
+  "empty": {
+    "noTickets": "No se encontraron tickets",
+    "noMatchingTickets": "Ningún ticket coincide con tus filtros"
+  },
+  "table": {
+    "columns": {
+      "ticket": "Ticket",
+      "title": "Título",
+      "priority": "Prioridad",
+      "status": "Estado",
+      "category": "Categoría",
+      "assignedTo": "Asignado a",
+      "dueDate": "Fecha límite",
+      "created": "Creado",
+      "actions": "Acciones"
+    }
+  },
+  "modal": {
+    "editTitle": "Editar Ticket {{ticketNumber}}",
+    "createTitle": "Crear nuevo Ticket",
+    "editDesc": "Actualiza los detalles del ticket y sigue el progreso.",
+    "createDesc": "Completa los detalles para crear un nuevo ticket para tu equipo.",
+    "tabs": {
+      "details": "Detalles del ticket",
+      "comments": "Comentarios",
+      "attachments": "Adjuntos"
+    },
+    "sections": {
+      "essentialInfo": "Información esencial",
+      "status": "Estado del ticket",
+      "assignment": "Asignación y cronograma",
+      "notes": "Notas adicionales",
+      "comments": "Agregar comentario",
+      "attachments": "Subir adjunto",
+      "attachmentsList": "Archivos adjuntos"
+    },
+    "fields": {
+      "taskTitle": "Título de la tarea *",
+      "description": "Descripción",
+      "category": "Categoría *",
+      "priority": "Prioridad",
+      "currentStatus": "Estado actual",
+      "assignmentType": "Tipo de asignación",
+      "individualUser": "Usuario individual",
+      "team": "Equipo",
+      "dueDate": "Fecha límite",
+      "department": "Departamento *",
+      "teamReq": "Equipo *",
+      "assignToUser": "Asignar a Usuario",
+      "unassigned": "Sin asignar"
+    },
+    "placeholders": {
+      "title": "p. ej., Corregir problema de autenticación en la página de inicio de sesión",
+      "description": "Proporciona información detallada sobre la tarea, requisitos y resultados esperados...",
+      "tags": "Etiquetas separadas por coma",
+      "searchUser": "Seleccionar usuario",
+      "selectTeam": "Seleccionar equipo",
+      "selectDept": "Seleccionar departamento",
+      "comment": "Escribe tu comentario...",
+      "uploadCta": "Haz clic para subir o arrastra y suelta",
+      "uploadHelp": "PDF, DOC, DOCX, XLS, XLSX, PNG, JPG hasta 10MB"
+    },
+    "empty": {
+      "noComments": "Aún no hay comentarios. ¡Sé el primero en agregar uno!",
+      "noAttachments": "Aún no hay adjuntos. ¡Sube un archivo para comenzar!"
+    },
+    "buttons": {
+      "cancel": "Cancelar",
+      "create": "Crear Ticket",
+      "update": "Actualizar Ticket",
+      "creating": "Creando...",
+      "updating": "Actualizando...",
+      "addComment": "Agregar comentario",
+      "adding": "Agregando..."
+    },
+    "toasts": {
+      "created": "Ticket creado correctamente",
+      "updated": "Ticket actualizado correctamente",
+      "commentAdded": "Comentario agregado correctamente",
+      "fileAttached": "Archivo adjuntado correctamente",
+      "attachmentDeleted": "Adjunto eliminado correctamente"
+    }
+  }
+}
+
+

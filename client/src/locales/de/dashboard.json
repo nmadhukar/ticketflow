@@ -1,0 +1,34 @@
+{
+  "title": "Dashboard",
+  "subtitle": "Willkommen zurück! Hier ist deine Ticketübersicht.",
+  "realtimeUpdates": "Echtzeit-Updates aktiv",
+  "stats": {
+    "totalTickets": "Gesamt-Tickets",
+    "openTickets": "Offene Tickets",
+    "inProgress": "In Bearbeitung",
+    "resolved": "Gelöst",
+    "closed": "Geschlossen",
+    "completed": "Abgeschlossen",
+    "highPriority": "Hohe Priorität"
+  },
+  "admin": {
+    "totalUsers": "Gesamtbenutzer",
+    "activeUsers": "aktiv",
+    "totalTeams": "Gesamtteams",
+    "acrossDepartments": "Über alle Abteilungen",
+    "openTickets": "Offene Tickets",
+    "highPriority": "hohe Priorität",
+    "avgResolutionTime": "Durchschn. Lösungszeit",
+    "hours": "Stunden"
+  },
+  "recentActivity": {
+    "title": "Aktuelle Aktivitäten",
+    "noActivity": "Keine aktuellen Aktivitäten"
+  },
+  "teamMembers": {
+    "title": "Teammitglieder",
+    "noMembers": "Keine Teammitglieder"
+  }
+}
+
+

@@ -1,0 +1,34 @@
+{
+  "title": "Tablero",
+  "subtitle": "¡Bienvenido! Aquí está el resumen de tus tickets.",
+  "realtimeUpdates": "Actualizaciones en tiempo real activas",
+  "stats": {
+    "totalTickets": "Tickets Totales",
+    "openTickets": "Tickets Abiertos",
+    "inProgress": "En Progreso",
+    "resolved": "Resueltos",
+    "closed": "Cerrados",
+    "completed": "Completados",
+    "highPriority": "Alta Prioridad"
+  },
+  "admin": {
+    "totalUsers": "Usuarios Totales",
+    "activeUsers": "activos",
+    "totalTeams": "Equipos Totales",
+    "acrossDepartments": "En todos los departamentos",
+    "openTickets": "Tickets Abiertos",
+    "highPriority": "alta prioridad",
+    "avgResolutionTime": "Tiempo Promedio de Resolución",
+    "hours": "horas"
+  },
+  "recentActivity": {
+    "title": "Actividad reciente",
+    "noActivity": "No hay actividad reciente"
+  },
+  "teamMembers": {
+    "title": "Miembros del equipo",
+    "noMembers": "No hay miembros del equipo"
+  }
+}
+
+

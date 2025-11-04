@@ -1,0 +1,88 @@
+{
+  "title": "Gestion de la base de connaissances",
+  "subtitle": "Gérez les articles pour les problèmes courants et leurs solutions",
+  "actions": {
+    "aiLearning": "Apprentissage IA",
+    "addArticle": "Ajouter un article",
+    "clearFilters": "Effacer les filtres",
+    "publishNow": "Publier immédiatement",
+    "cancel": "Annuler",
+    "create": "Créer",
+    "update": "Mettre à jour",
+    "delete": "Supprimer"
+  },
+  "filters": {
+    "filterSearch": "Filtrer et rechercher",
+    "search": "Rechercher",
+    "searchPlaceholder": "Rechercher des articles...",
+    "category": "Catégorie",
+    "allCategories": "Toutes les catégories",
+    "status": "Statut",
+    "allStatuses": "Tous les statuts",
+    "published": "Publié",
+    "draft": "Brouillon",
+    "archived": "Archivé",
+    "source": "Source",
+    "allSources": "Toutes les sources",
+    "manual": "Manuel",
+    "ai_generated": "Généré par IA"
+  },
+  "table": {
+    "title": "Articles de connaissance ({{count}})",
+    "manage": "Gérez des articles créés manuellement et générés par IA",
+    "columns": {
+      "title": "Titre",
+      "category": "Catégorie",
+      "source": "Source",
+      "status": "Statut",
+      "views": "Vues",
+      "usage": "Utilisation",
+      "effectiveness": "Efficacité",
+      "created": "Créé",
+      "actions": "Actions"
+    },
+    "loading": "Chargement des articles...",
+    "emptyFiltered": "Aucun article ne correspond à votre recherche.",
+    "empty": "Aucun article. Créez votre premier article !"
+  },
+  "badges": {
+    "published": "Publié",
+    "draft": "Brouillon",
+    "ai": "IA",
+    "manual": "Manuel"
+  },
+  "dialog": {
+    "createTitle": "Créer un article de connaissance",
+    "editTitle": "Modifier un article de connaissance",
+    "createDesc": "Créez un nouvel article pour les problèmes courants et leurs solutions.",
+    "editDesc": "Mettez à jour les détails de l'article ci-dessous.",
+    "fields": {
+      "title": "Titre *",
+      "titlePlaceholder": "p. ex., Comment réinitialiser le mot de passe",
+      "summary": "Résumé",
+      "summaryPlaceholder": "Brève description de la solution",
+      "category": "Catégorie",
+      "tags": "Tags",
+      "tagsPlaceholder": "Tags séparés par des virgules",
+      "content": "Contenu *",
+      "contentPlaceholder": "Résolution détaillée étape par étape...",
+      "categoryPlaceholder": "Sélectionner une catégorie"
+    },
+    "submitCreate": "Créer l'article",
+    "submitUpdate": "Mettre à jour l'article"
+  },
+  "delete": {
+    "title": "Supprimer l'article",
+    "confirm": "Voulez-vous vraiment supprimer \"{{title}}\" ? Cette action est irréversible."
+  },
+  "toasts": {
+    "success": "Succès",
+    "error": "Erreur",
+    "created": "Article créé avec succès",
+    "updated": "Article mis à jour avec succès",
+    "deleted": "Article supprimé avec succès",
+    "aiComplete": "Apprentissage IA terminé"
+  }
+}
+
+

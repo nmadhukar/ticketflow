@@ -1,0 +1,39 @@
+{
+  "title": "Gestión de departamentos",
+  "subtitle": "Organiza a los usuarios en departamentos",
+  "actions": {
+    "add": "Agregar departamento",
+    "create": "Crear departamento",
+    "update": "Actualizar departamento"
+  },
+  "status": {
+    "active": "Activo",
+    "inactive": "Inactivo"
+  },
+  "empty": {
+    "title": "Aún no hay departamentos",
+    "desc": "No tienes departamentos creados. Crea uno para organizar a los usuarios y enrutar tickets.",
+    "create": "Crear nuevo departamento"
+  },
+  "labels": {
+    "name": "Nombre del departamento",
+    "description": "Descripción",
+    "manager": "Responsable del departamento",
+    "selectManager": "Selecciona un responsable",
+    "noManager": "Sin responsable",
+    "managerLine": "Responsable: {{first}} {{last}}"
+  },
+  "dialogs": {
+    "editTitle": "Editar departamento",
+    "editDesc": "Actualiza la información del departamento",
+    "createTitle": "Crear nuevo departamento",
+    "createDesc": "Agrega un nuevo departamento para organizar a tu equipo"
+  },
+  "toasts": {
+    "created": "Departamento creado correctamente",
+    "updated": "Departamento actualizado correctamente",
+    "deleted": "Departamento eliminado correctamente"
+  }
+}
+
+

@@ -1,0 +1,46 @@
+{
+  "title": "Equipos",
+  "subtitle": "Gestiona tus equipos y colabora eficazmente",
+  "actions": {
+    "create": "Crear equipo",
+    "creating": "Creando...",
+    "open": "Abrir equipo"
+  },
+  "my": {
+    "title": "Mis equipos",
+    "loading": "Cargando tus equipos...",
+    "emptyTitle": "Aún no hay equipos",
+    "emptyDesc": "No perteneces a ningún equipo. {{extra}}",
+    "extraAdmin": "Crea un equipo o pide que te inviten a uno.",
+    "createFirst": "Crea tu primer equipo",
+    "member": "Miembro",
+    "created": "Creado el {{date}}"
+  },
+  "all": {
+    "title": "Todos los equipos",
+    "loading": "Cargando equipos...",
+    "emptyTitle": "No se encontraron equipos",
+    "emptyDesc": "Aún no se han creado equipos. ¡Sé el primero en crear uno!",
+    "public": "Público",
+    "created": "Creado el {{date}}"
+  },
+  "form": {
+    "createTitle": "Crear nuevo equipo",
+    "createDesc": "Crea un nuevo equipo para colaborar con otros miembros en tareas y proyectos.",
+    "name": "Nombre del equipo",
+    "namePlaceholder": "Ingresa el nombre del equipo...",
+    "description": "Descripción",
+    "descriptionPlaceholder": "Describe el propósito de tu equipo...",
+    "cancel": "Cancelar"
+  },
+  "toasts": {
+    "created": "Equipo creado correctamente"
+  },
+  "errors": {
+    "unauthorized": "Has cerrado sesión. Iniciando sesión nuevamente...",
+    "nameRequired": "El nombre del equipo es obligatorio",
+    "createFailed": "No se pudo crear el equipo"
+  }
+}
+
+

@@ -48,10 +48,12 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import Tasks from "./tasks";
+import { useTranslation } from "react-i18next";
 
 export default function Dashboard() {
   const { toast } = useToast();
   const { isAuthenticated, isLoading, user } = useAuth();
+  const { t } = useTranslation(["common", "dashboard"]);
   const { isConnected } = useWebSocketContext();
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [priorityFilter, setPriorityFilter] = useState<string | null>(null);
@@ -118,19 +120,15 @@ export default function Dashboard() {
   if (isLoading || !isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        Loading...
+        {t("actions.loading")}
       </div>
     );
   }
 
-  if (hasCustomerRole) {
-    return <Tasks />;
-  }
-
   return (
     <MainWrapper
-      title="Dashboard"
-      subTitle="Welcome back! Here's your ticket overview."
+      title={t("dashboard:title")}
+      subTitle={t("dashboard:subtitle")}
       action={
         !tasksLoading && hasCustomerRole ? (
           <Button
@@ -139,7 +137,7 @@ export default function Dashboard() {
             }}
           >
             <Plus className="h-4 w-4 mr-2" />
-            New Ticket
+            {t("tickets:newTicket")}
           </Button>
         ) : null
       }
@@ -148,16 +146,20 @@ export default function Dashboard() {
       {isConnected && (
         <div className="flex items-center gap-2 text-sm text-green-600 mb-3">
           <div className="w-2 h-2 rounded-full bg-green-600 animate-pulse" />
-          Real-time updates active
+          {t("dashboard:realtimeUpdates")}
         </div>
       )}
+
+      {hasCustomerRole ? <Tasks /> : <></>}
 
       {/* Admin-only System Overview Cards */}
       {(user as any)?.role === "admin" && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
           <Card className="hover:shadow-business transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Users</CardTitle>
+              <CardTitle className="text-sm font-medium">
+                {t("dashboard:admin.totalUsers")}
+              </CardTitle>
               <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
                 <Users className="h-4 w-4 text-primary" />
               </div>
@@ -167,13 +169,16 @@ export default function Dashboard() {
                 {(systemStats as any)?.totalUsers || 0}
               </div>
               <p className="text-xs text-muted-foreground">
-                {(systemStats as any)?.activeUsers || 0} active
+                {(systemStats as any)?.activeUsers || 0}{" "}
+                {t("dashboard:admin.activeUsers")}
               </p>
             </CardContent>
           </Card>
           <Card className="hover:shadow-business transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Teams</CardTitle>
+              <CardTitle className="text-sm font-medium">
+                {t("dashboard:admin.totalTeams")}
+              </CardTitle>
               <div className="h-8 w-8 rounded-lg bg-secondary/10 flex items-center justify-center">
                 <UserCog className="h-4 w-4 text-secondary-foreground" />
               </div>
@@ -183,14 +188,14 @@ export default function Dashboard() {
                 {(systemStats as any)?.totalTeams || 0}
               </div>
               <p className="text-xs text-muted-foreground">
-                Across all departments
+                {t("dashboard:admin.acrossDepartments")}
               </p>
             </CardContent>
           </Card>
           <Card className="hover:shadow-business transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">
-                Open Tickets
+                {t("dashboard:admin.openTickets")}
               </CardTitle>
               <div className="h-8 w-8 rounded-lg bg-accent/10 flex items-center justify-center">
                 <BarChart3 className="h-4 w-4 text-accent-foreground" />
@@ -201,14 +206,15 @@ export default function Dashboard() {
                 {(systemStats as any)?.openTickets || 0}
               </div>
               <p className="text-xs text-muted-foreground">
-                {(systemStats as any)?.urgentTickets || 0} high priority
+                {(systemStats as any)?.urgentTickets || 0}{" "}
+                {t("dashboard:admin.highPriority")}
               </p>
             </CardContent>
           </Card>
           <Card className="hover:shadow-business transition-shadow">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">
-                Avg Resolution Time
+                {t("dashboard:admin.avgResolutionTime")}
               </CardTitle>
               <div className="h-8 w-8 rounded-lg bg-muted/10 flex items-center justify-center">
                 <Settings className="h-4 w-4 text-muted-foreground" />
@@ -218,7 +224,9 @@ export default function Dashboard() {
               <div className="text-2xl font-bold">
                 {(systemStats as any)?.avgResolutionTime || "N/A"}
               </div>
-              <p className="text-xs text-muted-foreground">hours</p>
+              <p className="text-xs text-muted-foreground">
+                {t("dashboard:admin.hours")}
+              </p>
             </CardContent>
           </Card>
         </div>
@@ -235,7 +243,7 @@ export default function Dashboard() {
             className="cursor-pointer transform transition-transform hover:scale-105"
           >
             <StatsCard
-              title="Total Tickets"
+              title={t("dashboard:stats.totalTickets")}
               value={stats?.total || 0}
               icon={<BarChart3 className="text-blue-600" />}
               loading={statsLoading}
@@ -250,7 +258,7 @@ export default function Dashboard() {
             className="cursor-pointer transform transition-transform hover:scale-105"
           >
             <StatsCard
-              title="In Progress"
+              title={t("dashboard:stats.inProgress")}
               value={stats?.inProgress || 0}
               icon={<Clock className="text-yellow-600" />}
               loading={statsLoading}
@@ -265,7 +273,9 @@ export default function Dashboard() {
             className="cursor-pointer transform transition-transform hover:scale-105"
           >
             <StatsCard
-              title="Completed"
+              title={t("dashboard:stats.completed", {
+                defaultValue: "Completed",
+              })}
               value={(stats?.resolved || 0) + (stats?.closed || 0)}
               icon={<CheckCircle className="text-green-600" />}
               loading={statsLoading}
@@ -280,7 +290,9 @@ export default function Dashboard() {
             className="cursor-pointer transform transition-transform hover:scale-105"
           >
             <StatsCard
-              title="High Priority"
+              title={t("dashboard:stats.highPriority", {
+                defaultValue: "High Priority",
+              })}
               value={stats?.highPriority || 0}
               icon={<AlertTriangle className="text-red-600" />}
               loading={statsLoading}
@@ -305,11 +317,11 @@ export default function Dashboard() {
           {/* Team Members */}
           <Card>
             <CardHeader>
-              <CardTitle>Team Members</CardTitle>
+              <CardTitle>{t("dashboard:teamMembers.title")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               {membersLoading ? (
-                <div className="text-center py-4">Loading team members...</div>
+                <div className="text-center py-4">{t("actions.loading")}</div>
               ) : teamMembers?.length ? (
                 teamMembers?.slice(0, 5).map((team: any) => (
                   <div key={team.id} className="flex items-center space-x-3">
@@ -330,7 +342,7 @@ export default function Dashboard() {
                 ))
               ) : (
                 <div className="text-center py-4 text-slate-500">
-                  No team members found.
+                  {t("dashboard:teamMembers.noMembers")}
                 </div>
               )}
             </CardContent>
@@ -339,11 +351,11 @@ export default function Dashboard() {
           {/* Recent Activity */}
           <Card>
             <CardHeader>
-              <CardTitle>Recent Activity</CardTitle>
+              <CardTitle>{t("dashboard:recentActivity.title")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               {activityLoading ? (
-                <div className="text-center py-4">Loading activity...</div>
+                <div className="text-center py-4">{t("actions.loading")}</div>
               ) : activity && activity.length > 0 ? (
                 activity.slice(0, 5).map((item: any) => (
                   <div
@@ -394,26 +406,13 @@ export default function Dashboard() {
                 ))
               ) : (
                 <div className="text-center py-4 text-slate-500">
-                  No recent activity.
+                  {t("dashboard:recentActivity.noActivity")}
                 </div>
               )}
             </CardContent>
           </Card>
         </div>
       )}
-      {/* </div> */}
-      {/* </>
-      )} */}
-
-      {/* Ticket Modal */}
-      <TaskModal
-        isOpen={isTaskModalOpen}
-        onClose={() => {
-          setIsTaskModalOpen(false);
-          setSelectedTask(null);
-        }}
-        task={selectedTask}
-      />
     </MainWrapper>
   );
 }

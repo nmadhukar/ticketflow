@@ -1,0 +1,37 @@
+{
+  "title": "Dashboard",
+  "subtitle": "Welcome back! Here's your ticket overview.",
+  "realtimeUpdates": "Real-time updates active",
+  "stats": {
+    "totalTickets": "Total Tickets",
+    "openTickets": "Open Tickets",
+    "inProgress": "In Progress",
+    "resolved": "Resolved",
+    "closed": "Closed",
+    "completed": "Completed",
+    "highPriority": "High Priority"
+  },
+  "admin": {
+    "totalUsers": "Total Users",
+    "activeUsers": "active",
+    "totalTeams": "Total Teams",
+    "acrossDepartments": "Across all departments",
+    "openTickets": "Open Tickets",
+    "highPriority": "high priority",
+    "avgResolutionTime": "Avg Resolution Time",
+    "hours": "hours"
+  },
+  "recentActivity": {
+    "title": "Recent Activity",
+    "noActivity": "No recent activity"
+  },
+  "myTasks": {
+    "title": "My Tasks",
+    "noTasks": "No tasks assigned to you"
+  },
+  "teamMembers": {
+    "title": "Team Members",
+    "noMembers": "No team members"
+  }
+}
+

@@ -1,0 +1,46 @@
+{
+  "title": "Teams",
+  "subtitle": "Manage your teams and collaborate effectively",
+  "actions": {
+    "create": "Create Team",
+    "creating": "Creating...",
+    "open": "Open Team"
+  },
+  "my": {
+    "title": "My Teams",
+    "loading": "Loading your teams...",
+    "emptyTitle": "No teams yet",
+    "emptyDesc": "You're not a member of any teams. {{extra}}",
+    "extraAdmin": "Create a team or ask to be invited to one.",
+    "createFirst": "Create Your First Team",
+    "member": "Member",
+    "created": "Created {{date}}"
+  },
+  "all": {
+    "title": "All Teams",
+    "loading": "Loading teams...",
+    "emptyTitle": "No teams found",
+    "emptyDesc": "No teams have been created yet. Be the first to create one!",
+    "public": "Public",
+    "created": "Created {{date}}"
+  },
+  "form": {
+    "createTitle": "Create New Team",
+    "createDesc": "Create a new team to collaborate with other members on tasks and projects.",
+    "name": "Team Name",
+    "namePlaceholder": "Enter team name...",
+    "description": "Description",
+    "descriptionPlaceholder": "Describe your team's purpose...",
+    "cancel": "Cancel"
+  },
+  "toasts": {
+    "created": "Team created successfully"
+  },
+  "errors": {
+    "unauthorized": "You are logged out. Logging in again...",
+    "nameRequired": "Team name is required",
+    "createFailed": "Failed to create team"
+  }
+}
+
+

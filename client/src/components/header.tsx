@@ -17,6 +17,7 @@ import {
   UserCircle,
 } from "lucide-react";
 import { useEffect, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import SignOutButton from "./signOutButton";
@@ -37,6 +38,7 @@ interface HeaderProps {
 
 export default function Header({ title, subtitle, action }: HeaderProps) {
   const { user } = useAuth();
+  const { i18n, t } = useTranslation();
   const [location] = useLocation();
   const { data: companyBranding } = useQuery({
     queryKey: ["/api/company-settings/branding"],
@@ -90,12 +92,12 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
   const userDropdownActions = useMemo(() => {
     return (user as any)?.role === "admin"
       ? [
-          { name: "Admin Guides", href: "/admin-guides", icon: BookOpen },
-          { name: "Settings", href: "/settings", icon: Settings },
+          { name: t("nav.adminGuides"), href: "/admin-guides", icon: BookOpen },
+          { name: t("nav.settings"), href: "/settings", icon: Settings },
         ]
       : [
-          { name: "User Guides", href: "/guides", icon: BookOpen },
-          { name: "Settings", href: "/settings", icon: Settings },
+          { name: t("nav.userGuides"), href: "/guides", icon: BookOpen },
+          { name: t("nav.settings"), href: "/settings", icon: Settings },
         ];
   }, [user]);
 
@@ -128,16 +130,26 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
               className="flex items-center space-x-2"
             >
               <Globe className="h-4 w-4" />
-              <span>EN</span>
+              <span>{i18n.language?.toUpperCase?.() || "EN"}</span>
               <ChevronDown className="h-3 w-3" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent>
-            <DropdownMenuItem>English</DropdownMenuItem>
-            <DropdownMenuItem>Español</DropdownMenuItem>
-            <DropdownMenuItem>Français</DropdownMenuItem>
-            <DropdownMenuItem>Deutsch</DropdownMenuItem>
-            <DropdownMenuItem>中文</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => i18n.changeLanguage("en")}>
+              English
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => i18n.changeLanguage("es")}>
+              Español
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => i18n.changeLanguage("fr")}>
+              Français
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => i18n.changeLanguage("de")}>
+              Deutsch
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => i18n.changeLanguage("zh")}>
+              中文
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 

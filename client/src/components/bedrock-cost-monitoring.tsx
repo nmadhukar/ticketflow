@@ -6,6 +6,7 @@
  */
 
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -77,6 +78,7 @@ interface CostStatistics {
 
 export function BedrockCostMonitoring() {
   const { toast } = useToast();
+  const { t } = useTranslation(["common", "bedrock"]);
   const {
     showCostLimitUpdatedNotification,
     showConnectionTestNotification,
@@ -113,9 +115,14 @@ export function BedrockCostMonitoring() {
     },
     onError: (error: any) => {
       toast({
-        title: "Failed to reset usage",
+        title: t("bedrock:errors.resetTitle", {
+          defaultValue: "Failed to reset usage",
+        }),
         description:
-          error.message || "An error occurred while resetting usage data.",
+          error.message ||
+          t("bedrock:errors.resetDesc", {
+            defaultValue: "An error occurred while resetting usage data.",
+          }),
         variant: "destructive",
       });
     },
@@ -150,9 +157,14 @@ export function BedrockCostMonitoring() {
     },
     onError: (error: any) => {
       toast({
-        title: "Failed to export usage",
+        title: t("bedrock:errors.exportTitle", {
+          defaultValue: "Failed to export usage",
+        }),
         description:
-          error.message || "An error occurred while exporting usage data.",
+          error.message ||
+          t("bedrock:errors.exportDesc", {
+            defaultValue: "An error occurred while exporting usage data.",
+          }),
         variant: "destructive",
       });
     },
@@ -177,7 +189,10 @@ export function BedrockCostMonitoring() {
   const handleResetUsage = () => {
     if (
       window.confirm(
-        "Are you sure you want to reset all usage data? This action cannot be undone."
+        t("bedrock:confirm.reset", {
+          defaultValue:
+            "Are you sure you want to reset all usage data? This action cannot be undone.",
+        })
       )
     ) {
       resetUsageMutation.mutate();
@@ -186,10 +201,16 @@ export function BedrockCostMonitoring() {
 
   const handleExportUsage = () => {
     const startDate = prompt(
-      "Enter start date (YYYY-MM-DD) or leave blank for all data:"
+      t("bedrock:prompt.startDate", {
+        defaultValue:
+          "Enter start date (YYYY-MM-DD) or leave blank for all data:",
+      })
     );
     const endDate = prompt(
-      "Enter end date (YYYY-MM-DD) or leave blank for all data:"
+      t("bedrock:prompt.endDate", {
+        defaultValue:
+          "Enter end date (YYYY-MM-DD) or leave blank for all data:",
+      })
     );
     exportUsageMutation.mutate({
       startDate: startDate || undefined,
@@ -239,7 +260,9 @@ export function BedrockCostMonitoring() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <RefreshCw className="h-5 w-5 animate-spin" />
-            Loading Cost Statistics...
+            {t("bedrock:loading", {
+              defaultValue: "Loading Cost Statistics...",
+            })}
           </CardTitle>
         </CardHeader>
       </Card>
@@ -250,16 +273,22 @@ export function BedrockCostMonitoring() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Cost Monitoring Unavailable</CardTitle>
+          <CardTitle>
+            {t("bedrock:unavailable.title", {
+              defaultValue: "Cost Monitoring Unavailable",
+            })}
+          </CardTitle>
           <CardDescription>
-            Unable to load cost statistics. Please check your connection and try
-            again.
+            {t("bedrock:unavailable.desc", {
+              defaultValue:
+                "Unable to load cost statistics. Please check your connection and try again.",
+            })}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Button onClick={() => refetch()} variant="outline">
             <RefreshCw className="h-4 w-4 mr-2" />
-            Retry
+            {t("bedrock:actions.retry", { defaultValue: "Retry" })}
           </Button>
         </CardContent>
       </Card>
@@ -305,7 +334,9 @@ export function BedrockCostMonitoring() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Daily Usage</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              {t("bedrock:cards.daily.title", { defaultValue: "Daily Usage" })}
+            </CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -320,7 +351,12 @@ export function BedrockCostMonitoring() {
                 )}
                 className="flex-1"
               />
-              <span>of ${limits.dailyLimitUSD}</span>
+              <span>
+                {t("bedrock:cards.of", {
+                  defaultValue: "of ${{amount}}",
+                  amount: limits.dailyLimitUSD,
+                })}
+              </span>
             </div>
             <Badge
               variant={
@@ -331,14 +367,21 @@ export function BedrockCostMonitoring() {
                   : "default"
               }
             >
-              {dailyUsage.requestCount} requests
+              {t("bedrock:cards.requests", {
+                defaultValue: "{{count}} requests",
+                count: dailyUsage.requestCount,
+              })}
             </Badge>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Monthly Usage</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              {t("bedrock:cards.monthly.title", {
+                defaultValue: "Monthly Usage",
+              })}
+            </CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -353,7 +396,12 @@ export function BedrockCostMonitoring() {
                 )}
                 className="flex-1"
               />
-              <span>of ${limits.monthlyLimitUSD}</span>
+              <span>
+                {t("bedrock:cards.of", {
+                  defaultValue: "of ${{amount}}",
+                  amount: limits.monthlyLimitUSD,
+                })}
+              </span>
             </div>
             <Badge
               variant={
@@ -364,27 +412,45 @@ export function BedrockCostMonitoring() {
                   : "default"
               }
             >
-              {monthlyUsage.requestCount} requests
+              {t("bedrock:cards.requests", {
+                defaultValue: "{{count}} requests",
+                count: monthlyUsage.requestCount,
+              })}
             </Badge>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Account Type</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              {t("bedrock:cards.accountType.title", {
+                defaultValue: "Account Type",
+              })}
+            </CardTitle>
             <Shield className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {limits.isFreeTierAccount ? "Free Tier" : "Paid"}
+              {limits.isFreeTierAccount
+                ? t("bedrock:cards.accountType.free", {
+                    defaultValue: "Free Tier",
+                  })
+                : t("bedrock:cards.accountType.paid", { defaultValue: "Paid" })}
             </div>
             <p className="text-xs text-muted-foreground">
               {limits.isFreeTierAccount
-                ? "Strict cost limits enabled"
-                : "Standard cost limits"}
+                ? t("bedrock:cards.accountType.freeNote", {
+                    defaultValue: "Strict cost limits enabled",
+                  })
+                : t("bedrock:cards.accountType.paidNote", {
+                    defaultValue: "Standard cost limits",
+                  })}
             </p>
             <Badge variant={limits.isFreeTierAccount ? "secondary" : "default"}>
-              {limits.maxRequestsPerDay} req/day
+              {t("bedrock:cards.accountType.reqPerDay", {
+                defaultValue: "{{count}} req/day",
+                count: limits.maxRequestsPerDay,
+              })}
             </Badge>
           </CardContent>
         </Card>
@@ -395,9 +461,15 @@ export function BedrockCostMonitoring() {
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
-            <strong>Cost Limit Warning:</strong> You're approaching or have
-            exceeded your cost limits. New requests may be blocked to prevent
-            unexpected charges.
+            <strong>
+              {t("bedrock:alerts.critical.title", {
+                defaultValue: "Cost Limit Warning:",
+              })}
+            </strong>{" "}
+            {t("bedrock:alerts.critical.body", {
+              defaultValue:
+                "You're approaching or have exceeded your cost limits. New requests may be blocked to prevent unexpected charges.",
+            })}
           </AlertDescription>
         </Alert>
       )}
@@ -406,9 +478,15 @@ export function BedrockCostMonitoring() {
         <Alert>
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
-            <strong>Cost Limit Alert:</strong> You're approaching your cost
-            limits. Consider reviewing your usage or increasing limits if
-            needed.
+            <strong>
+              {t("bedrock:alerts.warning.title", {
+                defaultValue: "Cost Limit Alert:",
+              })}
+            </strong>{" "}
+            {t("bedrock:alerts.warning.body", {
+              defaultValue:
+                "You're approaching your cost limits. Consider reviewing your usage or increasing limits if needed.",
+            })}
           </AlertDescription>
         </Alert>
       )}
@@ -418,21 +496,35 @@ export function BedrockCostMonitoring() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Clock className="h-5 w-5" />
-            Recent Usage
+            {t("bedrock:recent.title", { defaultValue: "Recent Usage" })}
           </CardTitle>
           <CardDescription>
-            Last 10 Bedrock API calls with cost information.
+            {t("bedrock:recent.desc", {
+              defaultValue: "Last 10 Bedrock API calls with cost information.",
+            })}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Time</TableHead>
-                <TableHead>Operation</TableHead>
-                <TableHead>Model</TableHead>
-                <TableHead>Tokens</TableHead>
-                <TableHead>Cost</TableHead>
+                <TableHead>
+                  {t("bedrock:recent.table.time", { defaultValue: "Time" })}
+                </TableHead>
+                <TableHead>
+                  {t("bedrock:recent.table.operation", {
+                    defaultValue: "Operation",
+                  })}
+                </TableHead>
+                <TableHead>
+                  {t("bedrock:recent.table.model", { defaultValue: "Model" })}
+                </TableHead>
+                <TableHead>
+                  {t("bedrock:recent.table.tokens", { defaultValue: "Tokens" })}
+                </TableHead>
+                <TableHead>
+                  {t("bedrock:recent.table.cost", { defaultValue: "Cost" })}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody className="max-h-[30vh] overflow-y-auto">

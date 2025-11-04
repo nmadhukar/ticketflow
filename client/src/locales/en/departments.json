@@ -1,0 +1,39 @@
+{
+  "title": "Department Management",
+  "subtitle": "Organize users into departments",
+  "actions": {
+    "add": "Add Department",
+    "create": "Create Department",
+    "update": "Update Department"
+  },
+  "status": {
+    "active": "Active",
+    "inactive": "Inactive"
+  },
+  "empty": {
+    "title": "No departments yet",
+    "desc": "You don't have any departments created yet. Create one to organize users and route tickets.",
+    "create": "Create New Department"
+  },
+  "labels": {
+    "name": "Department Name",
+    "description": "Description",
+    "manager": "Department Manager",
+    "selectManager": "Select a manager",
+    "noManager": "No Manager",
+    "managerLine": "Manager: {{first}} {{last}}"
+  },
+  "dialogs": {
+    "editTitle": "Edit Department",
+    "editDesc": "Update department information",
+    "createTitle": "Create New Department",
+    "createDesc": "Add a new department to organize your team"
+  },
+  "toasts": {
+    "created": "Department created successfully",
+    "updated": "Department updated successfully",
+    "deleted": "Department deleted successfully"
+  }
+}
+
+

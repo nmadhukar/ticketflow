@@ -29,11 +29,13 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import MainWrapper from "@/components/main-wrapper";
+import { useTranslation } from "react-i18next";
 
 export default function Teams() {
   const { toast } = useToast();
   const { isAuthenticated, isLoading, user } = useAuth();
   const queryClient = useQueryClient();
+  const { t } = useTranslation(["common", "teams"]);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [teamName, setTeamName] = useState("");
   const [teamDescription, setTeamDescription] = useState("");
@@ -42,8 +44,8 @@ export default function Teams() {
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       toast({
-        title: "Unauthorized",
-        description: "You are logged out. Logging in again...",
+        title: t("messages.unauthorized"),
+        description: t("messages.loggedOut"),
         variant: "destructive",
       });
       setTimeout(() => {
@@ -80,15 +82,15 @@ export default function Teams() {
       setTeamName("");
       setTeamDescription("");
       toast({
-        title: "Success",
-        description: "Team created successfully",
+        title: t("messages.success"),
+        description: t("teams:toasts.created"),
       });
     },
     onError: (error) => {
       if (isUnauthorizedError(error)) {
         toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
+          title: t("messages.unauthorized"),
+          description: t("messages.loggedOut"),
           variant: "destructive",
         });
         setTimeout(() => {
@@ -97,8 +99,8 @@ export default function Teams() {
         return;
       }
       toast({
-        title: "Error",
-        description: "Failed to create team",
+        title: t("messages.error"),
+        description: t("teams:errors.createFailed"),
         variant: "destructive",
       });
     },
@@ -107,7 +109,7 @@ export default function Teams() {
   if (isLoading || !isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        Loading...
+        {t("actions.loading")}
       </div>
     );
   }
@@ -134,15 +136,15 @@ export default function Teams() {
 
   return (
     <MainWrapper
-      title="Teams"
-      subTitle="Manage your teams and collaborate effectively"
+      title={t("teams:title")}
+      subTitle={t("teams:subtitle")}
       action={
         isUserAdminOrManager &&
         !myTeamsLoading &&
         !!myTeams?.length && (
           <Button onClick={() => setIsCreateDialogOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
-            Create Team
+            {t("teams:actions.create")}
           </Button>
         )
       }
@@ -150,9 +152,9 @@ export default function Teams() {
       {/* My Teams Section */}
 
       <div className="mb-8">
-        <h3 className="text-lg font-semibold mb-4">My Teams</h3>
+        <h3 className="text-lg font-semibold mb-4">{t("teams:my.title")}</h3>
         {myTeamsLoading ? (
-          <div className="text-center py-8">Loading your teams...</div>
+          <div className="text-center py-8">{t("teams:my.loading")}</div>
         ) : myTeams && myTeams.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {myTeams.map((team: any) => (
@@ -172,7 +174,7 @@ export default function Teams() {
                     </div>
                     <Badge variant="secondary">
                       <Crown className="h-3 w-3 mr-1" />
-                      Member
+                      {t("teams:my.member")}
                     </Badge>
                   </div>
                 </CardHeader>
@@ -182,12 +184,14 @@ export default function Teams() {
                   </CardDescription>
                   <div className="flex items-center justify-between">
                     <div className="text-xs text-slate-500">
-                      Created {new Date(team.createdAt).toLocaleDateString()}
+                      {t("teams:my.created", {
+                        date: new Date(team.createdAt).toLocaleDateString(),
+                      })}
                     </div>
                     <Link href={`/teams/${team.id}`}>
                       <Button size="sm" variant="outline" className="h-8">
                         <ExternalLink className="h-3 w-3 mr-1" />
-                        Open Team
+                        {t("teams:actions.open")}
                       </Button>
                     </Link>
                   </div>
@@ -200,14 +204,12 @@ export default function Teams() {
             <CardContent className="p-8 text-center">
               <Users className="h-12 w-12 text-slate-400 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-slate-900 mb-2">
-                No teams yet
+                {t("teams:my.emptyTitle")}
               </h3>
               <p className="text-slate-500 mb-4">
-                {` You're not a member of any teams. ${
-                  isUserAdminOrManager
-                    ? "Create a team or ask to be invited to one."
-                    : ""
-                }`}
+                {t("teams:my.emptyDesc", {
+                  extra: isUserAdminOrManager ? t("teams:my.extraAdmin") : "",
+                })}
               </p>
               {isUserAdminOrManager ? (
                 <Button
@@ -215,7 +217,7 @@ export default function Teams() {
                   className="bg-blue-600 hover:bg-blue-700"
                 >
                   <Plus className="h-4 w-4 mr-2" />
-                  Create Your First Team
+                  {t("teams:my.createFirst")}
                 </Button>
               ) : (
                 <></>
@@ -229,10 +231,10 @@ export default function Teams() {
       {isUserAdminOrManager ? (
         <div>
           <h3 className="text-lg font-semibold text-slate-800 mb-4">
-            All Teams
+            {t("teams:all.title")}
           </h3>
           {teamsLoading ? (
-            <div className="text-center py-8">Loading teams...</div>
+            <div className="text-center py-8">{t("teams:all.loading")}</div>
           ) : teams && teams.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {teams.map((team: any) => (
@@ -254,7 +256,7 @@ export default function Teams() {
                         variant="outline"
                         className="bg-slate-50 text-slate-700"
                       >
-                        Public
+                        {t("teams:all.public")}
                       </Badge>
                     </div>
                   </CardHeader>
@@ -264,12 +266,14 @@ export default function Teams() {
                     </CardDescription>
                     <div className="flex items-center justify-between">
                       <div className="text-xs text-slate-500">
-                        Created {new Date(team.createdAt).toLocaleDateString()}
+                        {t("teams:all.created", {
+                          date: new Date(team.createdAt).toLocaleDateString(),
+                        })}
                       </div>
                       <Link href={`/teams/${team.id}`}>
                         <Button size="sm" variant="outline" className="h-8">
                           <ExternalLink className="h-3 w-3 mr-1" />
-                          Open Team
+                          {t("teams:actions.open")}
                         </Button>
                       </Link>
                     </div>
@@ -282,11 +286,9 @@ export default function Teams() {
               <CardContent className="p-8 text-center">
                 <Users className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-slate-900 mb-2">
-                  No teams found
+                  {t("teams:all.emptyTitle")}
                 </h3>
-                <p className="text-slate-500">
-                  No teams have been created yet. Be the first to create one!
-                </p>
+                <p className="text-slate-500">{t("teams:all.emptyDesc")}</p>
               </CardContent>
             </Card>
           )}
@@ -298,27 +300,26 @@ export default function Teams() {
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create New Team</DialogTitle>
-            <DialogDescription>
-              Create a new team to collaborate with other members on tasks and
-              projects.
-            </DialogDescription>
+            <DialogTitle>{t("teams:form.createTitle")}</DialogTitle>
+            <DialogDescription>{t("teams:form.createDesc")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <Label htmlFor="team-name">Team Name</Label>
+              <Label htmlFor="team-name">{t("teams:form.name")}</Label>
               <Input
                 id="team-name"
-                placeholder="Enter team name..."
+                placeholder={t("teams:form.namePlaceholder")}
                 value={teamName}
                 onChange={(e) => setTeamName(e.target.value)}
               />
             </div>
             <div>
-              <Label htmlFor="team-description">Description</Label>
+              <Label htmlFor="team-description">
+                {t("teams:form.description")}
+              </Label>
               <Textarea
                 id="team-description"
-                placeholder="Describe your team's purpose..."
+                placeholder={t("teams:form.descriptionPlaceholder")}
                 value={teamDescription}
                 onChange={(e) => setTeamDescription(e.target.value)}
               />
@@ -329,13 +330,15 @@ export default function Teams() {
               variant="outline"
               onClick={() => setIsCreateDialogOpen(false)}
             >
-              Cancel
+              {t("teams:form.cancel")}
             </Button>
             <Button
               onClick={handleCreateTeam}
               disabled={createTeamMutation.isPending}
             >
-              {createTeamMutation.isPending ? "Creating..." : "Create Team"}
+              {createTeamMutation.isPending
+                ? t("teams:actions.creating")
+                : t("teams:actions.create")}
             </Button>
           </DialogFooter>
         </DialogContent>

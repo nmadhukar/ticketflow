@@ -12,6 +12,7 @@ import {
   Users,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
+import { useTranslation } from "react-i18next";
 
 interface SidebarProps {
   className?: string;
@@ -20,106 +21,94 @@ interface SidebarProps {
 export function Sidebar({ className }: SidebarProps) {
   const [location] = useLocation();
   const { user } = useAuth();
+  const { t } = useTranslation("navigation");
 
   const navigation = (() => {
     const role = (user as any)?.role;
     if (role === "admin") {
       return [
-        { name: "Dashboard", href: "/", icon: LayoutDashboard },
-        { name: "Tickets", href: "/tasks", icon: FolderOpen },
-        { name: "Departments", href: "/departments", icon: Building },
-        { name: "Knowledge Base", href: "/knowledge-base", icon: BookOpen },
+        { name: t("dashboard"), href: "/", icon: LayoutDashboard },
+        { name: t("tickets"), href: "/tasks", icon: FolderOpen },
+        { name: t("departments"), href: "/departments", icon: Building },
+        { name: t("knowledge_base"), href: "/knowledge-base", icon: BookOpen },
       ];
     }
     if (role === "manager") {
       return [
-        { name: "Dashboard", href: "/", icon: LayoutDashboard },
-        { name: "Tickets", href: "/tasks", icon: FolderOpen },
-        { name: "Teams", href: "/teams", icon: Users },
-        { name: "Departments", href: "/departments", icon: Building },
+        { name: t("dashboard"), href: "/", icon: LayoutDashboard },
+        { name: t("tickets"), href: "/tasks", icon: FolderOpen },
+        { name: t("departments"), href: "/departments", icon: Building },
+        { name: t("teams"), href: "/teams", icon: Users },
       ];
     }
     if (role === "agent") {
       return [
-        { name: "Dashboard", href: "/", icon: LayoutDashboard },
-        { name: "Tickets", href: "/tasks", icon: FolderOpen },
-        { name: "Teams", href: "/teams", icon: Users },
-        { name: "Knowledge Base", href: "/knowledge-base", icon: BookOpen },
+        { name: t("dashboard"), href: "/", icon: LayoutDashboard },
+        { name: t("tickets"), href: "/tasks", icon: FolderOpen },
+        { name: t("teams"), href: "/teams", icon: Users },
+        { name: t("knowledge_base"), href: "/knowledge-base", icon: BookOpen },
       ];
     }
 
     return [
-      { name: "Tickets", href: "/", icon: LayoutDashboard },
-      { name: "Knowledge Base", href: "/knowledge-base", icon: BookOpen },
+      { name: t("tickets"), href: "/", icon: LayoutDashboard },
+      { name: t("knowledge_base"), href: "/knowledge-base", icon: BookOpen },
     ];
   })();
 
   const adminGroups = [
     {
-      title: "User & Team Management",
+      titleKey: "management_title",
       icon: Users,
       hrefBase: "/admin",
       section: "management",
-      items: ["User Management", "Invitations", "Team Management"],
+      items: ["users", "invitations", "teams"],
     },
     {
-      title: "Configuration",
+      titleKey: "configuration_title",
       icon: Settings,
       hrefBase: "/admin",
       section: "configuration",
-      items: ["Company Console", "AI Settings"],
+      items: ["company-console", "ai-settings"],
     },
     {
-      title: "Analytics & Insights",
+      titleKey: "analytics_title",
       icon: Brain,
       hrefBase: "/admin",
       section: "analytics",
-      items: ["AI Performance", "Learning Queue"],
+      items: ["ai-analytics", "learning-queue"],
     },
     {
-      title: "Docs & Guides",
+      titleKey: "content_title",
       icon: BookOpen,
       hrefBase: "/admin",
       section: "content",
-      items: ["Help Documentation", "Company Policies"],
+      items: ["help", "policies"],
     },
     {
-      title: "Integrations",
+      titleKey: "integrations_title",
       icon: Plug,
       hrefBase: "/admin",
       section: "integrations",
-      items: ["Microsoft 365 SSO", "Microsoft Teams", "Developer Resources"],
+      items: ["sso", "ms-teams-integration", "developer-resources"],
     },
   ] as const;
 
-  const itemToTab: Record<string, string> = {
-    "User Management": "users",
-    Invitations: "invitations",
-    "Team Management": "teams",
-    "Company Console": "company-console",
-    "Developer Resources": "developer-resources",
-    "AI Settings": "ai-settings",
-    "AI Performance": "ai-analytics",
-    "Learning Queue": "learning-queue",
-    "Help Documentation": "help",
-    "Company Policies": "policies",
-    "Microsoft 365 SSO": "sso",
-    "Microsoft Teams": "ms-teams-integration",
-  };
+  // items are already tab keys; no mapping needed
 
   const itemAllowed: Record<string, Array<string>> = {
-    "User Management": ["admin"],
-    Invitations: ["admin"],
-    "Team Management": ["admin"],
-    "Company Console": ["admin"],
-    "Developer Resources": ["admin"],
-    "AI Settings": ["admin"],
-    "AI Performance": ["admin", "manager"],
-    "Learning Queue": ["admin", "manager"],
-    "Help Documentation": ["admin", "manager"],
-    "Company Policies": ["admin", "manager"],
-    "Microsoft 365 SSO": ["admin"],
-    "Microsoft Teams": ["admin"],
+    users: ["admin"],
+    invitations: ["admin"],
+    teams: ["admin"],
+    "company-console": ["admin"],
+    "developer-resources": ["admin"],
+    "ai-settings": ["admin"],
+    "ai-analytics": ["admin", "manager"],
+    "learning-queue": ["admin", "manager"],
+    help: ["admin", "manager"],
+    policies: ["admin", "manager"],
+    sso: ["admin"],
+    "ms-teams-integration": ["admin"],
   };
 
   return (
@@ -154,34 +143,33 @@ export function Sidebar({ className }: SidebarProps) {
             <>
               <Separator className="my-4" />
               {adminGroups.map((group) => (
-                <div key={group.title} className="px-3 pt-4 pb-2">
-                  <h3 className="mb-2 text-xs font-semibold text-muted-foreground uppercase flex items-center gap-2">
+                <div key={group.section} className="px-3 pt-4 pb-2">
+                  <h3 className="mb-2 text-xs font-semibold text-muted-foreground uppercase flex items-center gap-2 line-clamp-1">
                     <group.icon className="h-4 w-4" />
-                    {group.title}
+                    {t(group.titleKey)}
                   </h3>
                   <div className="space-y-1">
                     {group.items
-                      .filter((itemName) =>
-                        itemAllowed[itemName]?.includes((user as any)?.role)
+                      .filter((tabKey) =>
+                        itemAllowed[tabKey]?.includes((user as any)?.role)
                       )
-                      .map((itemName) => {
-                        const tab = itemToTab[itemName] || "users";
-                        const href = `${group.hrefBase}/${tab}?section=${group.section}`;
+                      .map((tabKey) => {
+                        const href = `${group.hrefBase}/${tabKey}?section=${group.section}`;
                         const isActive = location.startsWith(
                           href.split("?")[0]
                         );
                         return (
                           <Link
-                            key={itemName}
+                            key={tabKey}
                             href={href}
                             className={cn(
-                              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
+                              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors cursor-pointer line-clamp-1",
                               isActive
                                 ? "bg-primary text-primary-foreground"
                                 : "hover:bg-accent hover:text-accent-foreground"
                             )}
                           >
-                            {itemName}
+                            {t(tabKey)}
                           </Link>
                         );
                       })}

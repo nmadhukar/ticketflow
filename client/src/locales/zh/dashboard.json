@@ -1,0 +1,34 @@
+{
+  "title": "仪表板",
+  "subtitle": "欢迎回来！这里是你的工单概览。",
+  "realtimeUpdates": "实时更新已启用",
+  "stats": {
+    "totalTickets": "工单总数",
+    "openTickets": "未解决工单",
+    "inProgress": "进行中",
+    "resolved": "已解决",
+    "closed": "已关闭",
+    "completed": "已完成",
+    "highPriority": "高优先级"
+  },
+  "admin": {
+    "totalUsers": "用户总数",
+    "activeUsers": "活跃",
+    "totalTeams": "团队总数",
+    "acrossDepartments": "跨所有部门",
+    "openTickets": "未解决工单",
+    "highPriority": "高优先级",
+    "avgResolutionTime": "平均解决时间",
+    "hours": "小时"
+  },
+  "recentActivity": {
+    "title": "最近活动",
+    "noActivity": "暂无最近活动"
+  },
+  "teamMembers": {
+    "title": "团队成员",
+    "noMembers": "暂无团队成员"
+  }
+}
+
+

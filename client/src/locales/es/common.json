@@ -1,0 +1,31 @@
+{
+  "language": {
+    "en": "Inglés",
+    "es": "Español",
+    "fr": "Francés",
+    "de": "Alemán",
+    "zh": "Chino"
+  },
+  "actions": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "update": "Actualizar",
+    "close": "Cerrar",
+    "signOut": "Cerrar sesión",
+    "signingOut": "Cerrando sesión..."
+  },
+  "nav": {
+    "settings": "Configuración",
+    "adminGuides": "Guías de administrador",
+    "userGuides": "Guías de usuario"
+  },
+  "settings": {
+    "title": "Configuración",
+    "subtitle": "Administra la configuración y preferencias de tu cuenta",
+    "language": "Idioma"
+  },
+  "header": {
+    "language": "Idioma"
+  }
+}
+

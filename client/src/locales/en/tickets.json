@@ -1,0 +1,156 @@
+{
+  "title": "Tickets",
+  "newTicket": "New Ticket",
+  "createTicket": "Create Ticket",
+  "editTicket": "Edit Ticket",
+  "deleteTicket": "Delete Ticket",
+  "taskDeleted": "Task deleted successfully",
+  "failedToDelete": "Failed to delete task",
+  "confirmDelete": "Are you sure you want to delete this task?",
+  "filters": {
+    "all": "All",
+    "status": "Status",
+    "category": "Category",
+    "priority": "Priority",
+    "search": "Search tickets...",
+    "searchPlaceholder": "Search by title, description, or ticket number...",
+    "onlyMyTickets": "Only My Tickets",
+    "clearFilters": "Clear filters",
+    "page": "Page",
+    "prev": "Prev",
+    "next": "Next",
+    "of": "of",
+    "tickets": "tickets"
+  },
+  "status": {
+    "all": "All Statuses",
+    "open": "Open",
+    "in_progress": "In Progress",
+    "resolved": "Resolved",
+    "closed": "Closed",
+    "on_hold": "On Hold"
+  },
+  "category": {
+    "all": "All Categories",
+    "bug": "Bug",
+    "feature": "Feature",
+    "support": "Support",
+    "enhancement": "Enhancement",
+    "incident": "Incident",
+    "request": "Request"
+  },
+  "priority": {
+    "all": "All Priorities",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "urgent": "Urgent"
+  },
+  "assignee": {
+    "none": "Unassigned",
+    "assignedTo": "Assigned to",
+    "assignTo": "Assign to",
+    "assignToUser": "Assign to User",
+    "assignToTeam": "Assign to Team"
+  },
+  "details": {
+    "title": "Title",
+    "description": "Description",
+    "notes": "Notes",
+    "dueDate": "Due Date",
+    "createdAt": "Created",
+    "updatedAt": "Updated",
+    "createdBy": "Created by",
+    "ticketNumber": "Ticket #"
+  },
+  "view": {
+    "cards": "Cards",
+    "table": "Table",
+    "showMine": "Show My Tickets"
+  },
+  "empty": {
+    "noTickets": "No tickets found",
+    "noMatchingTickets": "No tickets match your filters"
+  },
+  "subtitle": "Manage and track all tickets across your projects",
+  "table": {
+    "columns": {
+      "ticket": "Ticket",
+      "title": "Title",
+      "priority": "Priority",
+      "status": "Status",
+      "category": "Category",
+      "assignedTo": "Assigned To",
+      "dueDate": "Due Date",
+      "created": "Created",
+      "actions": "Actions"
+    }
+  },
+  "modal": {
+    "editTitle": "Edit Ticket {{ticketNumber}}",
+    "createTitle": "Create New Ticket",
+    "editDesc": "Update the ticket details and track progress.",
+    "createDesc": "Fill in the details to create a new ticket for your team.",
+    "tabs": {
+      "details": "Ticket Details",
+      "comments": "Comments",
+      "attachments": "Attachments"
+    },
+    "sections": {
+      "essentialInfo": "Essential Information",
+      "status": "Ticket Status",
+      "assignment": "Assignment & Timeline",
+      "notes": "Additional Notes",
+      "comments": "Add Comment",
+      "attachments": "Upload Attachment",
+      "attachmentsList": "Attached Files"
+    },
+    "fields": {
+      "taskTitle": "Task Title *",
+      "description": "Description",
+      "category": "Category *",
+      "priority": "Priority",
+      "currentStatus": "Current Status",
+      "assignmentType": "Assignment Type",
+      "individualUser": "Individual User",
+      "team": "Team",
+      "dueDate": "Due Date",
+      "department": "Department *",
+      "teamReq": "Team *",
+      "assignToUser": "Assign to User",
+      "unassigned": "Unassigned"
+    },
+    "placeholders": {
+      "title": "e.g., Fix login page authentication issue",
+      "description": "Provide detailed information about the task, requirements, and expected outcomes...",
+      "tags": "Comma-separated tags",
+      "searchUser": "Select user",
+      "selectTeam": "Select team",
+      "selectDept": "Select department",
+      "comment": "Write your comment...",
+      "uploadCta": "Click to upload or drag and drop",
+      "uploadHelp": "PDF, DOC, DOCX, XLS, XLSX, PNG, JPG up to 10MB"
+    },
+    "empty": {
+      "noComments": "No comments yet. Be the first to add one!",
+      "noAttachments": "No attachments yet. Upload a file to get started!"
+    },
+    "buttons": {
+      "cancel": "Cancel",
+      "create": "Create Ticket",
+      "update": "Update Ticket",
+      "creating": "Creating...",
+      "updating": "Updating...",
+      "addComment": "Add Comment",
+      "adding": "Adding..."
+    },
+    "toasts": {
+      "created": "Ticket created successfully",
+      "updated": "Ticket updated successfully",
+      "commentAdded": "Comment added successfully",
+      "fileAttached": "File attached successfully",
+      "attachmentDeleted": "Attachment deleted successfully"
+    }
+  }
+}
+

@@ -1,0 +1,88 @@
+{
+  "title": "Knowledge Base Management",
+  "subtitle": "Manage knowledge articles for common issues and resolutions",
+  "actions": {
+    "aiLearning": "AI Learning",
+    "addArticle": "Add Article",
+    "clearFilters": "Clear Filters",
+    "publishNow": "Publish immediately",
+    "cancel": "Cancel",
+    "create": "Create",
+    "update": "Update",
+    "delete": "Delete"
+  },
+  "filters": {
+    "filterSearch": "Filter & Search",
+    "search": "Search",
+    "searchPlaceholder": "Search articles...",
+    "category": "Category",
+    "allCategories": "All categories",
+    "status": "Status",
+    "allStatuses": "All statuses",
+    "published": "Published",
+    "draft": "Draft",
+    "archived": "Archived",
+    "source": "Source",
+    "allSources": "All sources",
+    "manual": "Manual",
+    "ai_generated": "AI generated"
+  },
+  "table": {
+    "title": "Knowledge Articles ({{count}})",
+    "manage": "Manage manually created and AI-generated knowledge articles",
+    "columns": {
+      "title": "Title",
+      "category": "Category",
+      "source": "Source",
+      "status": "Status",
+      "views": "Views",
+      "usage": "Usage",
+      "effectiveness": "Effectiveness",
+      "created": "Created",
+      "actions": "Actions"
+    },
+    "loading": "Loading articles...",
+    "emptyFiltered": "No articles match your search criteria.",
+    "empty": "No knowledge articles found. Create your first article!"
+  },
+  "badges": {
+    "published": "Published",
+    "draft": "Draft",
+    "ai": "AI",
+    "manual": "Manual"
+  },
+  "dialog": {
+    "createTitle": "Create Knowledge Article",
+    "editTitle": "Edit Knowledge Article",
+    "createDesc": "Create a new knowledge article for common issues and their resolutions.",
+    "editDesc": "Update the knowledge article details below.",
+    "fields": {
+      "title": "Title *",
+      "titlePlaceholder": "e.g., How to reset password",
+      "summary": "Summary",
+      "summaryPlaceholder": "Brief description of the solution",
+      "category": "Category",
+      "tags": "Tags",
+      "tagsPlaceholder": "Comma-separated tags (e.g., password, authentication, login)",
+      "content": "Content *",
+      "contentPlaceholder": "Detailed step-by-step resolution...",
+      "categoryPlaceholder": "Select category"
+    },
+    "submitCreate": "Create Article",
+    "submitUpdate": "Update Article"
+  },
+  "delete": {
+    "title": "Delete Knowledge Article",
+    "confirm": "Are you sure you want to delete \"{{title}}\"? This action cannot be undone."
+  },
+  "toasts": {
+    "success": "Success",
+    "error": "Error",
+    "created": "Knowledge article created successfully",
+    "updated": "Knowledge article updated successfully",
+    "deleted": "Knowledge article deleted successfully",
+    "aiComplete": "AI Learning Complete"
+  }
+}
+
+

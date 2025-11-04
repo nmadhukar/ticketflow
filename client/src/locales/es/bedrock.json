@@ -1,0 +1,60 @@
+{
+  "loading": "Cargando estadísticas de costos...",
+  "unavailable": {
+    "title": "Monitoreo de costos no disponible",
+    "desc": "No se pueden cargar las estadísticas de costos. Verifica tu conexión e intenta nuevamente."
+  },
+  "actions": {
+    "retry": "Reintentar"
+  },
+  "cards": {
+    "daily": { "title": "Uso diario" },
+    "monthly": { "title": "Uso mensual" },
+    "of": "de ${{amount}}",
+    "requests": "{{count}} solicitudes",
+    "accountType": {
+      "title": "Tipo de cuenta",
+      "free": "Free Tier",
+      "paid": "De pago",
+      "freeNote": "Límites de costo estrictos habilitados",
+      "paidNote": "Límites de costo estándar",
+      "reqPerDay": "{{count}} sol/día"
+    }
+  },
+  "alerts": {
+    "critical": {
+      "title": "Advertencia de límite de costo:",
+      "body": "Estás cerca o has superado tus límites de costo. Las nuevas solicitudes pueden bloquearse para evitar cargos inesperados."
+    },
+    "warning": {
+      "title": "Alerta de límite de costo:",
+      "body": "Estás acercándote a tus límites de costo. Considera revisar tu uso o aumentar los límites si es necesario."
+    }
+  },
+  "recent": {
+    "title": "Uso reciente",
+    "desc": "Últimas 10 llamadas a la API de Bedrock con información de costos.",
+    "table": {
+      "time": "Hora",
+      "operation": "Operación",
+      "model": "Modelo",
+      "tokens": "Tokens",
+      "cost": "Costo"
+    }
+  },
+  "confirm": {
+    "reset": "¿Seguro que quieres restablecer todos los datos de uso? Esta acción no se puede deshacer."
+  },
+  "prompt": {
+    "startDate": "Ingresa fecha de inicio (AAAA-MM-DD) o deja en blanco para todos los datos:",
+    "endDate": "Ingresa fecha de fin (AAAA-MM-DD) o deja en blanco para todos los datos:"
+  },
+  "errors": {
+    "resetTitle": "Error al restablecer uso",
+    "resetDesc": "Se produjo un error al restablecer los datos de uso.",
+    "exportTitle": "Error al exportar uso",
+    "exportDesc": "Se produjo un error al exportar los datos de uso."
+  }
+}
+
+

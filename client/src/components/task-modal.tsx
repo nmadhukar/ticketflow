@@ -20,6 +20,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -124,6 +125,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   const { toast } = useToast();
   const { user } = useAuth() as { user?: { role?: string } } as any;
   const queryClient = useQueryClient();
+  const { t } = useTranslation(["common", "tickets"]);
   const [currentTab, setCurrentTab] = useState("details");
   const [commentText, setCommentText] = useState("");
 
@@ -285,15 +287,15 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       onClose();
       toast({
-        title: "Success",
-        description: "Ticket created successfully",
+        title: t("messages.success"),
+        description: t("tickets:modal.toasts.created"),
       });
     },
     onError: (error) => {
       if (isUnauthorizedError(error)) {
         toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
+          title: t("messages.unauthorized"),
+          description: t("messages.loggedOut"),
           variant: "destructive",
         });
         setTimeout(() => {
@@ -302,8 +304,10 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         return;
       }
       toast({
-        title: "Error",
-        description: "Failed to create ticket",
+        title: t("messages.error"),
+        description: t("tickets:modal.toasts.errorCreate", {
+          defaultValue: "Failed to create ticket",
+        }),
         variant: "destructive",
       });
     },
@@ -321,15 +325,15 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         onClose();
       }
       toast({
-        title: "Success",
-        description: "Ticket updated successfully",
+        title: t("messages.success"),
+        description: t("tickets:modal.toasts.updated"),
       });
     },
     onError: (error) => {
       if (isUnauthorizedError(error)) {
         toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
+          title: t("messages.unauthorized"),
+          description: t("messages.loggedOut"),
           variant: "destructive",
         });
         setTimeout(() => {
@@ -338,8 +342,10 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         return;
       }
       toast({
-        title: "Error",
-        description: "Failed to update ticket",
+        title: t("messages.error"),
+        description: t("tickets:modal.toasts.errorUpdate", {
+          defaultValue: "Failed to update ticket",
+        }),
         variant: "destructive",
       });
     },
@@ -359,15 +365,15 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       });
       setCommentText("");
       toast({
-        title: "Success",
-        description: "Comment added successfully",
+        title: t("messages.success"),
+        description: t("tickets:modal.toasts.commentAdded"),
       });
     },
     onError: (error) => {
       if (isUnauthorizedError(error)) {
         toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
+          title: t("messages.unauthorized"),
+          description: t("messages.loggedOut"),
           variant: "destructive",
         });
         setTimeout(() => {
@@ -376,8 +382,10 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         return;
       }
       toast({
-        title: "Error",
-        description: "Failed to add comment",
+        title: t("messages.error"),
+        description: t("tickets:modal.toasts.errorComment", {
+          defaultValue: "Failed to add comment",
+        }),
         variant: "destructive",
       });
     },
@@ -495,16 +503,16 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     },
     onSuccess: () => {
       toast({
-        title: "Success",
-        description: "File attached successfully",
+        title: t("messages.success"),
+        description: t("tickets:modal.toasts.fileAttached"),
       });
       refetchAttachments();
     },
     onError: (error) => {
       if (isUnauthorizedError(error)) {
         toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
+          title: t("messages.unauthorized"),
+          description: t("messages.loggedOut"),
           variant: "destructive",
         });
         setTimeout(() => {
@@ -513,8 +521,10 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         return;
       }
       toast({
-        title: "Error",
-        description: "Failed to attach file",
+        title: t("messages.error"),
+        description: t("tickets:modal.toasts.errorAttach", {
+          defaultValue: "Failed to attach file",
+        }),
         variant: "destructive",
       });
     },
@@ -526,16 +536,16 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     },
     onSuccess: () => {
       toast({
-        title: "Success",
-        description: "Attachment deleted successfully",
+        title: t("messages.success"),
+        description: t("tickets:modal.toasts.attachmentDeleted"),
       });
       refetchAttachments();
     },
     onError: (error) => {
       if (isUnauthorizedError(error)) {
         toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
+          title: t("messages.unauthorized"),
+          description: t("messages.loggedOut"),
           variant: "destructive",
         });
         setTimeout(() => {
@@ -544,8 +554,10 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         return;
       }
       toast({
-        title: "Error",
-        description: "Failed to delete attachment",
+        title: t("messages.error"),
+        description: t("tickets:modal.toasts.errorDelete", {
+          defaultValue: "Failed to delete attachment",
+        }),
         variant: "destructive",
       });
     },
@@ -588,36 +600,54 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                 <div className="flex-1">
                   <DialogTitle className="text-xl font-semibold text-slate-900">
                     {task
-                      ? `Edit Ticket ${task.ticketNumber || ""}`
-                      : "Create New Ticket"}
+                      ? t("tickets:modal.editTitle", {
+                          ticketNumber: task.ticketNumber || "",
+                        })
+                      : t("tickets:modal.createTitle")}
                   </DialogTitle>
                   <DialogDescription className="text-slate-600 mt-1">
                     {task ? (
                       <div className="space-y-1">
-                        <p>Update the ticket details and track progress.</p>
+                        <p>{t("tickets:modal.editDesc")}</p>
                         <div className="flex flex-col gap-1 text-xs">
                           {task.creatorName && task.createdAt && (
                             <p className="flex items-center gap-1">
                               <User className="h-3 w-3" />
-                              Created by {task.creatorName} on{" "}
+                              {t("tickets:modal.meta.createdBy", {
+                                defaultValue: "Created by",
+                              })}{" "}
+                              {task.creatorName}{" "}
+                              {t("tickets:modal.meta.on", {
+                                defaultValue: "on",
+                              })}{" "}
                               {new Date(task.createdAt).toLocaleDateString()}
                             </p>
                           )}
                           {task.updatedAt && (
                             <p className="flex items-center gap-1">
                               <Clock className="h-3 w-3" />
-                              Last updated{" "}
+                              {t("tickets:modal.meta.lastUpdated", {
+                                defaultValue: "Last updated",
+                              })}{" "}
                               {task.lastUpdatedBy
-                                ? `by ${task.lastUpdatedBy} `
+                                ? `${t("tickets:modal.meta.by", {
+                                    defaultValue: "by",
+                                  })} ${task.lastUpdatedBy} `
                                 : ""}
-                              on {new Date(task.updatedAt).toLocaleDateString()}{" "}
-                              at {new Date(task.updatedAt).toLocaleTimeString()}
+                              {t("tickets:modal.meta.on", {
+                                defaultValue: "on",
+                              })}{" "}
+                              {new Date(task.updatedAt).toLocaleDateString()}{" "}
+                              {t("tickets:modal.meta.at", {
+                                defaultValue: "at",
+                              })}{" "}
+                              {new Date(task.updatedAt).toLocaleTimeString()}
                             </p>
                           )}
                         </div>
                       </div>
                     ) : (
-                      "Fill in the details to create a new ticket for your team."
+                      t("tickets:modal.createDesc")
                     )}
                   </DialogDescription>
                 </div>
@@ -644,7 +674,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                     className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
                   >
                     <FileText className="h-4 w-4 mr-2" />
-                    Ticket Details
+                    {t("tickets:modal.tabs.details")}
                   </TabsTrigger>
                   {task && (
                     <>
@@ -653,7 +683,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                         className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
                       >
                         <Send className="h-4 w-4 mr-2" />
-                        Comments{" "}
+                        {t("tickets:modal.tabs.comments")}{" "}
                         {taskComments?.length ? `(${taskComments.length})` : ""}
                       </TabsTrigger>
                     </>
@@ -663,7 +693,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                     className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
                   >
                     <Paperclip className="h-4 w-4 mr-2" />
-                    Attachments{" "}
+                    {t("tickets:modal.tabs.attachments")}{" "}
                     {taskAttachments?.length
                       ? `(${taskAttachments.length})`
                       : ""}
@@ -679,7 +709,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                       <CardHeader className="pb-3">
                         <CardTitle className="text-lg flex items-center gap-2">
                           <Target className="h-5 w-5 text-blue-600" />
-                          Essential Information
+                          {t("tickets:modal.sections.essentialInfo")}
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-4">
@@ -690,11 +720,11 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                             className="text-sm font-medium text-slate-700 flex items-center gap-2"
                           >
                             <FileText className="h-4 w-4" />
-                            Task Title *
+                            {t("tickets:modal.fields.taskTitle")} *
                           </Label>
                           <Input
                             id="title"
-                            placeholder="e.g., Fix login page authentication issue"
+                            placeholder={t("tickets:modal.placeholders.title")}
                             value={formData.title}
                             onChange={(e) =>
                               handleInputChange("title", e.target.value)
@@ -703,7 +733,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                             required
                           />
                           <p className="text-xs text-slate-500 mt-1">
-                            Be specific and descriptive
+                            {t("tickets:modal.help.titleHint", {
+                              defaultValue: "Be specific and descriptive",
+                            })}
                           </p>
                         </div>
 
@@ -713,11 +745,13 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                             className="text-sm font-medium text-slate-700 flex items-center gap-2"
                           >
                             <FileText className="h-4 w-4" />
-                            Description
+                            {t("tickets:modal.fields.description")}
                           </Label>
                           <Textarea
                             id="description"
-                            placeholder="Provide detailed information about the task, requirements, and expected outcomes..."
+                            placeholder={t(
+                              "tickets:modal.placeholders.description"
+                            )}
                             rows={4}
                             value={formData.description}
                             onChange={(e) =>
@@ -738,7 +772,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                               className="text-sm font-medium text-slate-700 flex items-center gap-2"
                             >
                               <Tag className="h-4 w-4" />
-                              Category *
+                              {t("tickets:modal.fields.category")} *
                             </Label>
                             <Select
                               value={formData.category}
@@ -769,7 +803,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                               className="text-sm font-medium text-slate-700 flex items-center gap-2"
                             >
                               <Flag className="h-4 w-4" />
-                              Priority
+                              {t("tickets:modal.fields.priority")}
                             </Label>
                             <Select
                               value={formData.priority}
@@ -803,7 +837,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                         <CardHeader className="pb-3">
                           <CardTitle className="text-lg flex items-center gap-2">
                             <CircleDot className="h-5 w-5 text-yellow-600" />
-                            Ticket Status
+                            {t("tickets:modal.sections.status")}
                           </CardTitle>
                         </CardHeader>
                         <CardContent>
@@ -813,7 +847,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                               className="text-sm font-medium text-slate-700 flex items-center gap-2"
                             >
                               <CircleDot className="h-4 w-4" />
-                              Current Status
+                              {t("tickets:modal.fields.currentStatus")}
                             </Label>
                             <Select
                               value={formData.status}
@@ -857,7 +891,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                       <CardHeader className="pb-3">
                         <CardTitle className="text-lg flex items-center gap-2">
                           <Users className="h-5 w-5 text-green-600" />
-                          Assignment & Timeline
+                          {t("tickets:modal.sections.assignment")}
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-4">
@@ -865,7 +899,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                           <div>
                             <Label className="text-sm font-medium text-slate-700 flex items-center gap-2">
                               <User className="h-4 w-4" />
-                              Assignment Type
+                              {t("tickets:modal.fields.assignmentType")}
                             </Label>
                             <Select
                               value={formData.assigneeType}
@@ -881,13 +915,13 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                 <SelectItem value="user">
                                   <div className="flex items-center gap-2">
                                     <User className="h-4 w-4" />
-                                    Individual User
+                                    {t("tickets:modal.fields.individualUser")}
                                   </div>
                                 </SelectItem>
                                 <SelectItem value="team">
                                   <div className="flex items-center gap-2">
                                     <Users className="h-4 w-4" />
-                                    Team
+                                    {t("tickets:modal.fields.team")}
                                   </div>
                                 </SelectItem>
                               </SelectContent>
@@ -897,7 +931,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                           <div>
                             <Label className="text-sm font-medium text-slate-700 flex items-center gap-2">
                               <Calendar className="h-4 w-4" />
-                              Due Date
+                              {t("tickets:modal.fields.dueDate")}
                             </Label>
                             <Input
                               type="date"
@@ -918,7 +952,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                             <div className="grid grid-cols-2 gap-4">
                               <div>
                                 <Label className="text-sm font-medium text-slate-700">
-                                  Department *
+                                  {t("tickets:modal.fields.department")} *
                                 </Label>
                                 <Select
                                   value={formData.departmentId}
@@ -932,7 +966,11 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                   }
                                 >
                                   <SelectTrigger className="mt-2">
-                                    <SelectValue placeholder="Select department" />
+                                    <SelectValue
+                                      placeholder={t(
+                                        "tickets:modal.placeholders.selectDept"
+                                      )}
+                                    />
                                   </SelectTrigger>
                                   <SelectContent>
                                     {departments?.map((dept: any) => (
@@ -948,7 +986,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                               </div>
                               <div>
                                 <Label className="text-sm font-medium text-slate-700">
-                                  Team *
+                                  {t("tickets:modal.fields.teamReq")} *
                                 </Label>
                                 <Select
                                   value={formData.teamId}
@@ -960,7 +998,11 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                   }
                                 >
                                   <SelectTrigger className="mt-2">
-                                    <SelectValue placeholder="Select team" />
+                                    <SelectValue
+                                      placeholder={t(
+                                        "tickets:modal.placeholders.selectTeam"
+                                      )}
+                                    />
                                   </SelectTrigger>
                                   <SelectContent>
                                     {teams
@@ -990,7 +1032,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                           )?.includes("user") && (
                             <div className="col-span-2">
                               <Label className="text-sm font-medium text-slate-700">
-                                Assign to User
+                                {t("tickets:modal.fields.assignToUser")}
                               </Label>
                               <Select
                                 value={formData.assigneeId}
@@ -1000,13 +1042,17 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                 disabled={!!task && !canEditField("assigneeId")}
                               >
                                 <SelectTrigger className="mt-2">
-                                  <SelectValue placeholder="Select user" />
+                                  <SelectValue
+                                    placeholder={t(
+                                      "tickets:modal.placeholders.searchUser"
+                                    )}
+                                  />
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="unassigned">
                                     <div className="flex items-center gap-2">
                                       <User className="h-4 w-4" />
-                                      Unassigned
+                                      {t("tickets:modal.fields.unassigned")}
                                     </div>
                                   </SelectItem>
                                   {assignableUsers?.map((user: any) => (
@@ -1031,12 +1077,15 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                       <CardHeader className="pb-3">
                         <CardTitle className="text-lg flex items-center gap-2">
                           <FileText className="h-5 w-5 text-purple-600" />
-                          Additional Notes
+                          {t("tickets:modal.sections.notes")}
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
                         <Textarea
-                          placeholder="Add any additional notes, special instructions, or important details..."
+                          placeholder={t("tickets:modal.placeholders.notes", {
+                            defaultValue:
+                              "Add any additional notes, special instructions, or important details...",
+                          })}
                           rows={3}
                           value={formData.notes}
                           onChange={(e) =>
@@ -1057,12 +1106,14 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                         <CardHeader className="pb-3">
                           <CardTitle className="text-base flex items-center gap-2">
                             <Send className="h-4 w-4" />
-                            Add Comment
+                            {t("tickets:modal.sections.comments")}
                           </CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-3">
                           <Textarea
-                            placeholder="Write your comment..."
+                            placeholder={t(
+                              "tickets:modal.placeholders.comment"
+                            )}
                             value={commentText}
                             onChange={(e) => setCommentText(e.target.value)}
                             rows={3}
@@ -1080,8 +1131,8 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                             >
                               <Send className="h-4 w-4 mr-2" />
                               {addCommentMutation.isPending
-                                ? "Adding..."
-                                : "Add Comment"}
+                                ? t("tickets:modal.buttons.adding")
+                                : t("tickets:modal.buttons.addComment")}
                             </Button>
                           </div>
                         </CardContent>
@@ -1137,7 +1188,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                       <CardHeader className="pb-3">
                         <CardTitle className="text-base flex items-center gap-2">
                           <Upload className="h-4 w-4" />
-                          Upload Attachment
+                          {t("tickets:modal.sections.attachments")}
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
@@ -1155,10 +1206,10 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                           >
                             <Paperclip className="h-8 w-8 mx-auto mb-2 text-slate-400" />
                             <p className="text-sm text-slate-600">
-                              Click to upload or drag and drop
+                              {t("tickets:modal.placeholders.uploadCta")}
                             </p>
                             <p className="text-xs text-slate-500 mt-1">
-                              PDF, DOC, DOCX, XLS, XLSX, PNG, JPG up to 10MB
+                              {t("tickets:modal.placeholders.uploadHelp")}
                             </p>
                           </label>
                         </div>
@@ -1168,7 +1219,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                     {/* Attachments List */}
                     <div className="space-y-3">
                       <h3 className="font-medium text-slate-900">
-                        Attached Files
+                        {t("tickets:modal.sections.attachmentsList")}
                       </h3>
                       {taskAttachments?.length ? (
                         taskAttachments?.map((attachment: any) => (
@@ -1188,7 +1239,14 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                     </p>
                                     <p className="text-xs text-slate-500">
                                       {(attachment.fileSize / 1024).toFixed(2)}{" "}
-                                      KB • Uploaded by {attachment.userName} on{" "}
+                                      KB •{" "}
+                                      {t("tickets:modal.meta.uploadedBy", {
+                                        defaultValue: "Uploaded by",
+                                      })}{" "}
+                                      {attachment.userName}{" "}
+                                      {t("tickets:modal.meta.on", {
+                                        defaultValue: "on",
+                                      })}{" "}
                                       {new Date(
                                         attachment.createdAt
                                       ).toLocaleDateString()}
@@ -1227,9 +1285,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                       ) : (
                         <div className="text-center py-8 text-slate-500">
                           <Paperclip className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                          <p>
-                            No attachments yet. Upload a file to get started!
-                          </p>
+                          <p>{t("tickets:modal.empty.noAttachments")}</p>
                         </div>
                       )}
                     </div>
@@ -1243,7 +1299,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
           <div className="border-t bg-slate-50 px-6 py-4">
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose}>
-                Cancel
+                {t("tickets:modal.buttons.cancel")}
               </Button>
               <Button
                 onClick={handleSubmit}
@@ -1254,11 +1310,11 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
               >
                 {createTaskMutation.isPending || updateTaskMutation.isPending
                   ? task
-                    ? "Updating..."
-                    : "Creating..."
+                    ? t("tickets:modal.buttons.updating")
+                    : t("tickets:modal.buttons.creating")
                   : task
-                  ? "Update Ticket"
-                  : "Create Ticket"}
+                  ? t("tickets:modal.buttons.update")
+                  : t("tickets:modal.buttons.create")}
               </Button>
             </DialogFooter>
           </div>

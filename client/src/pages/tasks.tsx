@@ -45,6 +45,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 const getStatusIcon = (status: string) => {
   switch (status) {
@@ -148,6 +149,7 @@ export default function Tasks() {
   const { toast } = useToast();
   const { isAuthenticated, isLoading, user } = useAuth();
   const queryClient = useQueryClient();
+  const { t } = useTranslation(["common", "tickets"]);
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [viewMode, setViewMode] = useState("cards"); // cards or table
@@ -190,8 +192,8 @@ export default function Tasks() {
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       toast({
-        title: "Unauthorized",
-        description: "You are logged out. Logging in again...",
+        title: t("messages.unauthorized"),
+        description: t("messages.loggedOut"),
         variant: "destructive",
       });
       setTimeout(() => {
@@ -217,8 +219,8 @@ export default function Tasks() {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tasks/my"] });
       toast({
-        title: "Success",
-        description: "Task deleted successfully",
+        title: t("messages.success"),
+        description: t("tickets.taskDeleted"),
       });
     },
     onError: (error) => {
@@ -234,8 +236,8 @@ export default function Tasks() {
         return;
       }
       toast({
-        title: "Error",
-        description: "Failed to delete task",
+        title: t("messages.error"),
+        description: t("tickets.failedToDelete"),
         variant: "destructive",
       });
     },
@@ -244,7 +246,7 @@ export default function Tasks() {
   if (isLoading || !isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        Loading...
+        {t("actions.loading")}
       </div>
     );
   }
@@ -261,7 +263,7 @@ export default function Tasks() {
   };
 
   const handleDeleteTask = (taskId: number) => {
-    if (confirm("Are you sure you want to delete this task?")) {
+    if (confirm(t("tickets.confirmDelete"))) {
       deleteTaskMutation.mutate(taskId);
     }
   };
@@ -322,11 +324,12 @@ export default function Tasks() {
     return new Date(dueDate) < new Date();
   };
 
-  console.log(tasks);
   return (
     <MainWrapper
-      title="All Tickets"
-      subTitle="Manage and track all tickets across your projects"
+      title={t("tickets:title")}
+      subTitle={t("tickets:subtitle", {
+        defaultValue: "Manage and track all tickets across your projects",
+      })}
       action={
         !tasksLoading &&
         !!tasks?.length &&
@@ -338,7 +341,7 @@ export default function Tasks() {
             }}
           >
             <Plus className="h-4 w-4 mr-2" />
-            New Ticket
+            {t("tickets:newTicket")}
           </Button>
         )
       }
@@ -351,7 +354,7 @@ export default function Tasks() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search by title, description, or ticket number..."
+                placeholder={t("tickets:filters.searchPlaceholder")}
                 value={filters.search}
                 onChange={(e) =>
                   setFilters((prev) => ({ ...prev, search: e.target.value }))
@@ -369,15 +372,25 @@ export default function Tasks() {
                 }
               >
                 <SelectTrigger className="w-[140px] h-10">
-                  <SelectValue placeholder="Status" />
+                  <SelectValue placeholder={t("tickets:filters.status")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="open">Open</SelectItem>
-                  <SelectItem value="in_progress">In Progress</SelectItem>
-                  <SelectItem value="resolved">Resolved</SelectItem>
-                  <SelectItem value="closed">Closed</SelectItem>
-                  <SelectItem value="on_hold">On Hold</SelectItem>
+                  <SelectItem value="all">{t("tickets:status.all")}</SelectItem>
+                  <SelectItem value="open">
+                    {t("common:status.open")}
+                  </SelectItem>
+                  <SelectItem value="in_progress">
+                    {t("common:status.in_progress")}
+                  </SelectItem>
+                  <SelectItem value="resolved">
+                    {t("common:status.resolved")}
+                  </SelectItem>
+                  <SelectItem value="closed">
+                    {t("common:status.closed")}
+                  </SelectItem>
+                  <SelectItem value="on_hold">
+                    {t("common:status.on_hold")}
+                  </SelectItem>
                 </SelectContent>
               </Select>
 
@@ -388,16 +401,30 @@ export default function Tasks() {
                 }
               >
                 <SelectTrigger className="w-[140px] h-10">
-                  <SelectValue placeholder="Category" />
+                  <SelectValue placeholder={t("tickets:filters.category")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Categories</SelectItem>
-                  <SelectItem value="bug">Bug</SelectItem>
-                  <SelectItem value="feature">Feature</SelectItem>
-                  <SelectItem value="support">Support</SelectItem>
-                  <SelectItem value="enhancement">Enhancement</SelectItem>
-                  <SelectItem value="incident">Incident</SelectItem>
-                  <SelectItem value="request">Request</SelectItem>
+                  <SelectItem value="all">
+                    {t("tickets:category.all")}
+                  </SelectItem>
+                  <SelectItem value="bug">
+                    {t("tickets:category.bug")}
+                  </SelectItem>
+                  <SelectItem value="feature">
+                    {t("tickets:category.feature")}
+                  </SelectItem>
+                  <SelectItem value="support">
+                    {t("tickets:category.support")}
+                  </SelectItem>
+                  <SelectItem value="enhancement">
+                    {t("tickets:category.enhancement")}
+                  </SelectItem>
+                  <SelectItem value="incident">
+                    {t("tickets:category.incident")}
+                  </SelectItem>
+                  <SelectItem value="request">
+                    {t("tickets:category.request")}
+                  </SelectItem>
                 </SelectContent>
               </Select>
 
@@ -408,13 +435,21 @@ export default function Tasks() {
                 }
               >
                 <SelectTrigger className="w-[140px] h-10">
-                  <SelectValue placeholder="Priority" />
+                  <SelectValue placeholder={t("tickets:filters.priority")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Priorities</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="low">Low</SelectItem>
+                  <SelectItem value="all">
+                    {t("tickets:priority.all")}
+                  </SelectItem>
+                  <SelectItem value="high">
+                    {t("common:priority.high")}
+                  </SelectItem>
+                  <SelectItem value="medium">
+                    {t("common:priority.medium")}
+                  </SelectItem>
+                  <SelectItem value="low">
+                    {t("common:priority.low")}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -430,7 +465,7 @@ export default function Tasks() {
                 htmlFor="only-my-tickets"
                 className="text-sm text-muted-foreground select-none"
               >
-                Only My Tickets
+                {t("tickets:filters.onlyMyTickets")}
               </label>
             </div>
           </div>
@@ -439,7 +474,8 @@ export default function Tasks() {
           <div className="flex items-center justify-between mt-4 pt-4 border-t">
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">
-                {filteredTasks?.length || 0} of {tasks?.length || 0} tickets
+                {filteredTasks?.length || 0} {t("tickets:filters.of")}{" "}
+                {tasks?.length || 0} {t("tickets:filters.tickets")}
               </span>
               {(filters.search ||
                 filters.status !== "all" ||
@@ -458,13 +494,13 @@ export default function Tasks() {
                   }
                   className="h-7 px-2"
                 >
-                  Clear filters
+                  {t("tickets:filters.clearFilters")}
                 </Button>
               )}
               {!showMine && (
                 <>
                   <div className="ml-4 text-sm text-muted-foreground">
-                    Page {page + 1}
+                    {t("tickets:filters.page")} {page + 1}
                   </div>
                   <div className="flex gap-2 ml-auto">
                     <Button
@@ -473,7 +509,7 @@ export default function Tasks() {
                       disabled={page === 0 || tasksLoading}
                       onClick={() => setPage((p) => Math.max(0, p - 1))}
                     >
-                      Prev
+                      {t("tickets:filters.prev")}
                     </Button>
                     <Button
                       size="sm"
@@ -481,7 +517,7 @@ export default function Tasks() {
                       disabled={tasksLoading || (tasks?.length || 0) < pageSize}
                       onClick={() => setPage((p) => p + 1)}
                     >
-                      Next
+                      {t("tickets:filters.next")}
                     </Button>
                   </div>
                 </>
@@ -507,15 +543,33 @@ export default function Tasks() {
               <table className="w-full">
                 <thead className="bg-muted/50 border-b">
                   <tr>
-                    <th className="text-left p-4 font-medium">Ticket</th>
-                    <th className="text-left p-4 font-medium">Title</th>
-                    <th className="text-left p-4 font-medium">Priority</th>
-                    <th className="text-left p-4 font-medium">Status</th>
-                    <th className="text-left p-4 font-medium">Category</th>
-                    <th className="text-left p-4 font-medium">Assigned To</th>
-                    <th className="text-left p-4 font-medium">Due Date</th>
-                    <th className="text-left p-4 font-medium">Created</th>
-                    <th className="text-center p-4 font-medium">Actions</th>
+                    <th className="text-left p-4 font-medium">
+                      {t("tickets:table.columns.ticket")}
+                    </th>
+                    <th className="text-left p-4 font-medium">
+                      {t("tickets:table.columns.title")}
+                    </th>
+                    <th className="text-left p-4 font-medium">
+                      {t("tickets:table.columns.priority")}
+                    </th>
+                    <th className="text-left p-4 font-medium">
+                      {t("tickets:table.columns.status")}
+                    </th>
+                    <th className="text-left p-4 font-medium">
+                      {t("tickets:table.columns.category")}
+                    </th>
+                    <th className="text-left p-4 font-medium">
+                      {t("tickets:table.columns.assignedTo")}
+                    </th>
+                    <th className="text-left p-4 font-medium">
+                      {t("tickets:table.columns.dueDate")}
+                    </th>
+                    <th className="text-left p-4 font-medium">
+                      {t("tickets:table.columns.created")}
+                    </th>
+                    <th className="text-center p-4 font-medium">
+                      {t("tickets:table.columns.actions")}
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -653,7 +707,7 @@ export default function Tasks() {
                                 onClick={() => handleEditTask(task)}
                               >
                                 <Edit3 className="h-4 w-4 mr-2" />
-                                Edit Ticket
+                                {t("tickets:editTicket")}
                               </DropdownMenuItem>
                               {canDelete && (
                                 <DropdownMenuItem
@@ -661,7 +715,7 @@ export default function Tasks() {
                                   className="text-red-600"
                                 >
                                   <Trash2 className="h-4 w-4 mr-2" />
-                                  Delete Ticket
+                                  {t("tickets:deleteTicket")}
                                 </DropdownMenuItem>
                               )}
                             </DropdownMenuContent>

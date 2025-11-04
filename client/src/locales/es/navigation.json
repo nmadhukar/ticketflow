@@ -1,0 +1,25 @@
+{
+  "dashboard": "Tablero",
+  "tickets": "Tickets",
+  "departments": "Departamentos",
+  "knowledge_base": "Base de Conocimiento",
+  "teams": "Equipos",
+  "management_title": "Usuarios y grupos",
+  "users": "Usuarios",
+  "invitations": "Invitaciones",
+  "configuration_title": "Configuración",
+  "company-console": "Consola de la empresa",
+  "ai-settings": "Configuración de IA",
+  "analytics_title": "Analítica e información",
+  "ai-analytics": "Rendimiento de IA",
+  "learning-queue": "Cola de aprendizaje",
+  "content_title": "Documentos y guías",
+  "help": "Documentación de ayuda",
+  "policies": "Políticas de la empresa",
+  "integrations_title": "Integraciones",
+  "sso": "SSO de Microsoft 365",
+  "ms-teams-integration": "Microsoft Teams",
+  "developer-resources": "Recursos para desarrolladores"
+}
+
+

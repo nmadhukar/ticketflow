@@ -44,6 +44,7 @@ import { z } from "zod";
 import { Loader2, Plus, Pencil, Trash2, Building, Users } from "lucide-react";
 import type { Department, User } from "@shared/schema";
 import MainWrapper from "@/components/main-wrapper";
+import { useTranslation } from "react-i18next";
 
 const departmentSchema = z.object({
   name: z.string().min(2, "Department name must be at least 2 characters"),
@@ -54,6 +55,7 @@ const departmentSchema = z.object({
 type DepartmentFormData = z.infer<typeof departmentSchema>;
 
 export default function Departments() {
+  const { t } = useTranslation(["common", "departments"]);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingDepartment, setEditingDepartment] = useState<Department | null>(
     null
@@ -96,16 +98,20 @@ export default function Departments() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
       toast({
-        title: "Success",
-        description: "Department created successfully",
+        title: t("messages.success"),
+        description: t("departments:toasts.created"),
       });
       setIsCreateOpen(false);
       createForm.reset();
     },
     onError: (error) => {
       toast({
-        title: "Error",
-        description: error.message || "Failed to create department",
+        title: t("messages.error"),
+        description:
+          error.message ||
+          t("departments:errors.createFailed", {
+            defaultValue: "Failed to create department",
+          }),
         variant: "destructive",
       });
     },
@@ -129,15 +135,19 @@ export default function Departments() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
       toast({
-        title: "Success",
-        description: "Department updated successfully",
+        title: t("messages.success"),
+        description: t("departments:toasts.updated"),
       });
       setEditingDepartment(null);
     },
     onError: (error) => {
       toast({
-        title: "Error",
-        description: error.message || "Failed to update department",
+        title: t("messages.error"),
+        description:
+          error.message ||
+          t("departments:errors.updateFailed", {
+            defaultValue: "Failed to update department",
+          }),
         variant: "destructive",
       });
     },
@@ -150,14 +160,18 @@ export default function Departments() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
       toast({
-        title: "Success",
-        description: "Department deleted successfully",
+        title: t("messages.success"),
+        description: t("departments:toasts.deleted"),
       });
     },
     onError: (error) => {
       toast({
-        title: "Error",
-        description: error.message || "Failed to delete department",
+        title: t("messages.error"),
+        description:
+          error.message ||
+          t("departments:errors.deleteFailed", {
+            defaultValue: "Failed to delete department",
+          }),
         variant: "destructive",
       });
     },
@@ -192,13 +206,13 @@ export default function Departments() {
 
   return (
     <MainWrapper
-      title="Department Management"
-      subTitle="Organize users into departments"
+      title={t("departments:title")}
+      subTitle={t("departments:subtitle")}
       action={
         departments?.length ? (
           <Button className="gap-2" onClick={() => setIsCreateOpen(true)}>
             <Plus className="w-4 h-4" />
-            Add Department
+            {t("departments:actions.add")}
           </Button>
         ) : null
       }
@@ -220,11 +234,11 @@ export default function Departments() {
                       </CardTitle>
                       {department.isActive ? (
                         <Badge variant="secondary" className="mt-1">
-                          Active
+                          {t("departments:status.active")}
                         </Badge>
                       ) : (
                         <Badge variant="destructive" className="mt-1">
-                          Inactive
+                          {t("departments:status.inactive")}
                         </Badge>
                       )}
                     </div>
@@ -249,13 +263,19 @@ export default function Departments() {
               </CardHeader>
               <CardContent>
                 <CardDescription className="mb-4">
-                  {department.description || "No description provided"}
+                  {department.description ||
+                    t("departments:labels.noDescription", {
+                      defaultValue: "No description provided",
+                    })}
                 </CardDescription>
                 {manager && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Users className="w-4 h-4" />
                     <span>
-                      Manager: {manager.firstName} {manager.lastName}
+                      {t("departments:labels.managerLine", {
+                        first: manager.firstName,
+                        last: manager.lastName,
+                      })}
                     </span>
                   </div>
                 )}
@@ -270,18 +290,17 @@ export default function Departments() {
             <Building className="h-8 w-8 text-slate-400" />
           </div>
           <h3 className="text-2xl font-semibold text-slate-900 mb-2">
-            No departments yet
+            {t("departments:empty.title")}
           </h3>
           <p className="text-slate-500 mb-6 max-w-xl mx-auto">
-            You don't have any departments created yet. Create one to organize
-            users and route tickets.
+            {t("departments:empty.desc")}
           </p>
           <Button
             onClick={() => setIsCreateOpen(true)}
             className="gap-2 bg-blue-600 hover:bg-blue-700"
           >
             <Plus className="h-4 w-4" />
-            Create New Department
+            {t("departments:empty.create")}
           </Button>
         </Card>
       )}
@@ -293,8 +312,10 @@ export default function Departments() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit Department</DialogTitle>
-            <DialogDescription>Update department information</DialogDescription>
+            <DialogTitle>{t("departments:dialogs.editTitle")}</DialogTitle>
+            <DialogDescription>
+              {t("departments:dialogs.editDesc")}
+            </DialogDescription>
           </DialogHeader>
           <Form {...editForm}>
             <form
@@ -306,7 +327,7 @@ export default function Departments() {
                 name="name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Department Name</FormLabel>
+                    <FormLabel>{t("departments:labels.name")}</FormLabel>
                     <FormControl>
                       <Input {...field} />
                     </FormControl>
@@ -319,7 +340,7 @@ export default function Departments() {
                 name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Description</FormLabel>
+                    <FormLabel>{t("departments:labels.description")}</FormLabel>
                     <FormControl>
                       <Textarea {...field} />
                     </FormControl>
@@ -332,15 +353,19 @@ export default function Departments() {
                 name="managerId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Department Manager</FormLabel>
+                    <FormLabel>{t("departments:labels.manager")}</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="Select a manager" />
+                          <SelectValue
+                            placeholder={t("departments:labels.selectManager")}
+                          />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="none">No Manager</SelectItem>
+                        <SelectItem value="none">
+                          {t("departments:labels.noManager")}
+                        </SelectItem>
                         {users
                           ?.filter(
                             (user: User) =>
@@ -362,7 +387,7 @@ export default function Departments() {
                   {updateMutation.isPending && (
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   )}
-                  Update Department
+                  {t("departments:actions.update")}
                 </Button>
               </DialogFooter>
             </form>
@@ -373,9 +398,9 @@ export default function Departments() {
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create New Department</DialogTitle>
+            <DialogTitle>{t("departments:dialogs.createTitle")}</DialogTitle>
             <DialogDescription>
-              Add a new department to organize your team
+              {t("departments:dialogs.createDesc")}
             </DialogDescription>
           </DialogHeader>
           <Form {...createForm}>
@@ -388,7 +413,7 @@ export default function Departments() {
                 name="name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Department Name</FormLabel>
+                    <FormLabel>{t("departments:labels.name")}</FormLabel>
                     <FormControl>
                       <Input placeholder="e.g., Engineering" {...field} />
                     </FormControl>
@@ -401,7 +426,7 @@ export default function Departments() {
                 name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Description</FormLabel>
+                    <FormLabel>{t("departments:labels.description")}</FormLabel>
                     <FormControl>
                       <Textarea
                         placeholder="Department description..."
@@ -417,15 +442,19 @@ export default function Departments() {
                 name="managerId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Department Manager</FormLabel>
+                    <FormLabel>{t("departments:labels.manager")}</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="Select a manager" />
+                          <SelectValue
+                            placeholder={t("departments:labels.selectManager")}
+                          />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="none">No Manager</SelectItem>
+                        <SelectItem value="none">
+                          {t("departments:labels.noManager")}
+                        </SelectItem>
                         {users
                           .filter(
                             (user: User) =>
@@ -447,7 +476,7 @@ export default function Departments() {
                   {createMutation.isPending && (
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   )}
-                  Create Department
+                  {t("departments:actions.create")}
                 </Button>
               </DialogFooter>
             </form>

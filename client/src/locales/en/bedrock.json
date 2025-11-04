@@ -1,0 +1,60 @@
+{
+  "loading": "Loading Cost Statistics...",
+  "unavailable": {
+    "title": "Cost Monitoring Unavailable",
+    "desc": "Unable to load cost statistics. Please check your connection and try again."
+  },
+  "actions": {
+    "retry": "Retry"
+  },
+  "cards": {
+    "daily": { "title": "Daily Usage" },
+    "monthly": { "title": "Monthly Usage" },
+    "of": "of ${{amount}}",
+    "requests": "{{count}} requests",
+    "accountType": {
+      "title": "Account Type",
+      "free": "Free Tier",
+      "paid": "Paid",
+      "freeNote": "Strict cost limits enabled",
+      "paidNote": "Standard cost limits",
+      "reqPerDay": "{{count}} req/day"
+    }
+  },
+  "alerts": {
+    "critical": {
+      "title": "Cost Limit Warning:",
+      "body": "You're approaching or have exceeded your cost limits. New requests may be blocked to prevent unexpected charges."
+    },
+    "warning": {
+      "title": "Cost Limit Alert:",
+      "body": "You're approaching your cost limits. Consider reviewing your usage or increasing limits if needed."
+    }
+  },
+  "recent": {
+    "title": "Recent Usage",
+    "desc": "Last 10 Bedrock API calls with cost information.",
+    "table": {
+      "time": "Time",
+      "operation": "Operation",
+      "model": "Model",
+      "tokens": "Tokens",
+      "cost": "Cost"
+    }
+  },
+  "confirm": {
+    "reset": "Are you sure you want to reset all usage data? This action cannot be undone."
+  },
+  "prompt": {
+    "startDate": "Enter start date (YYYY-MM-DD) or leave blank for all data:",
+    "endDate": "Enter end date (YYYY-MM-DD) or leave blank for all data:"
+  },
+  "errors": {
+    "resetTitle": "Failed to reset usage",
+    "resetDesc": "An error occurred while resetting usage data.",
+    "exportTitle": "Failed to export usage",
+    "exportDesc": "An error occurred while exporting usage data."
+  }
+}
+
+

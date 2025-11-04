@@ -13,6 +13,7 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -74,6 +75,7 @@ import {
 import { format } from "date-fns";
 import type { KnowledgeArticle } from "@shared/schema";
 import MainWrapper from "@/components/main-wrapper";
+import { useTranslation } from "react-i18next";
 
 /**
  * Knowledge Base Management Page
@@ -92,6 +94,7 @@ export default function KnowledgeBase() {
   const { toast } = useToast();
   const { isAuthenticated, isLoading, user } = useAuth();
   const queryClient = useQueryClient();
+  const { t } = useTranslation(["common", "knowledge"]);
 
   const [isArticleDialogOpen, setIsArticleDialogOpen] = useState(false);
   const [selectedArticle, setSelectedArticle] =
@@ -127,8 +130,8 @@ export default function KnowledgeBase() {
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       toast({
-        title: "Unauthorized",
-        description: "Admin access required. Redirecting...",
+        title: t("messages.unauthorized"),
+        description: t("messages.loggedOut"),
         variant: "destructive",
       });
       setTimeout(() => {
@@ -188,17 +191,17 @@ export default function KnowledgeBase() {
       resetArticleForm();
       setIsArticleDialogOpen(false);
       toast({
-        title: "Success",
-        description: `Knowledge article ${
-          selectedArticle ? "updated" : "created"
-        } successfully`,
+        title: t("messages.success"),
+        description: selectedArticle
+          ? t("knowledge:toasts.updated")
+          : t("knowledge:toasts.created"),
       });
     },
     onError: (error: Error) => {
       if (isUnauthorizedError(error)) {
         toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
+          title: t("messages.unauthorized"),
+          description: t("messages.loggedOut"),
           variant: "destructive",
         });
         setTimeout(() => {
@@ -207,7 +210,7 @@ export default function KnowledgeBase() {
         return;
       }
       toast({
-        title: "Error",
+        title: t("messages.error"),
         description: error.message,
         variant: "destructive",
       });
@@ -222,15 +225,15 @@ export default function KnowledgeBase() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/knowledge"] });
       toast({
-        title: "Success",
-        description: "Knowledge article deleted successfully",
+        title: t("messages.success"),
+        description: t("knowledge:toasts.deleted"),
       });
     },
     onError: (error: Error) => {
       if (isUnauthorizedError(error)) {
         toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
+          title: t("messages.unauthorized"),
+          description: t("messages.loggedOut"),
           variant: "destructive",
         });
         setTimeout(() => {
@@ -239,7 +242,7 @@ export default function KnowledgeBase() {
         return;
       }
       toast({
-        title: "Error",
+        title: t("messages.error"),
         description: error.message,
         variant: "destructive",
       });
@@ -282,13 +285,13 @@ export default function KnowledgeBase() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/knowledge"] });
       toast({
-        title: "AI Learning Complete",
+        title: t("knowledge:toasts.aiComplete"),
         description: `Found ${data.patternsFound} patterns, created ${data.articlesCreated} articles (${data.articlesPublished} published)`,
       });
     },
     onError: (error: Error) => {
       toast({
-        title: "Error",
+        title: t("messages.error"),
         description: error.message,
         variant: "destructive",
       });
@@ -319,8 +322,10 @@ export default function KnowledgeBase() {
   const handleSaveArticle = () => {
     if (!articleTitle.trim() || !articleContent.trim()) {
       toast({
-        title: "Validation Error",
-        description: "Title and content are required",
+        title: t("messages.error"),
+        description: t("validation.required", {
+          defaultValue: "Title and content are required",
+        }),
         variant: "destructive",
       });
       return;
@@ -409,8 +414,8 @@ export default function KnowledgeBase() {
 
   return (
     <MainWrapper
-      title="Knowledge Base Management"
-      subTitle="Manage knowledge articles for common issues and resolutions"
+      title={t("knowledge:title")}
+      subTitle={t("knowledge:subtitle")}
       action={
         (user as any)?.role === "admin" && (
           <div className="flex items-center gap-3">
@@ -424,43 +429,67 @@ export default function KnowledgeBase() {
               ) : (
                 <Brain className="h-4 w-4 mr-2" />
               )}
-              AI Learning
+              {t("knowledge:actions.aiLearning")}
             </Button>
-            <Button onClick={() => resetArticleForm()}>
+            <Button
+              onClick={() => {
+                resetArticleForm();
+                setIsArticleDialogOpen(true);
+              }}
+            >
               <Plus className="h-4 w-4 mr-2" />
-              Add Article
+              {t("knowledge:actions.addArticle")}
             </Button>
           </div>
         )
       }
     >
-      {/* Filters and Search */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Search className="h-5 w-5" />
-            Filter & Search
-          </CardTitle>
+          <div className="w-full flex items-start justify-between">
+            <div className="flex flex-col gap-1">
+              <CardTitle>
+                {t("knowledge:table.title", { count: filteredArticles.length })}
+              </CardTitle>
+              {(user as any)?.role === "admin" && (
+                <CardDescription>{t("knowledge:table.manage")}</CardDescription>
+              )}
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSearchQuery("");
+                setCategoryFilter("all");
+                setStatusFilter("all");
+              }}
+            >
+              {t("knowledge:actions.clearFilters")}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div>
-              <Label htmlFor="search">Search</Label>
-              <Input
-                id="search"
-                placeholder="Search articles..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="category-filter">Category</Label>
+          <Card>
+            <div className="grid grid-cols-1 md:grid-cols-7 p-5 gap-8">
+              <div className="relative col-span-1 md:col-span-4">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+                <Input
+                  id="search"
+                  placeholder={t("knowledge:filters.searchPlaceholder")}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                 <SelectTrigger>
-                  <SelectValue placeholder="All categories" />
+                  <SelectValue
+                    placeholder={t("knowledge:filters.allCategories")}
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All categories</SelectItem>
+                  <SelectItem value="all">
+                    {t("knowledge:filters.allCategories")}
+                  </SelectItem>
                   {knowledgeCategories.map((category) => (
                     <SelectItem key={category} value={category}>
                       <div className="flex items-center gap-2">
@@ -472,71 +501,68 @@ export default function KnowledgeBase() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            <div>
-              <Label htmlFor="status-filter">Status</Label>
+
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger>
-                  <SelectValue placeholder="All statuses" />
+                  <SelectValue
+                    placeholder={t("knowledge:filters.allStatuses")}
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
-                  <SelectItem value="published">Published</SelectItem>
-                  <SelectItem value="draft">Draft</SelectItem>
-                  <SelectItem value="archived">Archived</SelectItem>
+                  <SelectItem value="all">
+                    {t("knowledge:filters.allStatuses")}
+                  </SelectItem>
+                  <SelectItem value="published">
+                    {t("knowledge:filters.published")}
+                  </SelectItem>
+                  <SelectItem value="draft">
+                    {t("knowledge:filters.draft")}
+                  </SelectItem>
+                  <SelectItem value="archived">
+                    {t("knowledge:filters.archived")}
+                  </SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-            <div>
-              <Label htmlFor="source-filter">Source</Label>
+
               <Select value={sourceFilter} onValueChange={setSourceFilter}>
                 <SelectTrigger>
-                  <SelectValue placeholder="All sources" />
+                  <SelectValue
+                    placeholder={t("knowledge:filters.allSources")}
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All sources</SelectItem>
-                  <SelectItem value="manual">Manual</SelectItem>
-                  <SelectItem value="ai_generated">AI generated</SelectItem>
+                  <SelectItem value="all">
+                    {t("knowledge:filters.allSources")}
+                  </SelectItem>
+                  <SelectItem value="manual">
+                    {t("knowledge:filters.manual")}
+                  </SelectItem>
+                  <SelectItem value="ai_generated">
+                    {t("knowledge:filters.ai_generated")}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex items-end">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setSearchQuery("");
-                  setCategoryFilter("all");
-                  setStatusFilter("all");
-                }}
-              >
-                Clear Filters
-              </Button>
-            </div>
-          </div>
+          </Card>
         </CardContent>
-      </Card>
-
-      {/* Articles Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Knowledge Articles ({filteredArticles.length})</CardTitle>
-          <CardDescription>
-            Manage manually created and AI-generated knowledge articles
-          </CardDescription>
-        </CardHeader>
+        <CardFooter className="flex justify-end"></CardFooter>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Title</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Source</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Views</TableHead>
-                <TableHead>Usage</TableHead>
-                <TableHead>Effectiveness</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t("knowledge:table.columns.title")}</TableHead>
+                <TableHead>{t("knowledge:table.columns.category")}</TableHead>
+                <TableHead>{t("knowledge:table.columns.source")}</TableHead>
+                <TableHead>{t("knowledge:table.columns.status")}</TableHead>
+                <TableHead>{t("knowledge:table.columns.views")}</TableHead>
+                <TableHead>{t("knowledge:table.columns.usage")}</TableHead>
+                <TableHead>
+                  {t("knowledge:table.columns.effectiveness")}
+                </TableHead>
+                <TableHead>{t("knowledge:table.columns.created")}</TableHead>
+                <TableHead className="text-right">
+                  {t("knowledge:table.columns.actions")}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -544,15 +570,15 @@ export default function KnowledgeBase() {
                 <TableRow>
                   <TableCell colSpan={7} className="text-center">
                     <Loader2 className="h-4 w-4 animate-spin mx-auto" />
-                    Loading articles...
+                    {t("knowledge:table.loading")}
                   </TableCell>
                 </TableRow>
               ) : filteredArticles.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center">
                     {searchQuery || categoryFilter || statusFilter
-                      ? "No articles match your search criteria."
-                      : "No knowledge articles found. Create your first article!"}
+                      ? t("knowledge:table.emptyFiltered")
+                      : t("knowledge:table.empty")}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -585,8 +611,8 @@ export default function KnowledgeBase() {
                         }
                       >
                         {(article as any).source === "ai_generated"
-                          ? "AI"
-                          : "Manual"}
+                          ? t("knowledge:badges.ai")
+                          : t("knowledge:badges.manual")}
                       </Badge>
                     </TableCell>
                     <TableCell>{getStatusBadge(article)}</TableCell>
@@ -634,15 +660,18 @@ export default function KnowledgeBase() {
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>
-                                Delete Knowledge Article
+                                {t("knowledge:delete.title")}
                               </AlertDialogTitle>
                               <AlertDialogDescription>
-                                Are you sure you want to delete "{article.title}
-                                "? This action cannot be undone.
+                                {t("knowledge:delete.confirm", {
+                                  title: article.title,
+                                })}
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogCancel>
+                                {t("common.actions.cancel")}
+                              </AlertDialogCancel>
                               <AlertDialogAction
                                 onClick={() =>
                                   deleteArticleMutation.mutate(article.id)
@@ -653,7 +682,7 @@ export default function KnowledgeBase() {
                                 {deleteArticleMutation.isPending && (
                                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                 )}
-                                Delete
+                                {t("knowledge:actions.delete")}
                               </AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>
@@ -673,42 +702,52 @@ export default function KnowledgeBase() {
           <DialogHeader>
             <DialogTitle>
               {selectedArticle
-                ? "Edit Knowledge Article"
-                : "Create Knowledge Article"}
+                ? t("knowledge:dialog.editTitle")
+                : t("knowledge:dialog.createTitle")}
             </DialogTitle>
             <DialogDescription>
               {selectedArticle
-                ? "Update the knowledge article details below."
-                : "Create a new knowledge article for common issues and their resolutions."}
+                ? t("knowledge:dialog.editDesc")
+                : t("knowledge:dialog.createDesc")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <Label htmlFor="title">Title *</Label>
+              <Label htmlFor="title">
+                {t("knowledge:dialog.fields.title")}
+              </Label>
               <Input
                 id="title"
                 value={articleTitle}
                 onChange={(e) => setArticleTitle(e.target.value)}
-                placeholder="e.g., How to reset password"
+                placeholder={t("knowledge:dialog.fields.titlePlaceholder")}
               />
             </div>
             <div>
-              <Label htmlFor="summary">Summary</Label>
+              <Label htmlFor="summary">
+                {t("knowledge:dialog.fields.summary")}
+              </Label>
               <Input
                 id="summary"
                 value={articleSummary}
                 onChange={(e) => setArticleSummary(e.target.value)}
-                placeholder="Brief description of the solution"
+                placeholder={t("knowledge:dialog.fields.summary")}
               />
             </div>
             <div>
-              <Label htmlFor="category">Category</Label>
+              <Label htmlFor="category">
+                {t("knowledge:dialog.fields.category")}
+              </Label>
               <Select
                 value={articleCategory}
                 onValueChange={setArticleCategory}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select category" />
+                  <SelectValue
+                    placeholder={t(
+                      "knowledge:dialog.fields.categoryPlaceholder"
+                    )}
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   {knowledgeCategories.map((category) => (
@@ -724,21 +763,23 @@ export default function KnowledgeBase() {
               </Select>
             </div>
             <div>
-              <Label htmlFor="tags">Tags</Label>
+              <Label htmlFor="tags">{t("knowledge:dialog.fields.tags")}</Label>
               <Input
                 id="tags"
                 value={articleTags}
                 onChange={(e) => setArticleTags(e.target.value)}
-                placeholder="Comma-separated tags (e.g., password, authentication, login)"
+                placeholder={t("knowledge:dialog.fields.tagsPlaceholder")}
               />
             </div>
             <div>
-              <Label htmlFor="content">Content *</Label>
+              <Label htmlFor="content">
+                {t("knowledge:dialog.fields.content")}
+              </Label>
               <Textarea
                 id="content"
                 value={articleContent}
                 onChange={(e) => setArticleContent(e.target.value)}
-                placeholder="Detailed step-by-step resolution..."
+                placeholder={t("knowledge:dialog.fields.contentPlaceholder")}
                 className="min-h-[200px]"
               />
             </div>
@@ -748,7 +789,9 @@ export default function KnowledgeBase() {
                 checked={isPublished}
                 onCheckedChange={setIsPublished}
               />
-              <Label htmlFor="published">Publish immediately</Label>
+              <Label htmlFor="published">
+                {t("knowledge:actions.publishNow")}
+              </Label>
             </div>
           </div>
           <DialogFooter>
@@ -756,7 +799,7 @@ export default function KnowledgeBase() {
               variant="outline"
               onClick={() => setIsArticleDialogOpen(false)}
             >
-              Cancel
+              {t("common.actions.cancel")}
             </Button>
             <Button
               onClick={handleSaveArticle}
@@ -765,7 +808,9 @@ export default function KnowledgeBase() {
               {saveArticleMutation.isPending && (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               )}
-              {selectedArticle ? "Update" : "Create"} Article
+              {selectedArticle
+                ? t("knowledge:dialog.submitUpdate")
+                : t("knowledge:dialog.submitCreate")}
             </Button>
           </DialogFooter>
         </DialogContent>

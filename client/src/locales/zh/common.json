@@ -1,0 +1,31 @@
+{
+  "language": {
+    "en": "英语",
+    "es": "西班牙语",
+    "fr": "法语",
+    "de": "德语",
+    "zh": "中文"
+  },
+  "actions": {
+    "save": "保存",
+    "cancel": "取消",
+    "update": "更新",
+    "close": "关闭",
+    "signOut": "退出登录",
+    "signingOut": "正在退出..."
+  },
+  "nav": {
+    "settings": "设置",
+    "adminGuides": "管理员指南",
+    "userGuides": "用户指南"
+  },
+  "settings": {
+    "title": "设置",
+    "subtitle": "管理您的账户设置和偏好",
+    "language": "语言"
+  },
+  "header": {
+    "language": "语言"
+  }
+}
+
