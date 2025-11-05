@@ -559,39 +559,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getUserId(req);
       const isCustomer = (await storage.getUser(userId))?.role === "customer";
 
-      // Enforce routing for customers: require departmentId and teamId
+      // Customer create: support user, team, department-only, unassigned
       if (isCustomer) {
-        const { departmentId, teamId } = req.body || {};
-        const parsedDeptId = parseInt(departmentId);
-        const parsedTeamId = parseInt(teamId);
-        if (!parsedDeptId || !parsedTeamId) {
-          return res.status(400).json({
-            message: "departmentId and teamId are required for customers",
-          });
+        const { assigneeType, assigneeId, teamId, departmentId } =
+          req.body || {};
+        const parsedTeamId = teamId ? parseInt(teamId) : undefined;
+        const parsedDeptId = departmentId ? parseInt(departmentId) : undefined;
+
+        if (assigneeType === "user") {
+          if (!assigneeId) {
+            return res
+              .status(400)
+              .json({ message: "assigneeId is required for user assignment" });
+          }
+          req.body.assigneeId = String(assigneeId);
+          req.body.assigneeTeamId = null;
+          req.body.teamId = undefined;
+          // departmentId optional
+        } else if (assigneeType === "team" || parsedTeamId) {
+          if (!parsedTeamId) {
+            return res
+              .status(400)
+              .json({ message: "teamId is required for team assignment" });
+          }
+          const team = await storage.getTeam(parsedTeamId);
+          if (!team) return res.status(400).json({ message: "Invalid team" });
+          if (parsedDeptId) {
+            const dept = await storage.getDepartmentById(parsedDeptId);
+            if (!dept || (dept as any).isActive === false) {
+              return res
+                .status(400)
+                .json({ message: "Invalid or inactive department" });
+            }
+            if (
+              (team as any).departmentId &&
+              (team as any).departmentId !== parsedDeptId
+            ) {
+              return res
+                .status(400)
+                .json({
+                  message: "Team does not belong to the selected department",
+                });
+            }
+          }
+          req.body.assigneeType = "team";
+          req.body.assigneeTeamId = parsedTeamId;
+          req.body.assigneeId = null;
+          // If department not provided, try deriving from team
+          if (!parsedDeptId && (team as any).departmentId) {
+            req.body.departmentId = (team as any).departmentId;
+          }
+        } else if (parsedDeptId) {
+          const dept = await storage.getDepartmentById(parsedDeptId);
+          if (!dept || (dept as any).isActive === false) {
+            return res
+              .status(400)
+              .json({ message: "Invalid or inactive department" });
+          }
+          // Department-only routing: clear team and assignee fields
+          req.body.teamId = null;
+          req.body.assigneeId = null;
+          req.body.assigneeTeamId = null;
+          // assigneeType can be omitted
+        } else {
+          // Unassigned: clear all assignment fields
+          req.body.assigneeId = null;
+          req.body.assigneeTeamId = null;
+          req.body.departmentId = null;
+          req.body.teamId = null;
         }
-        const dept = await storage.getDepartmentById(parsedDeptId);
-        if (!dept || dept.isActive === false) {
-          return res
-            .status(400)
-            .json({ message: "Invalid or inactive department" });
-        }
-        const team = await storage.getTeam(parsedTeamId);
-        if (!team) {
-          return res.status(400).json({ message: "Invalid team" });
-        }
-        // Optional: if team has departmentId, validate it matches
-        if (
-          (team as any).departmentId &&
-          (team as any).departmentId !== parsedDeptId
-        ) {
-          return res.status(400).json({
-            message: "Team does not belong to the selected department",
-          });
-        }
-        // Force team routing
-        req.body.assigneeType = "team";
-        req.body.assigneeTeamId = parsedTeamId;
-        req.body.assigneeId = null;
       }
 
       const taskData = insertTaskSchema.parse({
@@ -600,50 +636,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       const task = await storage.createTask(taskData);
 
-      // Run AI analysis for auto-response
-      try {
-        const { aiAutoResponseService } = await import("./aiAutoResponse");
-        const analysis = await aiAutoResponseService.analyzeTicket(task);
+      // Run AI analysis for auto-response (skip when Bedrock not configured)
+      const bedrockConfigured =
+        !!process.env.AWS_ACCESS_KEY_ID &&
+        !!process.env.AWS_SECRET_ACCESS_KEY &&
+        !!process.env.AWS_REGION;
 
-        // Save complexity score
-        await aiAutoResponseService.saveComplexityScore(
-          task.id,
-          analysis.complexity,
-          analysis.factors,
-          `Complexity: ${analysis.complexity}/100. Should escalate: ${analysis.shouldEscalate}`
-        );
+      if (bedrockConfigured) {
+        try {
+          const { aiAutoResponseService } = await import("./aiAutoResponse");
+          const analysis = await aiAutoResponseService.analyzeTicket(task);
 
-        // If confidence is high enough, save and apply auto-response
-        if (analysis.autoResponse && analysis.confidence >= 0.7) {
-          await aiAutoResponseService.saveAutoResponse(
+          // Save complexity score
+          await aiAutoResponseService.saveComplexityScore(
             task.id,
-            analysis.autoResponse,
-            analysis.confidence,
-            true // Applied automatically
+            analysis.complexity,
+            analysis.factors,
+            `Complexity: ${analysis.complexity}/100. Should escalate: ${analysis.shouldEscalate}`
           );
 
-          // Add the auto-response as a comment (use storage layer if available)
-          try {
-            await storage.addTaskComment({
-              taskId: task.id,
-              userId: userId,
-              content: `AI Auto-Response (confidence ${(
-                analysis.confidence * 100
-              ).toFixed(0)}%): ${analysis.autoResponse}`,
-            } as any);
-          } catch {}
-        }
+          // If confidence is high enough, save and apply auto-response
+          if (analysis.autoResponse && analysis.confidence >= 0.7) {
+            await aiAutoResponseService.saveAutoResponse(
+              task.id,
+              analysis.autoResponse,
+              analysis.confidence,
+              true // Applied automatically
+            );
 
-        // If should escalate, update assignment based on complexity
-        if (analysis.shouldEscalate && analysis.complexity > 70) {
-          // TODO: Implement escalation rules
-          console.log(
-            `Ticket ${task.ticketNumber} should be escalated (complexity: ${analysis.complexity})`
-          );
+            // Add the auto-response as a comment (use storage layer if available)
+            try {
+              await storage.addTaskComment({
+                taskId: task.id,
+                userId: userId,
+                content: `AI Auto-Response (confidence ${(
+                  analysis.confidence * 100
+                ).toFixed(0)}%): ${analysis.autoResponse}`,
+              } as any);
+            } catch {}
+          }
+
+          // If should escalate, update assignment based on complexity
+          if (analysis.shouldEscalate && analysis.complexity > 70) {
+            // TODO: Implement escalation rules
+            console.log(
+              `Ticket ${task.ticketNumber} should be escalated (complexity: ${analysis.complexity})`
+            );
+          }
+        } catch (error) {
+          console.error("Error in AI analysis:", error);
+          // Continue without AI features if there's an error
         }
-      } catch (error) {
-        console.error("Error in AI analysis:", error);
-        // Continue without AI features if there's an error
       }
 
       // WS: notify creator and, if team routed, team members (placeholder selection)

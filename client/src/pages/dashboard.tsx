@@ -289,7 +289,7 @@ export default function Dashboard() {
         <div className="col-span-2">
           <BedrockCostMonitoring />
         </div>
-        <Card className="min-h-[60vh] flex flex-col">
+        <Card className="min-h-[60vh] flex flex-col shadow shadow-blue-300">
           <CardHeader>
             <CardTitle>{t("dashboard:recentActivity.title")}</CardTitle>
           </CardHeader>

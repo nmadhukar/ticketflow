@@ -28,7 +28,7 @@ export function Sidebar({ className }: SidebarProps) {
     if (role === "admin") {
       return [
         { name: t("dashboard"), href: "/", icon: LayoutDashboard },
-        { name: t("tickets"), href: "/tasks", icon: FolderOpen },
+        { name: t("tickets"), href: "/tickets", icon: FolderOpen },
         { name: t("departments"), href: "/departments", icon: Building },
         { name: t("knowledge_base"), href: "/knowledge-base", icon: BookOpen },
       ];

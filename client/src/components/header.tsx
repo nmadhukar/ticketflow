@@ -112,7 +112,7 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
   }, [user]);
 
   return (
-    <header className="relative bg-card shadow-business p-5 sticky top-0 backdrop-blur-md flex items-center justify-between z-50">
+    <header className="bg-card shadow-business p-5 sticky top-0 backdrop-blur-md flex items-center justify-between z-50">
       <Link href="/">
         <div className="flex items-center gap-3 ml-2 cursor-pointer select-none">
           {(companyBranding as any)?.logoUrl ? (
@@ -124,7 +124,7 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
           ) : (
             <TicketIcon className="h-10 w-auto text-primary" />
           )}
-          <span className="text-foreground text-lg">
+          <span className="text-primary text-lg font-semibold">
             {(companyBranding as any)?.companyName || "TicketFlow"}
           </span>
         </div>

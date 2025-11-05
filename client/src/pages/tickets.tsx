@@ -8,6 +8,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
@@ -38,14 +42,16 @@ import {
   Search,
   Tag,
   Target,
+  Brain,
   Trash2,
   User,
   Users,
   XCircle,
   Zap,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, Fragment } from "react";
 import { useTranslation } from "react-i18next";
+import TicketDetail from "../components/ticket-detail";
 
 const getStatusIcon = (status: string) => {
   switch (status) {
@@ -150,10 +156,11 @@ export default function Tasks() {
   const { isAuthenticated, isLoading, user } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useTranslation(["common", "tickets"]);
+  const currentUserId = (user as any)?.id as string | undefined;
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<any>(null);
-  const [isViewOnly, setIsViewOnly] = useState(false);
-  const [viewMode, setViewMode] = useState("cards"); // cards or table
+  const [expandedTicketId, setExpandedTicketId] = useState<number | null>(null);
+  const [draggedTask, setDraggedTask] = useState<any | null>(null);
   const [filters, setFilters] = useState({
     search: "",
     status: "all",
@@ -167,6 +174,8 @@ export default function Tasks() {
   useEffect(() => {
     // Reset to first page when filters change
     setPage(0);
+    // Collapse any expanded detail when filters change
+    setExpandedTicketId(null);
   }, [filters.search, filters.status, filters.category]);
 
   const params = new URLSearchParams();
@@ -182,6 +191,7 @@ export default function Tasks() {
 
   useEffect(() => {
     setPage(0);
+    setExpandedTicketId(null);
   }, [showMine]);
 
   useEffect(() => {
@@ -211,6 +221,8 @@ export default function Tasks() {
     initialData: [],
     refetchOnMount: "always",
   });
+
+  // Teams for assignment are fetched after role is known
 
   const deleteTaskMutation = useMutation({
     mutationFn: async (taskId: number) => {
@@ -244,13 +256,32 @@ export default function Tasks() {
     },
   });
 
-  if (isLoading || !isAuthenticated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        {t("actions.loading")}
-      </div>
-    );
-  }
+  const updateTaskMutation = useMutation({
+    mutationFn: async ({ id, updates }: { id: number; updates: any }) => {
+      const res = await apiRequest("PATCH", `/api/tasks/${id}`, updates);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/tasks/my"] });
+      queryClient.invalidateQueries({ queryKey: [tasksUrl] });
+      toast({
+        title: t("messages.success"),
+        description: t("tickets.taskUpdated", {
+          defaultValue: "Ticket updated",
+        }),
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: t("messages.error"),
+        description:
+          error?.message ||
+          t("tickets.failedToUpdate", { defaultValue: "Update failed" }),
+        variant: "destructive",
+      });
+    },
+  });
 
   const role = (user as any)?.role as string | undefined;
   const canCreate = ["customer", "manager", "admin", "agent"].includes(
@@ -258,7 +289,63 @@ export default function Tasks() {
   );
   const canDelete = role === "admin";
 
+  // Teams for assignment (admin/manager can assign to any team; others use my teams)
+  const teamsEndpoint =
+    role === "admin" || role === "manager" ? "/api/teams" : "/api/teams/my";
+  const { data: teams } = useQuery<any[]>({
+    queryKey: [teamsEndpoint],
+    enabled: !!role && role !== "customer" && isAuthenticated,
+    initialData: [],
+  });
+
+  const canUpdateStatus = (task: any) => {
+    if (role === "admin" || role === "manager") return true;
+    if (role === "agent") {
+      return task.assigneeType === "user" && task.assigneeId === currentUserId;
+    }
+    return false;
+  };
+
+  // Drag and drop handlers (admin/manager only)
+  const handleDragStart = (e: any, task: any) => {
+    if (!(role === "admin" || role === "manager")) return;
+    setDraggedTask(task);
+    if (e?.dataTransfer) e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e: any) => {
+    if (!(role === "admin" || role === "manager")) return;
+    if (!draggedTask) return;
+    e.preventDefault();
+    if (e?.dataTransfer) e.dataTransfer.dropEffect = "move";
+  };
+
+  const handleDrop = (e: any, targetUserId?: string, targetTeamId?: number) => {
+    if (!(role === "admin" || role === "manager")) return;
+    if (!draggedTask) return;
+    e.preventDefault();
+
+    const updates: any = {};
+    if (targetUserId) {
+      updates.assigneeType = "user";
+      updates.assigneeId = targetUserId;
+      updates.assigneeTeamId = null;
+    } else if (targetTeamId) {
+      updates.assigneeType = "team";
+      updates.assigneeTeamId = targetTeamId;
+      updates.assigneeId = null;
+    } else {
+      // No target provided → do nothing
+      setDraggedTask(null);
+      return;
+    }
+
+    updateTaskMutation.mutate({ id: draggedTask.id, updates });
+    setDraggedTask(null);
+  };
+
   const handleEditTask = (task: any) => {
+    setExpandedTicketId(null);
     setEditingTask(task);
     setIsTaskModalOpen(true);
   };
@@ -324,6 +411,14 @@ export default function Tasks() {
     if (!dueDate) return false;
     return new Date(dueDate) < new Date();
   };
+
+  if (isLoading || !isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        {t("actions.loading")}
+      </div>
+    );
+  }
 
   return (
     <MainWrapper
@@ -559,9 +654,14 @@ export default function Tasks() {
                     <th className="text-left p-4 font-medium">
                       {t("tickets:table.columns.category")}
                     </th>
-                    <th className="text-left p-4 font-medium">
+                    <th className="min-w-max text-left p-4 font-medium">
                       {t("tickets:table.columns.assignedTo")}
                     </th>
+                    {(role === "admin" || role === "manager") && (
+                      <th className="min-w-max text-left p-4 font-medium">
+                        AI Info
+                      </th>
+                    )}
                     <th className="text-left p-4 font-medium">
                       {t("tickets:table.columns.dueDate")}
                     </th>
@@ -575,162 +675,324 @@ export default function Tasks() {
                 </thead>
                 <tbody className="divide-y">
                   {filteredTasks.map((task: any) => (
-                    <tr
-                      key={task.id}
-                      className="hover:bg-muted/50 transition-colors"
-                    >
-                      <td className="p-4">
-                        <Badge variant="outline" className="font-mono text-xs">
-                          {task.ticketNumber}
-                        </Badge>
-                      </td>
-                      <td className="p-4">
-                        <div>
-                          <p
-                            className="font-medium line-clamp-1 cursor-pointer hover:text-primary hover:underline"
-                            onClick={() => handleEditTask(task)}
+                    <Fragment key={task.id}>
+                      <tr
+                        className="hover:bg-muted/50 transition-colors"
+                        draggable={role === "admin" || role === "manager"}
+                        onDragStart={(e) => handleDragStart(e, task)}
+                      >
+                        <td
+                          className="p-4"
+                          onDragOver={handleDragOver}
+                          onDrop={(e) =>
+                            handleDrop(
+                              e,
+                              task?.assigneeId,
+                              task?.assigneeTeamId
+                            )
+                          }
+                        >
+                          <Badge
+                            variant="outline"
+                            className="font-mono text-xs"
                           >
-                            {task.title}
-                          </p>
-                          {task.description && (
-                            <p className="text-sm text-muted-foreground line-clamp-2 mt-1 w-56">
-                              {task.description}
+                            <span className="min-w-max">
+                              {task.ticketNumber}
+                            </span>
+                          </Badge>
+                        </td>
+                        <td className="p-4">
+                          <div>
+                            <p
+                              className="font-medium line-clamp-1 cursor-pointer hover:text-primary hover:underline"
+                              onClick={() => handleEditTask(task)}
+                            >
+                              {task.title}
                             </p>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-4 w-fit">
-                        <Badge
-                          className={cn(
-                            "min-w-max flex items-center gap-1 w-fit text-xs lowercase shadow-sm",
-                            getPriorityColor(task.priority)
-                          )}
-                        >
-                          <span> {getPriorityIcon(task.priority)}</span>
-                          <span> {task.priority?.toUpperCase()}</span>
-                        </Badge>
-                      </td>
-                      <td className="p-4">
-                        <Badge
-                          className={cn(
-                            "min-w-max flex items-center gap-1 w-fit text-xs lowercase shadow-sm",
-                            getStatusColor(task.status)
-                          )}
-                        >
-                          <span> {getStatusIcon(task.status)}</span>
-                          <span>
-                            {task.status?.replace("_", " ").toUpperCase()}
-                          </span>
-                        </Badge>
-                      </td>
-                      <td className="p-4">
-                        <Badge
-                          className={`${getCategoryColor(
-                            task.category
-                          )} border flex items-center gap-1 text-xs w-fit lowercase shadow-sm`}
-                        >
-                          <span> {getCategoryIcon(task.category)}</span>
-                          <span> {task.category?.toUpperCase()}</span>
-                        </Badge>
-                      </td>
-                      <td className="p-4">
-                        {task.assigneeType === "team" && task.assigneeTeamId ? (
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Users className="h-4 w-4" />
+                            {task.description && (
+                              <p className="text-sm text-muted-foreground line-clamp-2 mt-1 w-56">
+                                {task.description}
+                              </p>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4 w-fit">
+                          <Badge
+                            className={cn(
+                              "min-w-max flex items-center gap-1 w-fit text-xs lowercase shadow-sm",
+                              getPriorityColor(task.priority)
+                            )}
+                          >
+                            <span> {getPriorityIcon(task.priority)}</span>
+                            <span> {task.priority?.toUpperCase()}</span>
+                          </Badge>
+                        </td>
+                        <td className="p-4">
+                          <Badge
+                            className={cn(
+                              "min-w-max flex items-center gap-1 w-fit text-xs lowercase shadow-sm",
+                              getStatusColor(task.status)
+                            )}
+                          >
+                            <span> {getStatusIcon(task.status)}</span>
                             <span>
-                              {task.teamName ||
-                                task.assigneeName ||
-                                `Team #${task.assigneeTeamId}`}
+                              {task.status?.replace("_", " ").toUpperCase()}
+                            </span>
+                          </Badge>
+                        </td>
+                        <td className="p-4">
+                          <Badge
+                            className={`${getCategoryColor(
+                              task.category
+                            )} border flex items-center gap-1 text-xs w-fit lowercase shadow-sm`}
+                          >
+                            <span> {getCategoryIcon(task.category)}</span>
+                            <span> {task.category?.toUpperCase()}</span>
+                          </Badge>
+                        </td>
+                        <td className="p-4">
+                          {task.assigneeType === "team" &&
+                          task.assigneeTeamId ? (
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <Users className="h-4 w-4" />
+                              <span>
+                                {task.teamName ||
+                                  task.assigneeName ||
+                                  `Team #${task.assigneeTeamId}`}
+                              </span>
+                            </div>
+                          ) : task.assigneeId ? (
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <User className="h-4 w-4" />
+                              <span>
+                                {task.assigneeName || task.assigneeId}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">
+                              Unassigned
+                            </span>
+                          )}
+                        </td>
+                        {(role === "admin" || role === "manager") && (
+                          <td className="p-4">
+                            {task.hasAutoResponse ? (
+                              <div className="flex items-center gap-2">
+                                <Brain className="h-4 w-4 text-primary" />
+                                {typeof task.aiConfidence === "number" && (
+                                  <span
+                                    className={cn(
+                                      "text-sm font-medium",
+                                      task.aiConfidence >= 0.8
+                                        ? "text-green-600 dark:text-green-400"
+                                        : task.aiConfidence >= 0.6
+                                        ? "text-yellow-600 dark:text-yellow-400"
+                                        : "text-red-600 dark:text-red-400"
+                                    )}
+                                  >
+                                    {(task.aiConfidence * 100).toFixed(0)}%
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">
+                                —
+                              </span>
+                            )}
+                          </td>
+                        )}
+                        <td className=" p-4">
+                          {task.dueDate ? (
+                            <div
+                              className={`min-w-max text-sm ${
+                                isOverdue(task.dueDate)
+                                  ? "text-destructive font-medium"
+                                  : "text-muted-foreground"
+                              }`}
+                            >
+                              {formatDate(task.dueDate)}
+                            </div>
+                          ) : (
+                            <span className="min-w-max text-sm text-muted-foreground">
+                              No due date
+                            </span>
+                          )}
+                        </td>
+                        <td className=" p-4">
+                          <div className="text-sm text-muted-foreground">
+                            <p className="min-w-max">
+                              {task.createdByName ||
+                                task.creatorName ||
+                                "Unknown"}
+                            </p>
+                            <span className="min-w-max text-xs">
+                              {getTimeAgo(task.createdAt)}
                             </span>
                           </div>
-                        ) : task.assigneeId ? (
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <User className="h-4 w-4" />
-                            <span>{task.assigneeName || task.assigneeId}</span>
-                          </div>
-                        ) : (
-                          <span className="text-sm text-muted-foreground">
-                            Unassigned
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        {task.dueDate ? (
-                          <div
-                            className={`text-sm ${
-                              isOverdue(task.dueDate)
-                                ? "text-destructive font-medium"
-                                : "text-muted-foreground"
-                            }`}
-                          >
-                            {formatDate(task.dueDate)}
-                          </div>
-                        ) : (
-                          <span className="text-sm text-muted-foreground">
-                            No due date
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        <div className="text-sm text-muted-foreground">
-                          <div>
-                            {task.createdByName ||
-                              task.creatorName ||
-                              "Unknown"}
-                          </div>
-                          <div className="text-xs">
-                            {getTimeAgo(task.createdAt)}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex items-center justify-center gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setEditingTask(task);
-                              setIsViewOnly(true);
-                              setIsTaskModalOpen(true);
-                            }}
-                            className="h-8 w-8 p-0"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0"
-                              >
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  handleEditTask(task);
-                                  setIsViewOnly(false);
-                                }}
-                              >
-                                <Edit3 className="h-4 w-4 mr-2" />
-                                {t("tickets:editTicket")}
-                              </DropdownMenuItem>
-                              {canDelete && (
-                                <DropdownMenuItem
-                                  onClick={() => handleDeleteTask(task.id)}
-                                  className="text-red-600"
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center justify-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-expanded={expandedTicketId === task.id}
+                              onClick={() => {
+                                setExpandedTicketId((prev) =>
+                                  prev === task.id ? null : task.id
+                                );
+                              }}
+                              className="h-8 w-8 p-0"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
                                 >
-                                  <Trash2 className="h-4 w-4 mr-2" />
-                                  {t("tickets:deleteTicket")}
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                {(role === "admin" || role === "manager") && (
+                                  <DropdownMenuSub>
+                                    <DropdownMenuSubTrigger>
+                                      Quick Assign
+                                    </DropdownMenuSubTrigger>
+                                    <DropdownMenuSubContent>
+                                      <DropdownMenuItem
+                                        onClick={() => {
+                                          if (!currentUserId) return;
+                                          updateTaskMutation.mutate({
+                                            id: task.id,
+                                            updates: {
+                                              assigneeType: "user",
+                                              assigneeId: currentUserId,
+                                              assigneeTeamId: null,
+                                            },
+                                          });
+                                        }}
+                                      >
+                                        Assign to me
+                                      </DropdownMenuItem>
+                                      <DropdownMenuSeparator />
+                                      {(teams || []).length ? (
+                                        (teams || []).map((t: any) => (
+                                          <DropdownMenuItem
+                                            key={t.id}
+                                            onClick={() => {
+                                              updateTaskMutation.mutate({
+                                                id: task.id,
+                                                updates: {
+                                                  assigneeType: "team",
+                                                  assigneeTeamId: t.id,
+                                                  assigneeId: null,
+                                                },
+                                              });
+                                            }}
+                                          >
+                                            Assign to team: {t.name}
+                                          </DropdownMenuItem>
+                                        ))
+                                      ) : (
+                                        <DropdownMenuItem disabled>
+                                          No teams available
+                                        </DropdownMenuItem>
+                                      )}
+                                    </DropdownMenuSubContent>
+                                  </DropdownMenuSub>
+                                )}
+                                {role === "agent" &&
+                                  !(
+                                    task.assigneeType === "user" &&
+                                    task.assigneeId === currentUserId
+                                  ) && (
+                                    <DropdownMenuItem
+                                      onClick={() => {
+                                        if (!currentUserId) return;
+                                        updateTaskMutation.mutate({
+                                          id: task.id,
+                                          updates: {
+                                            assigneeType: "user",
+                                            assigneeId: currentUserId,
+                                            assigneeTeamId: null,
+                                          },
+                                        });
+                                      }}
+                                    >
+                                      Assign to me
+                                    </DropdownMenuItem>
+                                  )}
+                                {canUpdateStatus(task) && (
+                                  <DropdownMenuSub>
+                                    <DropdownMenuSubTrigger>
+                                      Update Status
+                                    </DropdownMenuSubTrigger>
+                                    <DropdownMenuSubContent>
+                                      {[
+                                        "open",
+                                        "in_progress",
+                                        "resolved",
+                                        "closed",
+                                        "on_hold",
+                                      ]
+                                        .filter((s) => s !== task.status)
+                                        .map((s) => (
+                                          <DropdownMenuItem
+                                            key={s}
+                                            onClick={() => {
+                                              updateTaskMutation.mutate({
+                                                id: task.id,
+                                                updates: { status: s },
+                                              });
+                                            }}
+                                          >
+                                            {s.replace("_", " ")}
+                                          </DropdownMenuItem>
+                                        ))}
+                                    </DropdownMenuSubContent>
+                                  </DropdownMenuSub>
+                                )}
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    handleEditTask(task);
+                                  }}
+                                >
+                                  <Edit3 className="h-4 w-4 mr-2" />
+                                  {t("tickets:editTicket")}
                                 </DropdownMenuItem>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </td>
-                    </tr>
+                                {canDelete && (
+                                  <DropdownMenuItem
+                                    onClick={() => handleDeleteTask(task.id)}
+                                    className="text-red-600"
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    {t("tickets:deleteTicket")}
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </td>
+                      </tr>
+                      {expandedTicketId === task.id && (
+                        <tr className="bg-gray-300">
+                          <td
+                            className="p-4"
+                            colSpan={
+                              role === "admin" || role === "manager" ? 10 : 9
+                            }
+                          >
+                            <TicketDetail
+                              ticketId={task.id}
+                              onClose={() => setExpandedTicketId(null)}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -781,10 +1043,8 @@ export default function Tasks() {
         onClose={() => {
           setIsTaskModalOpen(false);
           setEditingTask(null);
-          setIsViewOnly(false);
         }}
         task={editingTask}
-        viewOnly={isViewOnly}
       />
     </MainWrapper>
   );

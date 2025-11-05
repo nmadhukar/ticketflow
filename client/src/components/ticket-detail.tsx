@@ -15,22 +15,19 @@ import {
   Brain,
   MessageSquare,
   Clock,
-  AlertCircle,
   CheckCircle,
   XCircle,
   User,
-  Calendar,
   Tag,
-  ThumbsUp,
-  ThumbsDown,
   Send,
   Sparkles,
   FileText,
-  BarChart,
   AlertTriangle,
+  FileIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AiResponseFeedback } from "@/components/ai-response-feedback";
+import { useAuth } from "@/hooks/useAuth";
 
 interface TicketDetailProps {
   ticketId: number;
@@ -41,25 +38,35 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
   const { toast } = useToast();
   const [comment, setComment] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { user } = useAuth() as any;
+  const currentUserId = user?.id as string | undefined;
+  const role = user?.role as string | undefined;
 
   // Fetch ticket details
-  const { data: ticket, isLoading: ticketLoading } = useQuery({
+  const { data: ticket, isLoading: ticketLoading } = useQuery<any>({
     queryKey: [`/api/tasks/${ticketId}`],
   });
 
   // Fetch ticket comments
-  const { data: comments, isLoading: commentsLoading } = useQuery({
+  const { data: comments, isLoading: commentsLoading } = useQuery<any[]>({
     queryKey: [`/api/tasks/${ticketId}/comments`],
   });
 
   // Fetch AI response if available
-  const { data: aiResponse } = useQuery({
+  const { data: aiResponse } = useQuery<any>({
     queryKey: [`/api/tasks/${ticketId}/auto-response`],
   });
 
   // Fetch ticket history
-  const { data: history } = useQuery({
+  const { data: history } = useQuery<any[]>({
     queryKey: [`/api/tasks/${ticketId}/history`],
+  });
+
+  // Fetch ticket attachments
+  const { data: attachments, refetch: refetchAttachments } = useQuery<any[]>({
+    queryKey: ["/api/tasks", ticketId, "attachments"],
+    retry: false,
+    initialData: [],
   });
 
   // Add comment mutation
@@ -139,6 +146,75 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
     },
   });
 
+  // Attachment mutations
+  const addAttachmentMutation = useMutation({
+    mutationFn: async (attachmentData: any) => {
+      return await apiRequest(
+        "POST",
+        `/api/tasks/${ticketId}/attachments`,
+        attachmentData
+      );
+    },
+    onSuccess: () => {
+      toast({ title: "Success", description: "File attached" });
+      refetchAttachments();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to attach file",
+        description: error?.message || "Please try again",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteAttachmentMutation = useMutation({
+    mutationFn: async (attachmentId: number) => {
+      return await apiRequest("DELETE", `/api/attachments/${attachmentId}`);
+    },
+    onSuccess: () => {
+      toast({ title: "Success", description: "Attachment deleted" });
+      refetchAttachments();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to delete attachment",
+        description: error?.message || "Please try again",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // simulate upload to storage; in real flow, upload and send URL
+    const fakeUrl = `https://storage.example.com/${Date.now()}_${file.name}`;
+    await addAttachmentMutation.mutateAsync({
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+      fileUrl: fakeUrl,
+    });
+    e.target.value = "";
+  };
+
+  const canUploadAttachment = (() => {
+    if (role === "admin" || role === "manager") return true;
+    if (role === "agent") {
+      // allow when assigned to agent
+      return (
+        (queryClient.getQueryData([`/api/tasks/${ticketId}`]) as any)
+          ?.assigneeType === "user" &&
+        (queryClient.getQueryData([`/api/tasks/${ticketId}`]) as any)
+          ?.assigneeId === currentUserId
+      );
+    }
+    return false;
+  })();
+
+  const canDeleteAttachment = role === "admin" || role === "manager";
+
   const handleSubmitComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!comment.trim()) return;
@@ -205,9 +281,9 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
   }
 
   return (
-    <>
+    <div className="flex flex-col gap-4">
       {/* Ticket Header */}
-      <Card>
+      <Card className="bg-gray-50">
         <CardHeader>
           <div className="flex items-start justify-between">
             <div className="space-y-2">
@@ -245,7 +321,7 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
             <div>
               <p className="text-muted-foreground">Assigned to</p>
               <p className="font-medium">
-                {ticket.assignedToName || ticket.teamName || "Unassigned"}
+                {ticket.assigneeName || ticket.teamName || "Unassigned"}
               </p>
             </div>
             <div>
@@ -263,12 +339,179 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
               ))}
             </div>
           )}
+          {ticket.notes && (
+            <div className="mt-4">
+              <p className="text-sm font-medium mb-1">Additional Notes</p>
+              <p className="text-sm whitespace-pre-wrap text-muted-foreground">
+                {ticket.notes}
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
+      <div className="grid grid-cols-3 gap-5">
+        {/* Attachments */}
+        <Card className="bg-gray-50">
+          <CardHeader>
+            <CardTitle>
+              <div className="flex items-center gap-1">
+                <FileIcon className="h-5 w-5" />
+                <p className="text-xl"> Attachments</p>
+              </div>
+            </CardTitle>
+            {canUploadAttachment && (
+              <div>
+                <input
+                  id="ticket-file-upload"
+                  type="file"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                  disabled={addAttachmentMutation.isPending}
+                />
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    document.getElementById("ticket-file-upload")?.click()
+                  }
+                >
+                  Upload
+                </Button>
+              </div>
+            )}
+          </CardHeader>
+          <CardContent>
+            {attachments && attachments.length > 0 ? (
+              <div className="space-y-3">
+                {attachments.map((attachment: any) => (
+                  <div
+                    key={attachment.id}
+                    className="flex items-center justify-between border rounded p-3"
+                  >
+                    <div className="flex items-center gap-3">
+                      <FileText className="h-4 w-4 text-muted-foreground" />
+                      <div>
+                        <div className="text-sm font-medium">
+                          {attachment.fileName}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {(attachment.fileSize / 1024).toFixed(2)} KB
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          window.open(attachment.fileUrl, "_blank")
+                        }
+                      >
+                        Download
+                      </Button>
+                      {canDeleteAttachment && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            deleteAttachmentMutation.mutate(attachment.id)
+                          }
+                          disabled={deleteAttachmentMutation.isPending}
+                        >
+                          Delete
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">
+                No attachments yet
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        {/* Conversation */}
+        <Card className="bg-gray-50 col-span-2">
+          <CardHeader>
+            <CardTitle>
+              <div className="flex items-center gap-1">
+                <MessageSquare className="h-5 w-5" />
+                <p className="text-xl"> Conversation</p>
+              </div>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {commentsLoading ? (
+                <div className="text-center py-4 text-muted-foreground">
+                  Loading comments...
+                </div>
+              ) : comments && comments.length > 0 ? (
+                comments.map((comment: any) => (
+                  <div key={comment.id} className="flex gap-3">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={comment.user?.profileImageUrl} />
+                      <AvatarFallback>
+                        {comment.user?.firstName?.[0] || "U"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">
+                          {comment.user?.firstName} {comment.user?.lastName}
+                        </span>
+                        <span className="text-sm text-muted-foreground">
+                          {format(
+                            new Date(comment.createdAt),
+                            "MMM d, yyyy h:mm a"
+                          )}
+                        </span>
+                        {comment.isAIGenerated && (
+                          <Badge variant="secondary" className="text-xs">
+                            <Brain className="h-3 w-3 mr-1" />
+                            AI
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-sm whitespace-pre-wrap">
+                        {comment.content}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-4 text-muted-foreground">
+                  No comments yet
+                </div>
+              )}
+            </div>
+            <Separator className="my-4" />
+            <form onSubmit={handleSubmitComment} className="space-y-4">
+              <Textarea
+                placeholder="Add a comment..."
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                className="min-h-[100px]"
+              />
+              <div className="flex justify-end">
+                <Button
+                  type="submit"
+                  disabled={isSubmitting || !comment.trim()}
+                >
+                  <Send className="h-4 w-4 mr-2" />
+                  Send Comment
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* AI Response Section */}
       {aiResponse && !aiResponse.wasApplied && (
-        <Card className="border-primary/20">
+        <Card className="border-primary/20 bg-gray-50">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -282,15 +525,25 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
                   <span
                     className={cn(
                       "font-medium",
-                      getConfidenceLevel(aiResponse.confidenceScore).color
+                      getConfidenceLevel(
+                        Number(aiResponse?.confidenceScore ?? 0)
+                      ).color
                     )}
                   >
-                    {getConfidenceLevel(aiResponse.confidenceScore).label} (
-                    {(aiResponse.confidenceScore * 100).toFixed(0)}%)
+                    {
+                      getConfidenceLevel(
+                        Number(aiResponse?.confidenceScore ?? 0)
+                      ).label
+                    }{" "}
+                    (
+                    {(Number(aiResponse?.confidenceScore ?? 0) * 100).toFixed(
+                      0
+                    )}
+                    %)
                   </span>
                 </div>
                 <Progress
-                  value={aiResponse.confidenceScore * 100}
+                  value={Number(aiResponse?.confidenceScore ?? 0) * 100}
                   className="w-24"
                 />
               </div>
@@ -302,15 +555,15 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
               <AlertTitle>AI-Generated Content</AlertTitle>
               <AlertDescription>
                 This response was automatically generated by AI with{" "}
-                {(aiResponse.confidenceScore * 100).toFixed(0)}% confidence.
-                Please review before applying.
+                {(Number(aiResponse?.confidenceScore ?? 0) * 100).toFixed(0)}%
+                confidence. Please review before applying.
               </AlertDescription>
             </Alert>
             <div className="space-y-4">
               <div className="p-4 bg-muted rounded-lg">
-                <p className="whitespace-pre-wrap">{aiResponse.aiResponse}</p>
+                <p className="whitespace-pre-wrap">{aiResponse?.aiResponse}</p>
               </div>
-              {aiResponse.suggestedArticles &&
+              {Array.isArray(aiResponse?.suggestedArticles) &&
                 aiResponse.suggestedArticles.length > 0 && (
                   <div>
                     <p className="text-sm font-medium mb-2">
@@ -353,80 +606,9 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
         </Card>
       )}
 
-      {/* Conversation History */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <MessageSquare className="h-5 w-5" />
-            <CardTitle>Conversation History</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {commentsLoading ? (
-              <div className="text-center py-4 text-muted-foreground">
-                Loading comments...
-              </div>
-            ) : comments && comments.length > 0 ? (
-              comments.map((comment: any) => (
-                <div key={comment.id} className="flex gap-3">
-                  <Avatar className="h-8 w-8">
-                    <AvatarImage src={comment.user?.profileImageUrl} />
-                    <AvatarFallback>
-                      {comment.user?.firstName?.[0] || "U"}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">
-                        {comment.user?.firstName} {comment.user?.lastName}
-                      </span>
-                      <span className="text-sm text-muted-foreground">
-                        {format(
-                          new Date(comment.createdAt),
-                          "MMM d, yyyy h:mm a"
-                        )}
-                      </span>
-                      {comment.isAIGenerated && (
-                        <Badge variant="secondary" className="text-xs">
-                          <Brain className="h-3 w-3 mr-1" />
-                          AI
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-sm whitespace-pre-wrap">
-                      {comment.content}
-                    </p>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="text-center py-4 text-muted-foreground">
-                No comments yet
-              </div>
-            )}
-          </div>
-          <Separator className="my-4" />
-          <form onSubmit={handleSubmitComment} className="space-y-4">
-            <Textarea
-              placeholder="Add a comment..."
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              className="min-h-[100px]"
-            />
-            <div className="flex justify-end">
-              <Button type="submit" disabled={isSubmitting || !comment.trim()}>
-                <Send className="h-4 w-4 mr-2" />
-                Send Comment
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-
       {/* Activity History */}
-      {history && history.length > 0 && (
-        <Card>
+      {Array.isArray(history) && history.length > 0 && (
+        <Card className="bg-gray-50">
           <CardHeader>
             <div className="flex items-center gap-2">
               <Clock className="h-5 w-5" />
@@ -462,6 +644,6 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
           </CardContent>
         </Card>
       )}
-    </>
+    </div>
   );
 }

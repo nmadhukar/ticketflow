@@ -49,7 +49,7 @@ import { ProtectedRoute } from "@/components/protected-route";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
-import Tasks from "@/pages/tasks";
+import Tickets from "@/pages/tickets";
 import Teams from "@/pages/teams";
 import TeamDetail from "@/pages/team-detail";
 import Settings from "@/pages/settings";
@@ -71,7 +71,7 @@ function RedirectHome() {
 function TasksRoute() {
   const { user } = useAuth();
   const role = (user as any)?.role;
-  return role !== "admin" ? <RedirectHome /> : <Tasks />;
+  return role !== "admin" ? <RedirectHome /> : <Tickets />;
 }
 
 function Router() {
@@ -86,6 +86,7 @@ function Router() {
       <Switch>
         <Route path="/login" component={AuthPage} />
         <Route path="/api-docs" component={ApiDocs} />
+        <Route path="/404" component={NotFound} />
 
         {!isAuthenticated ? (
           <>
@@ -103,11 +104,11 @@ function Router() {
                     {(user as any)?.role === "admin" ? (
                       <Dashboard />
                     ) : (
-                      <Tasks />
+                      <Tickets />
                     )}
                   </ProtectedRoute>
                 </Route>
-                <Route path="/tasks">
+                <Route path="/tickets">
                   <ProtectedRoute
                     allowedRoles={["admin", "manager", "agent", "customer"]}
                   >
@@ -136,12 +137,11 @@ function Router() {
                   )}
                 />
                 <Route path="/knowledge-base">
-                  <ProtectedRoute
-                    allowedRoles={["admin", "manager", "agent", "customer"]}
-                  >
+                  <ProtectedRoute allowedRoles={["admin"]}>
                     <KnowledgeBase />
                   </ProtectedRoute>
                 </Route>
+                <Route path="/404" component={NotFound} />
                 <Route path="/settings" component={Settings} />
                 <Route path="/notifications" component={Notifications} />
                 <Route path="/guides" component={UserGuides} />

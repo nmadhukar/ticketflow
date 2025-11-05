@@ -60,7 +60,11 @@ export async function seedTickets() {
       );
 
     const myTeams = await db
-      .select({ id: teams.id, name: teams.name })
+      .select({
+        id: teams.id,
+        name: teams.name,
+        departmentId: teams.departmentId as any,
+      })
       .from(teams);
 
     // Determine last ticket number
@@ -140,6 +144,47 @@ export async function seedTickets() {
       console.log(
         `✓ Created team-queue ticket ${lastTicketNo} -> team ${team.name}`
       );
+    }
+
+    // Department-only (routing without team)
+    for (let i = 0; i < Math.min(2, myTeams.length); i++) {
+      const team = myTeams[i];
+      const deptId = (team as any).departmentId;
+      if (!deptId) continue;
+      lastTicketNo = await nextUniqueTicketNumber(lastTicketNo);
+      await db.insert(tasks).values({
+        ticketNumber: lastTicketNo,
+        title: `Dept routed ticket #${i + 1}`,
+        description: "Customer routed to department without choosing team",
+        category: "incident",
+        priority: "low",
+        status: "open",
+        assigneeType: null as any,
+        assigneeId: null,
+        assigneeTeamId: null,
+        createdBy: customers[i % customers.length]?.id || admin?.id,
+      });
+      console.log(
+        `✓ Created department-only ticket ${lastTicketNo} -> department ${deptId}`
+      );
+    }
+
+    // Unassigned (no routing/assignee)
+    for (let i = 0; i < 2; i++) {
+      lastTicketNo = await nextUniqueTicketNumber(lastTicketNo);
+      await db.insert(tasks).values({
+        ticketNumber: lastTicketNo,
+        title: `Unassigned ticket #${i + 1}`,
+        description: "Ticket created without assignment",
+        category: "enhancement",
+        priority: "medium",
+        status: "open",
+        assigneeType: null as any,
+        assigneeId: null,
+        assigneeTeamId: null,
+        createdBy: customers[0]?.id || admin?.id,
+      });
+      console.log(`✓ Created unassigned ticket ${lastTicketNo}`);
     }
   } catch (error) {
     console.error("Error seeding tickets:", error);

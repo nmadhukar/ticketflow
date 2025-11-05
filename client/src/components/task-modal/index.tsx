@@ -49,7 +49,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Send,
   Plus,
   Clock,
   User,
@@ -64,18 +63,34 @@ import {
   Target,
   Zap,
   Paperclip,
-  Download,
-  Trash2,
-  Upload,
 } from "lucide-react";
-import generateShortId from "@/lib/generateShortId";
+import TaskAttachments from "./task-attachments";
 
 interface TaskModalProps {
   isOpen: boolean;
   onClose: () => void;
   task?: any;
-  viewOnly?: boolean;
 }
+
+// Narrow minimal Task shape used by this modal (avoid any)
+type TaskMinimal = {
+  id: number;
+  ticketNumber?: string;
+  title?: string;
+  description?: string;
+  category?: string;
+  priority?: "low" | "medium" | "high" | "urgent" | string;
+  status?: "open" | "in_progress" | "resolved" | "closed" | "on_hold" | string;
+  notes?: string;
+  assigneeId?: string | number | null;
+  assigneeType?: "user" | "team" | string;
+  assigneeTeamId?: string | number | null;
+  dueDate?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  creatorName?: string;
+  lastUpdatedBy?: string;
+};
 
 const getPriorityIcon = (priority: string) => {
   switch (priority) {
@@ -122,18 +137,32 @@ const getStatusColor = (status: string) => {
   }
 };
 
-export default function TaskModal({
-  isOpen,
-  onClose,
-  task,
-  viewOnly,
-}: TaskModalProps) {
+// Determine editability summary for current user/role when editing
+const editableKeys = [
+  "title",
+  "description",
+  "category",
+  "priority",
+  "status",
+  "notes",
+  "assigneeId",
+  "assigneeType",
+  "assigneeTeamId",
+  "dueDate",
+  "departmentId",
+  "teamId",
+];
+
+export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   const { toast } = useToast();
   const { user } = useAuth() as { user?: { role?: string } } as any;
   const queryClient = useQueryClient();
   const { t } = useTranslation(["common", "tickets"]);
   const [currentTab, setCurrentTab] = useState("details");
-  const [commentText, setCommentText] = useState("");
+  // Customer create-only assignment mode: 'user' | 'team' | 'department' | 'unassigned'
+  const [assignmentMode, setAssignmentMode] = useState<
+    "user" | "team" | "department" | "unassigned"
+  >((user as any)?.role === "customer" && !task ? "team" : "user");
 
   const [formData, setFormData] = useState({
     title: "",
@@ -143,7 +172,7 @@ export default function TaskModal({
     status: "open",
     notes: "",
     assigneeId: "",
-    assigneeType: "user",
+    assigneeType: (user as any)?.role === "customer" && !task ? "team" : "user",
     assigneeTeamId: "",
     dueDate: "",
     departmentId: "",
@@ -154,12 +183,25 @@ export default function TaskModal({
   const metaUrl = task?.id
     ? `/api/tickets/${task.id}/meta`
     : "/api/tickets/meta";
-  const { data: meta } = useQuery<any>({
-    queryKey: [metaUrl],
-    enabled: true,
-    initialData: {},
+  const metaQuery = useQuery<any>({
+    queryKey: ["ticket-meta", { id: task?.id ?? null }],
+    enabled: isOpen,
+    staleTime: 0,
+    retry: false,
     refetchOnMount: "always",
+    queryFn: async () => {
+      const res = await apiRequest("GET", metaUrl);
+      return await res.json();
+    },
   });
+  const meta: any = metaQuery.data;
+
+  // Prime cache with row task snapshot to avoid flash of empty while refetching
+  useEffect(() => {
+    if (task?.id) {
+      queryClient.setQueryData([`/api/tasks/${task.id}`], task as TaskMinimal);
+    }
+  }, [task, queryClient]);
 
   // Always load the freshest task details when editing to ensure full payload
   const { data: taskDetails } = useQuery<any>({
@@ -168,13 +210,16 @@ export default function TaskModal({
     refetchOnMount: "always",
   });
 
+  // Optional: debug in development
+
   const departments = meta?.departments || [];
   const teams = meta?.teams || [];
   const assignableUsers = meta?.assignableUsers || [];
   const categoriesMeta = meta?.categories || [];
   const prioritiesMeta = meta?.priorities || [];
-  const statusesMeta = meta?.statuses || [];
+  // statusesMeta unused in modal (status handled outside modal)
   const permissions = meta?.permissions || {};
+  const isCustomer = (user as any)?.role === "customer";
 
   // Admin fallback: ensure admins are never blocked by missing/lagging meta
   const effectivePermissions = (() => {
@@ -209,30 +254,13 @@ export default function TaskModal({
     return allowed.includes(field);
   };
 
-  // Determine editability summary for current user/role when editing
-  const editableKeys = [
-    "title",
-    "description",
-    "category",
-    "priority",
-    "status",
-    "notes",
-    "assigneeId",
-    "assigneeType",
-    "assigneeTeamId",
-    "dueDate",
-    "departmentId",
-    "teamId",
-  ];
   const canEditAnything = (() => {
     if (!task) return true; // creating is always editable (server validates)
     if ((user as any)?.role === "admin") return true;
     if (!Array.isArray(permissions?.allowedFields)) return true;
     return editableKeys.some((k) => canEditField(k));
   })();
-  const canEditStatus = task
-    ? canEditField("status") || (user as any)?.role === "admin"
-    : false;
+
   const canEditAssignment = task
     ? [
         "assigneeType",
@@ -244,26 +272,36 @@ export default function TaskModal({
       ].some((k) => canEditField(k)) || (user as any)?.role === "admin"
     : true;
 
-  const { data: taskComments } = useQuery<any[]>({
-    queryKey: ["/api/tasks", task?.id, "comments"],
-    enabled: !!task?.id && isOpen,
-    retry: false,
-    initialData: [],
-    refetchOnMount: "always",
-  });
+  // Prefer freshest task details for displaying read-only values
+  const displayTask: TaskMinimal | undefined = (taskDetails || task) as any;
 
-  const { data: taskAttachments, refetch: refetchAttachments } = useQuery<
-    any[]
-  >({
-    queryKey: ["/api/tasks", task?.id, "attachments"],
-    enabled: !!task?.id && isOpen,
-    retry: false,
-    initialData: [],
-    refetchOnMount: "always",
-  });
+  // Date helpers to normalize yyyy-mm-dd and avoid TZ shifts
+  const toYyyyMmDd = (value?: string | null) => {
+    if (!value) return "";
+    // Handles ISO or date-only strings
+    const d = value.includes("T")
+      ? new Date(value)
+      : new Date(`${value}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toISOString().split("T")[0];
+  };
 
+  const formatHumanDate = (value?: string | null) => {
+    if (!value) return "";
+    const d = value.includes("T")
+      ? new Date(value)
+      : new Date(`${value}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  // Reset/initialize form snapshot when task or modal state changes
   useEffect(() => {
-    const current = (taskDetails || task) as any;
+    const current = (taskDetails || task) as TaskMinimal | undefined;
     if (current) {
       // Derive department/team selection when team-assigned
       let departmentId = "";
@@ -286,15 +324,19 @@ export default function TaskModal({
         title: current.title || "",
         description: current.description || "",
         category: current.category || "",
-        priority: current.priority || "medium",
-        status: current.status || "open",
+        priority: (current.priority as any) || "medium",
+        status: (current.status as any) || "open",
         notes: current.notes || "",
-        assigneeId: current.assigneeId || "unassigned",
-        assigneeType: current.assigneeType || "user",
-        assigneeTeamId: current.assigneeTeamId?.toString?.() || "unassigned",
-        dueDate: current.dueDate
-          ? new Date(current.dueDate).toISOString().split("T")[0]
-          : "",
+        assigneeId:
+          current.assigneeType === "user" && current.assigneeId != null
+            ? String(current.assigneeId)
+            : "unassigned",
+        assigneeType: (current.assigneeType as any) || "user",
+        assigneeTeamId:
+          current.assigneeType === "team" && current.assigneeTeamId != null
+            ? String(current.assigneeTeamId)
+            : "unassigned",
+        dueDate: current.dueDate ? toYyyyMmDd(current.dueDate) : "",
         departmentId,
         teamId,
       });
@@ -308,7 +350,7 @@ export default function TaskModal({
         status: "open",
         notes: "",
         assigneeId: "",
-        assigneeType: "user",
+        assigneeType: (user as any)?.role === "customer" ? "team" : "user",
         assigneeTeamId: "",
         dueDate: "",
         departmentId: "",
@@ -316,7 +358,28 @@ export default function TaskModal({
       });
       setCurrentTab("details");
     }
-  }, [task, taskDetails, isOpen]);
+  }, [task, taskDetails, isOpen, teams]);
+
+  // Clear local state when modal closes to avoid stale flashes on next open
+  useEffect(() => {
+    if (!isOpen) {
+      setCurrentTab("details");
+      setFormData({
+        title: "",
+        description: "",
+        category: "",
+        priority: "medium",
+        status: "open",
+        notes: "",
+        assigneeId: "",
+        assigneeType: (user as any)?.role === "customer" ? "team" : "user",
+        assigneeTeamId: "",
+        dueDate: "",
+        departmentId: "",
+        teamId: "",
+      });
+    }
+  }, [isOpen]);
 
   const createTaskMutation = useMutation({
     mutationFn: async (taskData: any) => {
@@ -325,6 +388,12 @@ export default function TaskModal({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tasks/my"] });
+      // Invalidate any paged/filtered variants of tasks list
+      queryClient.invalidateQueries({
+        predicate: (q) =>
+          typeof q.queryKey?.[0] === "string" &&
+          String(q.queryKey[0]).startsWith("/api/tasks"),
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       onClose();
       toast({
@@ -362,6 +431,12 @@ export default function TaskModal({
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tasks/my"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+      // Update task detail cache optimistically for a snappier UI
+      if (task?.id) {
+        queryClient.invalidateQueries({
+          queryKey: [`/api/tasks/${task.id}`],
+        });
+      }
       if (!formData.notes.trim()) {
         onClose();
       }
@@ -392,47 +467,8 @@ export default function TaskModal({
     },
   });
 
-  const addCommentMutation = useMutation({
-    mutationFn: async (commentData: any) => {
-      return await apiRequest(
-        "POST",
-        `/api/tasks/${task.id}/comments`,
-        commentData
-      );
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["/api/tasks", task?.id, "comments"],
-      });
-      setCommentText("");
-      toast({
-        title: t("messages.success"),
-        description: t("tickets:modal.toasts.commentAdded"),
-      });
-    },
-    onError: (error) => {
-      if (isUnauthorizedError(error)) {
-        toast({
-          title: t("messages.unauthorized"),
-          description: t("messages.loggedOut"),
-          variant: "destructive",
-        });
-        setTimeout(() => {
-          window.location.href = "/login";
-        }, 500);
-        return;
-      }
-      toast({
-        title: t("messages.error"),
-        description: t("tickets:modal.toasts.errorComment", {
-          defaultValue: "Failed to add comment",
-        }),
-        variant: "destructive",
-      });
-    },
-  });
-
   const handleInputChange = (field: string, value: string) => {
+    console.log("handleInputChange", field, value);
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -457,170 +493,289 @@ export default function TaskModal({
       return;
     }
 
-    // Customers must select Department and Team (routing)
-    if (user?.role === "customer") {
-      if (!formData.departmentId) {
+    // Assignment validation (role-aware)
+    const allowedAssigneeTypes: string[] =
+      (effectivePermissions?.allowedAssigneeTypes as any) || [];
+    const validateAssignment = () => {
+      // If editing but cannot edit assignment, skip client validation (server enforces)
+      if (task && !canEditAssignment) return true;
+
+      // Customer create: allow user, team, department-only, unassigned
+      if (user?.role === "customer" && !task) {
+        if (assignmentMode === "user") {
+          if (!formData.assigneeId || formData.assigneeId === "unassigned") {
+            toast({
+              title: "Error",
+              description: "Assignee is required",
+              variant: "destructive",
+            });
+            return false;
+          }
+          return true;
+        }
+        if (assignmentMode === "team") {
+          if (!formData.departmentId) {
+            toast({
+              title: "Error",
+              description: "Department is required",
+              variant: "destructive",
+            });
+            return false;
+          }
+          if (!formData.teamId) {
+            toast({
+              title: "Error",
+              description: "Team is required",
+              variant: "destructive",
+            });
+            return false;
+          }
+          return true;
+        }
+        if (assignmentMode === "department") {
+          if (!formData.departmentId) {
+            toast({
+              title: "Error",
+              description: "Department is required",
+              variant: "destructive",
+            });
+            return false;
+          }
+          return true;
+        }
+        // unassigned
+        return true;
+      }
+
+      // For other roles, ensure selected type is allowed (if meta provided)
+      if (
+        allowedAssigneeTypes.length &&
+        !allowedAssigneeTypes.includes(formData.assigneeType)
+      ) {
         toast({
-          title: "Error",
-          description: "Department is required",
+          title: t("messages.error"),
+          description: t("tickets:modal.toasts.assignmentNotAllowed", {
+            defaultValue: "Selected assignment type is not allowed.",
+          }),
           variant: "destructive",
         });
-        return;
+        return false;
       }
-      if (!formData.teamId) {
-        toast({
-          title: "Error",
-          description: "Team is required",
-          variant: "destructive",
-        });
-        return;
+
+      if (formData.assigneeType === "team") {
+        if (!formData.departmentId) {
+          toast({
+            title: "Error",
+            description: "Department is required",
+            variant: "destructive",
+          });
+          return false;
+        }
+        if (!formData.teamId) {
+          toast({
+            title: "Error",
+            description: "Team is required",
+            variant: "destructive",
+          });
+          return false;
+        }
       }
-    }
+      // User assignment allows unassigned; server will coerce null
+      return true;
+    };
+
+    if (!validateAssignment()) return;
 
     const taskData = {
-      ticketNumber: generateShortId(), // Prevents validation errors in shared/schema line 110
       title: formData.title.trim(),
       description: formData.description.trim(),
       category: formData.category,
       priority: formData.priority,
       status: formData.status,
       notes: formData.notes.trim(),
-      assigneeId:
-        formData.assigneeType === "user" && formData.assigneeId !== "unassigned"
-          ? formData.assigneeId
-          : null,
-      assigneeType: formData.assigneeType,
-      assigneeTeamId:
-        formData.assigneeType === "team" &&
-        formData.assigneeTeamId !== "unassigned"
-          ? parseInt(formData.assigneeTeamId)
-          : null,
       dueDate: formData.dueDate
-        ? new Date(formData.dueDate).toISOString()
+        ? new Date(`${formData.dueDate}T00:00:00`).toISOString()
         : null,
-      // For customers, include explicit routing fields required by API
-      ...(user?.role === "customer"
-        ? {
-            departmentId: parseInt(formData.departmentId),
-            teamId: parseInt(formData.teamId),
-            assigneeType: "team" as const,
-          }
+      attachments: [],
+      // For customers, include routing/assignment per selected mode
+      ...(isCustomer && !task
+        ? assignmentMode === "user"
+          ? {
+              assigneeType: "user" as const,
+              assigneeId: formData.assigneeId,
+              assigneeTeamId: null,
+              departmentId: undefined,
+              teamId: undefined,
+            }
+          : assignmentMode === "team"
+          ? {
+              assigneeType: "team" as const,
+              assigneeId: null,
+              assigneeTeamId: formData.assigneeTeamId
+                ? parseInt(formData.assigneeTeamId)
+                : formData.teamId
+                ? parseInt(formData.teamId)
+                : null,
+              departmentId: formData.departmentId
+                ? parseInt(formData.departmentId)
+                : undefined,
+              teamId: formData.teamId ? parseInt(formData.teamId) : undefined,
+            }
+          : assignmentMode === "department"
+          ? {
+              assigneeType: undefined as any,
+              assigneeId: null,
+              assigneeTeamId: null,
+              departmentId: parseInt(formData.departmentId),
+              teamId: null,
+            }
+          : {
+              // unassigned
+              assigneeType: undefined as any,
+              assigneeId: null,
+              assigneeTeamId: null,
+              departmentId: undefined,
+              teamId: null,
+            }
         : {}),
     } as any;
 
-    // If editing, prune disallowed fields client-side for UX; server still enforces
-    if (task && Array.isArray(permissions?.allowedFields)) {
-      const allowedSet = new Set<string>(permissions.allowedFields);
-      Object.keys(taskData).forEach((key) => {
-        if (!allowedSet.has(key)) {
-          delete (taskData as any)[key];
-        }
+    // Role-aware whitelist (fallback when permissions are absent) matching server policy
+    const fallbackAllowedByRoleEdit: Record<string, string[]> = {
+      admin: [
+        "title",
+        "description",
+        "category",
+        "priority",
+        "status",
+        "notes",
+        "assigneeId",
+        "assigneeType",
+        "assigneeTeamId",
+        "dueDate",
+        "departmentId",
+        "teamId",
+      ],
+      manager: [
+        "title",
+        "description",
+        "category",
+        "priority",
+        "status",
+        "notes",
+        "assigneeId",
+        "assigneeType",
+        "assigneeTeamId",
+        "dueDate",
+        "departmentId",
+        "teamId",
+      ],
+      agent: [
+        "title",
+        "description",
+        "priority",
+        "status",
+        "notes",
+        "assigneeId",
+        "assigneeType",
+        "assigneeTeamId",
+        "dueDate",
+      ],
+      customer: ["title", "description", "notes", "dueDate"],
+    };
+
+    const fallbackAllowedByRoleCreate: Record<string, string[]> = {
+      admin: fallbackAllowedByRoleEdit.admin,
+      manager: fallbackAllowedByRoleEdit.manager,
+      agent: fallbackAllowedByRoleEdit.agent,
+      customer: [
+        "title",
+        "description",
+        "notes",
+        "dueDate",
+        "category",
+        "priority",
+        "departmentId",
+        "teamId",
+        "assigneeId",
+        "assigneeType",
+        "assigneeTeamId",
+        "attachments",
+      ],
+    };
+
+    const roleKey = (user?.role || "").toString();
+    const allowedFieldsForEdit = Array.isArray(permissions?.allowedFields)
+      ? (permissions?.allowedFields as string[])
+      : fallbackAllowedByRoleEdit[roleKey] || fallbackAllowedByRoleEdit.agent;
+    const allowedFieldsForCreate =
+      fallbackAllowedByRoleCreate[roleKey] || fallbackAllowedByRoleCreate.agent;
+
+    // Prune payload according to context (create vs edit)
+    const pruneToAllowed = (payload: any, allowed: string[]) => {
+      const set = new Set<string>(allowed);
+      Object.keys(payload).forEach((k) => {
+        if (!set.has(k)) delete payload[k];
       });
-    }
+      return payload;
+    };
 
     if (task) {
+      pruneToAllowed(taskData, allowedFieldsForEdit);
+      // Customer ownership guard before PATCH
+      if (isCustomer) {
+        const ownerId =
+          (taskDetails as any)?.createdBy || (task as any)?.createdBy;
+        if (ownerId && ownerId !== (user as any)?.id) {
+          toast({
+            title: t("messages.error"),
+            description: t("tickets:modal.toasts.ownership", {
+              defaultValue: "You can only edit your own tickets.",
+            }),
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+      if (Object.keys(taskData).length === 0) {
+        toast({
+          title: t("messages.error"),
+          description: t("tickets:modal.toasts.noChangesAllowed", {
+            defaultValue: "No changes allowed for your role.",
+          }),
+          variant: "destructive",
+        });
+        return;
+      }
+    } else {
+      pruneToAllowed(taskData, allowedFieldsForCreate);
+      if (!taskData.title) {
+        toast({
+          title: t("messages.error"),
+          description: t("tickets:modal.toasts.titleRequired", {
+            defaultValue: "Ticket title is required.",
+          }),
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    // Avoid sending no-op status updates (server rejects same->same transition)
+    if (task) {
+      const currentStatus =
+        (taskDetails as any)?.status || (task as any)?.status;
+      if (
+        taskData.status &&
+        currentStatus &&
+        taskData.status === currentStatus
+      ) {
+        delete (taskData as any).status;
+      }
       updateTaskMutation.mutate(taskData);
     } else {
       createTaskMutation.mutate(taskData);
     }
-  };
-
-  const handleAddComment = () => {
-    if (!commentText.trim()) return;
-
-    addCommentMutation.mutate({
-      content: commentText.trim(),
-    });
-  };
-
-  // File attachment mutations
-  const addAttachmentMutation = useMutation({
-    mutationFn: async (attachmentData: any) => {
-      return await apiRequest(
-        "POST",
-        `/api/tasks/${task?.id}/attachments`,
-        attachmentData
-      );
-    },
-    onSuccess: () => {
-      toast({
-        title: t("messages.success"),
-        description: t("tickets:modal.toasts.fileAttached"),
-      });
-      refetchAttachments();
-    },
-    onError: (error) => {
-      if (isUnauthorizedError(error)) {
-        toast({
-          title: t("messages.unauthorized"),
-          description: t("messages.loggedOut"),
-          variant: "destructive",
-        });
-        setTimeout(() => {
-          window.location.href = "/login";
-        }, 500);
-        return;
-      }
-      toast({
-        title: t("messages.error"),
-        description: t("tickets:modal.toasts.errorAttach", {
-          defaultValue: "Failed to attach file",
-        }),
-        variant: "destructive",
-      });
-    },
-  });
-
-  const deleteAttachmentMutation = useMutation({
-    mutationFn: async (attachmentId: number) => {
-      return await apiRequest("DELETE", `/api/attachments/${attachmentId}`);
-    },
-    onSuccess: () => {
-      toast({
-        title: t("messages.success"),
-        description: t("tickets:modal.toasts.attachmentDeleted"),
-      });
-      refetchAttachments();
-    },
-    onError: (error) => {
-      if (isUnauthorizedError(error)) {
-        toast({
-          title: t("messages.unauthorized"),
-          description: t("messages.loggedOut"),
-          variant: "destructive",
-        });
-        setTimeout(() => {
-          window.location.href = "/login";
-        }, 500);
-        return;
-      }
-      toast({
-        title: t("messages.error"),
-        description: t("tickets:modal.toasts.errorDelete", {
-          defaultValue: "Failed to delete attachment",
-        }),
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !task?.id) return;
-
-    // In a real app, you would upload the file to a storage service
-    // For now, we'll simulate with a fake URL
-    const fakeUrl = `https://storage.example.com/${Date.now()}_${file.name}`;
-
-    await addAttachmentMutation.mutateAsync({
-      fileName: file.name,
-      fileSize: file.size,
-      fileType: file.type,
-      fileUrl: fakeUrl,
-    });
-
-    // Reset the input
-    e.target.value = "";
   };
 
   return (
@@ -641,11 +796,9 @@ export default function TaskModal({
                 <div className="flex-1">
                   <DialogTitle className="text-xl font-semibold text-slate-900">
                     {task
-                      ? viewOnly
-                        ? task.title || task.ticketNumber || ""
-                        : t("tickets:modal.editTitle", {
-                            ticketNumber: task.ticketNumber || "",
-                          })
+                      ? t("tickets:modal.editTitle", {
+                          ticketNumber: task.ticketNumber || "",
+                        })
                       : t("tickets:modal.createTitle")}
                   </DialogTitle>
                   <DialogDescription className="text-slate-600 mt-1">
@@ -719,28 +872,15 @@ export default function TaskModal({
                     <FileText className="h-4 w-4 mr-2" />
                     {t("tickets:modal.tabs.details")}
                   </TabsTrigger>
-                  {task && (
-                    <>
-                      <TabsTrigger
-                        value="comments"
-                        className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
-                      >
-                        <Send className="h-4 w-4 mr-2" />
-                        {t("tickets:modal.tabs.comments")}{" "}
-                        {taskComments?.length ? `(${taskComments.length})` : ""}
-                      </TabsTrigger>
-                    </>
+                  {!task && (
+                    <TabsTrigger
+                      value="attachments"
+                      className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
+                    >
+                      <Paperclip className="h-4 w-4 mr-2" />
+                      {t("tickets:modal.tabs.attachments")}
+                    </TabsTrigger>
                   )}
-                  <TabsTrigger
-                    value="attachments"
-                    className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
-                  >
-                    <Paperclip className="h-4 w-4 mr-2" />
-                    {t("tickets:modal.tabs.attachments")}{" "}
-                    {taskAttachments?.length
-                      ? `(${taskAttachments.length})`
-                      : ""}
-                  </TabsTrigger>
                 </TabsList>
               </div>
 
@@ -763,7 +903,7 @@ export default function TaskModal({
                             className="text-sm font-medium text-slate-700 flex items-center gap-2"
                           >
                             <FileText className="h-4 w-4" />
-                            {t("tickets:modal.fields.taskTitle")} *
+                            {t("tickets:modal.fields.taskTitle")}
                           </Label>
                           <Input
                             id="title"
@@ -808,36 +948,43 @@ export default function TaskModal({
                           </p>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-3 gap-4">
                           <div>
                             <Label
                               htmlFor="category"
                               className="text-sm font-medium text-slate-700 flex items-center gap-2"
                             >
                               <Tag className="h-4 w-4" />
-                              {t("tickets:modal.fields.category")} *
+                              {t("tickets:modal.fields.category")}
                             </Label>
-                            <Select
-                              value={formData.category}
-                              onValueChange={(value) =>
-                                handleInputChange("category", value)
-                              }
-                              disabled={!!task && !canEditField("category")}
-                            >
-                              <SelectTrigger className="mt-2">
-                                <SelectValue placeholder="Select category" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {categoriesMeta?.map((c: string) => (
-                                  <SelectItem key={c} value={c}>
-                                    <div className="flex items-center gap-2">
-                                      {getCategoryIcon(c)}
-                                      {c.charAt(0).toUpperCase() + c.slice(1)}
-                                    </div>
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            {task && !canEditField("category") ? (
+                              <div className="mt-2">
+                                <span className="px-2 py-1 rounded border text-xs">
+                                  {(displayTask?.category || "").toUpperCase()}
+                                </span>
+                              </div>
+                            ) : (
+                              <Select
+                                value={formData.category}
+                                onValueChange={(value) =>
+                                  handleInputChange("category", value)
+                                }
+                              >
+                                <SelectTrigger className="mt-2">
+                                  <SelectValue placeholder="Select category" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {categoriesMeta?.map((c: string) => (
+                                    <SelectItem key={c} value={c}>
+                                      <div className="flex items-center gap-2">
+                                        {getCategoryIcon(c)}
+                                        {c.charAt(0).toUpperCase() + c.slice(1)}
+                                      </div>
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
                           </div>
 
                           <div>
@@ -848,88 +995,63 @@ export default function TaskModal({
                               <Flag className="h-4 w-4" />
                               {t("tickets:modal.fields.priority")}
                             </Label>
-                            <Select
-                              value={formData.priority}
-                              onValueChange={(value) =>
-                                handleInputChange("priority", value)
-                              }
-                              disabled={!!task && !canEditField("priority")}
-                            >
-                              <SelectTrigger className="mt-2">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {prioritiesMeta?.map((p: string) => (
-                                  <SelectItem key={p} value={p}>
-                                    <div className="flex items-center gap-2">
-                                      {getPriorityIcon(p)}
-                                      {p.charAt(0).toUpperCase() + p.slice(1)}
-                                    </div>
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            {task && !canEditField("priority") ? (
+                              <div className="mt-2">
+                                <span className="px-2 py-1 rounded border text-xs">
+                                  {(displayTask?.priority || "").toUpperCase()}
+                                </span>
+                              </div>
+                            ) : (
+                              <Select
+                                value={formData.priority}
+                                onValueChange={(value) =>
+                                  handleInputChange("priority", value)
+                                }
+                              >
+                                <SelectTrigger className="mt-2">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {prioritiesMeta?.map((p: string) => (
+                                    <SelectItem key={p} value={p}>
+                                      <div className="flex items-center gap-2">
+                                        {getPriorityIcon(p)}
+                                        {p.charAt(0).toUpperCase() + p.slice(1)}
+                                      </div>
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                          </div>
+
+                          <div>
+                            <Label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                              <Calendar className="h-4 w-4" />
+                              {t("tickets:modal.fields.dueDate")}
+                            </Label>
+                            {task && !canEditField("dueDate") ? (
+                              <div className="mt-2">
+                                <span className="px-2 py-1 rounded border text-xs">
+                                  {formatHumanDate(displayTask?.dueDate || "")}
+                                </span>
+                              </div>
+                            ) : (
+                              <Input
+                                type="date"
+                                value={toYyyyMmDd(formData.dueDate)}
+                                onChange={(e) =>
+                                  handleInputChange("dueDate", e.target.value)
+                                }
+                                className="mt-2"
+                              />
+                            )}
                           </div>
                         </div>
                       </CardContent>
                     </Card>
 
-                    {/* Status & Priority - only show status when editing */}
-                    {task && canEditStatus && (
-                      <Card className="border-l-4 border-l-yellow-500">
-                        <CardHeader className="pb-3">
-                          <CardTitle className="text-lg flex items-center gap-2">
-                            <CircleDot className="h-5 w-5 text-yellow-600" />
-                            {t("tickets:modal.sections.status")}
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <div>
-                            <Label
-                              htmlFor="status"
-                              className="text-sm font-medium text-slate-700 flex items-center gap-2"
-                            >
-                              <CircleDot className="h-4 w-4" />
-                              {t("tickets:modal.fields.currentStatus")}
-                            </Label>
-                            <Select
-                              value={formData.status}
-                              onValueChange={(value) =>
-                                handleInputChange("status", value)
-                              }
-                              disabled={!!task && !canEditField("status")}
-                            >
-                              <SelectTrigger className="mt-2">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {statusesMeta?.map((s: string) => (
-                                  <SelectItem key={s} value={s}>
-                                    <div className="flex items-center gap-2">
-                                      {s === "open" && (
-                                        <CircleDot className="h-4 w-4 text-blue-500" />
-                                      )}
-                                      {s === "in_progress" && (
-                                        <Clock className="h-4 w-4 text-yellow-500" />
-                                      )}
-                                      {(s === "resolved" || s === "closed") && (
-                                        <CheckCircle className="h-4 w-4 text-green-500" />
-                                      )}
-                                      {s === "on_hold" && (
-                                        <AlertTriangle className="h-4 w-4 text-orange-500" />
-                                      )}
-                                      {s.replace("_", " ")}
-                                    </div>
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )}
-
-                    {/* Assignment & Timeline */}
+                    {/* Assignment */}
                     {(!task ||
                       ((user as any)?.role !== "customer" &&
                         canEditAssignment)) && (
@@ -940,21 +1062,88 @@ export default function TaskModal({
                             {t("tickets:modal.sections.assignment")}
                           </CardTitle>
                         </CardHeader>
-                        <CardContent className="space-y-4">
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <Label className="text-sm font-medium text-slate-700 flex items-center gap-2">
-                                <User className="h-4 w-4" />
-                                {t("tickets:modal.fields.assignmentType")}
-                              </Label>
+                        <CardContent className="space-y-5">
+                          <div className="flex items-center justify-between gap-4">
+                            <Label className="min-w-max text-sm font-medium text-slate-700 flex items-center gap-2">
+                              {t("tickets:modal.fields.assignmentType")}
+                            </Label>
+                            {task && !canEditField("assigneeType") ? (
+                              <div className="mt-2">
+                                <span className="px-2 py-1 rounded border text-xs">
+                                  {(!task
+                                    ? "team"
+                                    : displayTask?.assigneeType || "user"
+                                  ).toUpperCase()}
+                                </span>
+                              </div>
+                            ) : (user as any)?.role === "customer" && !task ? (
+                              <Select
+                                value={assignmentMode}
+                                onValueChange={(value: any) => {
+                                  setAssignmentMode(value);
+                                  if (value === "user") {
+                                    handleInputChange("departmentId", "");
+                                    handleInputChange("teamId", "");
+                                    handleInputChange("assigneeTeamId", "");
+                                  } else if (value === "team") {
+                                    handleInputChange("assigneeId", "");
+                                  } else if (value === "department") {
+                                    handleInputChange("teamId", "");
+                                    handleInputChange("assigneeId", "");
+                                    handleInputChange("assigneeTeamId", "");
+                                  } else if (value === "unassigned") {
+                                    handleInputChange("assigneeId", "");
+                                    handleInputChange("assigneeTeamId", "");
+                                    handleInputChange("departmentId", "");
+                                    handleInputChange("teamId", "");
+                                  }
+                                }}
+                              >
+                                <SelectTrigger className="mt-2">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="user">
+                                    <div className="flex items-center gap-2">
+                                      <User className="h-4 w-4" />
+                                      {t("tickets:modal.fields.individualUser")}
+                                    </div>
+                                  </SelectItem>
+                                  <SelectItem value="team">
+                                    <div className="flex items-center gap-2">
+                                      <Users className="h-4 w-4" />
+                                      {t("tickets:modal.fields.team")}
+                                    </div>
+                                  </SelectItem>
+                                  <SelectItem value="department">
+                                    <div className="flex items-center gap-2">
+                                      <Target className="h-4 w-4" />
+                                      {t("tickets:modal.fields.department", {
+                                        defaultValue: "Department",
+                                      })}
+                                    </div>
+                                  </SelectItem>
+                                  <SelectItem value="unassigned">
+                                    <div className="flex items-center gap-2">
+                                      <CircleDot className="h-4 w-4" />
+                                      {t("tickets:modal.fields.unassigned")}
+                                    </div>
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                            ) : (
                               <Select
                                 value={formData.assigneeType}
-                                onValueChange={(value) =>
-                                  handleInputChange("assigneeType", value)
-                                }
-                                disabled={
-                                  !!task && !canEditField("assigneeType")
-                                }
+                                onValueChange={(value) => {
+                                  handleInputChange("assigneeType", value);
+                                  if (value === "team") {
+                                    handleInputChange("assigneeId", "");
+                                  } else {
+                                    handleInputChange("departmentId", "");
+                                    handleInputChange("teamId", "");
+                                    handleInputChange("assigneeTeamId", "");
+                                  }
+                                }}
                               >
                                 <SelectTrigger className="mt-2">
                                   <SelectValue />
@@ -974,33 +1163,19 @@ export default function TaskModal({
                                   </SelectItem>
                                 </SelectContent>
                               </Select>
-                            </div>
-
-                            <div>
-                              <Label className="text-sm font-medium text-slate-700 flex items-center gap-2">
-                                <Calendar className="h-4 w-4" />
-                                {t("tickets:modal.fields.dueDate")}
-                              </Label>
-                              <Input
-                                type="date"
-                                value={formData.dueDate}
-                                onChange={(e) =>
-                                  handleInputChange("dueDate", e.target.value)
-                                }
-                                className="mt-2"
-                                disabled={!!task && !canEditField("dueDate")}
-                              />
-                            </div>
+                            )}
                           </div>
 
-                          {formData.assigneeType === "team" &&
+                          {(isCustomer && !task
+                            ? assignmentMode === "team"
+                            : formData.assigneeType === "team") &&
                             (
                               effectivePermissions?.allowedAssigneeTypes || []
                             )?.includes("team") && (
                               <div className="grid grid-cols-2 gap-4">
                                 <div>
                                   <Label className="text-sm font-medium text-slate-700">
-                                    {t("tickets:modal.fields.department")} *
+                                    {t("tickets:modal.fields.department")}
                                   </Label>
                                   <Select
                                     value={formData.departmentId}
@@ -1034,7 +1209,7 @@ export default function TaskModal({
                                 </div>
                                 <div>
                                   <Label className="text-sm font-medium text-slate-700">
-                                    {t("tickets:modal.fields.teamReq")} *
+                                    {t("tickets:modal.fields.teamReq")}
                                   </Label>
                                   <Select
                                     value={formData.teamId}
@@ -1074,7 +1249,44 @@ export default function TaskModal({
                               </div>
                             )}
 
-                          {formData.assigneeType !== "team" &&
+                          {isCustomer &&
+                            !task &&
+                            assignmentMode === "department" && (
+                              <div className="w-full space-y-2">
+                                <Label className="text-sm font-medium text-slate-700">
+                                  {t("tickets:modal.fields.department")}
+                                </Label>
+                                <Select
+                                  value={formData.departmentId}
+                                  onValueChange={(value) => {
+                                    handleInputChange("departmentId", value);
+                                    handleInputChange("teamId", "");
+                                  }}
+                                >
+                                  <SelectTrigger className="mt-2">
+                                    <SelectValue
+                                      placeholder={t(
+                                        "tickets:modal.placeholders.selectDept"
+                                      )}
+                                    />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {departments?.map((dept: any) => (
+                                      <SelectItem
+                                        key={dept.id}
+                                        value={dept.id.toString()}
+                                      >
+                                        {dept.name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
+
+                          {(isCustomer && !task
+                            ? assignmentMode === "user"
+                            : formData.assigneeType === "user") &&
                             (
                               effectivePermissions?.allowedAssigneeTypes || []
                             )?.includes("user") && (
@@ -1099,12 +1311,6 @@ export default function TaskModal({
                                     />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    <SelectItem value="unassigned">
-                                      <div className="flex items-center gap-2">
-                                        <User className="h-4 w-4" />
-                                        {t("tickets:modal.fields.unassigned")}
-                                      </div>
-                                    </SelectItem>
                                     {assignableUsers?.map((user: any) => (
                                       <SelectItem key={user.id} value={user.id}>
                                         <div className="flex items-center gap-2">
@@ -1149,234 +1355,42 @@ export default function TaskModal({
                   </form>
                 </TabsContent>
 
-                {task && (
-                  <TabsContent value="comments" className="mt-0 p-6">
-                    <div className="space-y-4">
-                      {/* Add Comment */}
-                      <Card>
-                        <CardHeader className="pb-3">
-                          <CardTitle className="text-base flex items-center gap-2">
-                            <Send className="h-4 w-4" />
-                            {t("tickets:modal.sections.comments")}
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-3">
-                          <Textarea
-                            placeholder={t(
-                              "tickets:modal.placeholders.comment"
-                            )}
-                            value={commentText}
-                            onChange={(e) => setCommentText(e.target.value)}
-                            rows={3}
-                            className="resize-none"
-                          />
-                          <div className="flex justify-end">
-                            <Button
-                              onClick={handleAddComment}
-                              disabled={
-                                !commentText.trim() ||
-                                addCommentMutation.isPending
-                              }
-                              size="sm"
-                              className="bg-blue-600 hover:bg-blue-700"
-                            >
-                              <Send className="h-4 w-4 mr-2" />
-                              {addCommentMutation.isPending
-                                ? t("tickets:modal.buttons.adding")
-                                : t("tickets:modal.buttons.addComment")}
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      {/* Comments List */}
-                      <div className="space-y-3">
-                        {taskComments?.length ? (
-                          taskComments?.map((comment: any) => (
-                            <Card
-                              key={comment.id}
-                              className="border-l-4 border-l-blue-200"
-                            >
-                              <CardContent className="pt-4">
-                                <div className="flex items-start gap-3">
-                                  <div className="p-2 bg-blue-100 rounded-full">
-                                    <User className="h-4 w-4 text-blue-600" />
-                                  </div>
-                                  <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1">
-                                      <span className="font-medium text-slate-900">
-                                        {comment.userName}
-                                      </span>
-                                      <span className="text-xs text-slate-500">
-                                        {new Date(
-                                          comment.createdAt
-                                        ).toLocaleDateString()}
-                                      </span>
-                                    </div>
-                                    <p className="text-slate-700">
-                                      {comment.content}
-                                    </p>
-                                  </div>
-                                </div>
-                              </CardContent>
-                            </Card>
-                          ))
-                        ) : (
-                          <div className="text-center py-8 text-slate-500">
-                            <Send className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                            <p>No comments yet. Be the first to add one!</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                {!task && (
+                  <TabsContent value="attachments" className="mt-0 p-6">
+                    <TaskAttachments task={task} />
                   </TabsContent>
                 )}
-
-                <TabsContent value="attachments" className="mt-0 p-6">
-                  <div className="space-y-4">
-                    {/* Upload Attachment */}
-                    <Card>
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-base flex items-center gap-2">
-                          <Upload className="h-4 w-4" />
-                          {t("tickets:modal.sections.attachments")}
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-blue-500 transition-colors">
-                          <input
-                            type="file"
-                            id="file-upload"
-                            className="hidden"
-                            onChange={handleFileUpload}
-                            disabled={addAttachmentMutation.isPending}
-                          />
-                          <label
-                            htmlFor="file-upload"
-                            className="cursor-pointer"
-                          >
-                            <Paperclip className="h-8 w-8 mx-auto mb-2 text-slate-400" />
-                            <p className="text-sm text-slate-600">
-                              {t("tickets:modal.placeholders.uploadCta")}
-                            </p>
-                            <p className="text-xs text-slate-500 mt-1">
-                              {t("tickets:modal.placeholders.uploadHelp")}
-                            </p>
-                          </label>
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    {/* Attachments List */}
-                    <div className="space-y-3">
-                      <h3 className="font-medium text-slate-900">
-                        {t("tickets:modal.sections.attachmentsList")}
-                      </h3>
-                      {taskAttachments?.length ? (
-                        taskAttachments?.map((attachment: any) => (
-                          <Card
-                            key={attachment.id}
-                            className="border-l-4 border-l-purple-200"
-                          >
-                            <CardContent className="pt-4">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                  <div className="p-2 bg-purple-100 rounded-full">
-                                    <Paperclip className="h-4 w-4 text-purple-600" />
-                                  </div>
-                                  <div>
-                                    <p className="font-medium text-slate-900">
-                                      {attachment.fileName}
-                                    </p>
-                                    <p className="text-xs text-slate-500">
-                                      {(attachment.fileSize / 1024).toFixed(2)}{" "}
-                                      KB •{" "}
-                                      {t("tickets:modal.meta.uploadedBy", {
-                                        defaultValue: "Uploaded by",
-                                      })}{" "}
-                                      {attachment.userName}{" "}
-                                      {t("tickets:modal.meta.on", {
-                                        defaultValue: "on",
-                                      })}{" "}
-                                      {new Date(
-                                        attachment.createdAt
-                                      ).toLocaleDateString()}
-                                    </p>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() =>
-                                      window.open(attachment.fileUrl, "_blank")
-                                    }
-                                  >
-                                    <Download className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() =>
-                                      deleteAttachmentMutation.mutate(
-                                        attachment.id
-                                      )
-                                    }
-                                    disabled={
-                                      deleteAttachmentMutation.isPending
-                                    }
-                                  >
-                                    <Trash2 className="h-4 w-4 text-red-500" />
-                                  </Button>
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        ))
-                      ) : (
-                        <div className="text-center py-8 text-slate-500">
-                          <Paperclip className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                          <p>{t("tickets:modal.empty.noAttachments")}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </TabsContent>
               </div>
             </Tabs>
           </div>
 
           {/* Footer */}
-          {!viewOnly && (
-            <div className="border-t bg-slate-50 px-6 py-4">
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={onClose}>
-                  {t("tickets:modal.buttons.cancel")}
+          <div className="border-t bg-slate-50 px-6 py-4">
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={onClose}>
+                {t("tickets:modal.buttons.cancel")}
+              </Button>
+              {task && !canEditAnything ? (
+                <></>
+              ) : (
+                <Button
+                  onClick={handleSubmit}
+                  disabled={
+                    createTaskMutation.isPending || updateTaskMutation.isPending
+                  }
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  {createTaskMutation.isPending || updateTaskMutation.isPending
+                    ? task
+                      ? t("tickets:modal.buttons.updating")
+                      : t("tickets:modal.buttons.creating")
+                    : task
+                    ? t("tickets:modal.buttons.update")
+                    : t("tickets:modal.buttons.create")}
                 </Button>
-                {task && !canEditAnything ? (
-                  <></>
-                ) : (
-                  <Button
-                    onClick={handleSubmit}
-                    disabled={
-                      createTaskMutation.isPending ||
-                      updateTaskMutation.isPending
-                    }
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    {createTaskMutation.isPending ||
-                    updateTaskMutation.isPending
-                      ? task
-                        ? t("tickets:modal.buttons.updating")
-                        : t("tickets:modal.buttons.creating")
-                      : task
-                      ? t("tickets:modal.buttons.update")
-                      : t("tickets:modal.buttons.create")}
-                  </Button>
-                )}
-              </DialogFooter>
-            </div>
-          )}
+              )}
+            </DialogFooter>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

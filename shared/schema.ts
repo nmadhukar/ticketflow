@@ -375,6 +375,7 @@ export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
 export const insertTaskSchema = createInsertSchema(tasks)
   .omit({
     id: true,
+    ticketNumber: true, // server-generated
     createdAt: true,
     updatedAt: true,
   })

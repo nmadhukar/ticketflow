@@ -217,7 +217,8 @@ export async function getTicketMetaForUser(user: User, task: any | null) {
       }
     }
   } else if (user.role === "customer") {
-    base.allowedAssigneeTypes = ["team"]; // only on create
+    // Allow customers to choose user or team on create; editing remains restricted
+    base.allowedAssigneeTypes = ["user", "team"];
     base.allowedFields = ["title", "description"];
   }
 
