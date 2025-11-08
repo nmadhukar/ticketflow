@@ -1,9 +1,9 @@
 FROM node:20-alpine
 WORKDIR /app
 
-# 1) Install dependencies (include dev so vite/esbuild are available)
+# 1) Install dependencies 
 COPY package*.json ./
-RUN npm install --include=dev --no-audit --no-fund
+RUN npm install --no-audit --no-fund
 
 # 2) Copy source and build (produces ./dist)
 COPY . .
