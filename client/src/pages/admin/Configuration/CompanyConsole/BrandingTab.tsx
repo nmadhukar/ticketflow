@@ -220,6 +220,11 @@ const BrandingTab = () => {
                     }
                     alt="Company Logo"
                     className="w-full h-full object-contain"
+                    onError={(e) => {
+                      // Fallback if image fails to load (e.g., expired presigned URL or invalid S3 URL)
+                      console.warn("Logo preview failed to load");
+                      e.currentTarget.style.display = "none";
+                    }}
                   />
                 </div>
               ) : (

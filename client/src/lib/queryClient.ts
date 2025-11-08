@@ -36,8 +36,30 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
  */
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
-    const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    // Try to parse as JSON first, fallback to text
+    let errorData: any;
+    const contentType = res.headers.get("content-type");
+    if (contentType && contentType.includes("application/json")) {
+      try {
+        errorData = await res.json();
+      } catch {
+        // If JSON parsing fails, use text
+        const text = await res.text();
+        throw new Error(`${res.status}: ${text || res.statusText}`);
+      }
+    } else {
+      const text = await res.text();
+      throw new Error(`${res.status}: ${text || res.statusText}`);
+    }
+
+    // Create error with response data attached
+    const error: any = new Error(
+      errorData?.message || `${res.status}: ${res.statusText}`
+    );
+    error.response = res;
+    error.status = res.status;
+    error.data = errorData;
+    throw error;
   }
 }
 
@@ -46,14 +68,18 @@ export async function apiRequest(
   url: string,
   data?: unknown | undefined
 ): Promise<Response> {
+  // Check if data is FormData (for file uploads)
+  const isFormData = data instanceof FormData;
+
   const res = await fetch(url, {
     method,
     headers: {
-      ...(data ? { "Content-Type": "application/json" } : {}),
+      // Don't set Content-Type for FormData - browser will set it with boundary
+      ...(data && !isFormData ? { "Content-Type": "application/json" } : {}),
       "Cache-Control": "no-cache",
       Pragma: "no-cache",
     },
-    body: data ? JSON.stringify(data) : undefined,
+    body: data ? (isFormData ? data : JSON.stringify(data)) : undefined,
     credentials: "include",
     cache: "no-store",
   });

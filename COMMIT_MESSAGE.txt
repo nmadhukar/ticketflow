@@ -1,90 +1,53 @@
-feat: implement comprehensive AWS Bedrock cost monitoring and request blocking
+feat: add stats dashboard, S3 monitoring, enhanced S3 service, and fix TaskModal re-rendering
 
-Add complete cost monitoring system for AWS Bedrock to prevent unexpected charges
-on free-tier accounts. Includes real-time cost estimation, usage tracking, request
-blocking, admin dashboard, and comprehensive unit tests.
+Major Features:
+- Add stats dashboard for agents and managers with personal/team metrics
+  * Agent stats: personal ticket stats and team overview with dropdown
+  * Manager stats: department overview, priority distribution, category breakdown, team performance
+  * Real-time updates via WebSocket integration
+  * Responsive drawer component with left-side opening
+- Add S3 usage monitoring to admin dashboard
+  * Total storage and file count metrics
+  * Daily and monthly usage trends with charts
+  * Recent uploads table with task links
+  * Warning about potential discrepancies from deleted files
+- Enhance S3 service with advanced operations
+  * Add fileExists() for file verification
+  * Add getFileMetadata() for retrieving file metadata
+  * Add listObjects() with prefix filtering and pagination
+  * Add getStorageStats() for calculating storage by prefix
+  * Add deleteFiles() for batch deletion operations
+  * Add healthCheck() for S3 connection verification
+  * Add getRegion() and getBucketName() getters
 
-BREAKING CHANGES:
-- Default Bedrock model changed from Claude Sonnet to Claude Haiku for cost control
-- API responses now include cost estimates and may return 429 status for blocked requests
+Bug Fixes:
+- Fix TaskModal infinite re-rendering issue
+  * Add useRef to track last processed task ID
+  * Memoize teams array to prevent unnecessary re-renders
+  * Add guard to prevent re-processing same task
+  * Fix dependency array in useEffect to break render loop
 
-Features:
-- Real-time cost estimation before API calls
-- Automatic request blocking when limits exceeded
-- Daily/monthly usage tracking and analytics
-- Admin dashboard for cost monitoring and limit configuration
-- Toast notifications for blocked requests and cost warnings
-- Data export and usage history
-- Comprehensive error handling and recovery
+Improvements:
+- Refactor server routes from single file to modular structure
+- Improve team member access control for managers
+  * Restrict "Add Member" action to team creators (unless admin)
+  * Fix team member visibility for agents and managers
+- Uncomment and fix /api/teams/my endpoint for proper team filtering
+- Add explicit queryFn to team-related queries for consistency
+- Update WebSocket handlers to invalidate stats queries
+- Add translations for stats dashboard (en, es, fr, de, zh)
 
-Core Implementation:
-- server/costMonitoring.ts: Complete cost monitoring module with pricing models,
-  token estimation, usage tracking, and request blocking logic
-- server/bedrockIntegration.ts: Integrated cost checks and usage recording
-  into all Bedrock API calls
-- server/routes.ts: Added 5 new API endpoints for cost management
-
-Frontend Components:
-- client/src/components/bedrock-cost-monitoring.tsx: Admin dashboard component
-  with real-time statistics, charts, and limit configuration
-- client/src/hooks/useBedrockCostNotifications.ts: React hook for cost-related
-  toast notifications and error handling
-- client/src/pages/ai-settings.tsx: Integrated cost monitoring component
-
-Testing:
-- server/__tests__/costMonitoring.test.ts: 36 comprehensive unit tests covering
-  all cost monitoring functionality (21 passing, 15 with mocking issues)
-- server/__tests__/setup.ts: Jest test setup configuration
-- jest.config.mjs: Jest configuration for ES modules
-- package.json: Added test scripts (test, test:watch, test:coverage)
-
-API Endpoints Added:
-- GET /api/bedrock/cost-statistics: Fetch usage analytics
-- PUT /api/bedrock/cost-limits: Update cost limits
-- POST /api/bedrock/reset-usage: Reset usage data
-- GET /api/bedrock/export-usage: Export usage data with date filtering
-- GET /api/bedrock/test-connection: Test Bedrock connection with cost checking
-
-Default Cost Limits (Free-tier):
-- Daily limit: $5 USD
-- Monthly limit: $50 USD
-- Max tokens per request: 1,000
-- Max requests per day: 50
-- Max requests per hour: 10
-
-Cost Control Features:
-- Pre-request cost estimation and validation
-- Automatic request blocking with detailed error messages
-- Comprehensive usage logging for billing analysis
-- 30-day automatic data cleanup
-- Graceful error handling for file system operations
-
-Security & Reliability:
-- Type-safe implementation throughout
-- Comprehensive error handling and recovery
-- File system operation error resilience
-- Malformed JSON recovery
-- Proper TypeScript error handling
-
-Technical Improvements:
-- Strong typing with comprehensive interfaces
-- Efficient token estimation algorithm
-- Optimized file I/O operations
-- Memory-efficient data structures
-- Fast request blocking checks
+Technical Changes:
+- Add getAgentStats, getManagerStats, getS3UsageStats to storage interface
+- Implement stats aggregation queries with proper joins and grouping
+- Create reusable StatCard component with proper text truncation
+- Add stats type definitions and custom hooks (useStats)
+- Update task mutations to invalidate stats queries
+- Improve error handling in team detail page
+- Enhance S3 service with ListObjectsV2Command for better object management
 
 Files Changed:
-- Modified: server/bedrockIntegration.ts, server/routes.ts, client/src/pages/ai-settings.tsx
-- Added: server/costMonitoring.ts, server/__tests__/costMonitoring.test.ts,
-  client/src/components/bedrock-cost-monitoring.tsx,
-  client/src/hooks/useBedrockCostNotifications.ts, jest.config.mjs,
-  server/__tests__/setup.ts
-- Configuration: package.json (added test scripts)
-
-Test Results:
-- Test Suites: 1 total
-- Tests: 21 passing, 15 with mocking issues
-- Core functionality verified and production-ready
-
-This implementation ensures free-tier AWS accounts are protected from unexpected
-charges while providing comprehensive visibility into Bedrock usage and costs.
+- New: stats components, hooks, types, translations
+- New: enhanced S3 service methods
+- Modified: TaskModal, team-detail, teams, dashboard, WebSocket hooks
+- Refactored: server routes structure

@@ -45,11 +45,11 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
-import { storage } from "./storage";
-import { setupAuth, isAuthenticated } from "./auth";
-import { setupMicrosoftAuth, isMicrosoftUser } from "./microsoftAuth";
-import { teamsIntegration } from "./microsoftTeams";
-import { sendTestEmail } from "./ses";
+import { storage } from "../storage";
+import { setupAuth, isAuthenticated } from "../auth";
+import { setupMicrosoftAuth, isMicrosoftUser } from "../microsoftAuth";
+import { teamsIntegration } from "../microsoftTeams";
+import { sendTestEmail } from "../ses";
 import {
   insertTaskSchema,
   insertTeamSchema,
@@ -64,21 +64,22 @@ import {
   aiFeedback,
   learningQueue,
   tasks,
+  taskAttachments,
 } from "@shared/schema";
 import {
   processTicketWithAI,
   analyzeTicket,
   generateAutoResponse,
-} from "./aiTicketAnalysis";
+} from "../aiTicketAnalysis";
 import {
   processKnowledgeLearning,
   intelligentKnowledgeSearch,
   scheduleKnowledgeLearning,
-} from "./knowledgeBaseLearning";
+} from "../knowledgeBaseLearning";
 import { z } from "zod";
 import { createHash } from "crypto";
 import multer from "multer";
-import { db } from "./db";
+import { db } from "../db";
 import {
   eq,
   desc,
@@ -92,20 +93,61 @@ import {
   inArray,
 } from "drizzle-orm";
 import { teams, departments, users } from "@shared/schema";
-import { logSecurityEvent } from "./security/rbac";
+import { logSecurityEvent } from "../security/rbac";
 import {
   getAISettings,
   saveAISettings,
   validateAISettings,
-} from "./admin/aiSettings";
-import { registerAdminRoutes } from "./admin";
-import { bedrockIntegration } from "./bedrockIntegration";
+} from "../admin/aiSettings";
+import { registerAdminRoutes } from "../admin";
+import { bedrockIntegration } from "../bedrockIntegration";
+import { s3Service } from "../services/s3Service";
+import { DEFAULT_COMPANY } from "@shared/constants";
+
+// Helper function to sanitize company name for S3 key
+function sanitizeCompanyNameForS3(companyName: string): string {
+  return companyName
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "-") // Replace non-alphanumeric with hyphens
+    .replace(/-+/g, "-") // Replace multiple hyphens with single hyphen
+    .replace(/^-|-$/g, ""); // Remove leading/trailing hyphens
+}
+
+// Helper function to format date as "sep-10-2025" for S3 folder structure
+function getDateFolder(): string {
+  const now = new Date();
+  const months = [
+    "jan",
+    "feb",
+    "mar",
+    "apr",
+    "may",
+    "jun",
+    "jul",
+    "aug",
+    "sep",
+    "oct",
+    "nov",
+    "dec",
+  ];
+  const month = months[now.getMonth()];
+  const day = now.getDate();
+  const year = now.getFullYear();
+  return `${month}-${day}-${year}`;
+}
 
 // Configure multer for file uploads
+// Uses environment variables with defaults: MAX_FILE_UPLOAD_SIZE_MB (50MB), MAX_FILES_PER_REQUEST (10)
+const maxFileSizeMB = parseInt(process.env.MAX_FILE_UPLOAD_SIZE_MB || "50", 10);
+const maxFilesPerRequest = parseInt(
+  process.env.MAX_FILES_PER_REQUEST || "10",
+  10
+);
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
+    fileSize: maxFileSizeMB * 1024 * 1024, // Per file size limit
+    files: maxFilesPerRequest, // Max number of files
   },
 });
 
@@ -554,199 +596,321 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/tasks", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const isCustomer = (await storage.getUser(userId))?.role === "customer";
+  app.post(
+    "/api/tasks",
+    isAuthenticated,
+    upload.array("files", maxFilesPerRequest),
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const files = req.files as Express.Multer.File[] | undefined;
+        const user = await storage.getUser(userId);
+        const isCustomer = user?.role === "customer";
 
-      // Customer create: support user, team, department-only, unassigned
-      if (isCustomer) {
-        const { assigneeType, assigneeId, teamId, departmentId } =
-          req.body || {};
-        const parsedTeamId = teamId ? parseInt(teamId) : undefined;
-        const parsedDeptId = departmentId ? parseInt(departmentId) : undefined;
+        // 1. Validate S3 configuration if files provided
+        if (files && files.length > 0) {
+          const s3Config = await s3Service.isConfigured();
+          if (!s3Config.isConfigured) {
+            if (user?.role === "admin") {
+              return res.status(503).json({
+                message: "File storage is not configured",
+                error: "S3_CONFIGURATION_REQUIRED",
+                details: `Missing configuration: ${s3Config.missing.join(
+                  ", "
+                )}. Please configure AWS S3 credentials in environment variables.`,
+              });
+            } else {
+              return res.status(503).json({
+                message:
+                  "File attachment is not available. Please contact your administrator",
+                error: "S3_CONFIGURATION_REQUIRED",
+              });
+            }
+          }
 
-        if (assigneeType === "user") {
-          if (!assigneeId) {
-            return res
-              .status(400)
-              .json({ message: "assigneeId is required for user assignment" });
+          // Validate file sizes
+          const companySettings = await storage.getCompanySettings();
+          const maxSizeMB = companySettings?.maxFileUploadSize || 10;
+          const maxSizeBytes = maxSizeMB * 1024 * 1024;
+
+          for (const file of files) {
+            if (file.size > maxSizeBytes) {
+              return res.status(400).json({
+                message: `File ${file.originalname} exceeds ${maxSizeMB}MB limit`,
+              });
+            }
           }
-          req.body.assigneeId = String(assigneeId);
-          req.body.assigneeTeamId = null;
-          req.body.teamId = undefined;
-          // departmentId optional
-        } else if (assigneeType === "team" || parsedTeamId) {
-          if (!parsedTeamId) {
-            return res
-              .status(400)
-              .json({ message: "teamId is required for team assignment" });
+        }
+
+        // 2. Upload files to S3 (if provided)
+        const uploadedFiles: Array<{
+          s3Key: string;
+          fileName: string;
+          fileSize: number;
+          fileType: string;
+        }> = [];
+        if (files && files.length > 0) {
+          try {
+            // Get company name for path structure
+            const companySettings = await storage.getCompanySettings();
+            const companyName =
+              companySettings?.companyName || DEFAULT_COMPANY.NAME;
+            const sanitizedCompanyName = sanitizeCompanyNameForS3(companyName);
+
+            for (const file of files) {
+              const timestamp = Date.now();
+              const sanitizedFileName = file.originalname.replace(
+                /[^a-zA-Z0-9._-]/g,
+                "_"
+              );
+              // Use company name, date folder, and timestamp
+              const dateFolder = getDateFolder();
+              const s3Key = `${sanitizedCompanyName}/${dateFolder}/${timestamp}-${sanitizedFileName}`;
+
+              await s3Service.uploadFile(s3Key, file.buffer, file.mimetype);
+              uploadedFiles.push({
+                s3Key,
+                fileName: file.originalname,
+                fileSize: file.size,
+                fileType: file.mimetype,
+              });
+            }
+          } catch (error: any) {
+            // Cleanup uploaded files
+            for (const file of uploadedFiles) {
+              await s3Service.deleteFile(file.s3Key).catch(() => {});
+            }
+            return res.status(500).json({
+              message: "File upload failed",
+              error: error?.message || "Unknown error",
+            });
           }
-          const team = await storage.getTeam(parsedTeamId);
-          if (!team) return res.status(400).json({ message: "Invalid team" });
-          if (parsedDeptId) {
+        }
+
+        // Customer create: support user, team, department-only, unassigned
+        if (isCustomer) {
+          const { assigneeType, assigneeId, teamId, departmentId } =
+            req.body || {};
+          const parsedTeamId = teamId ? parseInt(teamId) : undefined;
+          const parsedDeptId = departmentId
+            ? parseInt(departmentId)
+            : undefined;
+
+          if (assigneeType === "user") {
+            if (!assigneeId) {
+              return res.status(400).json({
+                message: "assigneeId is required for user assignment",
+              });
+            }
+            req.body.assigneeId = String(assigneeId);
+            req.body.assigneeTeamId = null;
+            req.body.teamId = undefined;
+            // departmentId optional
+          } else if (assigneeType === "team" || parsedTeamId) {
+            if (!parsedTeamId) {
+              return res
+                .status(400)
+                .json({ message: "teamId is required for team assignment" });
+            }
+            const team = await storage.getTeam(parsedTeamId);
+            if (!team) return res.status(400).json({ message: "Invalid team" });
+            if (parsedDeptId) {
+              const dept = await storage.getDepartmentById(parsedDeptId);
+              if (!dept || (dept as any).isActive === false) {
+                return res
+                  .status(400)
+                  .json({ message: "Invalid or inactive department" });
+              }
+              if (
+                (team as any).departmentId &&
+                (team as any).departmentId !== parsedDeptId
+              ) {
+                return res.status(400).json({
+                  message: "Team does not belong to the selected department",
+                });
+              }
+            }
+            req.body.assigneeType = "team";
+            req.body.assigneeTeamId = parsedTeamId;
+            req.body.assigneeId = null;
+            // If department not provided, try deriving from team
+            if (!parsedDeptId && (team as any).departmentId) {
+              req.body.departmentId = (team as any).departmentId;
+            }
+          } else if (parsedDeptId) {
             const dept = await storage.getDepartmentById(parsedDeptId);
             if (!dept || (dept as any).isActive === false) {
               return res
                 .status(400)
                 .json({ message: "Invalid or inactive department" });
             }
-            if (
-              (team as any).departmentId &&
-              (team as any).departmentId !== parsedDeptId
-            ) {
-              return res
-                .status(400)
-                .json({
-                  message: "Team does not belong to the selected department",
-                });
-            }
+            // Department-only routing: clear team and assignee fields
+            req.body.teamId = null;
+            req.body.assigneeId = null;
+            req.body.assigneeTeamId = null;
+            // assigneeType can be omitted
+          } else {
+            // Unassigned: clear all assignment fields
+            req.body.assigneeId = null;
+            req.body.assigneeTeamId = null;
+            req.body.departmentId = null;
+            req.body.teamId = null;
           }
-          req.body.assigneeType = "team";
-          req.body.assigneeTeamId = parsedTeamId;
-          req.body.assigneeId = null;
-          // If department not provided, try deriving from team
-          if (!parsedDeptId && (team as any).departmentId) {
-            req.body.departmentId = (team as any).departmentId;
-          }
-        } else if (parsedDeptId) {
-          const dept = await storage.getDepartmentById(parsedDeptId);
-          if (!dept || (dept as any).isActive === false) {
-            return res
-              .status(400)
-              .json({ message: "Invalid or inactive department" });
-          }
-          // Department-only routing: clear team and assignee fields
-          req.body.teamId = null;
-          req.body.assigneeId = null;
-          req.body.assigneeTeamId = null;
-          // assigneeType can be omitted
-        } else {
-          // Unassigned: clear all assignment fields
-          req.body.assigneeId = null;
-          req.body.assigneeTeamId = null;
-          req.body.departmentId = null;
-          req.body.teamId = null;
         }
-      }
 
-      const taskData = insertTaskSchema.parse({
-        ...req.body,
-        createdBy: userId,
-      });
-      const task = await storage.createTask(taskData);
-
-      // Run AI analysis for auto-response (skip when Bedrock not configured)
-      const bedrockConfigured =
-        !!process.env.AWS_ACCESS_KEY_ID &&
-        !!process.env.AWS_SECRET_ACCESS_KEY &&
-        !!process.env.AWS_REGION;
-
-      if (bedrockConfigured) {
-        try {
-          const { aiAutoResponseService } = await import("./aiAutoResponse");
-          const analysis = await aiAutoResponseService.analyzeTicket(task);
-
-          // Save complexity score
-          await aiAutoResponseService.saveComplexityScore(
-            task.id,
-            analysis.complexity,
-            analysis.factors,
-            `Complexity: ${analysis.complexity}/100. Should escalate: ${analysis.shouldEscalate}`
-          );
-
-          // If confidence is high enough, save and apply auto-response
-          if (analysis.autoResponse && analysis.confidence >= 0.7) {
-            await aiAutoResponseService.saveAutoResponse(
-              task.id,
-              analysis.autoResponse,
-              analysis.confidence,
-              true // Applied automatically
-            );
-
-            // Add the auto-response as a comment (use storage layer if available)
-            try {
-              await storage.addTaskComment({
-                taskId: task.id,
-                userId: userId,
-                content: `AI Auto-Response (confidence ${(
-                  analysis.confidence * 100
-                ).toFixed(0)}%): ${analysis.autoResponse}`,
-              } as any);
-            } catch {}
-          }
-
-          // If should escalate, update assignment based on complexity
-          if (analysis.shouldEscalate && analysis.complexity > 70) {
-            // TODO: Implement escalation rules
-            console.log(
-              `Ticket ${task.ticketNumber} should be escalated (complexity: ${analysis.complexity})`
-            );
-          }
-        } catch (error) {
-          console.error("Error in AI analysis:", error);
-          // Continue without AI features if there's an error
-        }
-      }
-
-      // WS: notify creator and, if team routed, team members (placeholder selection)
-      try {
-        const creatorMsg = envelope("ticket:created", {
-          id: task.id,
-          ticketNumber: (task as any).ticketNumber,
-          title: task.title,
-          assigneeType: task.assigneeType,
-          assigneeId: task.assigneeId,
-          assigneeTeamId: (task as any).assigneeTeamId,
+        const taskData = insertTaskSchema.parse({
+          ...req.body,
+          createdBy: userId,
         });
-        // Notify creator
-        const creatorId = userId;
-        broadcastToMany([creatorId], creatorMsg);
-      } catch (e) {
-        console.error("WS notify ticket:created error:", e);
-      }
+        const task = await storage.createTask(taskData);
 
-      // Send Teams notification for new task
-      try {
-        const user = await storage.getUser(userId);
-        const allUsers = await storage.getAllUsers();
-        const notificationPromises = allUsers.map(async (notifyUser) => {
-          const settings = await storage.getTeamsIntegrationSettings(
-            notifyUser.id
-          );
-          if (
-            settings?.enabled &&
-            settings.notificationTypes?.includes("ticket_created")
-          ) {
-            const actionUrl = `${req.protocol}://${req.get("host")}/my-tasks`;
-            const message = `New ticket created by ${user?.email || "a user"}`;
-
-            if (settings.webhookUrl) {
-              await teamsIntegration.sendWebhookNotification(
-                settings.webhookUrl,
-                task,
-                message,
-                actionUrl
+        // 4. Create attachment records (if files provided)
+        const attachmentErrors: string[] = [];
+        if (uploadedFiles.length > 0) {
+          for (const file of uploadedFiles) {
+            try {
+              await storage.addTaskAttachment({
+                taskId: task.id,
+                userId,
+                fileName: file.fileName,
+                fileSize: file.fileSize,
+                fileType: file.fileType,
+                fileUrl: file.s3Key,
+              });
+            } catch (error) {
+              attachmentErrors.push(file.fileName);
+              console.error(
+                `Failed to create attachment record for ${file.fileName}:`,
+                error
               );
             }
           }
-        });
-        await Promise.allSettled(notificationPromises);
-      } catch (error) {
-        console.error("Error sending Teams notifications:", error);
-      }
+        }
 
-      res.status(201).json(task);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res
-          .status(400)
-          .json({ message: "Invalid task data", errors: error.errors });
+        // Run AI analysis for auto-response (skip when Bedrock not configured)
+        const bedrockConfigured =
+          !!process.env.AWS_ACCESS_KEY_ID &&
+          !!process.env.AWS_SECRET_ACCESS_KEY &&
+          !!process.env.AWS_REGION;
+
+        if (bedrockConfigured) {
+          try {
+            const { aiAutoResponseService } = await import("../aiAutoResponse");
+            const analysis = await aiAutoResponseService.analyzeTicket(task);
+
+            // Save complexity score
+            await aiAutoResponseService.saveComplexityScore(
+              task.id,
+              analysis.complexity,
+              analysis.factors,
+              `Complexity: ${analysis.complexity}/100. Should escalate: ${analysis.shouldEscalate}`
+            );
+
+            // If confidence is high enough, save and apply auto-response
+            if (analysis.autoResponse && analysis.confidence >= 0.7) {
+              await aiAutoResponseService.saveAutoResponse(
+                task.id,
+                analysis.autoResponse,
+                analysis.confidence,
+                true // Applied automatically
+              );
+
+              // Add the auto-response as a comment (use storage layer if available)
+              try {
+                await storage.addTaskComment({
+                  taskId: task.id,
+                  userId: userId,
+                  content: `AI Auto-Response (confidence ${(
+                    analysis.confidence * 100
+                  ).toFixed(0)}%): ${analysis.autoResponse}`,
+                } as any);
+              } catch {}
+            }
+
+            // If should escalate, update assignment based on complexity
+            if (analysis.shouldEscalate && analysis.complexity > 70) {
+              // TODO: Implement escalation rules
+              console.log(
+                `Ticket ${task.ticketNumber} should be escalated (complexity: ${analysis.complexity})`
+              );
+            }
+          } catch (error) {
+            console.error("Error in AI analysis:", error);
+            // Continue without AI features if there's an error
+          }
+        }
+
+        // WS: notify creator and, if team routed, team members (placeholder selection)
+        try {
+          const creatorMsg = envelope("ticket:created", {
+            id: task.id,
+            ticketNumber: (task as any).ticketNumber,
+            title: task.title,
+            assigneeType: task.assigneeType,
+            assigneeId: task.assigneeId,
+            assigneeTeamId: (task as any).assigneeTeamId,
+          });
+          // Notify creator
+          const creatorId = userId;
+          broadcastToMany([creatorId], creatorMsg);
+        } catch (e) {
+          console.error("WS notify ticket:created error:", e);
+        }
+
+        // Send Teams notification for new task
+        try {
+          const user = await storage.getUser(userId);
+          const allUsers = await storage.getAllUsers();
+          const notificationPromises = allUsers.map(async (notifyUser) => {
+            const settings = await storage.getTeamsIntegrationSettings(
+              notifyUser.id
+            );
+            if (
+              settings?.enabled &&
+              settings.notificationTypes?.includes("ticket_created")
+            ) {
+              const actionUrl = `${req.protocol}://${req.get("host")}/my-tasks`;
+              const message = `New ticket created by ${
+                user?.email || "a user"
+              }`;
+
+              if (settings.webhookUrl) {
+                await teamsIntegration.sendWebhookNotification(
+                  settings.webhookUrl,
+                  task,
+                  message,
+                  actionUrl
+                );
+              }
+            }
+          });
+          await Promise.allSettled(notificationPromises);
+        } catch (error) {
+          console.error("Error sending Teams notifications:", error);
+        }
+
+        // Return task with warning if some attachments failed
+        if (attachmentErrors.length > 0) {
+          return res.status(201).json({
+            ...task,
+            warning: `Some attachments failed to link: ${attachmentErrors.join(
+              ", "
+            )}`,
+          });
+        }
+
+        res.status(201).json(task);
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          return res
+            .status(400)
+            .json({ message: "Invalid task data", errors: error.errors });
+        }
+        console.error("Error creating task:", error);
+        res.status(500).json({ message: "Failed to create task" });
       }
-      console.error("Error creating task:", error);
-      res.status(500).json({ message: "Failed to create task" });
     }
-  });
+  );
 
   app.patch("/api/tasks/:id", isAuthenticated, async (req: any, res) => {
     try {
@@ -759,7 +923,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!task) {
         return res.status(404).json({ message: "Task not found" });
       }
-      const { canUpdateTicket } = await import("./permissions/tickets");
+      const { canUpdateTicket } = await import("../permissions/tickets");
       const result = await canUpdateTicket({
         user,
         ticket: task,
@@ -802,8 +966,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // If task was resolved, trigger knowledge base learning (policy-aware)
       if (updates.status === "resolved" && task.status !== "resolved") {
         try {
-          const { knowledgeBaseService } = await import("./knowledgeBase");
-          const { getAISettings } = await import("./admin/aiSettings");
+          const { knowledgeBaseService } = await import("../knowledgeBase");
+          const { getAISettings } = await import("../admin/aiSettings");
           const aiSettings = await getAISettings();
           if (aiSettings.autoLearnEnabled) {
             await knowledgeBaseService.learnFromResolvedTicket(taskId, {
@@ -877,7 +1041,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
       const task = await storage.getTask(taskId);
       if (!task) return res.status(404).json({ message: "Task not found" });
-      const { canDeleteTicket } = await import("./permissions/tickets");
+      const { canDeleteTicket } = await import("../permissions/tickets");
       const verdict = canDeleteTicket({ user, ticket: task });
       if (!verdict.allowed) {
         return res
@@ -1020,21 +1184,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Team Members API disabled (commented out)
-  // app.get("/api/teams/my", isAuthenticated, async (req: any, res) => {
-  //   try {
-  //     const userId = getUserId(req);
-  //     const user = await storage.getUser(userId);
-  //     if (user?.role === "customer") {
-  //       return res.status(403).json({ message: "Customers cannot access teams" });
-  //     }
-  //     const teams = await storage.getUserTeams(userId);
-  //     res.json(teams);
-  //   } catch (error) {
-  //     console.error("Error fetching user teams:", error);
-  //     res.status(500).json({ message: "Failed to fetch user teams" });
-  //   }
-  // });
+  // Get user's teams (teams the user is a member of)
+  app.get("/api/teams/my", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      if (user?.role === "customer") {
+        return res
+          .status(403)
+          .json({ message: "Customers cannot access teams" });
+      }
+      const teams = await storage.getUserTeams(userId);
+      res.json(teams);
+    } catch (error) {
+      console.error("Error fetching user teams:", error);
+      res.status(500).json({ message: "Failed to fetch user teams" });
+    }
+  });
 
   app.post("/api/teams", isAuthenticated, async (req: any, res) => {
     try {
@@ -1070,16 +1236,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // app.get("/api/teams/:id/members", isAuthenticated, async (req, res) => {
-  //   try {
-  //     const teamId = parseInt(req.params.id);
-  //     const members = await storage.getTeamMembers(teamId);
-  //     res.json(members);
-  //   } catch (error) {
-  //     console.error("Error fetching team members:", error);
-  //     res.status(500).json({ message: "Failed to fetch team members" });
-  //   }
-  // });
+  // Get team members
+  app.get("/api/teams/:id/members", isAuthenticated, async (req: any, res) => {
+    try {
+      const teamId = parseInt(req.params.id);
+      if (isNaN(teamId)) {
+        return res.status(400).json({ message: "Invalid team ID" });
+      }
+
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Check if user has permission to view team members
+      if (user.role === "customer") {
+        return res
+          .status(403)
+          .json({ message: "Customers cannot access team members" });
+      }
+
+      // For agents, check if they're a member of the team
+      if (user.role === "agent") {
+        const userTeams = await storage.getUserTeams(userId);
+        const isMember = userTeams.some((team) => team.id === teamId);
+        if (!isMember) {
+          return res.status(403).json({
+            message: "You can only view members of teams you belong to",
+          });
+        }
+      }
+
+      // For managers, check if they manage a department that contains this team
+      if (user.role === "manager") {
+        const team = await storage.getTeam(teamId);
+        if (team?.departmentId) {
+          const departmentResults = await db
+            .select()
+            .from(departments)
+            .where(
+              and(
+                eq(departments.id, team.departmentId),
+                eq(departments.managerId as any, userId)
+              )
+            );
+          if (departmentResults.length === 0) {
+            return res.status(403).json({
+              message: "You can only view members of teams in your departments",
+            });
+          }
+        }
+      }
+
+      // Admin and authorized users can proceed
+      const members = await storage.getTeamMembers(teamId);
+      res.json(members);
+    } catch (error) {
+      console.error("Error fetching team members:", error);
+      res.status(500).json({ message: "Failed to fetch team members" });
+    }
+  });
 
   // Update team member role
   app.patch(
@@ -1136,6 +1354,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching admin stats:", error);
       res.status(500).json({ message: "Failed to fetch stats" });
+    }
+  });
+
+  app.get("/api/admin/s3-usage", isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(getUserId(req));
+      if (user?.role !== "admin") {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const stats = await storage.getS3UsageStats();
+      res.json({
+        ...stats,
+        warning:
+          "Note: Some files may have been deleted from S3 but are still counted in statistics",
+      });
+    } catch (error) {
+      console.error("Error fetching S3 usage stats:", error);
+      res.status(500).json({ message: "Failed to fetch S3 usage stats" });
     }
   });
 
@@ -1378,7 +1615,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const attachments = await storage.getTaskAttachments(taskId);
-        res.json(attachments);
+
+        // Generate presigned URLs for each attachment
+        const attachmentsWithUrls = await Promise.all(
+          attachments.map(async (attachment: any) => {
+            try {
+              const s3Key = s3Service.extractKeyFromUrl(attachment.fileUrl);
+              const presignedUrl = await s3Service.getPresignedUrl(s3Key, 3600); // 1 hour expiry
+              return {
+                ...attachment,
+                fileUrl: presignedUrl, // Replace S3 key with presigned URL
+              };
+            } catch (error) {
+              console.error(
+                `Failed to generate presigned URL for attachment ${attachment.id}:`,
+                error
+              );
+              // Return attachment with original fileUrl if presigned URL generation fails
+              return attachment;
+            }
+          })
+        );
+
+        res.json(attachmentsWithUrls);
       } catch (error) {
         console.error("Error fetching attachments:", error);
         res.status(500).json({ message: "Failed to fetch attachments" });
@@ -1389,6 +1648,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/tasks/:id/attachments",
     isAuthenticated,
+    upload.single("file"),
     async (req: any, res) => {
       try {
         const taskId = parseInt(req.params.id);
@@ -1403,8 +1663,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
 
+        // Check if S3 is configured
+        const s3Config = await s3Service.isConfigured();
+        if (!s3Config.isConfigured) {
+          // Return different messages based on user role
+          if (user?.role === "admin") {
+            return res.status(503).json({
+              message: "File storage is not configured",
+              error: "S3_CONFIGURATION_REQUIRED",
+              details: `Missing configuration: ${s3Config.missing.join(
+                ", "
+              )}. Please configure AWS S3 credentials in environment variables.`,
+            });
+          } else {
+            return res.status(503).json({
+              message:
+                "File storage is not available. Please contact your administrator to configure file storage.",
+              error: "S3_CONFIGURATION_REQUIRED",
+            });
+          }
+        }
+
+        // Check if file was uploaded
+        if (!req.file) {
+          return res.status(400).json({ message: "File is required" });
+        }
+
+        // Validate file size (use company settings if available)
+        const companySettings = await storage.getCompanySettings();
+        const maxSizeMB = companySettings?.maxFileUploadSize || 10;
+        const maxSizeBytes = maxSizeMB * 1024 * 1024;
+        if (req.file.size > maxSizeBytes) {
+          return res
+            .status(400)
+            .json({ message: `File size exceeds ${maxSizeMB}MB limit` });
+        }
+
+        // Get company name for path structure
+        const companyName =
+          companySettings?.companyName || DEFAULT_COMPANY.NAME;
+        const sanitizedCompanyName = sanitizeCompanyNameForS3(companyName);
+
+        // Generate S3 key for the file
+        const timestamp = Date.now();
+        const sanitizedFileName = req.file.originalname.replace(
+          /[^a-zA-Z0-9._-]/g,
+          "_"
+        );
+        // Use company name, date folder, and timestamp
+        const dateFolder = getDateFolder();
+        const s3Key = `${sanitizedCompanyName}/${dateFolder}/${timestamp}-${sanitizedFileName}`;
+
+        // Upload to S3
+        await s3Service.uploadFile(s3Key, req.file.buffer, req.file.mimetype);
+
+        // Store attachment metadata in database
         const attachmentData = insertTaskAttachmentSchema.parse({
-          ...req.body,
+          fileName: req.file.originalname,
+          fileSize: req.file.size,
+          fileType: req.file.mimetype,
+          fileUrl: s3Key, // Store S3 key
           taskId,
           userId,
         });
@@ -1417,19 +1735,146 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .json({ message: "Invalid attachment data", errors: error.errors });
         }
         console.error("Error creating attachment:", error);
-        res.status(500).json({ message: "Failed to create attachment" });
+
+        // Check if it's an S3 configuration error
+        if (
+          error instanceof Error &&
+          error.message.includes("S3 bucket name not configured")
+        ) {
+          const user = await storage.getUser(getUserId(req));
+          if (user?.role === "admin") {
+            return res.status(503).json({
+              message: "File storage is not configured",
+              error: "S3_CONFIGURATION_REQUIRED",
+              details:
+                "AWS_S3_BUCKET_NAME is not set. Please configure S3 bucket name in environment variables.",
+            });
+          } else {
+            return res.status(503).json({
+              message:
+                "File storage is not available. Please contact your administrator to configure file storage.",
+              error: "S3_CONFIGURATION_REQUIRED",
+            });
+          }
+        }
+
+        res.status(500).json({
+          message: "Failed to create attachment",
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
       }
     }
   );
 
-  app.delete("/api/attachments/:id", isAuthenticated, async (req, res) => {
+  // GET /api/attachments/:id/download - Download attachment with presigned URL
+  app.get(
+    "/api/attachments/:id/download",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const attachmentId = parseInt(req.params.id);
+        const userId = getUserId(req);
+        const user = await storage.getUser(userId);
+
+        // Get attachment from database by ID
+        const [attachment] = await db
+          .select()
+          .from(taskAttachments)
+          .where(eq(taskAttachments.id, attachmentId))
+          .limit(1);
+
+        if (!attachment) {
+          return res.status(404).json({ message: "Attachment not found" });
+        }
+
+        // Check access permissions
+        const task = await storage.getTask(attachment.taskId);
+        if (user?.role === "customer") {
+          if (!task || task.createdBy !== userId) {
+            return res.status(403).json({ message: "Access denied" });
+          }
+        }
+
+        // Generate presigned URL for S3 object
+        const s3Key = s3Service.extractKeyFromUrl(attachment.fileUrl);
+        const presignedUrl = await s3Service.getPresignedUrl(s3Key, 3600); // 1 hour expiry
+
+        // Fetch the file from S3 and stream it to the client
+        const s3Response = await fetch(presignedUrl);
+        if (!s3Response.ok) {
+          return res.status(500).json({
+            message: "Failed to fetch file from storage",
+            error: s3Response.statusText,
+          });
+        }
+
+        // Set headers for file download
+        res.setHeader(
+          "Content-Type",
+          attachment.fileType || "application/octet-stream"
+        );
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${encodeURIComponent(attachment.fileName)}"`
+        );
+        res.setHeader("Content-Length", attachment.fileSize.toString());
+
+        // Stream the file to the client
+        const buffer = await s3Response.arrayBuffer();
+        res.send(Buffer.from(buffer));
+      } catch (error) {
+        console.error("Error generating download URL:", error);
+        res.status(500).json({
+          message: "Failed to generate download URL",
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    }
+  );
+
+  app.delete("/api/attachments/:id", isAuthenticated, async (req: any, res) => {
     try {
       const attachmentId = parseInt(req.params.id);
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+
+      // Get attachment to check permissions and get S3 key
+      const [attachment] = await db
+        .select()
+        .from(taskAttachments)
+        .where(eq(taskAttachments.id, attachmentId))
+        .limit(1);
+
+      if (!attachment) {
+        return res.status(404).json({ message: "Attachment not found" });
+      }
+
+      // Check permissions (uploader or admin/manager can delete)
+      const task = await storage.getTask(attachment.taskId);
+      if (user?.role === "customer" && attachment.userId !== userId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      // Delete from S3 if it's an S3 URL
+      if (s3Service.isS3Url(attachment.fileUrl)) {
+        try {
+          const s3Key = s3Service.extractKeyFromUrl(attachment.fileUrl);
+          await s3Service.deleteFile(s3Key);
+        } catch (error) {
+          console.warn("Failed to delete file from S3:", error);
+          // Continue with database deletion even if S3 delete fails
+        }
+      }
+
+      // Delete from database
       await storage.deleteTaskAttachment(attachmentId);
       res.status(204).send();
     } catch (error) {
       console.error("Error deleting attachment:", error);
-      res.status(500).json({ message: "Failed to delete attachment" });
+      res.status(500).json({
+        message: "Failed to delete attachment",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
     }
   });
 
@@ -3092,7 +3537,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           smtpSettings.awsAccessKeyId &&
           smtpSettings.awsSecretAccessKey
         ) {
-          const { sendEmailWithTemplate } = await import("./ses");
+          const { sendEmailWithTemplate } = await import("../ses");
           const inviteUrl = `${req.protocol}://${req.get(
             "host"
           )}/auth?mode=register&email=${encodeURIComponent(
@@ -3302,7 +3747,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         smtpSettings.awsAccessKeyId &&
         smtpSettings.awsSecretAccessKey
       ) {
-        const { sendEmailWithTemplate } = await import("./ses");
+        const { sendEmailWithTemplate } = await import("../ses");
         const inviteUrl = `${req.protocol}://${req.get(
           "host"
         )}/auth?mode=register&email=${encodeURIComponent(
@@ -3580,7 +4025,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const taskId = parseInt(req.params.id);
         const { wasHelpful } = req.body;
 
-        const { aiAutoResponseService } = await import("./aiAutoResponse");
+        const { aiAutoResponseService } = await import("../aiAutoResponse");
         await aiAutoResponseService.updateResponseEffectiveness(
           taskId,
           wasHelpful
@@ -3734,7 +4179,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const articleId = parseInt(req.params.id);
         const { isPublished } = req.body;
 
-        const { knowledgeBaseService } = await import("./knowledgeBase");
+        const { knowledgeBaseService } = await import("../knowledgeBase");
         if (isPublished) {
           await knowledgeBaseService.publishArticle(articleId);
         } else {
@@ -3755,7 +4200,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const articleId = parseInt(req.params.id);
       const { wasHelpful } = req.body;
 
-      const { knowledgeBaseService } = await import("./knowledgeBase");
+      const { knowledgeBaseService } = await import("../knowledgeBase");
       await knowledgeBaseService.updateArticleEffectiveness(
         articleId,
         wasHelpful
@@ -4755,6 +5200,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
   );
+
+  // Stats endpoints
+  app.get("/api/stats/agent", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (user.role !== "agent") {
+        return res
+          .status(403)
+          .json({ message: "Access denied. Agent role required." });
+      }
+
+      const stats = await storage.getAgentStats(userId);
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching agent stats:", error);
+      res.status(500).json({ message: "Failed to fetch agent stats" });
+    }
+  });
+
+  app.get("/api/stats/manager", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      if (user.role !== "manager") {
+        return res
+          .status(403)
+          .json({ message: "Access denied. Manager role required." });
+      }
+
+      const stats = await storage.getManagerStats(userId);
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching manager stats:", error);
+      res.status(500).json({ message: "Failed to fetch manager stats" });
+    }
+  });
 
   // Initialize AI systems
   try {

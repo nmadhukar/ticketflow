@@ -20,6 +20,7 @@ A comprehensive enterprise-grade ticketing system designed for small to medium b
 ## Features
 
 ### Core Features
+
 - **Advanced Ticket Management**: Create, track, and manage tickets with custom numbering (configurable prefix)
 - **Role-Based Access Control**: Admin, Manager, User, and Customer roles with granular permissions
 - **Team Collaboration**: Create teams, assign tickets, and collaborate with comments
@@ -28,6 +29,7 @@ A comprehensive enterprise-grade ticketing system designed for small to medium b
 - **Real-time Activity Feed**: Track recent activities across the system
 
 ### Enterprise Features
+
 - **Microsoft 365 SSO Integration**: Seamless authentication with Microsoft accounts
 - **Microsoft Teams Integration**: Automatic notifications to Teams channels
 - **Email Integration**: Send and receive emails using AWS SES
@@ -37,6 +39,7 @@ A comprehensive enterprise-grade ticketing system designed for small to medium b
 - **User Invitation System**: Invite users via email with auto-approval
 
 ### Advanced Features
+
 - **Help Documentation System**: Upload and manage help documents (Word, PDF)
 - **User Guide Management**: Create and organize user guides by category
 - **Company Policy Management**: Upload and manage company policy documents
@@ -49,6 +52,7 @@ A comprehensive enterprise-grade ticketing system designed for small to medium b
 ### Technology Stack
 
 #### Frontend
+
 - **Framework**: React 18 with TypeScript
 - **UI Components**: shadcn/ui (built on Radix UI)
 - **Styling**: Tailwind CSS with CSS variables
@@ -58,6 +62,7 @@ A comprehensive enterprise-grade ticketing system designed for small to medium b
 - **Icons**: Lucide React & React Icons
 
 #### Backend
+
 - **Runtime**: Node.js with Express.js
 - **Language**: TypeScript
 - **Database**: PostgreSQL (Neon Serverless)
@@ -94,22 +99,26 @@ The system uses a comprehensive relational database schema:
 ## Installation
 
 1. Clone the repository:
+
 ```bash
 git clone https://github.com/your-org/ticketflow.git
 cd ticketflow
 ```
 
 2. Install dependencies:
+
 ```bash
 npm install
 ```
 
 3. Set up the database:
+
 ```bash
 npm run db:push
 ```
 
 4. Seed email templates:
+
 ```bash
 # Email templates are automatically seeded on first run
 ```
@@ -135,7 +144,7 @@ SESSION_SECRET=your-super-secret-session-key
 # Application
 NODE_ENV=development
 REPL_ID=your-repl-id
-REPLIT_DOMAINS=localhost:5000
+MICROSOFT_REDIRECT_URL=http://localhost:5000/api/auth/microsoft/callback
 ```
 
 ### Optional Environment Variables
@@ -223,14 +232,15 @@ npm run test:coverage
 ### Writing Tests
 
 Example unit test:
+
 ```typescript
-describe('TaskService', () => {
-  it('should create a task with proper ticket number', async () => {
+describe("TaskService", () => {
+  it("should create a task with proper ticket number", async () => {
     const task = await taskService.create({
-      title: 'Test Task',
-      description: 'Test Description'
+      title: "Test Task",
+      description: "Test Description",
     });
-    
+
     expect(task.ticketNumber).toMatch(/^TKT-\d{4}-\d{4}$/);
   });
 });
@@ -241,6 +251,7 @@ describe('TaskService', () => {
 ### Authentication Endpoints
 
 #### Register User
+
 ```http
 POST /api/auth/register
 Content-Type: application/json
@@ -254,6 +265,7 @@ Content-Type: application/json
 ```
 
 #### Login
+
 ```http
 POST /api/auth/login
 Content-Type: application/json
@@ -265,6 +277,7 @@ Content-Type: application/json
 ```
 
 #### Logout
+
 ```http
 POST /api/auth/logout
 ```
@@ -272,6 +285,7 @@ POST /api/auth/logout
 ### Ticket Management
 
 #### Create Ticket
+
 ```http
 POST /api/tasks
 Content-Type: application/json
@@ -289,11 +303,13 @@ Content-Type: application/json
 ```
 
 #### Get Tickets
+
 ```http
 GET /api/tasks?status=open&priority=high&page=1&limit=20
 ```
 
 #### Update Ticket
+
 ```http
 PUT /api/tasks/:id
 Content-Type: application/json
@@ -307,6 +323,7 @@ Content-Type: application/json
 ### Team Management
 
 #### Create Team
+
 ```http
 POST /api/teams
 Content-Type: application/json
@@ -318,6 +335,7 @@ Content-Type: application/json
 ```
 
 #### Add Team Member
+
 ```http
 POST /api/teams/:teamId/members
 Content-Type: application/json
@@ -395,6 +413,7 @@ npm run db:push
 ### Monitoring
 
 The application includes:
+
 - Request logging
 - Error tracking
 - Performance monitoring

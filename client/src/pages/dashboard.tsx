@@ -26,6 +26,7 @@
 import MainWrapper from "@/components/main-wrapper";
 import StatsCard from "@/components/stats-card";
 import { BedrockCostMonitoring } from "@/components/bedrock-cost-monitoring";
+import { S3UsageMonitoring } from "@/components/s3-usage-monitoring";
 // import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
@@ -283,6 +284,13 @@ export default function Dashboard() {
         </div>
       ) : (
         <></>
+      )}
+
+      {/* S3 Usage Monitoring - Admin Only */}
+      {(user as any)?.role === "admin" && (
+        <div className="mb-8">
+          <S3UsageMonitoring />
+        </div>
       )}
 
       <div className="grid grid-cols-3 gap-10">

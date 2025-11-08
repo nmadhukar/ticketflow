@@ -72,11 +72,9 @@ export async function setupMicrosoftAuth(app: Express) {
     return;
   }
 
-  const redirectUrl = `${
-    process.env.REPLIT_DOMAINS?.split(",")[0]
-      ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}`
-      : "http://localhost:5000"
-  }/api/auth/microsoft/callback`;
+  const redirectUrl =
+    process.env.MICROSOFT_REDIRECT_URL ||
+    "http://localhost:5000/api/auth/microsoft/callback";
 
   console.log("Microsoft Auth Configuration:");
   console.log("- Client ID:", clientId);

@@ -1,6 +1,6 @@
 import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
+import { registerRoutes } from "./routes/index";
 import { setupVite, serveStatic, log } from "./vite";
 import {
   applySecurity,
@@ -17,9 +17,11 @@ app.set("trust proxy", 1);
 applySecurity(app);
 
 // Increase JSON body parser limit to handle base64 file uploads (logo, etc.)
-// Default is 100kb, we need at least 10MB to match multer's file size limit
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: false, limit: "10mb" }));
+// Increased to support file uploads with task creation
+// Uses MAX_REQUEST_SIZE_MB env variable, defaults to 50MB
+const maxRequestSizeMB = parseInt(process.env.MAX_REQUEST_SIZE_MB || "50", 10);
+app.use(express.json({ limit: `${maxRequestSizeMB}mb` }));
+app.use(express.urlencoded({ extended: true, limit: `${maxRequestSizeMB}mb` }));
 
 app.use((req, res, next) => {
   const start = Date.now();

@@ -166,6 +166,8 @@ export function useWebSocket() {
         // Invalidate ticket queries to refresh the list
         queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
         queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/stats/agent"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/stats/manager"] });
         queryClient.invalidateQueries({ queryKey: ["/api/activity"] });
 
         // Show notification for new ticket
@@ -187,6 +189,8 @@ export function useWebSocket() {
         });
         queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
         queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/stats/agent"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/stats/manager"] });
 
         // Show notification for important updates
         if (message.data.changes?.status === "resolved") {

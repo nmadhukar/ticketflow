@@ -46,6 +46,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Layout } from "@/components/layout";
 import { AiChatBot } from "@/components/AiChatBot";
 import { ProtectedRoute } from "@/components/protected-route";
+import { StatsDrawer } from "@/components/stats-drawer";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
@@ -123,7 +124,9 @@ function Router() {
                 <Route
                   path="/teams/:id"
                   component={() => (
-                    <ProtectedRoute allowedRoles={["admin", "manager"]}>
+                    <ProtectedRoute
+                      allowedRoles={["admin", "manager", "agent"]}
+                    >
                       <TeamDetail />
                     </ProtectedRoute>
                   )}
@@ -159,6 +162,7 @@ function Router() {
       </Switch>
       {/* Show AI Chat Bot for authenticated users */}
       {!isLoading && isAuthenticated && <AiChatBot />}
+      {!isLoading && isAuthenticated && <StatsDrawer />}
     </>
   );
 }

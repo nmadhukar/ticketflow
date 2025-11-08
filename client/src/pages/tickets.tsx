@@ -294,6 +294,10 @@ export default function Tasks() {
     role === "admin" || role === "manager" ? "/api/teams" : "/api/teams/my";
   const { data: teams } = useQuery<any[]>({
     queryKey: [teamsEndpoint],
+    queryFn: async () => {
+      const res = await apiRequest("GET", teamsEndpoint);
+      return res.json();
+    },
     enabled: !!role && role !== "customer" && isAuthenticated,
     initialData: [],
   });

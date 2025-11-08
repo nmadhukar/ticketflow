@@ -1,0 +1,59 @@
+{
+  "drawer": {
+    "title": "统计数据",
+    "close": "关闭",
+    "refresh": "刷新"
+  },
+  "agent": {
+    "title": "我的统计数据",
+    "personal": {
+      "title": "个人统计",
+      "assignedToMe": "分配给我",
+      "createdByMe": "我创建的",
+      "resolutionRate": "解决率",
+      "avgResolutionTime": "平均解决时间"
+    },
+    "team": {
+      "title": "团队概览",
+      "selectTeam": "选择团队",
+      "totalTickets": "总票数",
+      "openTickets": "未解决票数",
+      "inProgress": "进行中",
+      "resolved": "已解决",
+      "highPriority": "高优先级",
+      "noTeam": "您未分配到任何团队"
+    }
+  },
+  "manager": {
+    "title": "部门统计",
+    "department": {
+      "title": "部门概览",
+      "selectDepartment": "选择部门",
+      "totalTickets": "总票数",
+      "openTickets": "未解决票数",
+      "inProgress": "进行中",
+      "resolved": "已解决",
+      "highPriority": "高优先级",
+      "avgResolutionTime": "平均解决时间"
+    },
+    "priority": {
+      "title": "优先级分布"
+    },
+    "category": {
+      "title": "类别细分"
+    },
+    "teams": {
+      "title": "团队绩效",
+      "memberStats": "团队成员统计"
+    }
+  },
+  "common": {
+    "loading": "加载统计数据中...",
+    "error": "加载统计数据失败",
+    "noData": "无可用数据",
+    "hours": "小时",
+    "days": "天",
+    "percentage": "{{value}}%"
+  }
+}
+

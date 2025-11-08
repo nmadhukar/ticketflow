@@ -9,6 +9,7 @@ import { SaveEmailSettingsSchema, TestEmailSchema } from "@shared/email";
 import { getEmailAdapter } from "../email/adapters";
 import { getUserId, isAdmin } from "../middleware/admin.middleware";
 import { isAuthenticated } from "../auth";
+import { s3Service } from "../services/s3Service";
 
 export function registerCompanySettingsRoutes(app: Express): void {
   // GET /api/company-settings/branding - scoped fetch
@@ -18,6 +19,20 @@ export function registerCompanySettingsRoutes(app: Express): void {
     async (req, res) => {
       try {
         const s = await storage.getCompanySettings();
+
+        // If logo is stored as S3 key, generate presigned URL
+        if (s?.logoUrl && s3Service.isS3Url(s.logoUrl)) {
+          try {
+            const presignedUrl = await s3Service.getPresignedUrl(
+              s3Service.extractKeyFromUrl(s.logoUrl),
+              86400 // 24 hours for logos
+            );
+            s.logoUrl = presignedUrl;
+          } catch (error) {
+            console.warn("Failed to generate presigned URL for logo:", error);
+            // Keep original URL/key if presigned URL generation fails
+          }
+        }
         res.json({
           companyName: s?.companyName ?? "TicketFlow",
           logoUrl: s?.logoUrl ?? null,
@@ -221,7 +236,35 @@ export function registerCompanySettingsRoutes(app: Express): void {
             .json({ message: "Invalid base64 file data format" });
         }
 
-        const logoUrl = `data:${fileType};base64,${fileData}`;
+        // Convert base64 to Buffer
+        const buffer = Buffer.from(fileData, "base64");
+
+        // Determine file extension from MIME type
+        const extension =
+          fileType === "image/jpeg" || fileType === "image/jpg" ? "jpg" : "png";
+
+        // Upload to S3
+        const s3Key = `logos/company-logo.${extension}`;
+
+        // Delete old logo from S3 if it exists
+        const currentSettings = await storage.getCompanySettings();
+        if (
+          currentSettings?.logoUrl &&
+          s3Service.isS3Url(currentSettings.logoUrl)
+        ) {
+          try {
+            const oldKey = s3Service.extractKeyFromUrl(currentSettings.logoUrl);
+            await s3Service.deleteFile(oldKey);
+          } catch (error) {
+            console.warn("Failed to delete old logo from S3:", error);
+            // Continue with upload even if deletion fails
+          }
+        }
+
+        await s3Service.uploadFile(s3Key, buffer, fileType);
+
+        // Store S3 key in database (we'll use presigned URLs when serving)
+        const logoUrl = s3Key;
         const userId = getUserId(req);
         const settings = await storage.updateCompanySettings(
           { logoUrl },
@@ -230,7 +273,10 @@ export function registerCompanySettingsRoutes(app: Express): void {
         res.json(settings);
       } catch (error) {
         console.error("Error uploading logo:", error);
-        res.status(500).json({ message: "Failed to upload logo" });
+        res.status(500).json({
+          message: "Failed to upload logo",
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
       }
     }
   );

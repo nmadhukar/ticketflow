@@ -63,10 +63,16 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
   });
 
   // Fetch ticket attachments
-  const { data: attachments, refetch: refetchAttachments } = useQuery<any[]>({
-    queryKey: ["/api/tasks", ticketId, "attachments"],
+  const {
+    data: attachments,
+    isLoading: attachmentsLoading,
+    error: attachmentsError,
+    refetch: refetchAttachments,
+  } = useQuery<any[]>({
+    queryKey: [`/api/tasks/${ticketId}/attachments`],
     retry: false,
-    initialData: [],
+    enabled: !!ticketId,
+    refetchOnMount: "always",
   });
 
   // Add comment mutation
@@ -148,21 +154,40 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
 
   // Attachment mutations
   const addAttachmentMutation = useMutation({
-    mutationFn: async (attachmentData: any) => {
-      return await apiRequest(
+    mutationFn: async (formData: FormData) => {
+      const res = await apiRequest(
         "POST",
         `/api/tasks/${ticketId}/attachments`,
-        attachmentData
+        formData
       );
+      return res.json();
     },
     onSuccess: () => {
       toast({ title: "Success", description: "File attached" });
-      refetchAttachments();
+      queryClient.invalidateQueries({
+        queryKey: [`/api/tasks/${ticketId}/attachments`],
+      });
     },
     onError: (error: any) => {
+      // Check for S3 configuration error
+      let errorMessage = error?.message || "Please try again";
+
+      // Check if error data contains S3 configuration error
+      if (error?.data?.error === "S3_CONFIGURATION_REQUIRED") {
+        errorMessage = error.data.message;
+      } else if (
+        error?.message?.includes("S3_CONFIGURATION_REQUIRED") ||
+        error?.message?.includes("File storage is not available")
+      ) {
+        errorMessage =
+          role === "admin"
+            ? "File storage is not configured. Please configure AWS S3 credentials in environment variables."
+            : "File storage is not available. Please contact your administrator to configure file storage.";
+      }
+
       toast({
         title: "Failed to attach file",
-        description: error?.message || "Please try again",
+        description: errorMessage,
         variant: "destructive",
       });
     },
@@ -174,7 +199,9 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
     },
     onSuccess: () => {
       toast({ title: "Success", description: "Attachment deleted" });
-      refetchAttachments();
+      queryClient.invalidateQueries({
+        queryKey: [`/api/tasks/${ticketId}/attachments`],
+      });
     },
     onError: (error: any) => {
       toast({
@@ -188,14 +215,12 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    // simulate upload to storage; in real flow, upload and send URL
-    const fakeUrl = `https://storage.example.com/${Date.now()}_${file.name}`;
-    await addAttachmentMutation.mutateAsync({
-      fileName: file.name,
-      fileSize: file.size,
-      fileType: file.type,
-      fileUrl: fakeUrl,
-    });
+
+    // Create FormData for multipart file upload
+    const formData = new FormData();
+    formData.append("file", file);
+
+    await addAttachmentMutation.mutateAsync(formData);
     e.target.value = "";
   };
 
@@ -214,6 +239,59 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
   })();
 
   const canDeleteAttachment = role === "admin" || role === "manager";
+
+  const handleDownloadAttachment = async (
+    fileUrl: string,
+    fileName: string,
+    attachmentId: number
+  ) => {
+    try {
+      // Use the download endpoint which handles presigned URL generation server-side
+      const downloadUrl = `/api/attachments/${attachmentId}/download`;
+
+      // Fetch the file as a blob from our server endpoint
+      const response = await fetch(downloadUrl, {
+        credentials: "include",
+        method: "GET",
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(
+          `Download failed: ${response.status} ${response.statusText}`,
+          errorText
+        );
+        throw new Error(`Failed to download file: ${response.statusText}`);
+      }
+
+      const blob = await response.blob();
+
+      // Create a blob URL and trigger download
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = fileName;
+      link.style.display = "none";
+
+      // Append to body, click, and clean up
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      // Revoke the blob URL to free up memory
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error("Error downloading file:", error);
+      toast({
+        title: "Download failed",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Failed to download the file. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
 
   const handleSubmitComment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -381,7 +459,17 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
             )}
           </CardHeader>
           <CardContent>
-            {attachments && attachments.length > 0 ? (
+            {attachmentsLoading ? (
+              <div className="text-sm text-muted-foreground">
+                Loading attachments...
+              </div>
+            ) : attachmentsError ? (
+              <div className="text-sm text-destructive">
+                Failed to load attachments. Please try again.
+              </div>
+            ) : attachments &&
+              Array.isArray(attachments) &&
+              attachments.length > 0 ? (
               <div className="space-y-3">
                 {attachments.map((attachment: any) => (
                   <div
@@ -404,7 +492,11 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
                         variant="ghost"
                         size="sm"
                         onClick={() =>
-                          window.open(attachment.fileUrl, "_blank")
+                          handleDownloadAttachment(
+                            attachment.fileUrl,
+                            attachment.fileName,
+                            attachment.id
+                          )
                         }
                       >
                         Download

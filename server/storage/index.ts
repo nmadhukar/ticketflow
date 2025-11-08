@@ -2360,6 +2360,608 @@ export class DatabaseStorage implements IStorage {
       .returning();
     return result;
   }
+
+  // Stats operations
+  async getAgentStats(userId: string): Promise<{
+    personal: {
+      assignedToMe: number;
+      createdByMe: number;
+      resolutionRate: number;
+      avgResolutionTime: number;
+    };
+    team?: Array<{
+      teamId: number;
+      teamName: string;
+      totalTickets: number;
+      openTickets: number;
+      inProgress: number;
+      resolved: number;
+      closed: number;
+      highPriority: number;
+    }>;
+  }> {
+    // Personal stats: tickets assigned to me
+    const assignedTickets = await db
+      .select({ count: count() })
+      .from(tasks)
+      .where(and(eq(tasks.assigneeId, userId), eq(tasks.assigneeType, "user")));
+
+    const assignedCount = Number(assignedTickets[0]?.count || 0);
+
+    // Personal stats: tickets created by me
+    const createdTickets = await db
+      .select({ count: count() })
+      .from(tasks)
+      .where(eq(tasks.createdBy, userId));
+
+    const createdCount = Number(createdTickets[0]?.count || 0);
+
+    // Personal stats: resolution rate and avg resolution time
+    const resolvedTickets = await db
+      .select({
+        count: count(),
+        avgTime: sql<number>`AVG(
+          EXTRACT(EPOCH FROM (COALESCE(${tasks.resolvedAt}, ${tasks.closedAt}) - ${tasks.createdAt})) / 3600
+        )`,
+      })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.assigneeId, userId),
+          eq(tasks.assigneeType, "user"),
+          or(eq(tasks.status, "resolved"), eq(tasks.status, "closed"))
+        )
+      );
+
+    const resolvedCount = Number(resolvedTickets[0]?.count || 0);
+    const resolutionRate =
+      assignedCount > 0 ? resolvedCount / assignedCount : 0;
+    const avgResolutionTime = Number(resolvedTickets[0]?.avgTime || 0);
+
+    // Team stats: get user's teams (only teams the user is enrolled in via teamMembers table)
+    const userTeams = await this.getUserTeams(userId);
+    const teamStats: Array<{
+      teamId: number;
+      teamName: string;
+      totalTickets: number;
+      openTickets: number;
+      inProgress: number;
+      resolved: number;
+      closed: number;
+      highPriority: number;
+    }> = [];
+
+    for (const team of userTeams) {
+      // Total tickets assigned to team
+      const totalResult = await db
+        .select({ count: count() })
+        .from(tasks)
+        .where(
+          and(eq(tasks.assigneeTeamId, team.id), eq(tasks.assigneeType, "team"))
+        );
+
+      const total = Number(totalResult[0]?.count || 0);
+
+      // Open tickets
+      const openResult = await db
+        .select({ count: count() })
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.assigneeTeamId, team.id),
+            eq(tasks.assigneeType, "team"),
+            eq(tasks.status, "open")
+          )
+        );
+
+      const open = Number(openResult[0]?.count || 0);
+
+      // In progress tickets
+      const inProgressResult = await db
+        .select({ count: count() })
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.assigneeTeamId, team.id),
+            eq(tasks.assigneeType, "team"),
+            eq(tasks.status, "in_progress")
+          )
+        );
+
+      const inProgress = Number(inProgressResult[0]?.count || 0);
+
+      // Resolved tickets
+      const resolvedResult = await db
+        .select({ count: count() })
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.assigneeTeamId, team.id),
+            eq(tasks.assigneeType, "team"),
+            eq(tasks.status, "resolved")
+          )
+        );
+
+      const resolved = Number(resolvedResult[0]?.count || 0);
+
+      // Closed tickets
+      const closedResult = await db
+        .select({ count: count() })
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.assigneeTeamId, team.id),
+            eq(tasks.assigneeType, "team"),
+            eq(tasks.status, "closed")
+          )
+        );
+
+      const closed = Number(closedResult[0]?.count || 0);
+
+      // High priority tickets (high or urgent)
+      const highPriorityResult = await db
+        .select({ count: count() })
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.assigneeTeamId, team.id),
+            eq(tasks.assigneeType, "team"),
+            or(eq(tasks.priority, "high"), eq(tasks.priority, "urgent"))
+          )
+        );
+
+      const highPriority = Number(highPriorityResult[0]?.count || 0);
+
+      teamStats.push({
+        teamId: team.id,
+        teamName: team.name,
+        totalTickets: total,
+        openTickets: open,
+        inProgress,
+        resolved,
+        closed,
+        highPriority,
+      });
+    }
+
+    return {
+      personal: {
+        assignedToMe: assignedCount,
+        createdByMe: createdCount,
+        resolutionRate,
+        avgResolutionTime,
+      },
+      team: teamStats.length > 0 ? teamStats : undefined,
+    };
+  }
+
+  async getManagerStats(userId: string): Promise<{
+    department: Array<{
+      departmentId: number;
+      departmentName: string;
+      totalTickets: number;
+      openTickets: number;
+      inProgress: number;
+      resolved: number;
+      closed: number;
+      highPriority: number;
+      avgResolutionTime: number;
+    }>;
+    priorityDistribution: {
+      urgent: number;
+      high: number;
+      medium: number;
+      low: number;
+    };
+    categoryBreakdown: Array<{
+      category: string;
+      count: number;
+      percentage: number;
+    }>;
+    teamPerformance: Array<{
+      teamId: number;
+      teamName: string;
+      totalTickets: number;
+      resolutionRate: number;
+      avgResolutionTime: number;
+      members: Array<{
+        userId: string;
+        name: string;
+        assigned: number;
+        resolved: number;
+        resolutionRate: number;
+        avgResolutionTime: number;
+      }>;
+    }>;
+  }> {
+    // Get departments managed by this manager
+    const managerDepartments = await db
+      .select()
+      .from(departments)
+      .where(
+        and(
+          eq(departments.managerId as any, userId),
+          eq(departments.isActive, true)
+        )
+      );
+
+    const departmentStats: Array<{
+      departmentId: number;
+      departmentName: string;
+      totalTickets: number;
+      openTickets: number;
+      inProgress: number;
+      resolved: number;
+      closed: number;
+      highPriority: number;
+      avgResolutionTime: number;
+    }> = [];
+
+    let allDepartmentTaskIds: number[] = [];
+
+    for (const dept of managerDepartments) {
+      // Get teams in this department
+      const deptTeams = await db
+        .select({ id: teams.id })
+        .from(teams)
+        .where(eq(teams.departmentId, dept.id));
+
+      const teamIds = deptTeams.map((t) => t.id);
+
+      if (teamIds.length === 0) {
+        departmentStats.push({
+          departmentId: dept.id,
+          departmentName: dept.name,
+          totalTickets: 0,
+          openTickets: 0,
+          inProgress: 0,
+          resolved: 0,
+          closed: 0,
+          highPriority: 0,
+          avgResolutionTime: 0,
+        });
+        continue;
+      }
+
+      // Get all tickets for teams in this department
+      const deptTasks = await db
+        .select({
+          id: tasks.id,
+          status: tasks.status,
+          priority: tasks.priority,
+        })
+        .from(tasks)
+        .where(
+          and(
+            inArray(tasks.assigneeTeamId, teamIds),
+            eq(tasks.assigneeType, "team")
+          )
+        );
+
+      allDepartmentTaskIds.push(...deptTasks.map((t) => t.id));
+
+      // Calculate department stats
+      const total = deptTasks.length;
+      const open = deptTasks.filter((t) => t.status === "open").length;
+      const inProgress = deptTasks.filter(
+        (t) => t.status === "in_progress"
+      ).length;
+      const resolved = deptTasks.filter((t) => t.status === "resolved").length;
+      const closed = deptTasks.filter((t) => t.status === "closed").length;
+      const highPriority = deptTasks.filter(
+        (t) => t.priority === "high" || t.priority === "urgent"
+      ).length;
+
+      // Calculate avg resolution time for resolved/closed tickets
+      const resolvedTasks = await db
+        .select({
+          avgTime: sql<number>`AVG(
+            EXTRACT(EPOCH FROM (COALESCE(${tasks.resolvedAt}, ${tasks.closedAt}) - ${tasks.createdAt})) / 3600
+          )`,
+        })
+        .from(tasks)
+        .where(
+          and(
+            inArray(tasks.assigneeTeamId, teamIds),
+            eq(tasks.assigneeType, "team"),
+            or(eq(tasks.status, "resolved"), eq(tasks.status, "closed"))
+          )
+        );
+
+      const avgResolutionTime = Number(resolvedTasks[0]?.avgTime || 0);
+
+      departmentStats.push({
+        departmentId: dept.id,
+        departmentName: dept.name,
+        totalTickets: total,
+        openTickets: open,
+        inProgress,
+        resolved,
+        closed,
+        highPriority,
+        avgResolutionTime,
+      });
+    }
+
+    // Priority distribution across all department tickets
+    const priorityResult = await db
+      .select({
+        priority: tasks.priority,
+        count: count(),
+      })
+      .from(tasks)
+      .where(
+        allDepartmentTaskIds.length > 0
+          ? inArray(tasks.id, allDepartmentTaskIds)
+          : sql`FALSE`
+      )
+      .groupBy(tasks.priority);
+
+    const priorityDistribution = {
+      urgent: 0,
+      high: 0,
+      medium: 0,
+      low: 0,
+    };
+
+    for (const row of priorityResult) {
+      const priority = row.priority?.toLowerCase() || "";
+      const count = Number(row.count || 0);
+      if (priority === "urgent") priorityDistribution.urgent = count;
+      else if (priority === "high") priorityDistribution.high = count;
+      else if (priority === "medium") priorityDistribution.medium = count;
+      else if (priority === "low") priorityDistribution.low = count;
+    }
+
+    // Category breakdown
+    const categoryResult = await db
+      .select({
+        category: tasks.category,
+        count: count(),
+      })
+      .from(tasks)
+      .where(
+        allDepartmentTaskIds.length > 0
+          ? inArray(tasks.id, allDepartmentTaskIds)
+          : sql`FALSE`
+      )
+      .groupBy(tasks.category);
+
+    const totalCategoryTickets = categoryResult.reduce(
+      (sum, row) => sum + Number(row.count || 0),
+      0
+    );
+
+    const categoryBreakdown = categoryResult.map((row) => ({
+      category: row.category || "unknown",
+      count: Number(row.count || 0),
+      percentage:
+        totalCategoryTickets > 0
+          ? (Number(row.count || 0) / totalCategoryTickets) * 100
+          : 0,
+    }));
+
+    // Team performance
+    const teamPerformance: Array<{
+      teamId: number;
+      teamName: string;
+      totalTickets: number;
+      resolutionRate: number;
+      avgResolutionTime: number;
+      members: Array<{
+        userId: string;
+        name: string;
+        assigned: number;
+        resolved: number;
+        resolutionRate: number;
+        avgResolutionTime: number;
+      }>;
+    }> = [];
+
+    for (const dept of managerDepartments) {
+      const deptTeams = await db
+        .select({ id: teams.id, name: teams.name })
+        .from(teams)
+        .where(eq(teams.departmentId, dept.id));
+
+      for (const team of deptTeams) {
+        // Team ticket stats
+        const teamTasks = await db
+          .select()
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.assigneeTeamId, team.id),
+              eq(tasks.assigneeType, "team")
+            )
+          );
+
+        const totalTickets = teamTasks.length;
+        const resolvedTickets = teamTasks.filter(
+          (t) => t.status === "resolved" || t.status === "closed"
+        ).length;
+        const resolutionRate =
+          totalTickets > 0 ? resolvedTickets / totalTickets : 0;
+
+        // Team avg resolution time
+        const teamResolvedResult = await db
+          .select({
+            avgTime: sql<number>`AVG(
+              EXTRACT(EPOCH FROM (COALESCE(${tasks.resolvedAt}, ${tasks.closedAt}) - ${tasks.createdAt})) / 3600
+            )`,
+          })
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.assigneeTeamId, team.id),
+              eq(tasks.assigneeType, "team"),
+              or(eq(tasks.status, "resolved"), eq(tasks.status, "closed"))
+            )
+          );
+
+        const teamAvgResolutionTime = Number(
+          teamResolvedResult[0]?.avgTime || 0
+        );
+
+        // Team member stats
+        const teamMemberList = await this.getTeamMembers(team.id);
+        const memberStats = await Promise.all(
+          teamMemberList.map(async (member) => {
+            const assignedResult = await db
+              .select({ count: count() })
+              .from(tasks)
+              .where(
+                and(
+                  eq(tasks.assigneeId, member.user.id),
+                  eq(tasks.assigneeType, "user")
+                )
+              );
+
+            const assigned = Number(assignedResult[0]?.count || 0);
+
+            const resolvedResult = await db
+              .select({
+                count: count(),
+                avgTime: sql<number>`AVG(
+                  EXTRACT(EPOCH FROM (COALESCE(${tasks.resolvedAt}, ${tasks.closedAt}) - ${tasks.createdAt})) / 3600
+                )`,
+              })
+              .from(tasks)
+              .where(
+                and(
+                  eq(tasks.assigneeId, member.user.id),
+                  eq(tasks.assigneeType, "user"),
+                  or(eq(tasks.status, "resolved"), eq(tasks.status, "closed"))
+                )
+              );
+
+            const resolved = Number(resolvedResult[0]?.count || 0);
+            const memberResolutionRate = assigned > 0 ? resolved / assigned : 0;
+            const memberAvgResolutionTime = Number(
+              resolvedResult[0]?.avgTime || 0
+            );
+
+            return {
+              userId: member.user.id,
+              name:
+                `${member.user.firstName || ""} ${
+                  member.user.lastName || ""
+                }`.trim() ||
+                member.user.email ||
+                "Unknown",
+              assigned,
+              resolved,
+              resolutionRate: memberResolutionRate,
+              avgResolutionTime: memberAvgResolutionTime,
+            };
+          })
+        );
+
+        teamPerformance.push({
+          teamId: team.id,
+          teamName: team.name,
+          totalTickets,
+          resolutionRate,
+          avgResolutionTime: teamAvgResolutionTime,
+          members: memberStats,
+        });
+      }
+    }
+
+    return {
+      department: departmentStats,
+      priorityDistribution,
+      categoryBreakdown,
+      teamPerformance,
+    };
+  }
+
+  async getS3UsageStats(): Promise<{
+    totalStorage: number;
+    totalFiles: number;
+    dailyUsage: Array<{ date: string; storage: number; files: number }>;
+    monthlyUsage: Array<{ month: string; storage: number; files: number }>;
+    recentUploads: Array<{
+      fileName: string;
+      fileSize: number;
+      uploadedAt: string;
+      taskId: number;
+    }>;
+  }> {
+    // Total storage and file count
+    const [totalStats] = await db
+      .select({
+        totalStorage: sql<number>`COALESCE(SUM(${taskAttachments.fileSize}), 0)`,
+        totalFiles: count(),
+      })
+      .from(taskAttachments);
+
+    const totalStorage = Number(totalStats?.totalStorage || 0);
+    const totalFiles = Number(totalStats?.totalFiles || 0);
+
+    // Daily usage trends (last 30 days)
+    const dailyUsageResult = await db
+      .select({
+        date: sql<string>`DATE(${taskAttachments.createdAt})::text`,
+        storage: sql<number>`COALESCE(SUM(${taskAttachments.fileSize}), 0)`,
+        files: count(),
+      })
+      .from(taskAttachments)
+      .where(sql`${taskAttachments.createdAt} >= NOW() - INTERVAL '30 days'`)
+      .groupBy(sql`DATE(${taskAttachments.createdAt})`)
+      .orderBy(sql`DATE(${taskAttachments.createdAt}) ASC`);
+
+    const dailyUsage = dailyUsageResult.map((row) => ({
+      date: row.date,
+      storage: Number(row.storage || 0),
+      files: Number(row.files || 0),
+    }));
+
+    // Monthly usage trends (last 12 months)
+    const monthlyUsageResult = await db
+      .select({
+        month: sql<string>`TO_CHAR(${taskAttachments.createdAt}, 'YYYY-MM')`,
+        storage: sql<number>`COALESCE(SUM(${taskAttachments.fileSize}), 0)`,
+        files: count(),
+      })
+      .from(taskAttachments)
+      .where(sql`${taskAttachments.createdAt} >= NOW() - INTERVAL '12 months'`)
+      .groupBy(sql`TO_CHAR(${taskAttachments.createdAt}, 'YYYY-MM')`)
+      .orderBy(sql`TO_CHAR(${taskAttachments.createdAt}, 'YYYY-MM') ASC`);
+
+    const monthlyUsage = monthlyUsageResult.map((row) => ({
+      month: row.month,
+      storage: Number(row.storage || 0),
+      files: Number(row.files || 0),
+    }));
+
+    // Recent uploads (last 20)
+    const recentUploadsResult = await db
+      .select({
+        fileName: taskAttachments.fileName,
+        fileSize: taskAttachments.fileSize,
+        uploadedAt: taskAttachments.createdAt,
+        taskId: taskAttachments.taskId,
+      })
+      .from(taskAttachments)
+      .orderBy(desc(taskAttachments.createdAt))
+      .limit(20);
+
+    const recentUploads = recentUploadsResult.map((row) => ({
+      fileName: row.fileName,
+      fileSize: row.fileSize,
+      uploadedAt: row.uploadedAt?.toISOString() || new Date().toISOString(),
+      taskId: row.taskId,
+    }));
+
+    return {
+      totalStorage,
+      totalFiles,
+      dailyUsage,
+      monthlyUsage,
+      recentUploads,
+    };
+  }
 }
 
 export const storage = new DatabaseStorage();

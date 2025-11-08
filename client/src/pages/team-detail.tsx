@@ -86,8 +86,13 @@ export default function TeamDetail() {
 
   const { data: members, isLoading: membersLoading } = useQuery({
     queryKey: ["/api/teams", id, "members"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/teams/${id}/members`);
+      return res.json();
+    },
     retry: false,
     enabled: isAuthenticated && !!id,
+    refetchOnMount: "always",
   });
 
   const { data: allUsers } = useQuery({
@@ -225,31 +230,41 @@ export default function TeamDetail() {
 
   const isUserAdminOrManager = ["manager", "admin"].includes(user?.role);
 
+  // Check if manager can add members (only if they created the team, or if admin)
+  const canAddMembers = (() => {
+    if (user?.role === "admin") return true;
+    if (user?.role === "manager") {
+      // Managers can only add members to teams they created
+      return team?.createdBy === (user as any)?.id;
+    }
+    return false;
+  })();
+
   return (
     <MainWrapper
       title="Teams"
       subTitle="Manage your teams and collaborate effectively"
-      action={
-        <Button
-          variant="outline"
-          onClick={() => {
-            const pathname =
-              user?.role === "admin"
-                ? "/admin/teams?section=management"
-                : "/teams";
-            setLocation(pathname);
-          }}
-        >
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Teams
-        </Button>
-      }
     >
       {teamLoading ? (
         <div className="text-center py-8">Loading team details...</div>
       ) : (
         <div className="space-y-6">
           {/* Team Info */}
+
+          <Button
+            variant="outline"
+            onClick={() => {
+              const pathname =
+                user?.role === "admin"
+                  ? "/admin/teams?section=management"
+                  : "/teams";
+              setLocation(pathname);
+            }}
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Teams
+          </Button>
+
           <Card>
             <CardHeader>
               <div className="flex items-start justify-between">
@@ -265,17 +280,15 @@ export default function TeamDetail() {
                   </div>
                 </div>
                 <div className="flex flex-col gap-4 items-end justify-between">
-                  {isUserAdminOrManager &&
-                    !membersLoading &&
-                    !!members.length && (
-                      <Button
-                        className="bg-blue-600 hover:bg-blue-700"
-                        onClick={() => setIsAddMemberOpen(true)}
-                      >
-                        <UserPlus className="h-4 w-4 mr-2" />
-                        Add Member
-                      </Button>
-                    )}
+                  {canAddMembers && !membersLoading && !!members.length && (
+                    <Button
+                      className="bg-blue-600 hover:bg-blue-700"
+                      onClick={() => setIsAddMemberOpen(true)}
+                    >
+                      <UserPlus className="h-4 w-4 mr-2" />
+                      Add Member
+                    </Button>
+                  )}
                   <Badge variant="outline" className="bg-blue-50 text-blue-700">
                     <Calendar className="h-3 w-3 mr-1" />
                     Created {new Date(team?.createdAt).toLocaleDateString()}
@@ -340,44 +353,46 @@ export default function TeamDetail() {
                           Joined{" "}
                           {new Date(member.joinedAt).toLocaleDateString()}
                         </span>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                            >
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            {member.role === "admin" ? (
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  updateMemberRoleMutation.mutate({
-                                    userId: member.userId,
-                                    role: "member",
-                                  })
-                                }
+                        {isUserAdminOrManager && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
                               >
-                                <Shield className="mr-2 h-4 w-4" />
-                                Remove Admin
-                              </DropdownMenuItem>
-                            ) : (
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  updateMemberRoleMutation.mutate({
-                                    userId: member.userId,
-                                    role: "admin",
-                                  })
-                                }
-                              >
-                                <Crown className="mr-2 h-4 w-4" />
-                                Make Admin
-                              </DropdownMenuItem>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              {member.role === "admin" ? (
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    updateMemberRoleMutation.mutate({
+                                      userId: member.userId,
+                                      role: "member",
+                                    })
+                                  }
+                                >
+                                  <Shield className="mr-2 h-4 w-4" />
+                                  Remove Admin
+                                </DropdownMenuItem>
+                              ) : (
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    updateMemberRoleMutation.mutate({
+                                      userId: member.userId,
+                                      role: "admin",
+                                    })
+                                  }
+                                >
+                                  <Crown className="mr-2 h-4 w-4" />
+                                  Make Admin
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -392,13 +407,15 @@ export default function TeamDetail() {
                     This team doesn't have any members. Add some members to get
                     started.
                   </p>
-                  <Button
-                    onClick={() => setIsAddMemberOpen(true)}
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    <UserPlus className="h-4 w-4 mr-2" />
-                    Add First Member
-                  </Button>
+                  {canAddMembers && (
+                    <Button
+                      onClick={() => setIsAddMemberOpen(true)}
+                      className="bg-blue-600 hover:bg-blue-700"
+                    >
+                      <UserPlus className="h-4 w-4 mr-2" />
+                      Add First Member
+                    </Button>
+                  )}
                 </div>
               )}
             </CardContent>

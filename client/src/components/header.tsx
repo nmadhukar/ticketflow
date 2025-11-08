@@ -120,6 +120,11 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
               src={(companyBranding as any).logoUrl}
               alt={(companyBranding as any).companyName || "Company Logo"}
               className="h-8 w-auto object-contain max-w-[120px]"
+              onError={(e) => {
+                // Fallback if image fails to load (e.g., expired presigned URL)
+                console.warn("Logo image failed to load");
+                e.currentTarget.style.display = "none";
+              }}
             />
           ) : (
             <TicketIcon className="h-10 w-auto text-primary" />

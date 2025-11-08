@@ -64,11 +64,20 @@ export default function Teams() {
     initialData: [],
   });
 
-  const { data: myTeams, isLoading: myTeamsLoading } = useQuery<any[]>({
+  const {
+    data: myTeams,
+    isLoading: myTeamsLoading,
+    error: myTeamsError,
+  } = useQuery<any[]>({
     queryKey: ["/api/teams/my"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/teams/my");
+      return res.json();
+    },
     retry: false,
     enabled: isAuthenticated,
     initialData: [],
+    refetchOnMount: "always",
   });
 
   const createTeamMutation = useMutation({

@@ -435,4 +435,75 @@ export interface IStorage {
   saveAIAnalytics(analytics: any): Promise<void>;
   getRecentResolvedTickets(days: number): Promise<Task[]>;
   updateKnowledgeLearningStats(stats: any): Promise<void>;
+
+  // Stats operations
+  getAgentStats(userId: string): Promise<{
+    personal: {
+      assignedToMe: number;
+      createdByMe: number;
+      resolutionRate: number;
+      avgResolutionTime: number;
+    };
+    team?: Array<{
+      teamId: number;
+      teamName: string;
+      totalTickets: number;
+      openTickets: number;
+      inProgress: number;
+      resolved: number;
+      closed: number;
+      highPriority: number;
+    }>;
+  }>;
+  getManagerStats(userId: string): Promise<{
+    department: Array<{
+      departmentId: number;
+      departmentName: string;
+      totalTickets: number;
+      openTickets: number;
+      inProgress: number;
+      resolved: number;
+      closed: number;
+      highPriority: number;
+      avgResolutionTime: number;
+    }>;
+    priorityDistribution: {
+      urgent: number;
+      high: number;
+      medium: number;
+      low: number;
+    };
+    categoryBreakdown: Array<{
+      category: string;
+      count: number;
+      percentage: number;
+    }>;
+    teamPerformance: Array<{
+      teamId: number;
+      teamName: string;
+      totalTickets: number;
+      resolutionRate: number;
+      avgResolutionTime: number;
+      members: Array<{
+        userId: string;
+        name: string;
+        assigned: number;
+        resolved: number;
+        resolutionRate: number;
+        avgResolutionTime: number;
+      }>;
+    }>;
+  }>;
+  getS3UsageStats(): Promise<{
+    totalStorage: number;
+    totalFiles: number;
+    dailyUsage: Array<{ date: string; storage: number; files: number }>;
+    monthlyUsage: Array<{ month: string; storage: number; files: number }>;
+    recentUploads: Array<{
+      fileName: string;
+      fileSize: number;
+      uploadedAt: string;
+      taskId: number;
+    }>;
+  }>;
 }

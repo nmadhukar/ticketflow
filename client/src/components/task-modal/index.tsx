@@ -19,7 +19,7 @@
  * - In-ticket editing capabilities for status, assignment, and due dates
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -59,6 +59,7 @@ import {
   FileText,
   CheckCircle,
   AlertTriangle,
+  AlertCircle,
   CircleDot,
   Target,
   Zap,
@@ -115,6 +116,10 @@ const getCategoryIcon = (category: string) => {
       return <User className="h-4 w-4 text-purple-500" />;
     case "enhancement":
       return <Target className="h-4 w-4 text-green-500" />;
+    case "incident":
+      return <AlertCircle className="h-4 w-4 text-orange-500" />;
+    case "request":
+      return <FileText className="h-4 w-4 text-teal-500" />;
     default:
       return <Tag className="h-4 w-4 text-slate-400" />;
   }
@@ -178,6 +183,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     departmentId: "",
     teamId: "",
   });
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
 
   // Load meta for create/edit (role-scoped values and permissions)
   const metaUrl = task?.id
@@ -196,6 +202,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   });
   const meta: any = metaQuery.data;
 
+  // Track the last task ID we processed to prevent infinite loops
+  const lastProcessedTaskIdRef = useRef<number | undefined>(undefined);
+
   // Prime cache with row task snapshot to avoid flash of empty while refetching
   useEffect(() => {
     if (task?.id) {
@@ -213,7 +222,8 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   // Optional: debug in development
 
   const departments = meta?.departments || [];
-  const teams = meta?.teams || [];
+  // Memoize teams to prevent unnecessary re-renders (stable reference)
+  const teams = useMemo(() => meta?.teams || [], [meta?.teams]);
   const assignableUsers = meta?.assignableUsers || [];
   const categoriesMeta = meta?.categories || [];
   const prioritiesMeta = meta?.priorities || [];
@@ -301,7 +311,20 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
 
   // Reset/initialize form snapshot when task or modal state changes
   useEffect(() => {
+    // Only run when modal is open
+    if (!isOpen) {
+      lastProcessedTaskIdRef.current = undefined;
+      return;
+    }
+
     const current = (taskDetails || task) as TaskMinimal | undefined;
+    const currentTaskId = current?.id;
+
+    // Prevent re-processing the same task
+    if (currentTaskId && lastProcessedTaskIdRef.current === currentTaskId) {
+      return;
+    }
+
     if (current) {
       // Derive department/team selection when team-assigned
       let departmentId = "";
@@ -341,7 +364,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         teamId,
       });
       setCurrentTab("details");
-    } else {
+      lastProcessedTaskIdRef.current = currentTaskId;
+    } else if (!task && !taskDetails) {
+      // Only reset form when creating a new task (not when data is loading)
       setFormData({
         title: "",
         description: "",
@@ -357,8 +382,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         teamId: "",
       });
       setCurrentTab("details");
+      lastProcessedTaskIdRef.current = undefined;
     }
-  }, [task, taskDetails, isOpen, teams]);
+  }, [task?.id, taskDetails?.id, isOpen, teams]);
 
   // Clear local state when modal closes to avoid stale flashes on next open
   useEffect(() => {
@@ -383,9 +409,48 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
 
   const createTaskMutation = useMutation({
     mutationFn: async (taskData: any) => {
-      return await apiRequest("POST", "/api/tasks", taskData);
+      // If there are files, use FormData; otherwise use JSON
+      if (selectedFiles.length > 0) {
+        const formData = new FormData();
+
+        // Append all task fields
+        Object.keys(taskData).forEach((key) => {
+          const value = taskData[key];
+          // Skip null, undefined, empty strings, and empty arrays
+          if (
+            value !== null &&
+            value !== undefined &&
+            value !== "" &&
+            !(Array.isArray(value) && value.length === 0)
+          ) {
+            if (value instanceof Date) {
+              formData.append(key, value.toISOString());
+            } else if (typeof value === "object" && !Array.isArray(value)) {
+              formData.append(key, JSON.stringify(value));
+            } else if (
+              typeof value === "number" ||
+              typeof value === "boolean"
+            ) {
+              formData.append(key, String(value));
+            } else {
+              formData.append(key, String(value));
+            }
+          }
+        });
+
+        // Append files
+        selectedFiles.forEach((file) => {
+          formData.append("files", file);
+        });
+
+        return await apiRequest("POST", "/api/tasks", formData);
+      } else {
+        return await apiRequest("POST", "/api/tasks", taskData);
+      }
     },
-    onSuccess: () => {
+    onSuccess: async (response) => {
+      const result = await response.json();
+
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tasks/my"] });
       // Invalidate any paged/filtered variants of tasks list
@@ -395,13 +460,33 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
           String(q.queryKey[0]).startsWith("/api/tasks"),
       });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats/agent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats/manager"] });
+
+      // Clear selected files
+      setSelectedFiles([]);
+
+      // Show warning if some attachments failed
+      if (result.warning) {
+        toast({
+          title: t("messages.success"),
+          description: t("tickets:modal.toasts.created"),
+        });
+        toast({
+          title: t("messages.warning", { defaultValue: "Warning" }),
+          description: result.warning,
+          variant: "default",
+        });
+      } else {
+        toast({
+          title: t("messages.success"),
+          description: t("tickets:modal.toasts.created"),
+        });
+      }
+
       onClose();
-      toast({
-        title: t("messages.success"),
-        description: t("tickets:modal.toasts.created"),
-      });
     },
-    onError: (error) => {
+    onError: (error: any) => {
       if (isUnauthorizedError(error)) {
         toast({
           title: t("messages.unauthorized"),
@@ -413,11 +498,30 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         }, 500);
         return;
       }
+
+      // Check for S3 configuration error
+      let errorMessage =
+        error?.message ||
+        t("tickets:modal.toasts.errorCreate", {
+          defaultValue: "Failed to create ticket",
+        });
+
+      // Check if error data contains S3 configuration error
+      if (error?.data?.error === "S3_CONFIGURATION_REQUIRED") {
+        errorMessage = error.data.message;
+      } else if (
+        error?.message?.includes("S3_CONFIGURATION_REQUIRED") ||
+        error?.message?.includes("File attachment is not available")
+      ) {
+        errorMessage =
+          user?.role === "admin"
+            ? "File storage is not configured. Please configure AWS S3 credentials in environment variables."
+            : "File attachment is not available. Please contact your administrator";
+      }
+
       toast({
         title: t("messages.error"),
-        description: t("tickets:modal.toasts.errorCreate", {
-          defaultValue: "Failed to create ticket",
-        }),
+        description: errorMessage,
         variant: "destructive",
       });
     },
@@ -431,6 +535,8 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tasks/my"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats/agent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats/manager"] });
       // Update task detail cache optimistically for a snappier UI
       if (task?.id) {
         queryClient.invalidateQueries({
@@ -468,7 +574,6 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   });
 
   const handleInputChange = (field: string, value: string) => {
-    console.log("handleInputChange", field, value);
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -1357,7 +1462,10 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
 
                 {!task && (
                   <TabsContent value="attachments" className="mt-0 p-6">
-                    <TaskAttachments task={task} />
+                    <TaskAttachments
+                      task={task}
+                      onFilesChange={setSelectedFiles}
+                    />
                   </TabsContent>
                 )}
               </div>

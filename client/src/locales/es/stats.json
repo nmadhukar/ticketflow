@@ -1,0 +1,59 @@
+{
+  "drawer": {
+    "title": "Estadísticas",
+    "close": "Cerrar",
+    "refresh": "Actualizar"
+  },
+  "agent": {
+    "title": "Mis Estadísticas",
+    "personal": {
+      "title": "Estadísticas Personales",
+      "assignedToMe": "Asignadas a Mí",
+      "createdByMe": "Creadas por Mí",
+      "resolutionRate": "Tasa de Resolución",
+      "avgResolutionTime": "Tiempo Promedio de Resolución"
+    },
+    "team": {
+      "title": "Resumen del Equipo",
+      "selectTeam": "Seleccionar Equipo",
+      "totalTickets": "Total de Tickets",
+      "openTickets": "Tickets Abiertos",
+      "inProgress": "En Progreso",
+      "resolved": "Resueltos",
+      "highPriority": "Alta Prioridad",
+      "noTeam": "No estás asignado a ningún equipo"
+    }
+  },
+  "manager": {
+    "title": "Estadísticas del Departamento",
+    "department": {
+      "title": "Resumen del Departamento",
+      "selectDepartment": "Seleccionar Departamento",
+      "totalTickets": "Total de Tickets",
+      "openTickets": "Tickets Abiertos",
+      "inProgress": "En Progreso",
+      "resolved": "Resueltos",
+      "highPriority": "Alta Prioridad",
+      "avgResolutionTime": "Tiempo Promedio de Resolución"
+    },
+    "priority": {
+      "title": "Distribución de Prioridades"
+    },
+    "category": {
+      "title": "Desglose por Categoría"
+    },
+    "teams": {
+      "title": "Rendimiento del Equipo",
+      "memberStats": "Estadísticas de Miembros del Equipo"
+    }
+  },
+  "common": {
+    "loading": "Cargando estadísticas...",
+    "error": "Error al cargar estadísticas",
+    "noData": "No hay datos disponibles",
+    "hours": "horas",
+    "days": "días",
+    "percentage": "{{value}}%"
+  }
+}
+
