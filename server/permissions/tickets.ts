@@ -66,20 +66,9 @@ function deriveAllowedFields(role?: string): ReadonlyArray<string> {
       "departmentId",
       "teamId",
     ];
-  if (role === "agent")
-    return [
-      "title",
-      "description",
-      "priority",
-      "status",
-      "notes",
-      "assigneeId",
-      "assigneeType",
-      "assigneeTeamId",
-      "dueDate",
-    ];
+  if (role === "agent") return ["priority", "status", "notes"];
   // customer: keep small surface
-  return ["title", "description", "notes", "dueDate"];
+  return ["title", "description", "notes"];
 }
 
 export async function canUpdateTicket({
@@ -120,6 +109,7 @@ export async function canUpdateTicket({
     // Restrict status changes for customers
     delete base.status;
     delete base.priority; // optional stricter policy
+    delete base.dueDate;
   }
 
   try {
@@ -199,26 +189,18 @@ export async function getTicketMetaForUser(user: User, task: any | null) {
       "assigneeTeamId",
     ];
   } else if (user.role === "agent") {
-    base.allowedAssigneeTypes = ["user", "team"];
-    base.allowedFields = ["status", "priority", "dueDate", "notes"];
+    base.allowedAssigneeTypes = [];
+    base.allowedFields = [];
     if (task) {
-      const myTeams = await storage.getUserTeams(user.id);
       const isAssigneeUser =
         task.assigneeType === "user" && task.assigneeId === user.id;
-      const isInTicketTeam =
-        task.assigneeType === "team" && task.assigneeTeamId
-          ? (myTeams || []).some((t: any) => t.id === task.assigneeTeamId)
-          : false;
+
       if (isAssigneeUser) {
-        base.allowedFields.push("assigneeType", "assigneeId", "assigneeTeamId");
-      }
-      if (!isAssigneeUser && !isInTicketTeam) {
-        base.allowedFields = [];
+        base.allowedFields = ["status", "priority", "notes"];
       }
     }
   } else if (user.role === "customer") {
-    // Allow customers to choose user or team on create; editing remains restricted
-    base.allowedAssigneeTypes = ["user", "team"];
+    base.allowedAssigneeTypes = [];
     base.allowedFields = ["title", "description"];
   }
 

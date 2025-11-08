@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { isUnauthorizedError } from "@/lib/authUtils";
@@ -51,6 +52,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, Fragment } from "react";
 import { useTranslation } from "react-i18next";
+import { useDebounce } from "@/hooks/useDebounce";
 import TicketDetail from "../components/ticket-detail";
 
 const getStatusIcon = (status: string) => {
@@ -153,7 +155,7 @@ const getCategoryIcon = (category: string) => {
 
 export default function Tasks() {
   const { toast } = useToast();
-  const { isAuthenticated, isLoading, user } = useAuth();
+  const { isAuthenticated, isLoading: isLoadingAuth, user } = useAuth();
   const queryClient = useQueryClient();
   const { t } = useTranslation(["common", "tickets"]);
   const currentUserId = (user as any)?.id as string | undefined;
@@ -161,6 +163,8 @@ export default function Tasks() {
   const [editingTask, setEditingTask] = useState<any>(null);
   const [expandedTicketId, setExpandedTicketId] = useState<number | null>(null);
   const [draggedTask, setDraggedTask] = useState<any | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const debouncedSearch = useDebounce(searchInput, 500);
   const [filters, setFilters] = useState({
     search: "",
     status: "all",
@@ -170,6 +174,11 @@ export default function Tasks() {
   const [page, setPage] = useState(0);
   const pageSize = 20;
   const [showMine, setShowMine] = useState(false);
+
+  // Update filters when debounced search changes
+  useEffect(() => {
+    setFilters((prev) => ({ ...prev, search: debouncedSearch }));
+  }, [debouncedSearch]);
 
   useEffect(() => {
     // Reset to first page when filters change
@@ -201,7 +210,7 @@ export default function Tasks() {
 
   // Redirect if not authenticated
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    if (!isLoadingAuth && !isAuthenticated) {
       toast({
         title: t("messages.unauthorized"),
         description: t("messages.loggedOut"),
@@ -212,9 +221,13 @@ export default function Tasks() {
       }, 500);
       return;
     }
-  }, [isAuthenticated, isLoading, toast]);
+  }, [isAuthenticated, isLoadingAuth, toast]);
 
-  const { data: tasks, isLoading: tasksLoading } = useQuery<any[]>({
+  const {
+    data: tasks,
+    isLoading: tasksLoading,
+    isFetching: isFetchingTasks,
+  } = useQuery<any[]>({
     queryKey: [tasksUrl],
     retry: false,
     enabled: isAuthenticated,
@@ -284,9 +297,7 @@ export default function Tasks() {
   });
 
   const role = (user as any)?.role as string | undefined;
-  const canCreate = ["customer", "manager", "admin", "agent"].includes(
-    role || ""
-  );
+  const canCreate = ["customer", "manager", "admin"].includes(role || "");
   const canDelete = role === "admin";
 
   // Teams for assignment (admin/manager can assign to any team; others use my teams)
@@ -416,7 +427,9 @@ export default function Tasks() {
     return new Date(dueDate) < new Date();
   };
 
-  if (isLoading || !isAuthenticated) {
+  const isLoading = tasksLoading || isFetchingTasks;
+
+  if (!isAuthenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         {t("actions.loading")}
@@ -431,7 +444,7 @@ export default function Tasks() {
         defaultValue: "Manage and track all tickets across your projects",
       })}
       action={
-        !tasksLoading &&
+        !isLoading &&
         !!tasks?.length &&
         canCreate && (
           <Button
@@ -455,10 +468,8 @@ export default function Tasks() {
               <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder={t("tickets:filters.searchPlaceholder")}
-                value={filters.search}
-                onChange={(e) =>
-                  setFilters((prev) => ({ ...prev, search: e.target.value }))
-                }
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-10 h-10"
               />
             </div>
@@ -553,21 +564,24 @@ export default function Tasks() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex items-center gap-2">
-              <Switch
-                id="only-my-tickets"
-                checked={showMine}
-                onCheckedChange={(v) => {
-                  setShowMine(!!v);
-                }}
-              />
-              <label
-                htmlFor="only-my-tickets"
-                className="text-sm text-muted-foreground select-none"
-              >
-                {t("tickets:filters.onlyMyTickets")}
-              </label>
-            </div>
+            {role !== "customer" && (
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="only-my-tickets"
+                  checked={showMine}
+                  onCheckedChange={(v) => {
+                    setShowMine(!!v);
+                  }}
+                  disabled={isLoading}
+                />
+                <label
+                  htmlFor="only-my-tickets"
+                  className="text-sm text-muted-foreground select-none"
+                >
+                  {t("tickets:filters.onlyMyTickets")}
+                </label>
+              </div>
+            )}
           </div>
 
           {/* Active Filters & Stats */}
@@ -606,7 +620,7 @@ export default function Tasks() {
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={page === 0 || tasksLoading}
+                      disabled={page === 0 || isLoading}
                       onClick={() => setPage((p) => Math.max(0, p - 1))}
                     >
                       {t("tickets:filters.prev")}
@@ -614,7 +628,7 @@ export default function Tasks() {
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={tasksLoading || (tasks?.length || 0) < pageSize}
+                      disabled={isLoading || (tasks?.length || 0) < pageSize}
                       onClick={() => setPage((p) => p + 1)}
                     >
                       {t("tickets:filters.next")}
@@ -630,12 +644,11 @@ export default function Tasks() {
       {/* Tasks Table */}
       <Card className="shadow-business">
         <CardContent className="p-0">
-          {tasksLoading ? (
-            <div className="animate-pulse p-6">
-              <div className="space-y-3">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-12 bg-slate-100 rounded"></div>
-                ))}
+          {isLoading ? (
+            <div className="text-center py-12">
+              <div className="max-w-md mx-auto">
+                <Spinner size="lg" className="mx-auto mb-3" />
+                <p className="text-slate-500">Loading tickets...</p>
               </div>
             </div>
           ) : filteredTasks?.length > 0 ? (
@@ -754,7 +767,7 @@ export default function Tasks() {
                             <span> {task.category?.toUpperCase()}</span>
                           </Badge>
                         </td>
-                        <td className="p-4">
+                        <td className="p-4 whitespace-nowrap">
                           {task.assigneeType === "team" &&
                           task.assigneeTeamId ? (
                             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -779,7 +792,7 @@ export default function Tasks() {
                           )}
                         </td>
                         {(role === "admin" || role === "manager") && (
-                          <td className="p-4">
+                          <td className="p-4 whitespace-nowrap">
                             {task.hasAutoResponse ? (
                               <div className="flex items-center gap-2">
                                 <Brain className="h-4 w-4 text-primary" />
@@ -805,7 +818,7 @@ export default function Tasks() {
                             )}
                           </td>
                         )}
-                        <td className=" p-4">
+                        <td className="p-4 whitespace-nowrap">
                           {task.dueDate ? (
                             <div
                               className={`min-w-max text-sm ${
@@ -817,7 +830,7 @@ export default function Tasks() {
                               {formatDate(task.dueDate)}
                             </div>
                           ) : (
-                            <span className="min-w-max text-sm text-muted-foreground">
+                            <span className="min-w-fit text-sm text-muted-foreground">
                               No due date
                             </span>
                           )}
@@ -959,14 +972,22 @@ export default function Tasks() {
                                     </DropdownMenuSubContent>
                                   </DropdownMenuSub>
                                 )}
-                                <DropdownMenuItem
-                                  onClick={() => {
-                                    handleEditTask(task);
-                                  }}
-                                >
-                                  <Edit3 className="h-4 w-4 mr-2" />
-                                  {t("tickets:editTicket")}
-                                </DropdownMenuItem>
+                                {/* Hide Edit Ticket for agents when viewing all tickets and ticket is not directly assigned to them */}
+                                {!(
+                                  role === "agent" &&
+                                  !showMine &&
+                                  (task.assigneeType !== "user" ||
+                                    task.assigneeId !== currentUserId)
+                                ) && (
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      handleEditTask(task);
+                                    }}
+                                  >
+                                    <Edit3 className="h-4 w-4 mr-2" />
+                                    {t("tickets:editTicket")}
+                                  </DropdownMenuItem>
+                                )}
                                 {canDelete && (
                                   <DropdownMenuItem
                                     onClick={() => handleDeleteTask(task.id)}

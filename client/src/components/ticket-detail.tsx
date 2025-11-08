@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils";
 import { AiResponseFeedback } from "@/components/ai-response-feedback";
 import { useAuth } from "@/hooks/useAuth";
+import { Spinner } from "@/components/ui/spinner";
 
 interface TicketDetailProps {
   ticketId: number;
@@ -452,8 +453,16 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
                   onClick={() =>
                     document.getElementById("ticket-file-upload")?.click()
                   }
+                  disabled={addAttachmentMutation.isPending}
                 >
-                  Upload
+                  {addAttachmentMutation.isPending ? (
+                    <>
+                      <Spinner size="sm" className="mr-2" />
+                      Uploading...
+                    </>
+                  ) : (
+                    "Upload"
+                  )}
                 </Button>
               </div>
             )}

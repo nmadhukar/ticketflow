@@ -103,6 +103,7 @@ import { registerAdminRoutes } from "../admin";
 import { bedrockIntegration } from "../bedrockIntegration";
 import { s3Service } from "../services/s3Service";
 import { DEFAULT_COMPANY } from "@shared/constants";
+import { getTicketMetaForUser } from "../permissions/tickets";
 
 // Helper function to sanitize company name for S3 key
 function sanitizeCompanyNameForS3(companyName: string): string {
@@ -509,74 +510,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         baseMeta = await baseMetaRes.json();
       } catch {}
 
-      // Permissions for this ticket (policy 1b + 2a)
+      const ticketMeta = await getTicketMetaForUser(user, task);
+
+      // Compute additional permission flags based on the ticket meta
       let canChangeStatus = false;
       let canAssign = false;
-      let allowedAssigneeTypes: string[] = [];
-      let allowedFields: string[] = [];
 
       if (user.role === "admin") {
         canChangeStatus = true;
         canAssign = true;
-        allowedAssigneeTypes = ["user", "team"];
-        allowedFields = [
-          "title",
-          "description",
-          "category",
-          "priority",
-          "status",
-          "notes",
-          "assigneeId",
-          "assigneeType",
-          "assigneeTeamId",
-          "dueDate",
-        ];
       } else if (user.role === "manager") {
-        // Only within managed departments (if team-assigned)
         canChangeStatus = true;
         canAssign = true;
-        allowedAssigneeTypes = ["user", "team"];
-        allowedFields = [
-          "title",
-          "description",
-          "category",
-          "priority",
-          "status",
-          "notes",
-          "assigneeId",
-          "assigneeType",
-          "assigneeTeamId",
-          "dueDate",
-        ];
       } else if (user.role === "agent") {
-        const myTeams = await storage.getUserTeams(userId);
-        const userTeamIds = (myTeams || []).map((t: any) => t.id);
-        const isAssigneeUser =
+        canChangeStatus =
           task.assigneeType === "user" && task.assigneeId === userId;
-        const isInTicketTeam =
-          task.assigneeType === "team" && task.assigneeTeamId
-            ? userTeamIds.includes(task.assigneeTeamId as any)
-            : false;
-        canChangeStatus = isAssigneeUser || isInTicketTeam;
-        canAssign = isAssigneeUser; // only assignee can reassign
-        allowedAssigneeTypes = isAssigneeUser ? ["user", "team"] : [];
-        allowedFields = ["priority", "status", "dueDate", "notes"];
-        if (isAssigneeUser) {
-          allowedFields.push("assigneeType", "assigneeId", "assigneeTeamId");
-        }
+        canAssign = false;
       } else if (user.role === "customer") {
         canChangeStatus = false;
         canAssign = false;
-        allowedAssigneeTypes = ["team"]; // only on create
-        allowedFields = ["title", "description"];
       }
 
       const permissions = {
         ...baseMeta.permissions,
         canAssign,
         canChangeStatus,
-        allowedAssigneeTypes,
-        allowedFields,
+        allowedAssigneeTypes: ticketMeta.allowedAssigneeTypes,
+        allowedFields: ticketMeta.allowedFields,
       };
 
       return res.json({

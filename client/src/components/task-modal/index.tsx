@@ -19,7 +19,7 @@
  * - In-ticket editing capabilities for status, assignment, and due dates
  */
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -83,6 +83,8 @@ type TaskMinimal = {
   priority?: "low" | "medium" | "high" | "urgent" | string;
   status?: "open" | "in_progress" | "resolved" | "closed" | "on_hold" | string;
   notes?: string;
+  departmentId?: string | number | null;
+  teamId?: string | number | null;
   assigneeId?: string | number | null;
   assigneeType?: "user" | "team" | string;
   assigneeTeamId?: string | number | null;
@@ -158,12 +160,90 @@ const editableKeys = [
   "teamId",
 ];
 
+// Date helpers to normalize yyyy-mm-dd and avoid TZ shifts
+const toYyyyMmDd = (value?: string | null) => {
+  if (!value) return "";
+  // Handles ISO or date-only strings
+  const d = value.includes("T")
+    ? new Date(value)
+    : new Date(`${value}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().split("T")[0];
+};
+
+const formatHumanDate = (value?: string | null) => {
+  if (!value) return "";
+  const d = value.includes("T")
+    ? new Date(value)
+    : new Date(`${value}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+};
+
+// Role-aware whitelist (fallback when permissions are absent) matching server policy
+const fallbackAllowedByRoleEdit: Record<string, string[]> = {
+  admin: [
+    "title",
+    "description",
+    "category",
+    "priority",
+    "status",
+    "notes",
+    "assigneeId",
+    "assigneeType",
+    "assigneeTeamId",
+    "dueDate",
+    "departmentId",
+    "teamId",
+  ],
+  manager: [
+    "title",
+    "description",
+    "category",
+    "priority",
+    "status",
+    "notes",
+    "assigneeId",
+    "assigneeType",
+    "assigneeTeamId",
+    "dueDate",
+    "departmentId",
+    "teamId",
+  ],
+  agent: ["priority", "status", "notes"],
+  customer: ["title", "description"],
+};
+
+const fallbackAllowedByRoleCreate: Record<string, string[]> = {
+  admin: fallbackAllowedByRoleEdit.admin,
+  manager: fallbackAllowedByRoleEdit.manager,
+  agent: fallbackAllowedByRoleEdit.agent,
+  customer: [
+    "title",
+    "description",
+    "notes",
+    "dueDate",
+    "category",
+    "priority",
+    "departmentId",
+    "teamId",
+    "assigneeId",
+    "assigneeType",
+    "assigneeTeamId",
+    "attachments",
+  ],
+};
+
 export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   const { toast } = useToast();
   const { user } = useAuth() as { user?: { role?: string } } as any;
   const queryClient = useQueryClient();
   const { t } = useTranslation(["common", "tickets"]);
-  const [currentTab, setCurrentTab] = useState("details");
+
   // Customer create-only assignment mode: 'user' | 'team' | 'department' | 'unassigned'
   const [assignmentMode, setAssignmentMode] = useState<
     "user" | "team" | "department" | "unassigned"
@@ -191,10 +271,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     : "/api/tickets/meta";
   const metaQuery = useQuery<any>({
     queryKey: ["ticket-meta", { id: task?.id ?? null }],
-    enabled: isOpen,
+    enabled: !!task?.id && isOpen,
     staleTime: 0,
     retry: false,
-    refetchOnMount: "always",
     queryFn: async () => {
       const res = await apiRequest("GET", metaUrl);
       return await res.json();
@@ -202,21 +281,12 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   });
   const meta: any = metaQuery.data;
 
-  // Track the last task ID we processed to prevent infinite loops
-  const lastProcessedTaskIdRef = useRef<number | undefined>(undefined);
-
-  // Prime cache with row task snapshot to avoid flash of empty while refetching
-  useEffect(() => {
-    if (task?.id) {
-      queryClient.setQueryData([`/api/tasks/${task.id}`], task as TaskMinimal);
-    }
-  }, [task, queryClient]);
-
   // Always load the freshest task details when editing to ensure full payload
   const { data: taskDetails } = useQuery<any>({
     queryKey: [task?.id ? `/api/tasks/${task.id}` : undefined],
     enabled: !!task?.id && isOpen,
-    refetchOnMount: "always",
+    staleTime: 0,
+    retry: false,
   });
 
   // Optional: debug in development
@@ -285,127 +355,72 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   // Prefer freshest task details for displaying read-only values
   const displayTask: TaskMinimal | undefined = (taskDetails || task) as any;
 
-  // Date helpers to normalize yyyy-mm-dd and avoid TZ shifts
-  const toYyyyMmDd = (value?: string | null) => {
-    if (!value) return "";
-    // Handles ISO or date-only strings
-    const d = value.includes("T")
-      ? new Date(value)
-      : new Date(`${value}T00:00:00`);
-    if (Number.isNaN(d.getTime())) return "";
-    return d.toISOString().split("T")[0];
-  };
-
-  const formatHumanDate = (value?: string | null) => {
-    if (!value) return "";
-    const d = value.includes("T")
-      ? new Date(value)
-      : new Date(`${value}T00:00:00`);
-    if (Number.isNaN(d.getTime())) return "";
-    return d.toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  };
-
   // Reset/initialize form snapshot when task or modal state changes
   useEffect(() => {
-    // Only run when modal is open
+    // Clear form when modal closes
     if (!isOpen) {
-      lastProcessedTaskIdRef.current = undefined;
-      return;
-    }
+      setFormData({
+        title: "",
+        description: "",
+        category: "",
+        priority: "medium",
+        status: "open",
+        notes: "",
+        assigneeId: "",
+        assigneeType: (user as any)?.role === "customer" ? "team" : "user",
+        assigneeTeamId: "",
+        dueDate: "",
+        departmentId: "",
+        teamId: "",
+      });
+    } else {
+      // Only process when modal is open and we have task data
+      const current = (taskDetails || task) as TaskMinimal | undefined;
 
-    const current = (taskDetails || task) as TaskMinimal | undefined;
-    const currentTaskId = current?.id;
-
-    // Prevent re-processing the same task
-    if (currentTaskId && lastProcessedTaskIdRef.current === currentTaskId) {
-      return;
-    }
-
-    if (current) {
-      // Derive department/team selection when team-assigned
-      let departmentId = "";
-      let teamId = "";
-      if (
-        current.assigneeType === "team" &&
-        current.assigneeTeamId &&
-        Array.isArray(teams)
-      ) {
-        const match = (teams as any[]).find(
-          (t) => t.id === current.assigneeTeamId
-        );
-        if (match) {
-          departmentId = match.departmentId?.toString?.() || "";
-          teamId = match.id?.toString?.() || "";
+      if (current) {
+        // Derive department/team selection when team-assigned
+        let departmentId = "";
+        let teamId = "";
+        if (
+          current.assigneeType === "team" &&
+          current.assigneeTeamId &&
+          Array.isArray(teams)
+        ) {
+          const match = (teams as any[]).find(
+            (t) => t.id === current.assigneeTeamId
+          );
+          if (match) {
+            departmentId = match.departmentId?.toString?.() || "";
+            teamId = match.id?.toString?.() || "";
+          }
         }
+
+        const dataToSet = {
+          title: current.title || "",
+          description: current.description || "",
+          category: current.category || "",
+          priority: (current.priority as any) || "medium",
+          status: (current.status as any) || "open",
+          notes: current.notes || "",
+          assigneeId:
+            current.assigneeType === "user" && current.assigneeId != null
+              ? String(current.assigneeId)
+              : "unassigned",
+          assigneeType: (current.assigneeType as any) || "user",
+          assigneeTeamId:
+            current.assigneeType === "team" && current.assigneeTeamId != null
+              ? String(current.assigneeTeamId)
+              : "unassigned",
+          dueDate: current.dueDate ? toYyyyMmDd(current.dueDate) : "",
+          departmentId: current.departmentId
+            ? current.departmentId?.toString()
+            : "",
+          teamId: current.teamId ? current.teamId?.toString() : "",
+        };
+        setFormData(dataToSet);
       }
-
-      setFormData({
-        title: current.title || "",
-        description: current.description || "",
-        category: current.category || "",
-        priority: (current.priority as any) || "medium",
-        status: (current.status as any) || "open",
-        notes: current.notes || "",
-        assigneeId:
-          current.assigneeType === "user" && current.assigneeId != null
-            ? String(current.assigneeId)
-            : "unassigned",
-        assigneeType: (current.assigneeType as any) || "user",
-        assigneeTeamId:
-          current.assigneeType === "team" && current.assigneeTeamId != null
-            ? String(current.assigneeTeamId)
-            : "unassigned",
-        dueDate: current.dueDate ? toYyyyMmDd(current.dueDate) : "",
-        departmentId,
-        teamId,
-      });
-      setCurrentTab("details");
-      lastProcessedTaskIdRef.current = currentTaskId;
-    } else if (!task && !taskDetails) {
-      // Only reset form when creating a new task (not when data is loading)
-      setFormData({
-        title: "",
-        description: "",
-        category: "",
-        priority: "medium",
-        status: "open",
-        notes: "",
-        assigneeId: "",
-        assigneeType: (user as any)?.role === "customer" ? "team" : "user",
-        assigneeTeamId: "",
-        dueDate: "",
-        departmentId: "",
-        teamId: "",
-      });
-      setCurrentTab("details");
-      lastProcessedTaskIdRef.current = undefined;
     }
-  }, [task?.id, taskDetails?.id, isOpen, teams]);
-
-  // Clear local state when modal closes to avoid stale flashes on next open
-  useEffect(() => {
-    if (!isOpen) {
-      setCurrentTab("details");
-      setFormData({
-        title: "",
-        description: "",
-        category: "",
-        priority: "medium",
-        status: "open",
-        notes: "",
-        assigneeId: "",
-        assigneeType: (user as any)?.role === "customer" ? "team" : "user",
-        assigneeTeamId: "",
-        dueDate: "",
-        departmentId: "",
-        teamId: "",
-      });
-    }
-  }, [isOpen]);
+  }, [taskDetails?.id, task?.id, isOpen, metaQuery.isFetched]);
 
   const createTaskMutation = useMutation({
     mutationFn: async (taskData: any) => {
@@ -532,24 +547,36 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       return await apiRequest("PATCH", `/api/tasks/${task.id}`, taskData);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/tasks/my"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/stats/agent"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/stats/manager"] });
-      // Update task detail cache optimistically for a snappier UI
+      // Invalidate all task list queries (including filtered/paged variants)
+      queryClient.invalidateQueries({
+        predicate: (q) =>
+          typeof q.queryKey?.[0] === "string" &&
+          String(q.queryKey[0]).startsWith("/api/tasks"),
+      });
+
+      // Invalidate ticket detail queries
       if (task?.id) {
         queryClient.invalidateQueries({
           queryKey: [`/api/tasks/${task.id}`],
         });
+        // Also invalidate related ticket queries
+        queryClient.invalidateQueries({
+          predicate: (q) =>
+            typeof q.queryKey?.[0] === "string" &&
+            String(q.queryKey[0]).includes(`/api/tasks/${task.id}`),
+        });
       }
-      if (!formData.notes.trim()) {
-        onClose();
-      }
+
+      // Invalidate stats queries
+      queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats/agent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats/manager"] });
+
       toast({
         title: t("messages.success"),
         description: t("tickets:modal.toasts.updated"),
       });
+      onClose();
     },
     onError: (error) => {
       if (isUnauthorizedError(error)) {
@@ -589,7 +616,11 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       return;
     }
 
-    if (!formData.category) {
+    // Only require category when creating a new ticket OR if user can edit category
+    const isCreating = !task;
+    const canEditCategory = canEditField("category");
+
+    if ((isCreating || canEditCategory) && !formData.category) {
       toast({
         title: "Error",
         description: "Ticket category is required",
@@ -697,7 +728,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       category: formData.category,
       priority: formData.priority,
       status: formData.status,
-      notes: formData.notes.trim(),
+      notes: formData.notes, // Don't trim - preserve whitespace and allow empty strings
       dueDate: formData.dueDate
         ? new Date(`${formData.dueDate}T00:00:00`).toISOString()
         : null,
@@ -745,76 +776,11 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         : {}),
     } as any;
 
-    // Role-aware whitelist (fallback when permissions are absent) matching server policy
-    const fallbackAllowedByRoleEdit: Record<string, string[]> = {
-      admin: [
-        "title",
-        "description",
-        "category",
-        "priority",
-        "status",
-        "notes",
-        "assigneeId",
-        "assigneeType",
-        "assigneeTeamId",
-        "dueDate",
-        "departmentId",
-        "teamId",
-      ],
-      manager: [
-        "title",
-        "description",
-        "category",
-        "priority",
-        "status",
-        "notes",
-        "assigneeId",
-        "assigneeType",
-        "assigneeTeamId",
-        "dueDate",
-        "departmentId",
-        "teamId",
-      ],
-      agent: [
-        "title",
-        "description",
-        "priority",
-        "status",
-        "notes",
-        "assigneeId",
-        "assigneeType",
-        "assigneeTeamId",
-        "dueDate",
-      ],
-      customer: ["title", "description", "notes", "dueDate"],
-    };
-
-    const fallbackAllowedByRoleCreate: Record<string, string[]> = {
-      admin: fallbackAllowedByRoleEdit.admin,
-      manager: fallbackAllowedByRoleEdit.manager,
-      agent: fallbackAllowedByRoleEdit.agent,
-      customer: [
-        "title",
-        "description",
-        "notes",
-        "dueDate",
-        "category",
-        "priority",
-        "departmentId",
-        "teamId",
-        "assigneeId",
-        "assigneeType",
-        "assigneeTeamId",
-        "attachments",
-      ],
-    };
-
     const roleKey = (user?.role || "").toString();
     const allowedFieldsForEdit = Array.isArray(permissions?.allowedFields)
       ? (permissions?.allowedFields as string[])
-      : fallbackAllowedByRoleEdit[roleKey] || fallbackAllowedByRoleEdit.agent;
-    const allowedFieldsForCreate =
-      fallbackAllowedByRoleCreate[roleKey] || fallbackAllowedByRoleCreate.agent;
+      : fallbackAllowedByRoleEdit[roleKey];
+    const allowedFieldsForCreate = fallbackAllowedByRoleCreate[roleKey];
 
     // Prune payload according to context (create vs edit)
     const pruneToAllowed = (payload: any, allowed: string[]) => {
@@ -877,6 +843,20 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       ) {
         delete (taskData as any).status;
       }
+
+      // Ensure notes is included if it's in allowedFields, even if empty
+      // This allows users to clear notes by setting it to empty string
+      if (allowedFieldsForEdit.includes("notes")) {
+        // Always include notes if allowed, even if empty (to allow clearing)
+        // If it was removed by pruneToAllowed, restore it from formData
+        if (taskData.notes === undefined) {
+          taskData.notes = formData.notes || "";
+        }
+      } else {
+        // If notes is not allowed, remove it from payload
+        delete (taskData as any).notes;
+      }
+
       updateTaskMutation.mutate(taskData);
     } else {
       createTaskMutation.mutate(taskData);
@@ -909,10 +889,10 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                   <DialogDescription className="text-slate-600 mt-1">
                     {task ? (
                       <div className="space-y-1">
-                        <p>{t("tickets:modal.editDesc")}</p>
+                        <span>{t("tickets:modal.editDesc")}</span>
                         <div className="flex flex-col gap-1 text-xs">
                           {task.creatorName && task.createdAt && (
-                            <p className="flex items-center gap-1">
+                            <span className="flex items-center gap-1">
                               <User className="h-3 w-3" />
                               {t("tickets:modal.meta.createdBy", {
                                 defaultValue: "Created by",
@@ -922,10 +902,10 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                 defaultValue: "on",
                               })}{" "}
                               {new Date(task.createdAt).toLocaleDateString()}
-                            </p>
+                            </span>
                           )}
-                          {task.updatedAt && (
-                            <p className="flex items-center gap-1">
+                          {task.lastUpdatedBy && task.updatedAt && (
+                            <span className="flex items-center gap-1">
                               <Clock className="h-3 w-3" />
                               {t("tickets:modal.meta.lastUpdated", {
                                 defaultValue: "Last updated",
@@ -943,12 +923,17 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                 defaultValue: "at",
                               })}{" "}
                               {new Date(task.updatedAt).toLocaleTimeString()}
-                            </p>
+                            </span>
                           )}
                         </div>
                       </div>
                     ) : (
-                      t("tickets:modal.createDesc")
+                      <span>
+                        {t("tickets:modal.createDesc", {
+                          defaultValue:
+                            "Fill in the details below to create a new ticket",
+                        })}
+                      </span>
                     )}
                   </DialogDescription>
                 </div>
@@ -963,11 +948,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
 
           {/* Content */}
           <div className="flex-1 overflow-hidden">
-            <Tabs
-              value={currentTab}
-              onValueChange={setCurrentTab}
-              className="h-full flex flex-col"
-            >
+            <Tabs defaultValue="details" className="h-full flex flex-col">
               <div className="border-b px-6">
                 <TabsList className="bg-transparent h-12 p-0 w-full justify-start">
                   <TabsTrigger
@@ -1019,6 +1000,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                             }
                             className="mt-2 text-base"
                             required
+                            readOnly={!canEditField("title")}
                           />
                           <p className="text-xs text-slate-500 mt-1">
                             {t("tickets:modal.help.titleHint", {
@@ -1046,6 +1028,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                               handleInputChange("description", e.target.value)
                             }
                             className="mt-2 resize-none"
+                            readOnly={!canEditField("description")}
                           />
                           <p className="text-xs text-slate-500 mt-1">
                             Include context, requirements, and acceptance

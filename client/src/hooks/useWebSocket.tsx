@@ -30,7 +30,24 @@ export function useWebSocket() {
 
     try {
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+      // Construct host reliably - handle cases where window.location.host might be malformed
+      let host = window.location.host;
+
+      // Check if host contains 'undefined' (common issue with proxies/development)
+      if (!host || host.includes("undefined")) {
+        const hostname = window.location.hostname || "localhost";
+        const port = window.location.port;
+
+        // Only include port if it exists and is not a default port
+        if (port && port !== "" && port !== "80" && port !== "443") {
+          host = `${hostname}:${port}`;
+        } else {
+          host = hostname;
+        }
+      }
+
+      const wsUrl = `${protocol}//${host}/ws`;
 
       console.log("Connecting to WebSocket:", wsUrl);
       const socket = new WebSocket(wsUrl);
