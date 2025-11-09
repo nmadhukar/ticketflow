@@ -300,9 +300,11 @@ export default function Tasks() {
   const canCreate = ["customer", "manager", "admin"].includes(role || "");
   const canDelete = role === "admin";
 
-  // Teams for assignment (admin/manager can assign to any team; others use my teams)
-  const teamsEndpoint =
-    role === "admin" || role === "manager" ? "/api/teams" : "/api/teams/my";
+  // Teams for assignment
+  // - Admins: all teams
+  // - Managers: teams created by them (for quick assignment)
+  // - Others: teams where user is a member
+  const teamsEndpoint = role === "admin" ? "/api/teams" : "/api/teams/my";
   const { data: teams } = useQuery<any[]>({
     queryKey: [teamsEndpoint],
     queryFn: async () => {
@@ -311,6 +313,7 @@ export default function Tasks() {
     },
     enabled: !!role && role !== "customer" && isAuthenticated,
     initialData: [],
+    refetchOnMount: "always",
   });
 
   const canUpdateStatus = (task: any) => {

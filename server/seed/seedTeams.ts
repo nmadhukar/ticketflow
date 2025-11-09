@@ -1,21 +1,12 @@
 import { db } from "../db";
-import { teams, departments, users, teamMembers } from "@shared/schema";
-import { eq, inArray, and } from "drizzle-orm";
-
-const FALLBACK_DEPARTMENTS = [
-  "Engineering",
-  "Product Management",
-  "Design & UX",
-  "Quality Assurance (QA)",
-  "Sales & Business Development",
-  "Marketing & Communications",
-  "Customer Success & Support",
-  "Human Resources (HR)",
-  "Finance & Accounting",
-  "Operations",
-  "Data Science & Analytics",
-  "Legal & Compliance",
-];
+import {
+  teams,
+  departments,
+  users,
+  teamMembers,
+  teamAdmins,
+} from "@shared/schema";
+import { eq, inArray, and, isNotNull } from "drizzle-orm";
 
 export async function seedTeams() {
   try {
@@ -43,14 +34,16 @@ export async function seedTeams() {
       // continue without createdBy if lookup fails
     }
 
-    // Prefer departments from DB, fallback to predefined list
+    // Get departments from DB (required - departments must be seeded first)
     const deptRows = await db.select().from(departments);
-    const sourceDepts =
-      deptRows.length > 0
-        ? deptRows
-        : FALLBACK_DEPARTMENTS.map(
-            (n, i) => ({ id: undefined as unknown as number, name: n } as any)
-          );
+    if (deptRows.length === 0) {
+      console.warn(
+        "⚠ No departments found in database. Please seed departments first before seeding teams."
+      );
+      console.log("Skipping team seeding - departments are required.");
+      return;
+    }
+    const sourceDepts = deptRows;
 
     // Build department-specific teams
     const deptToTeams: Record<string, string[]> = {
@@ -72,15 +65,70 @@ export async function seedTeams() {
 
     // Candidate members: agents only (exclude managers/admin/customers)
     const candidateUsers = await db
-      .select({ id: users.id, email: users.email, role: users.role })
+      .select({ id: users.id, email: users.email })
       .from(users)
-      .where(inArray(users.role as any, ["agent"]) as any);
+      .where(eq(users.role, "agent"));
 
-    // Rotate through candidates so each team gets different members
-    let memberIndex = 0;
+    // Track agent team assignments (max 3 teams per agent)
+    const agentTeamCount = new Map<string, number>();
+    const MAX_TEAMS_PER_AGENT = 3;
+
+    // Fetch all managers and their departments
+    const managerDepts = await db
+      .select({
+        managerId: departments.managerId,
+        departmentId: departments.id,
+        departmentName: departments.name,
+      })
+      .from(departments)
+      .where(isNotNull(departments.managerId));
+
+    // Group departments by manager
+    const managerToDepts = new Map<
+      string,
+      Array<{ id: number; name: string }>
+    >();
+    for (const md of managerDepts) {
+      if (!md.managerId) continue;
+      if (!managerToDepts.has(md.managerId)) {
+        managerToDepts.set(md.managerId, []);
+      }
+      managerToDepts.get(md.managerId)!.push({
+        id: md.departmentId,
+        name: md.departmentName || "",
+      });
+    }
+
+    // Track manager team assignments (max 4 teams per manager)
+    const managerTeamAssignments = new Map<string, Set<number>>();
+    const MAX_TEAMS_PER_MANAGER = 4;
+
+    // Helper function to shuffle array
+    const shuffle = <T>(array: T[]): T[] => {
+      const shuffled = [...array];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      return shuffled;
+    };
+
+    // Helper function to get random subset
+    const getRandomSubset = <T>(array: T[], min: number, max: number): T[] => {
+      if (array.length === 0) return [];
+      const count = Math.floor(Math.random() * (max - min + 1)) + min;
+      const shuffled = shuffle(array);
+      return shuffled.slice(0, Math.min(count, array.length));
+    };
 
     for (const dept of sourceDepts) {
-      const deptName = (dept as any).name as string;
+      // Ensure department has a valid ID (required field)
+      if (!dept.id) {
+        console.warn(`⚠ Skipping department "${dept.name}": No department ID`);
+        continue;
+      }
+
+      const deptName = dept.name || String(dept);
       const teamNames = deptToTeams[deptName] || [
         `${deptName} Team A`,
         `${deptName} Team B`,
@@ -93,60 +141,300 @@ export async function seedTeams() {
           .where(eq(teams.name, name))
           .limit(1);
 
-        let teamId: number | undefined = existing[0]?.id as any;
+        let teamId: number | undefined = existing[0]?.id;
         if (!teamId) {
+          // departmentId is required - dept.id should always exist at this point
+          const deptId = dept.id;
+          if (!deptId) {
+            console.warn(`⚠ Skipping team ${name}: No department ID available`);
+            continue;
+          }
+
+          // Double-check that department exists and is valid
+          const deptCheck = await db
+            .select({ id: departments.id })
+            .from(departments)
+            .where(eq(departments.id, deptId))
+            .limit(1);
+
+          if (!deptCheck || deptCheck.length === 0) {
+            console.warn(
+              `⚠ Skipping team ${name}: Department ID ${deptId} does not exist`
+            );
+            continue;
+          }
+
           const insertRes = await db
             .insert(teams)
             .values({
               name,
               description: `${name} Team`,
               createdBy: createdById,
-              departmentId: (dept as any).id || null,
+              departmentId: deptId, // Required field - must be set
             })
             .returning({ id: teams.id });
-          teamId = insertRes[0]?.id as any;
-          console.log(
-            `✓ Created team: ${name} (deptId: ${(dept as any).id || "null"})`
-          );
+          teamId = insertRes[0]?.id;
+          console.log(`✓ Created team: ${name} (deptId: ${deptId})`);
         } else {
+          // Verify existing team has a department
+          const existingTeam = await db
+            .select({ departmentId: teams.departmentId })
+            .from(teams)
+            .where(eq(teams.id, teamId))
+            .limit(1);
+
+          if (!existingTeam[0]?.departmentId) {
+            console.warn(
+              `⚠ Team ${name} (ID: ${teamId}) exists but has no department. This should not happen.`
+            );
+          }
           console.log(`Team already exists: ${name}`);
         }
 
-        // Add 1-2 members from candidate users (agents/users), avoid duplicates and vary selection
+        // Add 1-2 members from candidate users (agents), respecting max teams limit
         if (teamId && candidateUsers.length > 0) {
-          const numMembers = candidateUsers.length === 1 ? 1 : 2;
-          const selected: string[] = [];
-          for (let i = 0; i < numMembers; i++) {
-            const user =
-              candidateUsers[(memberIndex + i) % candidateUsers.length];
-            if (user) selected.push(user.id);
-          }
-          memberIndex = (memberIndex + 1) % candidateUsers.length;
+          // Filter agents that haven't reached their team limit
+          const availableAgents = candidateUsers.filter(
+            (agent) => (agentTeamCount.get(agent.id) || 0) < MAX_TEAMS_PER_AGENT
+          );
 
-          for (const userId of selected) {
-            const existingMember = await db
-              .select({ id: teamMembers.id })
-              .from(teamMembers)
-              .where(
-                and(
-                  eq(teamMembers.teamId as any, teamId as any) as any,
-                  eq(teamMembers.userId as any, userId as any) as any
-                ) as any
-              )
-              .limit(1);
-            if (existingMember.length === 0) {
-              await db.insert(teamMembers).values({
-                teamId: teamId as any,
-                userId,
-                role: "member",
-              });
+          if (availableAgents.length > 0) {
+            const numMembers = Math.min(
+              availableAgents.length === 1 ? 1 : 2,
+              availableAgents.length
+            );
+            const shuffled = shuffle(availableAgents);
+            const selected: string[] = [];
+            for (let i = 0; i < numMembers; i++) {
+              if (shuffled[i]) {
+                selected.push(shuffled[i].id);
+                agentTeamCount.set(
+                  shuffled[i].id,
+                  (agentTeamCount.get(shuffled[i].id) || 0) + 1
+                );
+              }
+            }
+
+            // Add members to team
+            for (const userId of selected) {
+              const existingMember = await db
+                .select({ id: teamMembers.id })
+                .from(teamMembers)
+                .where(
+                  and(
+                    eq(teamMembers.teamId, teamId),
+                    eq(teamMembers.userId, userId)
+                  )
+                )
+                .limit(1);
+              if (existingMember.length === 0) {
+                await db.insert(teamMembers).values({
+                  teamId,
+                  userId,
+                });
+              }
             }
           }
         }
       }
     }
 
-    console.log("Default teams seeding completed.");
+    // Phase 2: Assign managers to teams
+    console.log("\nAssigning managers to teams...");
+    for (const [managerId, deptList] of Array.from(managerToDepts.entries())) {
+      // Only assign managers who have at least 2 departments (as per requirement: "for 2 or 3 departments")
+      if (deptList.length < 2) {
+        console.log(
+          `  ⚠ Skipping manager ${managerId} - has only ${deptList.length} department(s)`
+        );
+        continue;
+      }
+
+      // Randomly select 2-3 departments for this manager
+      const selectedDepts = getRandomSubset(deptList, 2, 3);
+      const managerTeams: number[] = [];
+
+      // Collect teams from selected departments
+      for (const dept of selectedDepts) {
+        const deptTeams = await db
+          .select({ id: teams.id })
+          .from(teams)
+          .where(eq(teams.departmentId, dept.id));
+        managerTeams.push(...deptTeams.map((t) => t.id));
+      }
+
+      // Randomly select up to 4 teams total
+      const selectedTeams = getRandomSubset(
+        managerTeams,
+        1,
+        MAX_TEAMS_PER_MANAGER
+      );
+
+      // Add manager to selected teams
+      for (const teamId of selectedTeams) {
+        const currentCount = managerTeamAssignments.get(managerId)?.size || 0;
+        if (currentCount >= MAX_TEAMS_PER_MANAGER) break;
+
+        // Check if manager is already a member
+        const existingMember = await db
+          .select({ id: teamMembers.id })
+          .from(teamMembers)
+          .where(
+            and(
+              eq(teamMembers.teamId, teamId),
+              eq(teamMembers.userId, managerId)
+            )
+          )
+          .limit(1);
+
+        if (existingMember.length === 0) {
+          await db.insert(teamMembers).values({
+            teamId,
+            userId: managerId,
+          });
+
+          if (!managerTeamAssignments.has(managerId)) {
+            managerTeamAssignments.set(managerId, new Set());
+          }
+          managerTeamAssignments.get(managerId)!.add(teamId);
+
+          const team = await db
+            .select({ name: teams.name })
+            .from(teams)
+            .where(eq(teams.id, teamId))
+            .limit(1);
+          console.log(
+            `  ✓ Added manager ${managerId} to team ${team[0]?.name || teamId}`
+          );
+        }
+      }
+    }
+
+    // Phase 3: Assign admins randomly
+    console.log("\nAssigning team admins...");
+    const allTeams = await db.select().from(teams);
+
+    for (const team of allTeams) {
+      if (!team.id || !createdById) continue;
+
+      // Get team members (agents and managers)
+      const members = await db
+        .select({ userId: teamMembers.userId })
+        .from(teamMembers)
+        .where(eq(teamMembers.teamId, team.id));
+
+      if (members.length === 0) continue;
+
+      // Separate agents and managers
+      const memberUserIds = members.map((m) => m.userId);
+      const memberUsers = await db
+        .select({ id: users.id, role: users.role })
+        .from(users)
+        .where(inArray(users.id, memberUserIds));
+
+      const agentIds = memberUsers
+        .filter((u) => u.role === "agent")
+        .map((u) => u.id);
+      const managerIds = memberUsers
+        .filter((u) => u.role === "manager")
+        .map((u) => u.id);
+
+      // Check existing admins
+      const existingAdmins = await db
+        .select({ userId: teamAdmins.userId })
+        .from(teamAdmins)
+        .where(eq(teamAdmins.teamId, team.id));
+
+      const existingAdminIds = new Set(existingAdmins.map((a) => a.userId));
+
+      // Randomly decide admin count (0-2, but prefer at least 1 if managers available)
+      let adminCount = 0;
+      if (managerIds.length > 0) {
+        // 70% chance of having admins if managers are available
+        adminCount =
+          Math.random() < 0.7 ? Math.floor(Math.random() * 2) + 1 : 0;
+      } else {
+        // 50% chance if only agents available
+        adminCount = Math.random() < 0.5 ? 1 : 0;
+      }
+
+      const adminsToAdd: string[] = [];
+      let hasAgentAdmin = false;
+      let hasManagerAdmin = false;
+
+      // Select admins: prefer managers, but allow agents
+      if (adminCount > 0) {
+        const shuffledManagers = shuffle(managerIds);
+        const shuffledAgents = shuffle(agentIds);
+
+        // First, try to add managers (prefer managers)
+        for (
+          let i = 0;
+          i < Math.min(adminCount, shuffledManagers.length);
+          i++
+        ) {
+          if (!existingAdminIds.has(shuffledManagers[i])) {
+            adminsToAdd.push(shuffledManagers[i]);
+            hasManagerAdmin = true;
+          }
+        }
+
+        // If we still need more admins and have agents, add an agent
+        if (adminsToAdd.length < adminCount && shuffledAgents.length > 0) {
+          const agentAdmin = shuffledAgents.find(
+            (id) => !existingAdminIds.has(id)
+          );
+          if (agentAdmin) {
+            adminsToAdd.push(agentAdmin);
+            hasAgentAdmin = true;
+          }
+        }
+
+        // Rule: If agent is admin, ensure at least one manager is also admin
+        if (hasAgentAdmin && !hasManagerAdmin && shuffledManagers.length > 0) {
+          const managerToAdd = shuffledManagers.find(
+            (id) => !existingAdminIds.has(id) && !adminsToAdd.includes(id)
+          );
+          if (managerToAdd) {
+            adminsToAdd.push(managerToAdd);
+            hasManagerAdmin = true;
+          }
+        }
+
+        // If we still have room and managers available, add another manager
+        if (
+          adminsToAdd.length < 2 &&
+          shuffledManagers.length >
+            adminsToAdd.filter((id) => managerIds.includes(id)).length
+        ) {
+          const additionalManager = shuffledManagers.find(
+            (id) => !existingAdminIds.has(id) && !adminsToAdd.includes(id)
+          );
+          if (additionalManager) {
+            adminsToAdd.push(additionalManager);
+          }
+        }
+      }
+
+      // Insert admins
+      for (const userId of adminsToAdd) {
+        if (!existingAdminIds.has(userId)) {
+          await db.insert(teamAdmins).values({
+            teamId: team.id,
+            userId,
+            grantedBy: createdById,
+            grantedAt: new Date(),
+          });
+          const user = memberUsers.find((u) => u.id === userId);
+          const roleLabel = user?.role === "manager" ? "manager" : "agent";
+          console.log(
+            `  ✓ Granted admin status to ${roleLabel} ${userId} in team ${team.name}`
+          );
+        }
+      }
+    }
+
+    console.log("\nDefault teams seeding completed.");
   } catch (error) {
     console.error("Error seeding default teams:", error);
     throw error;

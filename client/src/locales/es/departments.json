@@ -4,7 +4,8 @@
   "actions": {
     "add": "Agregar departamento",
     "create": "Crear departamento",
-    "update": "Actualizar departamento"
+    "update": "Actualizar departamento",
+    "backToDepartments": "Volver a Departamentos"
   },
   "status": {
     "active": "Activo",
@@ -15,13 +16,41 @@
     "desc": "No tienes departamentos creados. Crea uno para organizar a los usuarios y enrutar tickets.",
     "create": "Crear nuevo departamento"
   },
+  "emptyStates": {
+    "noTeams": {
+      "title": "Aún no hay equipos",
+      "description": "Este departamento aún no tiene equipos asignados."
+    },
+    "noStats": "No hay estadísticas disponibles"
+  },
   "labels": {
     "name": "Nombre del departamento",
     "description": "Descripción",
     "manager": "Responsable del departamento",
     "selectManager": "Selecciona un responsable",
     "noManager": "Sin responsable",
+    "noDescription": "No se proporcionó descripción",
     "managerLine": "Responsable: {{first}} {{last}}"
+  },
+  "sections": {
+    "teams": {
+      "title": "Equipos",
+      "description": "Equipos en este departamento"
+    },
+    "statistics": {
+      "title": "Estadísticas",
+      "description": "Métricas de rendimiento del departamento"
+    }
+  },
+  "stats": {
+    "teams": "Equipos",
+    "totalTickets": "Total de Tickets",
+    "openTickets": "Tickets Abiertos",
+    "inProgress": "En Progreso",
+    "resolved": "Resueltos",
+    "highPriority": "Alta Prioridad",
+    "closedTickets": "Tickets Cerrados",
+    "completionRate": "Tasa de Finalización"
   },
   "dialogs": {
     "editTitle": "Editar departamento",
@@ -29,11 +58,29 @@
     "createTitle": "Crear nuevo departamento",
     "createDesc": "Agrega un nuevo departamento para organizar a tu equipo"
   },
+  "errors": {
+    "accessDenied": "Acceso Denegado",
+    "noAccessToDepartment": "No tienes permiso para ver este departamento.",
+    "loadFailed": "Error al Cargar Departamento",
+    "departmentNotFound": "Departamento no encontrado",
+    "departmentNotFoundDesc": "El departamento que buscas no existe o no tienes acceso a él.",
+    "updateFailed": "Error al actualizar departamento",
+    "deleteFailed": "Error al eliminar departamento",
+    "loadStatsFailed": "Error al cargar estadísticas",
+    "loadTeamsFailed": "Error al cargar equipos",
+    "tryAgain": "Por favor, inténtalo de nuevo más tarde"
+  },
   "toasts": {
     "created": "Departamento creado correctamente",
     "updated": "Departamento actualizado correctamente",
     "deleted": "Departamento eliminado correctamente"
+  },
+  "teamPreview": {
+    "members": "Miembros",
+    "admins": "Administradores",
+    "tasks": "Tareas",
+    "recentTasks": "Tareas Recientes",
+    "noTasks": "Aún no hay tareas asignadas a este equipo.",
+    "viewFullDetails": "Ver Detalles Completos"
   }
 }
-
-

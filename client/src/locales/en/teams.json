@@ -14,14 +14,16 @@
     "extraAdmin": "Create a team or ask to be invited to one.",
     "createFirst": "Create Your First Team",
     "member": "Member",
+    "owner": "Owner",
     "created": "Created {{date}}"
   },
   "all": {
-    "title": "All Teams",
+    "title": "Department Teams",
     "loading": "Loading teams...",
     "emptyTitle": "No teams found",
     "emptyDesc": "No teams have been created yet. Be the first to create one!",
     "public": "Public",
+    "admin": "Admin",
     "created": "Created {{date}}"
   },
   "form": {
@@ -29,6 +31,9 @@
     "createDesc": "Create a new team to collaborate with other members on tasks and projects.",
     "name": "Team Name",
     "namePlaceholder": "Enter team name...",
+    "department": "Department",
+    "selectDepartment": "Select a department",
+    "departmentRequired": "Department is required",
     "description": "Description",
     "descriptionPlaceholder": "Describe your team's purpose...",
     "cancel": "Cancel"

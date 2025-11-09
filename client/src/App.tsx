@@ -47,11 +47,13 @@ import { Layout } from "@/components/layout";
 import { AiChatBot } from "@/components/AiChatBot";
 import { ProtectedRoute } from "@/components/protected-route";
 import { StatsDrawer } from "@/components/stats-drawer";
+import { ActivityDrawer } from "@/components/activity-drawer";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
 import Tickets from "@/pages/tickets";
 import Teams from "@/pages/teams";
+import DepartmentDetail from "@/pages/department-detail";
 import TeamDetail from "@/pages/team-detail";
 import Settings from "@/pages/settings";
 import Notifications from "@/pages/notifications";
@@ -139,6 +141,14 @@ function Router() {
                     </ProtectedRoute>
                   )}
                 />
+                <Route
+                  path="/departments/:id"
+                  component={() => (
+                    <ProtectedRoute allowedRoles={["admin", "manager"]}>
+                      <DepartmentDetail />
+                    </ProtectedRoute>
+                  )}
+                />
                 <Route path="/knowledge-base">
                   <ProtectedRoute allowedRoles={["admin"]}>
                     <KnowledgeBase />
@@ -163,6 +173,7 @@ function Router() {
       {/* Show AI Chat Bot for authenticated users */}
       {!isLoading && isAuthenticated && <AiChatBot />}
       {!isLoading && isAuthenticated && <StatsDrawer />}
+      {!isLoading && isAuthenticated && <ActivityDrawer />}
     </>
   );
 }

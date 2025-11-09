@@ -28,6 +28,13 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import MainWrapper from "@/components/main-wrapper";
 import { useTranslation } from "react-i18next";
 
@@ -39,6 +46,7 @@ export default function Teams() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [teamName, setTeamName] = useState("");
   const [teamDescription, setTeamDescription] = useState("");
+  const [departmentId, setDepartmentId] = useState<string>("");
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -80,16 +88,46 @@ export default function Teams() {
     refetchOnMount: "always",
   });
 
+  // Fetch user's team admin status for all teams
+  const { data: teamAdminStatus } = useQuery<Record<number, boolean>>({
+    queryKey: ["/api/user/team-admin-status"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/user/team-admin-status");
+      return res.json();
+    },
+    enabled: isAuthenticated,
+    retry: false,
+  });
+
+  // Fetch departments for team creation (role-based)
+  const { data: departments } = useQuery<any[]>({
+    queryKey: ["/api/teams/departments"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/teams/departments");
+      return res.json();
+    },
+    enabled: isAuthenticated && isCreateDialogOpen,
+    retry: false,
+  });
+
   const createTeamMutation = useMutation({
-    mutationFn: async (teamData: { name: string; description: string }) => {
+    mutationFn: async (teamData: {
+      name: string;
+      description: string;
+      departmentId: number;
+    }) => {
       return await apiRequest("POST", "/api/teams", teamData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
       queryClient.invalidateQueries({ queryKey: ["/api/teams/my"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/user/team-admin-status"],
+      });
       setIsCreateDialogOpen(false);
       setTeamName("");
       setTeamDescription("");
+      setDepartmentId("");
       toast({
         title: t("messages.success"),
         description: t("teams:toasts.created"),
@@ -133,9 +171,19 @@ export default function Teams() {
       return;
     }
 
+    if (!departmentId) {
+      toast({
+        title: "Error",
+        description: t("teams:form.departmentRequired"),
+        variant: "destructive",
+      });
+      return;
+    }
+
     createTeamMutation.mutate({
       name: teamName.trim(),
       description: teamDescription.trim(),
+      departmentId: parseInt(departmentId),
     });
   };
 
@@ -173,18 +221,41 @@ export default function Teams() {
               >
                 <CardHeader>
                   <div className="flex items-start justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                    <div className="flex items-center space-x-3 flex-1 min-w-0">
+                      <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
                         <Users className="h-6 w-6 text-primary" />
                       </div>
-                      <div>
-                        <CardTitle className="text-lg">{team.name}</CardTitle>
+                      <div className="flex-1 min-w-0">
+                        <CardTitle className="text-lg line-clamp-2 break-words">
+                          {team.name}
+                        </CardTitle>
                       </div>
                     </div>
-                    <Badge variant="secondary">
-                      <Crown className="h-3 w-3 mr-1" />
-                      {t("teams:my.member")}
-                    </Badge>
+                    {team.createdBy === (user as any)?.id ? (
+                      <Badge
+                        variant="default"
+                        className="bg-purple-100 text-purple-700 hover:bg-purple-200"
+                      >
+                        <Crown className="h-3 w-3 mr-1" />
+                        {t("teams:my.owner")}
+                      </Badge>
+                    ) : teamAdminStatus?.[team.id] ? (
+                      <Badge
+                        variant="secondary"
+                        className="bg-blue-100 text-blue-700 hover:bg-blue-200"
+                      >
+                        <Crown className="h-3 w-3 mr-1" />
+                        {t("teams:all.admin")}
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="bg-slate-50 text-slate-700"
+                      >
+                        <Crown className="h-3 w-3 mr-1" />
+                        {t("teams:my.member")}
+                      </Badge>
+                    )}
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -253,20 +324,33 @@ export default function Teams() {
                 >
                   <CardHeader>
                     <div className="flex items-start justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center">
+                      <div className="flex items-center space-x-3 flex-1 min-w-0">
+                        <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0">
                           <Users className="h-6 w-6 text-emerald-600" />
                         </div>
-                        <div>
-                          <CardTitle className="text-lg">{team.name}</CardTitle>
+                        <div className="flex-1 min-w-0">
+                          <CardTitle className="text-lg line-clamp-2 break-words">
+                            {team.name}
+                          </CardTitle>
                         </div>
                       </div>
-                      <Badge
-                        variant="outline"
-                        className="bg-slate-50 text-slate-700"
-                      >
-                        {t("teams:all.public")}
-                      </Badge>
+                      {teamAdminStatus?.[team.id] ? (
+                        <Badge
+                          variant="secondary"
+                          className="bg-blue-100 text-blue-700 hover:bg-blue-200"
+                        >
+                          <Crown className="h-3 w-3 mr-1" />
+                          {t("teams:all.admin")}
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="bg-slate-50 text-slate-700"
+                        >
+                          <Crown className="h-3 w-3 mr-1" />
+                          {t("teams:my.member")}
+                        </Badge>
+                      )}
                     </div>
                   </CardHeader>
                   <CardContent>
@@ -306,7 +390,18 @@ export default function Teams() {
         <></>
       )}
 
-      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+      <Dialog
+        open={isCreateDialogOpen}
+        onOpenChange={(open) => {
+          setIsCreateDialogOpen(open);
+          if (!open) {
+            // Reset form when dialog closes
+            setTeamName("");
+            setTeamDescription("");
+            setDepartmentId("");
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("teams:form.createTitle")}</DialogTitle>
@@ -321,6 +416,23 @@ export default function Teams() {
                 value={teamName}
                 onChange={(e) => setTeamName(e.target.value)}
               />
+            </div>
+            <div>
+              <Label htmlFor="team-department">
+                {t("teams:form.department")}
+              </Label>
+              <Select value={departmentId} onValueChange={setDepartmentId}>
+                <SelectTrigger id="team-department">
+                  <SelectValue placeholder={t("teams:form.selectDepartment")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {departments?.map((dept: any) => (
+                    <SelectItem key={dept.id} value={dept.id.toString()}>
+                      {dept.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label htmlFor="team-description">

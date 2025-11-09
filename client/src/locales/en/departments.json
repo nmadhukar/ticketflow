@@ -4,7 +4,8 @@
   "actions": {
     "add": "Add Department",
     "create": "Create Department",
-    "update": "Update Department"
+    "update": "Update Department",
+    "backToDepartments": "Back to Departments"
   },
   "status": {
     "active": "Active",
@@ -15,13 +16,41 @@
     "desc": "You don't have any departments created yet. Create one to organize users and route tickets.",
     "create": "Create New Department"
   },
+  "emptyStates": {
+    "noTeams": {
+      "title": "No teams yet",
+      "description": "This department doesn't have any teams assigned yet."
+    },
+    "noStats": "No statistics available"
+  },
   "labels": {
     "name": "Department Name",
     "description": "Description",
     "manager": "Department Manager",
     "selectManager": "Select a manager",
     "noManager": "No Manager",
+    "noDescription": "No description provided",
     "managerLine": "Manager: {{first}} {{last}}"
+  },
+  "sections": {
+    "teams": {
+      "title": "Teams",
+      "description": "Teams in this department"
+    },
+    "statistics": {
+      "title": "Statistics",
+      "description": "Department performance metrics"
+    }
+  },
+  "stats": {
+    "teams": "Teams",
+    "totalTickets": "Total Tickets",
+    "openTickets": "Open Tickets",
+    "inProgress": "In Progress",
+    "resolved": "Resolved",
+    "highPriority": "High Priority",
+    "closedTickets": "Closed Tickets",
+    "completionRate": "Completion Rate"
   },
   "dialogs": {
     "editTitle": "Edit Department",
@@ -29,10 +58,30 @@
     "createTitle": "Create New Department",
     "createDesc": "Add a new department to organize your team"
   },
+  "errors": {
+    "accessDenied": "Access Denied",
+    "noAccessToDepartment": "You don't have permission to view this department.",
+    "loadFailed": "Failed to Load Department",
+    "departmentNotFound": "Department not found",
+    "departmentNotFoundDesc": "The department you're looking for doesn't exist or you don't have access to it.",
+    "updateFailed": "Failed to update department",
+    "deleteFailed": "Failed to delete department",
+    "loadStatsFailed": "Failed to load statistics",
+    "loadTeamsFailed": "Failed to load teams",
+    "tryAgain": "Please try again later"
+  },
   "toasts": {
     "created": "Department created successfully",
     "updated": "Department updated successfully",
     "deleted": "Department deleted successfully"
+  },
+  "teamPreview": {
+    "members": "Members",
+    "admins": "Admins",
+    "tasks": "Tasks",
+    "recentTasks": "Recent Tasks",
+    "noTasks": "No tasks assigned to this team yet.",
+    "viewFullDetails": "View Full Details"
   }
 }
 

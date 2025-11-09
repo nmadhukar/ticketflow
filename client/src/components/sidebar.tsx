@@ -29,8 +29,8 @@ export function Sidebar({ className }: SidebarProps) {
       return [
         { name: t("dashboard"), href: "/", icon: LayoutDashboard },
         { name: t("tickets"), href: "/tickets", icon: FolderOpen },
-        { name: t("departments"), href: "/departments", icon: Building },
         { name: t("knowledge_base"), href: "/knowledge-base", icon: BookOpen },
+        { name: t("departments"), href: "/departments", icon: Building },
       ];
     }
     if (role === "manager") {
@@ -70,7 +70,7 @@ export function Sidebar({ className }: SidebarProps) {
       icon: Brain,
       hrefBase: "/admin",
       section: "analytics",
-      items: ["ai-analytics", "learning-analytics"],
+      items: ["ai-analytics", "learning-queue"],
     },
     {
       titleKey: "content_title",
@@ -98,7 +98,7 @@ export function Sidebar({ className }: SidebarProps) {
     "developer-resources": ["admin"],
     "ai-settings": ["admin"],
     "ai-analytics": ["admin", "manager"],
-    "learning-analytics": ["admin", "manager"],
+    "learning-queue": ["admin", "manager"],
     help: ["admin", "manager"],
     policies: ["admin", "manager"],
     guidelines: ["admin", "manager"],

@@ -40,11 +40,6 @@ services:
       # Prefer explicit DATABASE_URL if provided; otherwise build from POSTGRES_*
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}
 
-      # Optional PG* variables for tools/clients inside the container
-      PGUSER: ${PGUSER:-}
-      PGPASSWORD: ${PGPASSWORD:-}
-      PGDATABASE: ${PGDATABASE:-}
-
       # Security & Auth
       SESSION_SECRET: ${SESSION_SECRET}
       JWT_SECRET: ${JWT_SECRET}
@@ -65,8 +60,18 @@ services:
       INPUT_VALIDATION_ENABLED: ${INPUT_VALIDATION_ENABLED:-true}
       VALIDATION_STRICT_MODE: ${VALIDATION_STRICT_MODE:-true}
 
-      # DB driver override (optional: neon | pg)
-      DB_DRIVER: ${DB_DRIVER:-}
+      COOKIE_SECURE: ${COOKIE_SECURE}
+
+      MAILTRAP_TOKEN: ${MAILTRAP_TOKEN}
+
+      AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME}
+      AWS_S3_REGION: ${AWS_S3_REGION}
+
+      MAX_FILE_UPLOAD_SIZE_MB: ${MAX_FILE_UPLOAD_SIZE_MB}
+      MAX_FILES_PER_REQUEST: ${MAX_FILES_PER_REQUEST}
+      MAX_REQUEST_SIZE_MB: ${MAX_REQUEST_SIZE_MB}
+
+      MICROSOFT_REDIRECT_URL: ${MICROSOFT_REDIRECT_URL}
 
       # Debugging (optional)
       DEBUG: ${DEBUG:-}

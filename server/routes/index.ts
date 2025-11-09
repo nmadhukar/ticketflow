@@ -50,6 +50,7 @@ import { setupAuth, isAuthenticated } from "../auth";
 import { setupMicrosoftAuth, isMicrosoftUser } from "../microsoftAuth";
 import { teamsIntegration } from "../microsoftTeams";
 import { sendTestEmail } from "../ses";
+import { canManageTeam } from "../permissions/teams";
 import {
   insertTaskSchema,
   insertTeamSchema,
@@ -104,6 +105,7 @@ import { bedrockIntegration } from "../bedrockIntegration";
 import { s3Service } from "../services/s3Service";
 import { DEFAULT_COMPANY } from "@shared/constants";
 import { getTicketMetaForUser } from "../permissions/tickets";
+import { registerTeamsRoutes } from "./teams";
 
 // Helper function to sanitize company name for S3 key
 function sanitizeCompanyNameForS3(companyName: string): string {
@@ -160,13 +162,11 @@ const upload = multer({
  */
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
-  await setupAuth(app);
-  await setupMicrosoftAuth(app);
+  setupAuth(app);
+  //await setupMicrosoftAuth(app);
 
-  // Auth routes are now handled in auth.ts
-
-  // Register admin routes (organized by domain)
   registerAdminRoutes(app);
+  registerTeamsRoutes(app);
 
   // Users route
   app.get("/api/users", isAuthenticated, async (req, res) => {
@@ -1100,192 +1100,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Team routes
-  app.get("/api/teams", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-
-      // Customers cannot access teams
-      if (user?.role === "customer") {
-        return res
-          .status(403)
-          .json({ message: "Customers cannot access teams" });
-      }
-
-      if (["admin", "customer"].includes(user?.role)) {
-        const allTeams = await storage.getTeams();
-        return res.json(allTeams);
-      }
-
-      if (user?.role === "manager") {
-        // select teams within departments managed by this manager using join
-        const managedTeams = await db
-          .select({
-            id: teams.id,
-            name: teams.name,
-            description: teams.description,
-            createdAt: teams.createdAt,
-            createdBy: teams.createdBy,
-          })
-          .from(teams)
-          .innerJoin(departments, eq(teams.departmentId, departments.id))
-          .where(eq(departments.managerId as any, userId) as any)
-          .orderBy(desc(teams.createdAt));
-
-        return res.json(managedTeams);
-      }
-
-      // Agents/Users: forbid listing all teams; use /api/teams/my
-      return res.status(403).json({ message: "Forbidden" });
-    } catch (error) {
-      console.error("Error fetching teams:", error);
-      res.status(500).json({ message: "Failed to fetch teams" });
-    }
-  });
-
-  // Get user's teams (teams the user is a member of)
-  app.get("/api/teams/my", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-      if (user?.role === "customer") {
-        return res
-          .status(403)
-          .json({ message: "Customers cannot access teams" });
-      }
-      const teams = await storage.getUserTeams(userId);
-      res.json(teams);
-    } catch (error) {
-      console.error("Error fetching user teams:", error);
-      res.status(500).json({ message: "Failed to fetch user teams" });
-    }
-  });
-
-  app.post("/api/teams", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const teamData = insertTeamSchema.parse({
-        ...req.body,
-        createdBy: userId,
-      });
-      const team = await storage.createTeam(teamData);
-      res.status(201).json(team);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res
-          .status(400)
-          .json({ message: "Invalid team data", errors: error.errors });
-      }
-      console.error("Error creating team:", error);
-      res.status(500).json({ message: "Failed to create team" });
-    }
-  });
-
-  app.get("/api/teams/:id", isAuthenticated, async (req, res) => {
-    try {
-      const teamId = parseInt(req.params.id);
-      const team = await storage.getTeam(teamId);
-      if (!team) {
-        return res.status(404).json({ message: "Team not found" });
-      }
-      res.json(team);
-    } catch (error) {
-      console.error("Error fetching team:", error);
-      res.status(500).json({ message: "Failed to fetch team" });
-    }
-  });
-
-  // Get team members
-  app.get("/api/teams/:id/members", isAuthenticated, async (req: any, res) => {
-    try {
-      const teamId = parseInt(req.params.id);
-      if (isNaN(teamId)) {
-        return res.status(400).json({ message: "Invalid team ID" });
-      }
-
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      // Check if user has permission to view team members
-      if (user.role === "customer") {
-        return res
-          .status(403)
-          .json({ message: "Customers cannot access team members" });
-      }
-
-      // For agents, check if they're a member of the team
-      if (user.role === "agent") {
-        const userTeams = await storage.getUserTeams(userId);
-        const isMember = userTeams.some((team) => team.id === teamId);
-        if (!isMember) {
-          return res.status(403).json({
-            message: "You can only view members of teams you belong to",
-          });
-        }
-      }
-
-      // For managers, check if they manage a department that contains this team
-      if (user.role === "manager") {
-        const team = await storage.getTeam(teamId);
-        if (team?.departmentId) {
-          const departmentResults = await db
-            .select()
-            .from(departments)
-            .where(
-              and(
-                eq(departments.id, team.departmentId),
-                eq(departments.managerId as any, userId)
-              )
-            );
-          if (departmentResults.length === 0) {
-            return res.status(403).json({
-              message: "You can only view members of teams in your departments",
-            });
-          }
-        }
-      }
-
-      // Admin and authorized users can proceed
-      const members = await storage.getTeamMembers(teamId);
-      res.json(members);
-    } catch (error) {
-      console.error("Error fetching team members:", error);
-      res.status(500).json({ message: "Failed to fetch team members" });
-    }
-  });
-
-  // Update team member role
-  app.patch(
-    "/api/teams/:teamId/members/:userId",
-    isAuthenticated,
-    async (req: any, res) => {
-      try {
-        const user = await storage.getUser(getUserId(req));
-        if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Forbidden" });
-        }
-
-        const { teamId, userId } = req.params;
-        const { role } = req.body;
-
-        const updatedMember = await storage.updateTeamMemberRole(
-          userId,
-          parseInt(teamId),
-          role
-        );
-        res.json(updatedMember);
-      } catch (error) {
-        console.error("Error updating team member role:", error);
-        res.status(500).json({ message: "Failed to update team member role" });
-      }
-    }
-  );
-
   // Admin routes
   app.get("/api/admin/users", isAuthenticated, async (req: any, res) => {
     try {
@@ -1403,15 +1217,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     isAuthenticated,
     async (req: any, res) => {
       try {
-        const user = await storage.getUser(getUserId(req));
-        if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Forbidden" });
+        const { userId } = req.params;
+        const { teamId } = req.body;
+
+        if (!teamId) {
+          return res.status(400).json({ message: "teamId is required" });
         }
 
-        const { userId } = req.params;
-        const { teamId, role } = req.body;
+        const currentUserId = getUserId(req);
+        const teamIdNum = parseInt(teamId);
 
-        const teamMember = await storage.assignUserToTeam(userId, teamId, role);
+        // Check if user can manage the team
+        const canManage = await canManageTeam(
+          storage,
+          currentUserId,
+          teamIdNum
+        );
+        if (!canManage) {
+          return res.status(403).json({
+            message: "You don't have permission to assign users to this team",
+          });
+        }
+
+        // Role field removed - use team admins endpoints instead
+        const teamMember = await storage.assignUserToTeam(
+          userId,
+          teamIdNum,
+          undefined
+        );
         res.json(teamMember);
       } catch (error) {
         console.error("Error assigning user to team:", error);
@@ -1425,13 +1258,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     isAuthenticated,
     async (req: any, res) => {
       try {
-        const user = await storage.getUser(getUserId(req));
-        if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Forbidden" });
+        const { userId, teamId } = req.params;
+        const teamIdNum = parseInt(teamId);
+
+        if (isNaN(teamIdNum)) {
+          return res.status(400).json({ message: "Invalid team ID" });
         }
 
-        const { userId, teamId } = req.params;
-        await storage.removeUserFromTeam(userId, parseInt(teamId));
+        const currentUserId = getUserId(req);
+
+        // Check if user can manage the team
+        const canManage = await canManageTeam(
+          storage,
+          currentUserId,
+          teamIdNum
+        );
+        if (!canManage) {
+          return res.status(403).json({
+            message: "You don't have permission to remove users from this team",
+          });
+        }
+
+        // Also remove from team_admins if user is an admin
+        const isAdmin = await storage.isTeamAdmin(userId, teamIdNum);
+        if (isAdmin) {
+          await storage.removeTeamAdmin(userId, teamIdNum);
+        }
+
+        await storage.removeUserFromTeam(userId, teamIdNum);
         res.status(204).send();
       } catch (error) {
         console.error("Error removing user from team:", error);
@@ -3543,6 +3397,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
   );
 
   // Department routes (scoped by role)
+  app.get("/api/departments/:id", isAuthenticated, async (req, res) => {
+    try {
+      const departmentId = parseInt(req.params.id);
+      if (isNaN(departmentId)) {
+        return res.status(400).json({ message: "Invalid department ID" });
+      }
+
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+
+      if (!user) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      const department = await storage.getDepartmentById(departmentId);
+      if (!department) {
+        return res.status(404).json({ message: "Department not found" });
+      }
+
+      // Permission check: Admin can access all, Manager can only access their departments
+      if (user.role === "admin") {
+        // Admin can access all departments
+      } else if (user.role === "manager") {
+        // Manager can only access departments they manage
+        if (department.managerId !== userId) {
+          return res.status(403).json({
+            message: "You can only access departments you manage",
+          });
+        }
+      } else {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      res.json(department);
+    } catch (error) {
+      console.error("Error fetching department:", error);
+      res.status(500).json({ message: "Failed to fetch department" });
+    }
+  });
+
   app.get("/api/departments", isAuthenticated, async (req, res) => {
     try {
       const userId = getUserId(req);
@@ -3588,6 +3482,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const department = await storage.createDepartment(req.body);
+
+      // Broadcast department created event
+      if ((app as any).broadcastToAll) {
+        (app as any).broadcastToAll({
+          type: "department:created",
+          data: { id: department.id, ...department },
+          ts: Date.now(),
+          v: 1,
+        });
+      }
+
       res.json(department);
     } catch (error) {
       console.error("Error creating department:", error);
@@ -3606,6 +3511,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const id = parseInt(req.params.id);
       const department = await storage.updateDepartment(id, req.body);
+
+      // Broadcast department updated event
+      if ((app as any).broadcastToAll) {
+        (app as any).broadcastToAll({
+          type: "department:updated",
+          data: { id: department.id, ...department },
+          ts: Date.now(),
+          v: 1,
+        });
+      }
+
       res.json(department);
     } catch (error) {
       console.error("Error updating department:", error);
@@ -3627,6 +3543,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const id = parseInt(req.params.id);
         await storage.deleteDepartment(id);
+
+        // Broadcast department deleted event
+        if ((app as any).broadcastToAll) {
+          (app as any).broadcastToAll({
+            type: "department:deleted",
+            data: { id },
+            ts: Date.now(),
+            v: 1,
+          });
+        }
+
         res.json({ message: "Department deleted successfully" });
       } catch (error) {
         console.error("Error deleting department:", error);
@@ -3634,6 +3561,160 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
   );
+
+  // Get teams in a department
+  app.get("/api/departments/:id/teams", isAuthenticated, async (req, res) => {
+    try {
+      const departmentId = parseInt(req.params.id);
+      if (isNaN(departmentId)) {
+        return res.status(400).json({ message: "Invalid department ID" });
+      }
+
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+
+      if (!user) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      // Check if department exists
+      const department = await storage.getDepartmentById(departmentId);
+      if (!department) {
+        return res.status(404).json({ message: "Department not found" });
+      }
+
+      // Permission check: Admin can access all, Manager can only access their departments
+      if (user.role === "admin") {
+        // Admin can access all departments
+      } else if (user.role === "manager") {
+        // Manager can only access departments they manage
+        if (department.managerId !== userId) {
+          return res.status(403).json({
+            message: "You can only access departments you manage",
+          });
+        }
+      } else {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      // Get teams in this department
+      const departmentTeams = await db
+        .select({
+          id: teams.id,
+          name: teams.name,
+          description: teams.description,
+          createdAt: teams.createdAt,
+          createdBy: teams.createdBy,
+        })
+        .from(teams)
+        .where(eq(teams.departmentId, departmentId))
+        .orderBy(desc(teams.createdAt));
+
+      res.json(departmentTeams);
+    } catch (error) {
+      console.error("Error fetching department teams:", error);
+      res.status(500).json({ message: "Failed to fetch department teams" });
+    }
+  });
+
+  // Get department statistics
+  app.get("/api/departments/:id/stats", isAuthenticated, async (req, res) => {
+    try {
+      const departmentId = parseInt(req.params.id);
+      if (isNaN(departmentId)) {
+        return res.status(400).json({ message: "Invalid department ID" });
+      }
+
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+
+      if (!user) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      // Check if department exists
+      const department = await storage.getDepartmentById(departmentId);
+      if (!department) {
+        return res.status(404).json({ message: "Department not found" });
+      }
+
+      // Permission check: Admin can access all, Manager can only access their departments
+      if (user.role === "admin") {
+        // Admin can access all departments
+      } else if (user.role === "manager") {
+        // Manager can only access departments they manage
+        if (department.managerId !== userId) {
+          return res.status(403).json({
+            message: "You can only access departments you manage",
+          });
+        }
+      } else {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      // Get teams in this department
+      const deptTeams = await db
+        .select({ id: teams.id })
+        .from(teams)
+        .where(eq(teams.departmentId, departmentId));
+
+      const teamIds = deptTeams.map((t) => t.id);
+      const teamCount = teamIds.length;
+
+      // Initialize stats
+      let totalTickets = 0;
+      let openTickets = 0;
+      let inProgressTickets = 0;
+      let resolvedTickets = 0;
+      let closedTickets = 0;
+      let highPriorityTickets = 0;
+
+      if (teamIds.length > 0) {
+        // Get all tickets for teams in this department
+        const deptTasks = await db
+          .select({
+            id: tasks.id,
+            status: tasks.status,
+            priority: tasks.priority,
+          })
+          .from(tasks)
+          .where(
+            and(
+              inArray(tasks.assigneeTeamId, teamIds),
+              eq(tasks.assigneeType, "team")
+            )
+          );
+
+        totalTickets = deptTasks.length;
+        openTickets = deptTasks.filter((t) => t.status === "open").length;
+        inProgressTickets = deptTasks.filter(
+          (t) => t.status === "in_progress"
+        ).length;
+        resolvedTickets = deptTasks.filter(
+          (t) => t.status === "resolved"
+        ).length;
+        closedTickets = deptTasks.filter((t) => t.status === "closed").length;
+        highPriorityTickets = deptTasks.filter(
+          (t) => t.priority === "high" || t.priority === "urgent"
+        ).length;
+      }
+
+      res.json({
+        teamCount,
+        totalTickets,
+        openTickets,
+        inProgressTickets,
+        resolvedTickets,
+        closedTickets,
+        highPriorityTickets,
+      });
+    } catch (error) {
+      console.error("Error fetching department stats:", error);
+      res
+        .status(500)
+        .json({ message: "Failed to fetch department statistics" });
+    }
+  });
 
   // User invitation routes (admin only)
   app.get("/api/admin/invitations", isAuthenticated, async (req, res) => {

@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { tasks, users, teams } from "@shared/schema";
+import { tasks, users, departments } from "@shared/schema";
 import { eq, inArray, desc } from "drizzle-orm";
 
 function nextTicketNumber(last?: string): string {
@@ -41,31 +41,36 @@ export async function seedTickets() {
       .select({ id: users.id })
       .from(users)
       .where(
-        inArray(users.email as any, [
+        inArray(users.email, [
           "agent1@ticketflow.local",
           "agent2@ticketflow.local",
           "agent3@ticketflow.local",
-        ]) as any
+        ])
       );
 
     const customers = await db
       .select({ id: users.id })
       .from(users)
       .where(
-        inArray(users.email as any, [
+        inArray(users.email, [
           "customer1@ticketflow.local",
           "customer2@ticketflow.local",
           "customer3@ticketflow.local",
-        ]) as any
+        ])
       );
 
-    const myTeams = await db
-      .select({
-        id: teams.id,
-        name: teams.name,
-        departmentId: teams.departmentId as any,
-      })
-      .from(teams);
+    // Get all active departments for random assignment
+    const allDepartments = await db
+      .select({ id: departments.id, name: departments.name })
+      .from(departments)
+      .where(eq(departments.isActive, true));
+
+    if (allDepartments.length === 0) {
+      console.warn(
+        "⚠ No active departments found. Cannot create department-assigned tickets."
+      );
+      return;
+    }
 
     // Determine last ticket number
     const [last] = await db
@@ -75,116 +80,46 @@ export async function seedTickets() {
       .limit(1);
     let lastTicketNo = last?.ticketNumber;
 
-    const seedRows: Array<
-      Parameters<typeof db.insert>[0] extends any
-        ? typeof tasks.$inferInsert
-        : never
-    > = [] as any;
+    // Helper function to get random department
+    const getRandomDepartment = () => {
+      return allDepartments[Math.floor(Math.random() * allDepartments.length)];
+    };
 
-    // Note: pushTicket helper removed; we insert directly with unique numbers
+    // Create tickets randomly assigned to departments only
+    const categories = ["support", "incident", "request", "enhancement", "bug"];
+    const priorities = ["low", "medium", "high", "urgent"];
+    const statuses = ["open", "in_progress"];
 
-    // Customers create tickets assigned to a team
-    for (let i = 0; i < Math.min(3, customers.length, myTeams.length); i++) {
-      const creator = customers[i].id;
-      const team = myTeams[i];
+    // Create 15-20 tickets randomly assigned to departments
+    const ticketCount = 15 + Math.floor(Math.random() * 6); // 15-20 tickets
+    for (let i = 0; i < ticketCount; i++) {
+      const randomDept = getRandomDepartment();
+      const randomCategory =
+        categories[Math.floor(Math.random() * categories.length)];
+      const randomPriority =
+        priorities[Math.floor(Math.random() * priorities.length)];
+      const randomStatus =
+        statuses[Math.floor(Math.random() * statuses.length)];
+      const randomCreator =
+        customers[Math.floor(Math.random() * customers.length)]?.id ||
+        admin?.id;
+
       lastTicketNo = await nextUniqueTicketNumber(lastTicketNo);
       await db.insert(tasks).values({
         ticketNumber: lastTicketNo,
-        title: `Customer issue #${i + 1}`,
-        description: "Issue reported by customer",
-        category: "support",
-        priority: i % 2 === 0 ? "high" : "medium",
-        status: "open",
-        assigneeType: "team",
-        assigneeTeamId: team.id,
-        createdBy: creator,
-      });
-      console.log(
-        `✓ Created team-assigned ticket ${lastTicketNo} -> team ${team.name}`
-      );
-    }
-
-    // Agent/user assigned directly
-    for (let i = 0; i < agents.length; i++) {
-      const assignee = agents[i].id;
-      lastTicketNo = await nextUniqueTicketNumber(lastTicketNo);
-      await db.insert(tasks).values({
-        ticketNumber: lastTicketNo,
-        title: `Agent task #${i + 1}`,
-        description: "Direct assignment to an agent",
-        category: "incident",
-        priority: i % 2 === 0 ? "urgent" : "low",
-        status: "open",
-        assigneeType: "user",
-        assigneeId: assignee,
-        createdBy: admin?.id || assignee,
-      });
-      console.log(
-        `✓ Created user-assigned ticket ${lastTicketNo} -> user ${assignee}`
-      );
-    }
-
-    // Mixed: team with later user assignment left null
-    for (let i = 0; i < Math.min(2, myTeams.length); i++) {
-      const team = myTeams[i];
-      lastTicketNo = await nextUniqueTicketNumber(lastTicketNo);
-      await db.insert(tasks).values({
-        ticketNumber: lastTicketNo,
-        title: `Team queue item #${i + 1}`,
-        description: "Team queue item awaiting pickup",
-        category: "request",
-        priority: "medium",
-        status: "open",
-        assigneeType: "team",
-        assigneeTeamId: team.id,
-        assigneeId: null,
-        createdBy:
-          admin?.id || agents[0]?.id || customers[0]?.id || "seed@system",
-      });
-      console.log(
-        `✓ Created team-queue ticket ${lastTicketNo} -> team ${team.name}`
-      );
-    }
-
-    // Department-only (routing without team)
-    for (let i = 0; i < Math.min(2, myTeams.length); i++) {
-      const team = myTeams[i];
-      const deptId = (team as any).departmentId;
-      if (!deptId) continue;
-      lastTicketNo = await nextUniqueTicketNumber(lastTicketNo);
-      await db.insert(tasks).values({
-        ticketNumber: lastTicketNo,
-        title: `Dept routed ticket #${i + 1}`,
-        description: "Customer routed to department without choosing team",
-        category: "incident",
-        priority: "low",
-        status: "open",
-        assigneeType: null as any,
+        title: `Department ticket #${i + 1}`,
+        description: `Ticket randomly assigned to department: ${randomDept.name}`,
+        category: randomCategory,
+        priority: randomPriority,
+        status: randomStatus,
+        assigneeType: null, // Department-only assignment
         assigneeId: null,
         assigneeTeamId: null,
-        createdBy: customers[i % customers.length]?.id || admin?.id,
+        createdBy: randomCreator,
       });
       console.log(
-        `✓ Created department-only ticket ${lastTicketNo} -> department ${deptId}`
+        `✓ Created department-assigned ticket ${lastTicketNo} -> department ${randomDept.name} (ID: ${randomDept.id})`
       );
-    }
-
-    // Unassigned (no routing/assignee)
-    for (let i = 0; i < 2; i++) {
-      lastTicketNo = await nextUniqueTicketNumber(lastTicketNo);
-      await db.insert(tasks).values({
-        ticketNumber: lastTicketNo,
-        title: `Unassigned ticket #${i + 1}`,
-        description: "Ticket created without assignment",
-        category: "enhancement",
-        priority: "medium",
-        status: "open",
-        assigneeType: null as any,
-        assigneeId: null,
-        assigneeTeamId: null,
-        createdBy: customers[0]?.id || admin?.id,
-      });
-      console.log(`✓ Created unassigned ticket ${lastTicketNo}`);
     }
   } catch (error) {
     console.error("Error seeding tickets:", error);

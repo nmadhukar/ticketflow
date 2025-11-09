@@ -27,7 +27,6 @@ import MainWrapper from "@/components/main-wrapper";
 import StatsCard from "@/components/stats-card";
 import { BedrockCostMonitoring } from "@/components/bedrock-cost-monitoring";
 import { S3UsageMonitoring } from "@/components/s3-usage-monitoring";
-// import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -38,9 +37,6 @@ import {
   BarChart3,
   CheckCircle,
   Clock,
-  MessageCircle,
-  Plus,
-  UserCheck,
   Users,
   UserCog,
   Settings,
@@ -93,23 +89,6 @@ export default function Dashboard() {
 
   const { data: recentTasks, isLoading: tasksLoading } = useQuery<any[]>({
     queryKey: ["/api/tasks"],
-    retry: false,
-    enabled: isAuthenticated && !hasCustomerRole,
-  });
-
-  // Team Members feature removed
-  // const { data: teamMembers = [], isLoading: membersLoading } = useQuery<any[]>(
-  //   {
-  //     queryKey: ["/api/teams/my"],
-  //     retry: false,
-  //     enabled: isAuthenticated && !hasCustomerRole,
-  //     initialData: [],
-  //     refetchOnMount: "always",
-  //   }
-  // );
-
-  const { data: activity, isLoading: activityLoading } = useQuery<any[]>({
-    queryKey: ["/api/activity"],
     retry: false,
     enabled: isAuthenticated && !hasCustomerRole,
   });
@@ -286,69 +265,15 @@ export default function Dashboard() {
         <></>
       )}
 
-      {/* S3 Usage Monitoring - Admin Only */}
-      {(user as any)?.role === "admin" && (
-        <div className="mb-8">
-          <S3UsageMonitoring />
-        </div>
-      )}
-
-      <div className="grid grid-cols-3 gap-10">
-        <div className="col-span-2">
+      <div className="space-y-6">
+        <div className="space-y-4">
+          <h2 className="text-2xl font-semibold">Bedrock Usage</h2>
           <BedrockCostMonitoring />
         </div>
-        <Card className="min-h-[60vh] flex flex-col shadow shadow-blue-300">
-          <CardHeader>
-            <CardTitle>{t("dashboard:recentActivity.title")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 flex-1">
-            {activityLoading ? (
-              <div className="text-center py-4">{t("actions.loading")}</div>
-            ) : activity && activity.length > 0 ? (
-              activity.slice(0, 5).map((item: any) => (
-                <div
-                  key={item.id}
-                  className="flex space-x-3 cursor-pointer hover:bg-muted/30 p-2 rounded-md transition-colors"
-                >
-                  <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                    {item.action === "created" && (
-                      <Plus className="h-4 w-4 text-blue-600" />
-                    )}
-                    {item.action === "completed" && (
-                      <CheckCircle className="h-4 w-4 text-green-600" />
-                    )}
-                    {item.action === "commented" && (
-                      <MessageCircle className="h-4 w-4 text-yellow-600" />
-                    )}
-                    {item.action === "updated" && (
-                      <UserCheck className="h-4 w-4 text-purple-600" />
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm text-slate-800">
-                      <span className="font-medium">
-                        {item.userName || item.userId}
-                      </span>{" "}
-                      {item.action} a ticket
-                    </p>
-                    {item.taskTitle && (
-                      <p className="text-xs text-muted-foreground font-medium hover:text-primary">
-                        {item.taskTitle}
-                      </p>
-                    )}
-                    <p className="text-xs text-slate-500">
-                      {new Date(item.createdAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="text-center py-4 text-slate-500">
-                {t("dashboard:recentActivity.noActivity")}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          <h2 className="text-2xl font-semibold">S3 Usage</h2>
+          <S3UsageMonitoring />
+        </div>
       </div>
     </MainWrapper>
   );

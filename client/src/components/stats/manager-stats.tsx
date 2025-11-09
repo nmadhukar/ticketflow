@@ -130,7 +130,7 @@ export function ManagerStats() {
     }));
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-10">
       {/* Department Overview */}
       <div>
         <div className="flex items-center justify-between mb-4">
@@ -200,72 +200,6 @@ export function ManagerStats() {
           </div>
         )}
       </div>
-
-      {/* Priority Distribution */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Priority Distribution</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {priorityData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={priorityData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, value, percent }) =>
-                    `${name}: ${value} (${(percent * 100).toFixed(0)}%)`
-                  }
-                  outerRadius={80}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  {priorityData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="text-center py-8 text-muted-foreground">
-              No priority data available
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Category Breakdown */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Category Breakdown</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {categoryData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={categoryData}>
-                <XAxis
-                  dataKey="name"
-                  angle={-45}
-                  textAnchor="end"
-                  height={100}
-                />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="count" fill="#3b82f6" />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="text-center py-8 text-muted-foreground">
-              No category data available
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       {/* Team Performance */}
       {teamPerformance.length > 0 && (
@@ -355,6 +289,72 @@ export function ManagerStats() {
           </Accordion>
         </div>
       )}
+
+      {/* Priority Distribution */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Priority Distribution</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {priorityData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <PieChart>
+                <Pie
+                  data={priorityData}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  label={({ name, value, percent }) =>
+                    `${name}: ${value} (${(percent * 100).toFixed(0)}%)`
+                  }
+                  outerRadius={80}
+                  fill="#8884d8"
+                  dataKey="value"
+                >
+                  {priorityData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              No priority data available
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Category Breakdown */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Category Breakdown</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {categoryData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={categoryData}>
+                <XAxis
+                  dataKey="name"
+                  angle={-45}
+                  textAnchor="end"
+                  height={100}
+                />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="count" fill="#3b82f6" />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              No category data available
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -3,6 +3,8 @@ import {
   tasks,
   teams,
   teamMembers,
+  teamAdmins,
+  teamTaskAssignments,
   taskComments,
   taskHistory,
   taskAttachments,
@@ -28,6 +30,8 @@ import {
   type InsertTaskComment,
   type TeamMember,
   type InsertTeamMember,
+  type TeamAdmin,
+  type InsertTeamAdmin,
   type TaskHistory,
   type TaskAttachment,
   type InsertTaskAttachment,
@@ -762,6 +766,221 @@ export class DatabaseStorage implements IStorage {
       .where(eq(teamMembers.teamId, teamId));
 
     return members;
+  }
+
+  // Team admin operations
+  async isTeamAdmin(userId: string, teamId: number): Promise<boolean> {
+    const [admin] = await db
+      .select()
+      .from(teamAdmins)
+      .where(and(eq(teamAdmins.userId, userId), eq(teamAdmins.teamId, teamId)))
+      .limit(1);
+
+    return !!admin;
+  }
+
+  async getTeamAdmins(
+    teamId: number
+  ): Promise<Array<TeamAdmin & { user: User; grantedByUser: User }>> {
+    const adminsWithGrantedBy = await db
+      .select({
+        id: teamAdmins.id,
+        teamId: teamAdmins.teamId,
+        userId: teamAdmins.userId,
+        grantedBy: teamAdmins.grantedBy,
+        grantedAt: teamAdmins.grantedAt,
+        permissions: teamAdmins.permissions,
+        user: users,
+      })
+      .from(teamAdmins)
+      .innerJoin(users, eq(teamAdmins.userId, users.id))
+      .where(eq(teamAdmins.teamId, teamId));
+
+    // Fetch grantedBy users separately
+    const result = [];
+    for (const admin of adminsWithGrantedBy) {
+      const [grantedByUser] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, admin.grantedBy))
+        .limit(1);
+
+      result.push({
+        ...admin,
+        grantedByUser: grantedByUser || ({} as User),
+      });
+    }
+
+    return result;
+  }
+
+  async addTeamAdmin(
+    userId: string,
+    teamId: number,
+    grantedBy: string
+  ): Promise<TeamAdmin> {
+    // Check if user is already a team admin
+    const existing = await this.isTeamAdmin(userId, teamId);
+    if (existing) {
+      const [admin] = await db
+        .select()
+        .from(teamAdmins)
+        .where(
+          and(eq(teamAdmins.userId, userId), eq(teamAdmins.teamId, teamId))
+        )
+        .limit(1);
+      if (admin) return admin;
+    }
+
+    const [newAdmin] = await db
+      .insert(teamAdmins)
+      .values({
+        userId,
+        teamId,
+        grantedBy,
+        grantedAt: new Date(),
+      })
+      .returning();
+
+    return newAdmin;
+  }
+
+  async removeTeamAdmin(userId: string, teamId: number): Promise<void> {
+    await db
+      .delete(teamAdmins)
+      .where(and(eq(teamAdmins.userId, userId), eq(teamAdmins.teamId, teamId)));
+  }
+
+  async getUserTeamAdminStatus(
+    userId: string
+  ): Promise<Record<number, boolean>> {
+    const userAdmins = await db
+      .select({ teamId: teamAdmins.teamId })
+      .from(teamAdmins)
+      .where(eq(teamAdmins.userId, userId));
+
+    const status: Record<number, boolean> = {};
+    for (const admin of userAdmins) {
+      status[admin.teamId] = true;
+    }
+
+    return status;
+  }
+
+  // Team task assignment operations
+  async getTeamTasks(teamId: number): Promise<Task[]> {
+    const teamTasks = await db
+      .select()
+      .from(tasks)
+      .where(
+        and(eq(tasks.assigneeType, "team"), eq(tasks.assigneeTeamId, teamId))
+      );
+
+    return teamTasks;
+  }
+
+  async getTaskAssignments(
+    taskId: number,
+    teamId: number
+  ): Promise<
+    Array<
+      TeamTaskAssignment & { assignedUser: User | null; assignedByUser: User }
+    >
+  > {
+    const assignments = await db
+      .select({
+        id: teamTaskAssignments.id,
+        taskId: teamTaskAssignments.taskId,
+        teamId: teamTaskAssignments.teamId,
+        assignedUserId: teamTaskAssignments.assignedUserId,
+        assignedBy: teamTaskAssignments.assignedBy,
+        assignedAt: teamTaskAssignments.assignedAt,
+        status: teamTaskAssignments.status,
+        completedAt: teamTaskAssignments.completedAt,
+        notes: teamTaskAssignments.notes,
+        priority: teamTaskAssignments.priority,
+      })
+      .from(teamTaskAssignments)
+      .where(
+        and(
+          eq(teamTaskAssignments.taskId, taskId),
+          eq(teamTaskAssignments.teamId, teamId)
+        )
+      );
+
+    // Fetch assigned users and assigned by users separately
+    const result = [];
+    for (const assignment of assignments) {
+      let assignedUser: User | null = null;
+      let assignedByUser: User | null = null;
+
+      if (assignment.assignedUserId) {
+        const [user] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, assignment.assignedUserId))
+          .limit(1);
+        assignedUser = user || null;
+      }
+
+      const [byUser] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, assignment.assignedBy))
+        .limit(1);
+      assignedByUser = byUser || ({} as User);
+
+      result.push({
+        ...assignment,
+        assignedUser,
+        assignedByUser,
+      });
+    }
+
+    return result;
+  }
+
+  async createTaskAssignment(
+    assignment: InsertTeamTaskAssignment
+  ): Promise<TeamTaskAssignment> {
+    const [newAssignment] = await db
+      .insert(teamTaskAssignments)
+      .values({
+        ...assignment,
+        assignedAt: new Date(),
+        status: assignment.status || "active",
+      })
+      .returning();
+
+    return newAssignment;
+  }
+
+  async updateTaskAssignment(
+    assignmentId: number,
+    updates: Partial<InsertTeamTaskAssignment>
+  ): Promise<TeamTaskAssignment> {
+    const updateData: any = { ...updates };
+
+    // Handle completedAt based on status
+    if (updates.status === "completed" && !updates.completedAt) {
+      updateData.completedAt = new Date();
+    } else if (updates.status !== "completed" && updates.completedAt === null) {
+      updateData.completedAt = null;
+    }
+
+    const [updatedAssignment] = await db
+      .update(teamTaskAssignments)
+      .set(updateData)
+      .where(eq(teamTaskAssignments.id, assignmentId))
+      .returning();
+
+    return updatedAssignment;
+  }
+
+  async deleteTaskAssignment(assignmentId: number): Promise<void> {
+    await db
+      .delete(teamTaskAssignments)
+      .where(eq(teamTaskAssignments.id, assignmentId));
   }
 
   // Comment operations

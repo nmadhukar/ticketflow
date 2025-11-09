@@ -271,7 +271,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     : "/api/tickets/meta";
   const metaQuery = useQuery<any>({
     queryKey: ["ticket-meta", { id: task?.id ?? null }],
-    enabled: !!task?.id && isOpen,
+    enabled: isOpen,
     staleTime: 0,
     retry: false,
     queryFn: async () => {
@@ -412,10 +412,19 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
               ? String(current.assigneeTeamId)
               : "unassigned",
           dueDate: current.dueDate ? toYyyyMmDd(current.dueDate) : "",
-          departmentId: current.departmentId
-            ? current.departmentId?.toString()
-            : "",
-          teamId: current.teamId ? current.teamId?.toString() : "",
+          // Use derived values from teams array when team-assigned, otherwise use task values if they exist
+          departmentId:
+            current.assigneeType === "team" && departmentId
+              ? departmentId
+              : current.departmentId
+              ? current.departmentId?.toString()
+              : "",
+          teamId:
+            current.assigneeType === "team" && teamId
+              ? teamId
+              : current.teamId
+              ? current.teamId?.toString()
+              : "",
         };
         setFormData(dataToSet);
       }
@@ -477,6 +486,13 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats/agent"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats/manager"] });
+
+      // Invalidate team tasks if ticket is assigned to a team
+      if (result?.assigneeTeamId) {
+        queryClient.invalidateQueries({
+          queryKey: ["/api/teams", result.assigneeTeamId, "tasks"],
+        });
+      }
 
       // Clear selected files
       setSelectedFiles([]);
@@ -546,7 +562,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     mutationFn: async (taskData: any) => {
       return await apiRequest("PATCH", `/api/tasks/${task.id}`, taskData);
     },
-    onSuccess: () => {
+    onSuccess: async (response) => {
+      const result = await response.json();
+
       // Invalidate all task list queries (including filtered/paged variants)
       queryClient.invalidateQueries({
         predicate: (q) =>
@@ -571,6 +589,24 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats/agent"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats/manager"] });
+
+      // Invalidate team tasks if assignment changed to/from a team
+      const oldTeamId = task?.assigneeTeamId;
+      const newTeamId = result?.assigneeTeamId;
+
+      // Invalidate old team's tasks if team assignment was removed or changed
+      if (oldTeamId && oldTeamId !== newTeamId) {
+        queryClient.invalidateQueries({
+          queryKey: ["/api/teams", oldTeamId, "tasks"],
+        });
+      }
+
+      // Invalidate new team's tasks if team assignment was added or changed
+      if (newTeamId) {
+        queryClient.invalidateQueries({
+          queryKey: ["/api/teams", newTeamId, "tasks"],
+        });
+      }
 
       toast({
         title: t("messages.success"),

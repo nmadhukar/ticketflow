@@ -5,9 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { apiRequest } from "@/lib/queryClient";
 import { useParams, useLocation } from "wouter";
-import Header from "@/components/header";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Card,
   CardContent,
@@ -17,23 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import {
-  ArrowLeft,
-  Users,
-  Plus,
-  UserPlus,
-  Settings,
-  Crown,
-  Calendar,
-  Shield,
-  MoreVertical,
-} from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { ArrowLeft, Users, UserPlus, Crown, Calendar } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -41,7 +23,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import {
@@ -51,7 +32,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import MainWrapper from "@/components/main-wrapper";
+import { TeamAdminsSection } from "@/components/teams/team-admins-section";
+import { TeamTasksSection } from "@/components/teams/team-tasks-section";
+import { useTeamPermissions } from "@/hooks/useTeamAdmins";
+import type { TeamMember } from "@/types/teams";
+import type { Team, User } from "@shared/schema";
 
 export default function TeamDetail() {
   const { id } = useParams<{ id: string }>();
@@ -61,7 +48,6 @@ export default function TeamDetail() {
   const queryClient = useQueryClient();
   const [isAddMemberOpen, setIsAddMemberOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState("");
-  const [selectedRole, setSelectedRole] = useState("member");
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -78,13 +64,17 @@ export default function TeamDetail() {
     }
   }, [isAuthenticated, isLoading, toast]);
 
-  const { data: team, isLoading: teamLoading } = useQuery({
+  const { data: team, isLoading: teamLoading } = useQuery<Team>({
     queryKey: ["/api/teams", id],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/teams/${id}`);
+      return res.json();
+    },
     retry: false,
     enabled: isAuthenticated && !!id,
   });
 
-  const { data: members, isLoading: membersLoading } = useQuery({
+  const { data: members, isLoading: membersLoading } = useQuery<TeamMember[]>({
     queryKey: ["/api/teams", id, "members"],
     queryFn: async () => {
       const res = await apiRequest("GET", `/api/teams/${id}/members`);
@@ -95,20 +85,25 @@ export default function TeamDetail() {
     refetchOnMount: "always",
   });
 
-  const { data: allUsers } = useQuery({
+  const { data: permissions } = useTeamPermissions(id);
+
+  const { data: allUsers } = useQuery<User[]>({
     queryKey: ["/api/users"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/users");
+      return res.json();
+    },
     retry: false,
     enabled: isAuthenticated,
   });
 
   const addMemberMutation = useMutation({
-    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
+    mutationFn: async ({ userId }: { userId: string }) => {
       return await apiRequest(
         "POST",
         `/api/admin/users/${userId}/assign-team`,
         {
           teamId: parseInt(id!),
-          role,
         }
       );
     },
@@ -118,7 +113,6 @@ export default function TeamDetail() {
       });
       setIsAddMemberOpen(false);
       setSelectedUserId("");
-      setSelectedRole("member");
       toast({
         title: "Success",
         description: "Member added to team",
@@ -139,41 +133,6 @@ export default function TeamDetail() {
       toast({
         title: "Error",
         description: "Failed to add member to team",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const updateMemberRoleMutation = useMutation({
-    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
-      return await apiRequest("PATCH", `/api/teams/${id}/members/${userId}`, {
-        role,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["/api/teams", id, "members"],
-      });
-      toast({
-        title: "Success",
-        description: "Member role updated",
-      });
-    },
-    onError: (error) => {
-      if (isUnauthorizedError(error)) {
-        toast({
-          title: "Unauthorized",
-          description: "You are logged out. Logging in again...",
-          variant: "destructive",
-        });
-        setTimeout(() => {
-          window.location.href = "/login";
-        }, 500);
-        return;
-      }
-      toast({
-        title: "Error",
-        description: "Failed to update member role",
         variant: "destructive",
       });
     },
@@ -218,27 +177,21 @@ export default function TeamDetail() {
 
     addMemberMutation.mutate({
       userId: selectedUserId,
-      role: selectedRole,
     });
   };
 
   // Filter out users who are already members
   const availableUsers =
     allUsers?.filter(
-      (user: any) => !members?.some((member: any) => member.userId === user.id)
+      (user) => !members?.some((member) => member.userId === user.id)
     ) || [];
 
-  const isUserAdminOrManager = ["manager", "admin"].includes(user?.role);
-
-  // Check if manager can add members (only if they created the team, or if admin)
-  const canAddMembers = (() => {
-    if (user?.role === "admin") return true;
-    if (user?.role === "manager") {
-      // Managers can only add members to teams they created
-      return team?.createdBy === (user as any)?.id;
-    }
-    return false;
-  })();
+  // System admins, team owners, and team admins can add members
+  const canAddMembers =
+    ((user as any)?.role === "admin" ||
+      team?.createdBy === (user as any)?.id ||
+      permissions?.isTeamAdmin) ??
+    false;
 
   return (
     <MainWrapper
@@ -255,7 +208,7 @@ export default function TeamDetail() {
             variant="outline"
             onClick={() => {
               const pathname =
-                user?.role === "admin"
+                (user as any)?.role === "admin"
                   ? "/admin/teams?section=management"
                   : "/teams";
               setLocation(pathname);
@@ -280,7 +233,7 @@ export default function TeamDetail() {
                   </div>
                 </div>
                 <div className="flex flex-col gap-4 items-end justify-between">
-                  {canAddMembers && !membersLoading && !!members.length && (
+                  {canAddMembers && !membersLoading && !!members?.length && (
                     <Button
                       className="bg-blue-600 hover:bg-blue-700"
                       onClick={() => setIsAddMemberOpen(true)}
@@ -291,135 +244,109 @@ export default function TeamDetail() {
                   )}
                   <Badge variant="outline" className="bg-blue-50 text-blue-700">
                     <Calendar className="h-3 w-3 mr-1" />
-                    Created {new Date(team?.createdAt).toLocaleDateString()}
+                    Created{" "}
+                    {team?.createdAt
+                      ? new Date(team.createdAt).toLocaleDateString()
+                      : "Unknown"}
                   </Badge>
                 </div>
               </div>
             </CardHeader>
           </Card>
 
-          {/* Team Members */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Team Members ({members?.length || 0})</CardTitle>
-              <CardDescription>
-                Manage team members and their roles
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {membersLoading ? (
-                <div className="text-center py-8">Loading members...</div>
-              ) : members?.length ? (
-                <div className="grid gap-4">
-                  {members.map((member: any) => (
-                    <div
-                      key={member.id}
-                      className="flex items-center justify-between p-4 border rounded-lg"
-                    >
-                      <div className="flex items-center space-x-3">
-                        <Avatar>
-                          <AvatarImage src={member.user.profileImageUrl} />
-                          <AvatarFallback>
-                            {member.user.firstName?.[0]}
-                            {member.user.lastName?.[0]}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-medium">
-                            {member.user.firstName} {member.user.lastName}
-                          </p>
-                          <p className="text-sm text-slate-500">
-                            {member.user.email}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Badge
-                          variant={
-                            member.role === "admin" ? "default" : "outline"
-                          }
-                          className={
-                            member.role === "admin"
-                              ? "bg-purple-100 text-purple-700"
-                              : ""
-                          }
+          {/* Team Sections with Tabs */}
+          <Tabs defaultValue="members" className="w-full">
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="members">Members</TabsTrigger>
+              <TabsTrigger value="admins">Admins</TabsTrigger>
+              <TabsTrigger value="tasks">Tasks</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="members" className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Team Members ({members?.length || 0})</CardTitle>
+                  <CardDescription>Manage team members</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {membersLoading ? (
+                    <div className="text-center py-8">Loading members...</div>
+                  ) : members?.length ? (
+                    <div className="grid gap-4">
+                      {members.map((member) => (
+                        <div
+                          key={member.id}
+                          className="flex items-center justify-between p-4 border rounded-lg"
                         >
-                          {member.role === "admin" && (
-                            <Crown className="h-3 w-3 mr-1" />
-                          )}
-                          Team {member.role}
-                        </Badge>
-                        <span className="text-xs text-slate-500">
-                          Joined{" "}
-                          {new Date(member.joinedAt).toLocaleDateString()}
-                        </span>
-                        {isUserAdminOrManager && (
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0"
-                              >
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              {member.role === "admin" ? (
-                                <DropdownMenuItem
-                                  onClick={() =>
-                                    updateMemberRoleMutation.mutate({
-                                      userId: member.userId,
-                                      role: "member",
-                                    })
-                                  }
-                                >
-                                  <Shield className="mr-2 h-4 w-4" />
-                                  Remove Admin
-                                </DropdownMenuItem>
-                              ) : (
-                                <DropdownMenuItem
-                                  onClick={() =>
-                                    updateMemberRoleMutation.mutate({
-                                      userId: member.userId,
-                                      role: "admin",
-                                    })
-                                  }
-                                >
-                                  <Crown className="mr-2 h-4 w-4" />
-                                  Make Admin
-                                </DropdownMenuItem>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        )}
-                      </div>
+                          <div className="flex items-center space-x-3">
+                            <Avatar>
+                              <AvatarImage
+                                src={member.user.profileImageUrl || undefined}
+                              />
+                              <AvatarFallback>
+                                {member.user.firstName?.[0]}
+                                {member.user.lastName?.[0]}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <p className="font-medium">
+                                  {member.user.firstName} {member.user.lastName}
+                                </p>
+                                {member.isAdmin && (
+                                  <Badge className="bg-purple-100 text-purple-700">
+                                    <Crown className="h-3 w-3 mr-1" />
+                                    Admin
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-sm text-slate-500">
+                                {member.user.email}
+                              </p>
+                            </div>
+                          </div>
+                          <span className="text-xs text-slate-500">
+                            Joined{" "}
+                            {new Date(member.joinedAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8">
-                  <Users className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-slate-900 mb-2">
-                    No members yet
-                  </h3>
-                  <p className="text-slate-500 mb-4">
-                    This team doesn't have any members. Add some members to get
-                    started.
-                  </p>
-                  {canAddMembers && (
-                    <Button
-                      onClick={() => setIsAddMemberOpen(true)}
-                      className="bg-blue-600 hover:bg-blue-700"
-                    >
-                      <UserPlus className="h-4 w-4 mr-2" />
-                      Add First Member
-                    </Button>
+                  ) : (
+                    <div className="text-center py-8">
+                      <Users className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-slate-900 mb-2">
+                        No members yet
+                      </h3>
+                      <p className="text-slate-500 mb-4">
+                        This team doesn't have any members. Add some members to
+                        get started.
+                      </p>
+                      {canAddMembers && (
+                        <Button
+                          onClick={() => setIsAddMemberOpen(true)}
+                          className="bg-blue-600 hover:bg-blue-700"
+                        >
+                          <UserPlus className="h-4 w-4 mr-2" />
+                          Add First Member
+                        </Button>
+                      )}
+                    </div>
                   )}
-                </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="admins" className="space-y-4">
+              {members && (
+                <TeamAdminsSection teamId={id!} members={members} team={team} />
               )}
-            </CardContent>
-          </Card>
+            </TabsContent>
+
+            <TabsContent value="tasks" className="space-y-4">
+              <TeamTasksSection teamId={id!} />
+            </TabsContent>
+          </Tabs>
         </div>
       )}
 
@@ -445,18 +372,6 @@ export default function TeamDetail() {
                       {user.firstName} {user.lastName} ({user.email})
                     </SelectItem>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="role-select">Role</Label>
-              <Select value={selectedRole} onValueChange={setSelectedRole}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="member">Member</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
                 </SelectContent>
               </Select>
             </div>

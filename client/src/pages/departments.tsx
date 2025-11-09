@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -41,7 +42,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Loader2, Plus, Pencil, Trash2, Building, Users } from "lucide-react";
+import { Loader2, Plus, Building, Users } from "lucide-react";
 import type { Department, User } from "@shared/schema";
 import MainWrapper from "@/components/main-wrapper";
 import { useTranslation } from "react-i18next";
@@ -55,11 +56,9 @@ const departmentSchema = z.object({
 type DepartmentFormData = z.infer<typeof departmentSchema>;
 
 export default function Departments() {
+  const [, setLocation] = useLocation();
   const { t } = useTranslation(["common", "departments"]);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [editingDepartment, setEditingDepartment] = useState<Department | null>(
-    null
-  );
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -80,10 +79,6 @@ export default function Departments() {
       description: "",
       managerId: "none",
     },
-  });
-
-  const editForm = useForm<DepartmentFormData>({
-    resolver: zodResolver(departmentSchema),
   });
 
   const createMutation = useMutation({
@@ -117,83 +112,8 @@ export default function Departments() {
     },
   });
 
-  const updateMutation = useMutation({
-    mutationFn: async ({
-      id,
-      data,
-    }: {
-      id: number;
-      data: DepartmentFormData;
-    }) => {
-      const payload = {
-        ...data,
-        managerId:
-          !data.managerId || data.managerId === "none" ? null : data.managerId,
-      };
-      await apiRequest("PUT", `/api/admin/departments/${id}`, payload);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
-      toast({
-        title: t("messages.success"),
-        description: t("departments:toasts.updated"),
-      });
-      setEditingDepartment(null);
-    },
-    onError: (error) => {
-      toast({
-        title: t("messages.error"),
-        description:
-          error.message ||
-          t("departments:errors.updateFailed", {
-            defaultValue: "Failed to update department",
-          }),
-        variant: "destructive",
-      });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id: number) => {
-      await apiRequest("DELETE", `/api/admin/departments/${id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
-      toast({
-        title: t("messages.success"),
-        description: t("departments:toasts.deleted"),
-      });
-    },
-    onError: (error) => {
-      toast({
-        title: t("messages.error"),
-        description:
-          error.message ||
-          t("departments:errors.deleteFailed", {
-            defaultValue: "Failed to delete department",
-          }),
-        variant: "destructive",
-      });
-    },
-  });
-
   const handleCreateSubmit = (data: DepartmentFormData) => {
     createMutation.mutate(data);
-  };
-
-  const handleEditSubmit = (data: DepartmentFormData) => {
-    if (editingDepartment) {
-      updateMutation.mutate({ id: editingDepartment.id, data });
-    }
-  };
-
-  const handleEditOpen = (department: Department) => {
-    setEditingDepartment(department);
-    editForm.reset({
-      name: department.name,
-      description: department.description || "",
-      managerId: department.managerId || "none",
-    });
   };
 
   if (isLoading) {
@@ -223,7 +143,13 @@ export default function Departments() {
             (u: User) => u.id === department.managerId
           );
           return (
-            <Card key={department.id} className="relative group">
+            <Card
+              key={department.id}
+              className="relative group cursor-pointer hover:shadow-lg transition-shadow"
+              onClick={() => {
+                setLocation(`/departments/${department.id}`);
+              }}
+            >
               <CardHeader className="pb-4">
                 <div className="flex justify-between items-start">
                   <div className="flex items-center gap-3">
@@ -242,22 +168,6 @@ export default function Departments() {
                         </Badge>
                       )}
                     </div>
-                  </div>
-                  <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => handleEditOpen(department)}
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => deleteMutation.mutate(department.id)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
                   </div>
                 </div>
               </CardHeader>
@@ -304,96 +214,6 @@ export default function Departments() {
           </Button>
         </Card>
       )}
-
-      {/* Edit Dialog */}
-      <Dialog
-        open={!!editingDepartment}
-        onOpenChange={(open) => !open && setEditingDepartment(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("departments:dialogs.editTitle")}</DialogTitle>
-            <DialogDescription>
-              {t("departments:dialogs.editDesc")}
-            </DialogDescription>
-          </DialogHeader>
-          <Form {...editForm}>
-            <form
-              onSubmit={editForm.handleSubmit(handleEditSubmit)}
-              className="space-y-4"
-            >
-              <FormField
-                control={editForm.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t("departments:labels.name")}</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={editForm.control}
-                name="description"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t("departments:labels.description")}</FormLabel>
-                    <FormControl>
-                      <Textarea {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={editForm.control}
-                name="managerId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t("departments:labels.manager")}</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue
-                            placeholder={t("departments:labels.selectManager")}
-                          />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="none">
-                          {t("departments:labels.noManager")}
-                        </SelectItem>
-                        {users
-                          ?.filter(
-                            (user: User) =>
-                              user.role === "admin" || user.role === "manager"
-                          )
-                          .map((user: User) => (
-                            <SelectItem key={user.id} value={user.id}>
-                              {user.firstName} {user.lastName} ({user.email})
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <DialogFooter>
-                <Button type="submit" disabled={updateMutation.isPending}>
-                  {updateMutation.isPending && (
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  )}
-                  {t("departments:actions.update")}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
         <DialogContent>

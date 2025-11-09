@@ -504,7 +504,7 @@ export function BedrockCostMonitoring() {
             })}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="h-[25vh] overflow-y-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -527,7 +527,7 @@ export function BedrockCostMonitoring() {
                 </TableHead>
               </TableRow>
             </TableHeader>
-            <TableBody className="max-h-[30vh] overflow-y-auto">
+            <TableBody>
               {recentUsage.map((record: UsageRecord, index: number) => (
                 <TableRow key={index}>
                   <TableCell className="text-sm">

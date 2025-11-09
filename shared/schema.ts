@@ -40,6 +40,7 @@ import {
   integer,
   boolean,
   decimal,
+  unique,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -92,7 +93,7 @@ export const teams = pgTable("teams", {
   id: serial("id").primaryKey(),
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
-  departmentId: integer("department_id").references(() => departments.id),
+  departmentId: integer("department_id").references(() => departments.id).notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   createdBy: varchar("created_by").references(() => users.id),
 });
@@ -106,9 +107,72 @@ export const teamMembers = pgTable("team_members", {
   userId: varchar("user_id")
     .references(() => users.id)
     .notNull(),
-  role: varchar("role", { length: 50 }).default("member"), // admin, member
+  role: varchar("role", { length: 50 }).default("member"), // admin, member (deprecated - will be removed)
   joinedAt: timestamp("joined_at").defaultNow(),
 });
+
+// Team admins table
+export const teamAdmins = pgTable(
+  "team_admins",
+  {
+    id: serial("id").primaryKey(),
+    teamId: integer("team_id")
+      .references(() => teams.id, { onDelete: "cascade" })
+      .notNull(),
+    userId: varchar("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    grantedBy: varchar("granted_by")
+      .references(() => users.id, { onDelete: "restrict" })
+      .notNull(),
+    grantedAt: timestamp("granted_at").defaultNow(),
+    permissions: text("permissions").array(), // Optional: for future extensibility
+  },
+  (table) => [
+    unique("unique_team_admin").on(table.userId, table.teamId),
+    index("idx_team_admins_team_user").on(table.teamId, table.userId),
+    index("idx_team_admins_user").on(table.userId),
+    index("idx_team_admins_team").on(table.teamId),
+  ]
+);
+
+// Team task assignments table
+export const teamTaskAssignments = pgTable(
+  "team_task_assignments",
+  {
+    id: serial("id").primaryKey(),
+    taskId: integer("task_id")
+      .references(() => tasks.id, { onDelete: "cascade" })
+      .notNull(),
+    teamId: integer("team_id")
+      .references(() => teams.id, { onDelete: "cascade" })
+      .notNull(),
+    assignedUserId: varchar("assigned_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    assignedBy: varchar("assigned_by")
+      .references(() => users.id, { onDelete: "set null" })
+      .notNull(),
+    assignedAt: timestamp("assigned_at").defaultNow(),
+    status: varchar("status", { length: 20 }).default("active").notNull(), // 'active', 'completed', 'reassigned', 'cancelled'
+    completedAt: timestamp("completed_at"),
+    notes: text("notes"),
+    priority: varchar("priority", { length: 20 }),
+  },
+  (table) => [
+    index("idx_team_task_assignments_task").on(table.taskId),
+    index("idx_team_task_assignments_user").on(table.assignedUserId),
+    index("idx_team_task_assignments_team").on(table.teamId),
+    index("idx_team_task_assignments_task_status").on(
+      table.taskId,
+      table.status
+    ),
+    index("idx_team_task_assignments_team_user").on(
+      table.teamId,
+      table.assignedUserId
+    ),
+  ]
+);
 
 // Tasks table
 export const tasks = pgTable("tasks", {
@@ -277,10 +341,18 @@ export const usersRelations = relations(users, ({ many }) => ({
   createdTasks: many(tasks, { relationName: "taskCreator" }),
   assignedTasks: many(tasks, { relationName: "taskAssignee" }),
   teamMemberships: many(teamMembers),
+  teamAdmins: many(teamAdmins, { relationName: "teamAdminUser" }),
+  teamAdminGrantedBy: many(teamAdmins, { relationName: "teamAdminGrantedBy" }),
   comments: many(taskComments),
   history: many(taskHistory),
   attachments: many(taskAttachments),
   apiKeys: many(apiKeys),
+  assignedTaskAssignments: many(teamTaskAssignments, {
+    relationName: "assignedUser",
+  }),
+  assignedByTaskAssignments: many(teamTaskAssignments, {
+    relationName: "assignedByUser",
+  }),
 }));
 
 export const teamsRelations = relations(teams, ({ one, many }) => ({
@@ -293,7 +365,9 @@ export const teamsRelations = relations(teams, ({ one, many }) => ({
     references: [departments.id],
   }),
   members: many(teamMembers),
+  admins: many(teamAdmins),
   assignedTasks: many(tasks, { relationName: "teamAssignedTasks" }),
+  taskAssignments: many(teamTaskAssignments),
 }));
 
 export const teamMembersRelations = relations(teamMembers, ({ one }) => ({
@@ -306,6 +380,47 @@ export const teamMembersRelations = relations(teamMembers, ({ one }) => ({
     references: [users.id],
   }),
 }));
+
+export const teamAdminsRelations = relations(teamAdmins, ({ one }) => ({
+  team: one(teams, {
+    fields: [teamAdmins.teamId],
+    references: [teams.id],
+  }),
+  user: one(users, {
+    fields: [teamAdmins.userId],
+    references: [users.id],
+    relationName: "teamAdminUser",
+  }),
+  grantedByUser: one(users, {
+    fields: [teamAdmins.grantedBy],
+    references: [users.id],
+    relationName: "teamAdminGrantedBy",
+  }),
+}));
+
+export const teamTaskAssignmentsRelations = relations(
+  teamTaskAssignments,
+  ({ one }) => ({
+    task: one(tasks, {
+      fields: [teamTaskAssignments.taskId],
+      references: [tasks.id],
+    }),
+    team: one(teams, {
+      fields: [teamTaskAssignments.teamId],
+      references: [teams.id],
+    }),
+    assignedUser: one(users, {
+      fields: [teamTaskAssignments.assignedUserId],
+      references: [users.id],
+      relationName: "assignedUser",
+    }),
+    assignedByUser: one(users, {
+      fields: [teamTaskAssignments.assignedBy],
+      references: [users.id],
+      relationName: "assignedByUser",
+    }),
+  })
+);
 
 export const tasksRelations = relations(tasks, ({ one, many }) => ({
   creator: one(users, {
@@ -326,6 +441,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   comments: many(taskComments),
   history: many(taskHistory),
   attachments: many(taskAttachments),
+  teamTaskAssignments: many(teamTaskAssignments),
 }));
 
 export const taskCommentsRelations = relations(taskComments, ({ one }) => ({
@@ -592,6 +708,10 @@ export type TaskComment = typeof taskComments.$inferSelect;
 export type InsertTaskComment = z.infer<typeof insertTaskCommentSchema>;
 export type TeamMember = typeof teamMembers.$inferSelect;
 export type InsertTeamMember = z.infer<typeof insertTeamMemberSchema>;
+export type TeamAdmin = typeof teamAdmins.$inferSelect;
+export type InsertTeamAdmin = typeof teamAdmins.$inferInsert;
+export type TeamTaskAssignment = typeof teamTaskAssignments.$inferSelect;
+export type InsertTeamTaskAssignment = typeof teamTaskAssignments.$inferInsert;
 export type TaskHistory = typeof taskHistory.$inferSelect;
 export type TaskAttachment = typeof taskAttachments.$inferSelect;
 export type InsertTaskAttachment = z.infer<typeof insertTaskAttachmentSchema>;

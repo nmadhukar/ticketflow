@@ -44,7 +44,10 @@ import {
   type TaskComment,
   type TaskHistory,
   type Team,
+  type TeamAdmin,
   type TeamMember,
+  type TeamTaskAssignment,
+  type InsertTeamTaskAssignment,
   type TeamsIntegrationSettings,
   type UpsertUser,
   type User,
@@ -158,6 +161,38 @@ export interface IStorage {
   addTeamMember(teamMember: InsertTeamMember): Promise<TeamMember>;
   removeTeamMember(teamId: number, userId: string): Promise<void>;
   getTeamMembers(teamId: number): Promise<(TeamMember & { user: User })[]>;
+
+  // Team admin operations
+  isTeamAdmin(userId: string, teamId: number): Promise<boolean>;
+  getTeamAdmins(
+    teamId: number
+  ): Promise<Array<TeamAdmin & { user: User; grantedByUser: User }>>;
+  addTeamAdmin(
+    userId: string,
+    teamId: number,
+    grantedBy: string
+  ): Promise<TeamAdmin>;
+  removeTeamAdmin(userId: string, teamId: number): Promise<void>;
+  getUserTeamAdminStatus(userId: string): Promise<Record<number, boolean>>;
+
+  // Team task assignment operations
+  getTeamTasks(teamId: number): Promise<Task[]>;
+  getTaskAssignments(
+    taskId: number,
+    teamId: number
+  ): Promise<
+    Array<
+      TeamTaskAssignment & { assignedUser: User | null; assignedByUser: User }
+    >
+  >;
+  createTaskAssignment(
+    assignment: InsertTeamTaskAssignment
+  ): Promise<TeamTaskAssignment>;
+  updateTaskAssignment(
+    assignmentId: number,
+    updates: Partial<InsertTeamTaskAssignment>
+  ): Promise<TeamTaskAssignment>;
+  deleteTaskAssignment(assignmentId: number): Promise<void>;
 
   // Comment operations
   addTaskComment(comment: InsertTaskComment): Promise<TaskComment>;

@@ -14,14 +14,16 @@
     "extraAdmin": "Crea un equipo o pide que te inviten a uno.",
     "createFirst": "Crea tu primer equipo",
     "member": "Miembro",
+    "owner": "Propietario",
     "created": "Creado el {{date}}"
   },
   "all": {
-    "title": "Todos los equipos",
+    "title": "Equipos del Departamento",
     "loading": "Cargando equipos...",
     "emptyTitle": "No se encontraron equipos",
     "emptyDesc": "Aún no se han creado equipos. ¡Sé el primero en crear uno!",
     "public": "Público",
+    "admin": "Administrador",
     "created": "Creado el {{date}}"
   },
   "form": {
@@ -29,6 +31,9 @@
     "createDesc": "Crea un nuevo equipo para colaborar con otros miembros en tareas y proyectos.",
     "name": "Nombre del equipo",
     "namePlaceholder": "Ingresa el nombre del equipo...",
+    "department": "Departamento",
+    "selectDepartment": "Selecciona un departamento",
+    "departmentRequired": "El departamento es obligatorio",
     "description": "Descripción",
     "descriptionPlaceholder": "Describe el propósito de tu equipo...",
     "cancel": "Cancelar"

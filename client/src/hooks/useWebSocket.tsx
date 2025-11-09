@@ -187,6 +187,25 @@ export function useWebSocket() {
         queryClient.invalidateQueries({ queryKey: ["/api/stats/manager"] });
         queryClient.invalidateQueries({ queryKey: ["/api/activity"] });
 
+        // Invalidate team tasks if ticket is assigned to a team
+        if ((message as any).data?.assigneeTeamId) {
+          const teamId = (message as any).data.assigneeTeamId;
+          queryClient.invalidateQueries({
+            queryKey: ["/api/teams", teamId, "tasks"],
+          });
+          // If team belongs to a department, invalidate department stats
+          // Note: We'd need team data to get departmentId, but we can invalidate
+          // all department stats queries as a fallback
+          queryClient.invalidateQueries({
+            queryKey: ["/api/departments"],
+            exact: false,
+            predicate: (query) => {
+              const key = query.queryKey as string[];
+              return key[0] === "/api/departments" && key[2] === "stats";
+            },
+          });
+        }
+
         // Show notification for new ticket
         if (
           (user as any)?.id &&
@@ -208,6 +227,35 @@ export function useWebSocket() {
         queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
         queryClient.invalidateQueries({ queryKey: ["/api/stats/agent"] });
         queryClient.invalidateQueries({ queryKey: ["/api/stats/manager"] });
+
+        // Invalidate team tasks if assignment changed to/from a team
+        const oldTeamId = message.data.changes?.assigneeTeamId?.old;
+        const newTeamId = message.data.changes?.assigneeTeamId?.new;
+        const currentTeamId = (message.data as any)?.assigneeTeamId;
+
+        // If team assignment changed, invalidate both old and new team's tasks
+        if (oldTeamId) {
+          queryClient.invalidateQueries({
+            queryKey: ["/api/teams", oldTeamId, "tasks"],
+          });
+        }
+        if (newTeamId || currentTeamId) {
+          const teamId = newTeamId || currentTeamId;
+          queryClient.invalidateQueries({
+            queryKey: ["/api/teams", teamId, "tasks"],
+          });
+        }
+        // Invalidate department stats if ticket is assigned to a team
+        if (oldTeamId || newTeamId || currentTeamId) {
+          queryClient.invalidateQueries({
+            queryKey: ["/api/departments"],
+            exact: false,
+            predicate: (query) => {
+              const key = query.queryKey as string[];
+              return key[0] === "/api/departments" && key[2] === "stats";
+            },
+          });
+        }
 
         // Show notification for important updates
         if (message.data.changes?.status === "resolved") {
@@ -263,10 +311,155 @@ export function useWebSocket() {
         }
         break;
 
+      case "team:admin:granted":
+      case "team:admin:revoked":
+        // Invalidate team admin queries
+        if (message.data?.teamId) {
+          queryClient.invalidateQueries({
+            queryKey: ["/api/teams", message.data.teamId, "admins"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["/api/teams", message.data.teamId, "members"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["/api/teams", message.data.teamId, "permissions"],
+          });
+        }
+        break;
+
+      case "team:task:assigned":
+      case "team:task:assignment:updated":
+      case "team:task:assignment:deleted":
+        // Invalidate task assignment queries
+        if (message.data?.teamId && message.data?.taskId) {
+          queryClient.invalidateQueries({
+            queryKey: [
+              "/api/teams",
+              message.data.teamId,
+              "tasks",
+              message.data.taskId,
+              "assignments",
+            ],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["/api/teams", message.data.teamId, "tasks"],
+          });
+        }
+        break;
+
+      case "department:created":
+      case "department:updated":
+        // Invalidate department queries
+        queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
+        // Invalidate specific department if ID is provided
+        if (message.data?.id) {
+          queryClient.invalidateQueries({
+            queryKey: ["/api/departments", message.data.id],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["/api/departments", message.data.id, "teams"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["/api/departments", message.data.id, "stats"],
+          });
+        }
+        break;
+
+      case "department:deleted":
+        // Invalidate department list
+        queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
+        // Invalidate specific department if ID is provided
+        if (message.data?.id) {
+          queryClient.invalidateQueries({
+            queryKey: ["/api/departments", message.data.id],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["/api/departments", message.data.id, "teams"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["/api/departments", message.data.id, "stats"],
+          });
+        }
+        break;
+
       case "team:update":
         // Invalidate team queries
         queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
         queryClient.invalidateQueries({ queryKey: ["/api/teams/my"] });
+        // Invalidate team-specific queries if teamId is provided
+        if (message.data?.teamId) {
+          queryClient.invalidateQueries({
+            queryKey: ["/api/teams", message.data.teamId],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["/api/teams", message.data.teamId, "members"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["/api/teams", message.data.teamId, "admins"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["/api/teams", message.data.teamId, "permissions"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["/api/teams", message.data.teamId, "tasks"],
+          });
+        }
+        // If team department changed, invalidate department queries
+        if (message.data?.departmentId) {
+          queryClient.invalidateQueries({
+            queryKey: ["/api/departments", message.data.departmentId, "teams"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["/api/departments", message.data.departmentId, "stats"],
+          });
+        }
+        // If team was moved from one department to another
+        if (message.data?.oldDepartmentId && message.data?.departmentId) {
+          queryClient.invalidateQueries({
+            queryKey: [
+              "/api/departments",
+              message.data.oldDepartmentId,
+              "teams",
+            ],
+          });
+          queryClient.invalidateQueries({
+            queryKey: [
+              "/api/departments",
+              message.data.oldDepartmentId,
+              "stats",
+            ],
+          });
+        }
+        break;
+
+      case "team:created":
+        // Invalidate team list
+        queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/teams/my"] });
+        // If team belongs to a department, invalidate department queries
+        if (message.data?.departmentId) {
+          queryClient.invalidateQueries({
+            queryKey: ["/api/departments", message.data.departmentId, "teams"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["/api/departments", message.data.departmentId, "stats"],
+          });
+        }
+        break;
+
+      case "team:deleted":
+        // Invalidate team list
+        queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/teams/my"] });
+        // If team belonged to a department, invalidate department queries
+        if (message.data?.departmentId) {
+          queryClient.invalidateQueries({
+            queryKey: ["/api/departments", message.data.departmentId, "teams"],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["/api/departments", message.data.departmentId, "stats"],
+          });
+        }
         break;
 
       case "user:update":

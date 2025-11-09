@@ -246,171 +246,165 @@ export function S3UsageMonitoring() {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Recent Uploads */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Clock className="h-5 w-5" />
-              Recent Uploads
-            </CardTitle>
-            <CardDescription>
-              Last 20 file uploads to S3 storage
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {recentUploads && recentUploads.length > 0 ? (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>File Name</TableHead>
-                    <TableHead>Size</TableHead>
-                    <TableHead>Uploaded</TableHead>
-                    <TableHead>Task</TableHead>
+      {/* Recent Uploads */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Clock className="h-5 w-5" />
+            Recent Uploads
+          </CardTitle>
+          <CardDescription>Last 20 file uploads to S3 storage</CardDescription>
+        </CardHeader>
+        <CardContent className="h-[25vh] overflow-y-auto">
+          {recentUploads && recentUploads.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>File Name</TableHead>
+                  <TableHead>Size</TableHead>
+                  <TableHead>Uploaded</TableHead>
+                  <TableHead>Task</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recentUploads.map((upload, index) => (
+                  <TableRow key={index}>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-muted-foreground" />
+                        {upload.fileName}
+                      </div>
+                    </TableCell>
+                    <TableCell>{formatFileSize(upload.fileSize)}</TableCell>
+                    <TableCell>
+                      {format(
+                        new Date(upload.uploadedAt),
+                        "MMM d, yyyy h:mm a"
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setLocation(`/tickets/${upload.taskId}`)}
+                        className="flex items-center gap-1"
+                      >
+                        <LinkIcon className="h-3 w-3" />#{upload.taskId}
+                      </Button>
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {recentUploads.map((upload, index) => (
-                    <TableRow key={index}>
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-muted-foreground" />
-                          {upload.fileName}
-                        </div>
-                      </TableCell>
-                      <TableCell>{formatFileSize(upload.fileSize)}</TableCell>
-                      <TableCell>
-                        {format(
-                          new Date(upload.uploadedAt),
-                          "MMM d, yyyy h:mm a"
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() =>
-                            setLocation(`/tickets/${upload.taskId}`)
-                          }
-                          className="flex items-center gap-1"
-                        >
-                          <LinkIcon className="h-3 w-3" />#{upload.taskId}
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            ) : (
-              <div className="text-center py-8 text-muted-foreground">
-                No recent uploads
-              </div>
-            )}
-          </CardContent>
-        </Card>
-        <div className="flex flex-col gap-4">
-          {/* Daily Usage Chart */}
-          {dailyChartData.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5" />
-                  Daily Storage Usage (Last 30 Days)
-                </CardTitle>
-                <CardDescription>
-                  Storage usage and file uploads per day
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={dailyChartData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" />
-                    <YAxis yAxisId="left" />
-                    <YAxis yAxisId="right" orientation="right" />
-                    <Tooltip
-                      formatter={(value: any, name: string) => {
-                        if (name === "storage") {
-                          return [
-                            `${formatBytes(value * 1024 * 1024)}`,
-                            "Storage",
-                          ];
-                        }
-                        return [value, "Files"];
-                      }}
-                    />
-                    <Legend />
-                    <Line
-                      yAxisId="left"
-                      type="monotone"
-                      dataKey="storage"
-                      stroke="#3b82f6"
-                      strokeWidth={2}
-                      name="Storage (MB)"
-                    />
-                    <Line
-                      yAxisId="right"
-                      type="monotone"
-                      dataKey="files"
-                      stroke="#10b981"
-                      strokeWidth={2}
-                      name="Files"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              No recent uploads
+            </div>
           )}
+        </CardContent>
+      </Card>
+      <div className="flex flex-col gap-4f">
+        {/* Daily Usage Chart */}
+        {dailyChartData.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="h-5 w-5" />
+                Daily Storage Usage (Last 30 Days)
+              </CardTitle>
+              <CardDescription>
+                Storage usage and file uploads per day
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={dailyChartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" />
+                  <YAxis yAxisId="left" />
+                  <YAxis yAxisId="right" orientation="right" />
+                  <Tooltip
+                    formatter={(value: any, name: string) => {
+                      if (name === "storage") {
+                        return [
+                          `${formatBytes(value * 1024 * 1024)}`,
+                          "Storage",
+                        ];
+                      }
+                      return [value, "Files"];
+                    }}
+                  />
+                  <Legend />
+                  <Line
+                    yAxisId="left"
+                    type="monotone"
+                    dataKey="storage"
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    name="Storage (MB)"
+                  />
+                  <Line
+                    yAxisId="right"
+                    type="monotone"
+                    dataKey="files"
+                    stroke="#10b981"
+                    strokeWidth={2}
+                    name="Files"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
 
-          {/* Monthly Usage Chart */}
-          {monthlyChartData.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5" />
-                  Monthly Storage Usage (Last 12 Months)
-                </CardTitle>
-                <CardDescription>
-                  Storage usage and file uploads per month
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={monthlyChartData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="month" />
-                    <YAxis yAxisId="left" />
-                    <YAxis yAxisId="right" orientation="right" />
-                    <Tooltip
-                      formatter={(value: any, name: string) => {
-                        if (name === "storage") {
-                          return [
-                            `${formatBytes(value * 1024 * 1024 * 1024)}`,
-                            "Storage",
-                          ];
-                        }
-                        return [value, "Files"];
-                      }}
-                    />
-                    <Legend />
-                    <Bar
-                      yAxisId="left"
-                      dataKey="storage"
-                      fill="#3b82f6"
-                      name="Storage (GB)"
-                    />
-                    <Bar
-                      yAxisId="right"
-                      dataKey="files"
-                      fill="#10b981"
-                      name="Files"
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+        {/* Monthly Usage Chart */}
+        {monthlyChartData.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="h-5 w-5" />
+                Monthly Storage Usage (Last 12 Months)
+              </CardTitle>
+              <CardDescription>
+                Storage usage and file uploads per month
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={monthlyChartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis yAxisId="left" />
+                  <YAxis yAxisId="right" orientation="right" />
+                  <Tooltip
+                    formatter={(value: any, name: string) => {
+                      if (name === "storage") {
+                        return [
+                          `${formatBytes(value * 1024 * 1024 * 1024)}`,
+                          "Storage",
+                        ];
+                      }
+                      return [value, "Files"];
+                    }}
+                  />
+                  <Legend />
+                  <Bar
+                    yAxisId="left"
+                    dataKey="storage"
+                    fill="#3b82f6"
+                    name="Storage (GB)"
+                  />
+                  <Bar
+                    yAxisId="right"
+                    dataKey="files"
+                    fill="#10b981"
+                    name="Files"
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );
