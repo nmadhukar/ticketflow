@@ -865,143 +865,152 @@ export default function Tasks() {
                             >
                               <Eye className="h-4 w-4" />
                             </Button>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-8 w-8 p-0"
-                                >
-                                  <MoreVertical className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                {(role === "admin" || role === "manager") && (
-                                  <DropdownMenuSub>
-                                    <DropdownMenuSubTrigger>
-                                      Quick Assign
-                                    </DropdownMenuSubTrigger>
-                                    <DropdownMenuSubContent>
-                                      <DropdownMenuItem
-                                        onClick={() => {
-                                          if (!currentUserId) return;
-                                          updateTaskMutation.mutate({
-                                            id: task.id,
-                                            updates: {
-                                              assigneeType: "user",
-                                              assigneeId: currentUserId,
-                                              assigneeTeamId: null,
-                                            },
-                                          });
-                                        }}
-                                      >
-                                        Assign to me
-                                      </DropdownMenuItem>
-                                      <DropdownMenuSeparator />
-                                      {(teams || []).length ? (
-                                        (teams || []).map((t: any) => (
+                            {(() => {
+                              // Check if there are any actions available for this user
+                              const hasQuickAssign =
+                                (role === "admin" || role === "manager") &&
+                                (teams || []).length > 0;
+                              const hasUpdateStatus = canUpdateStatus(task);
+                              const hasEditTicket = !(
+                                role === "agent" &&
+                                !showMine &&
+                                (task.assigneeType !== "user" ||
+                                  task.assigneeId !== currentUserId)
+                              );
+                              const hasDelete = canDelete;
+
+                              const hasAnyActions =
+                                hasQuickAssign ||
+                                hasUpdateStatus ||
+                                hasEditTicket ||
+                                hasDelete;
+
+                              if (!hasAnyActions) {
+                                return null; // Hide overflow icon if no actions available
+                              }
+
+                              return (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-8 w-8 p-0"
+                                    >
+                                      <MoreVertical className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    {(role === "admin" ||
+                                      role === "manager") && (
+                                      <DropdownMenuSub>
+                                        <DropdownMenuSubTrigger>
+                                          Quick Assign
+                                        </DropdownMenuSubTrigger>
+                                        <DropdownMenuSubContent>
                                           <DropdownMenuItem
-                                            key={t.id}
                                             onClick={() => {
+                                              if (!currentUserId) return;
                                               updateTaskMutation.mutate({
                                                 id: task.id,
                                                 updates: {
-                                                  assigneeType: "team",
-                                                  assigneeTeamId: t.id,
-                                                  assigneeId: null,
+                                                  assigneeType: "user",
+                                                  assigneeId: currentUserId,
+                                                  assigneeTeamId: null,
                                                 },
                                               });
                                             }}
                                           >
-                                            Assign to team: {t.name}
+                                            Assign to me
                                           </DropdownMenuItem>
-                                        ))
-                                      ) : (
-                                        <DropdownMenuItem disabled>
-                                          No teams available
-                                        </DropdownMenuItem>
-                                      )}
-                                    </DropdownMenuSubContent>
-                                  </DropdownMenuSub>
-                                )}
-                                {role === "agent" &&
-                                  !(
-                                    task.assigneeType === "user" &&
-                                    task.assigneeId === currentUserId
-                                  ) && (
-                                    <DropdownMenuItem
-                                      onClick={() => {
-                                        if (!currentUserId) return;
-                                        updateTaskMutation.mutate({
-                                          id: task.id,
-                                          updates: {
-                                            assigneeType: "user",
-                                            assigneeId: currentUserId,
-                                            assigneeTeamId: null,
-                                          },
-                                        });
-                                      }}
-                                    >
-                                      Assign to me
-                                    </DropdownMenuItem>
-                                  )}
-                                {canUpdateStatus(task) && (
-                                  <DropdownMenuSub>
-                                    <DropdownMenuSubTrigger>
-                                      Update Status
-                                    </DropdownMenuSubTrigger>
-                                    <DropdownMenuSubContent>
-                                      {[
-                                        "open",
-                                        "in_progress",
-                                        "resolved",
-                                        "closed",
-                                        "on_hold",
-                                      ]
-                                        .filter((s) => s !== task.status)
-                                        .map((s) => (
-                                          <DropdownMenuItem
-                                            key={s}
-                                            onClick={() => {
-                                              updateTaskMutation.mutate({
-                                                id: task.id,
-                                                updates: { status: s },
-                                              });
-                                            }}
-                                          >
-                                            {s.replace("_", " ")}
-                                          </DropdownMenuItem>
-                                        ))}
-                                    </DropdownMenuSubContent>
-                                  </DropdownMenuSub>
-                                )}
-                                {/* Hide Edit Ticket for agents when viewing all tickets and ticket is not directly assigned to them */}
-                                {!(
-                                  role === "agent" &&
-                                  !showMine &&
-                                  (task.assigneeType !== "user" ||
-                                    task.assigneeId !== currentUserId)
-                                ) && (
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      handleEditTask(task);
-                                    }}
-                                  >
-                                    <Edit3 className="h-4 w-4 mr-2" />
-                                    {t("tickets:editTicket")}
-                                  </DropdownMenuItem>
-                                )}
-                                {canDelete && (
-                                  <DropdownMenuItem
-                                    onClick={() => handleDeleteTask(task.id)}
-                                    className="text-red-600"
-                                  >
-                                    <Trash2 className="h-4 w-4 mr-2" />
-                                    {t("tickets:deleteTicket")}
-                                  </DropdownMenuItem>
-                                )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                                          <DropdownMenuSeparator />
+                                          {(teams || []).length ? (
+                                            (teams || []).map((t: any) => (
+                                              <DropdownMenuItem
+                                                key={t.id}
+                                                onClick={() => {
+                                                  updateTaskMutation.mutate({
+                                                    id: task.id,
+                                                    updates: {
+                                                      assigneeType: "team",
+                                                      assigneeTeamId: t.id,
+                                                      assigneeId: null,
+                                                    },
+                                                  });
+                                                }}
+                                              >
+                                                Assign to team: {t.name}
+                                              </DropdownMenuItem>
+                                            ))
+                                          ) : (
+                                            <DropdownMenuItem disabled>
+                                              No teams available
+                                            </DropdownMenuItem>
+                                          )}
+                                        </DropdownMenuSubContent>
+                                      </DropdownMenuSub>
+                                    )}
+                                    {canUpdateStatus(task) && (
+                                      <DropdownMenuSub>
+                                        <DropdownMenuSubTrigger>
+                                          Update Status
+                                        </DropdownMenuSubTrigger>
+                                        <DropdownMenuSubContent>
+                                          {[
+                                            "open",
+                                            "in_progress",
+                                            "resolved",
+                                            "closed",
+                                            "on_hold",
+                                          ]
+                                            .filter((s) => s !== task.status)
+                                            .map((s) => (
+                                              <DropdownMenuItem
+                                                key={s}
+                                                onClick={() => {
+                                                  updateTaskMutation.mutate({
+                                                    id: task.id,
+                                                    updates: { status: s },
+                                                  });
+                                                }}
+                                              >
+                                                {s.replace("_", " ")}
+                                              </DropdownMenuItem>
+                                            ))}
+                                        </DropdownMenuSubContent>
+                                      </DropdownMenuSub>
+                                    )}
+                                    {/* Hide Edit Ticket for agents when viewing all tickets and ticket is not directly assigned to them */}
+                                    {!(
+                                      role === "agent" &&
+                                      !showMine &&
+                                      (task.assigneeType !== "user" ||
+                                        task.assigneeId !== currentUserId)
+                                    ) && (
+                                      <DropdownMenuItem
+                                        onClick={() => {
+                                          handleEditTask(task);
+                                        }}
+                                      >
+                                        <Edit3 className="h-4 w-4 mr-2" />
+                                        {t("tickets:editTicket")}
+                                      </DropdownMenuItem>
+                                    )}
+                                    {canDelete && (
+                                      <DropdownMenuItem
+                                        onClick={() =>
+                                          handleDeleteTask(task.id)
+                                        }
+                                        className="text-red-600"
+                                      >
+                                        <Trash2 className="h-4 w-4 mr-2" />
+                                        {t("tickets:deleteTicket")}
+                                      </DropdownMenuItem>
+                                    )}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              );
+                            })()}
                           </div>
                         </td>
                       </tr>
