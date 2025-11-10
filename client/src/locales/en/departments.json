@@ -30,7 +30,9 @@
     "selectManager": "Select a manager",
     "noManager": "No Manager",
     "noDescription": "No description provided",
-    "managerLine": "Manager: {{first}} {{last}}"
+    "managerLine": "Manager: {{first}} {{last}}",
+    "status": "Status",
+    "statusDescription": "Enable or disable this department. Inactive departments cannot be assigned to new tickets."
   },
   "sections": {
     "teams": {

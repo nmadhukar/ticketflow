@@ -30,7 +30,9 @@
     "selectManager": "Selecciona un responsable",
     "noManager": "Sin responsable",
     "noDescription": "No se proporcionó descripción",
-    "managerLine": "Responsable: {{first}} {{last}}"
+    "managerLine": "Responsable: {{first}} {{last}}",
+    "status": "Estado",
+    "statusDescription": "Habilita o deshabilita este departamento. Los departamentos inactivos no pueden ser asignados a nuevos tickets."
   },
   "sections": {
     "teams": {

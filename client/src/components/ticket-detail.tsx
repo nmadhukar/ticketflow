@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
@@ -29,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { AiResponseFeedback } from "@/components/ai-response-feedback";
 import { useAuth } from "@/hooks/useAuth";
 import { Spinner } from "@/components/ui/spinner";
+import { CommentItem } from "@/components/comments/comment-item";
 
 interface TicketDetailProps {
   ticketId: number;
@@ -551,36 +551,7 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
                 </div>
               ) : comments && comments.length > 0 ? (
                 comments.map((comment: any) => (
-                  <div key={comment.id} className="flex gap-3">
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={comment.user?.profileImageUrl} />
-                      <AvatarFallback>
-                        {comment.user?.firstName?.[0] || "U"}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">
-                          {comment.user?.firstName} {comment.user?.lastName}
-                        </span>
-                        <span className="text-sm text-muted-foreground">
-                          {format(
-                            new Date(comment.createdAt),
-                            "MMM d, yyyy h:mm a"
-                          )}
-                        </span>
-                        {comment.isAIGenerated && (
-                          <Badge variant="secondary" className="text-xs">
-                            <Brain className="h-3 w-3 mr-1" />
-                            AI
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-sm whitespace-pre-wrap">
-                        {comment.content}
-                      </p>
-                    </div>
-                  </div>
+                  <CommentItem key={comment.id} comment={comment} />
                 ))
               ) : (
                 <div className="text-center py-4 text-muted-foreground">

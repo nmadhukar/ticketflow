@@ -16,9 +16,7 @@ import {
 } from "@/components/ui/accordion";
 import { ClipboardList, Eye } from "lucide-react";
 import { useTeamTasks } from "@/hooks/useTeamTasks";
-import { useQuery } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
-import type { Task, TeamMember } from "@/types/teams";
+import type { Task } from "@/types/teams";
 import { Spinner } from "@/components/ui/spinner";
 import { TaskAssignmentsSection } from "./task-assignments-section";
 import TicketDetail from "@/components/ticket-detail";
@@ -33,17 +31,6 @@ export function TeamTasksSection({ teamId }: TeamTasksSectionProps) {
     undefined
   );
   const { data: tasks, isLoading: tasksLoading } = useTeamTasks(teamId);
-
-  // Fetch team members for assignment dropdown
-  const { data: members } = useQuery<TeamMember[]>({
-    queryKey: ["/api/teams", teamId, "members"],
-    queryFn: async () => {
-      const res = await apiRequest("GET", `/api/teams/${teamId}/members`);
-      return res.json();
-    },
-    enabled: !!teamId,
-    retry: false,
-  });
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -156,14 +143,11 @@ export function TeamTasksSection({ teamId }: TeamTasksSectionProps) {
                         />
                       </div>
                     )}
-                    {members && (
-                      <TaskAssignmentsSection
-                        teamId={teamId}
-                        taskId={task.id}
-                        members={members}
-                        variant="nested"
-                      />
-                    )}
+                    <TaskAssignmentsSection
+                      teamId={teamId}
+                      taskId={task.id}
+                      variant="nested"
+                    />
                   </div>
                 </AccordionContent>
               </AccordionItem>

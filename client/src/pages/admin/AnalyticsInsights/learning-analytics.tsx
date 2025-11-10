@@ -26,7 +26,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { Database, RefreshCw, Zap, CheckCircle } from "lucide-react";
+import StatsCard from "@/components/stats-card";
+import {
+  Database,
+  RefreshCw,
+  Zap,
+  CheckCircle,
+  FileText,
+  TrendingUp,
+  MessageSquare,
+  Bot,
+} from "lucide-react";
 import { format } from "date-fns";
 
 // Queue Status Display Component
@@ -44,48 +54,34 @@ function QueueStatusDisplay() {
   }
 
   return (
-    <div className="grid grid-cols-3 gap-4">
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Pending</p>
-              <p className="text-2xl font-bold">
-                {(queueStatus as any)?.pending || 0}
-              </p>
-            </div>
-            <Database className="h-8 w-8 text-muted-foreground" />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Processing</p>
-              <p className="text-2xl font-bold">
-                {(queueStatus as any)?.processing || 0}
-              </p>
-            </div>
-            <RefreshCw className="h-8 w-8 text-primary animate-spin" />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Completed Today</p>
-              <p className="text-2xl font-bold">
-                {(queueStatus as any)?.completedToday || 0}
-              </p>
-            </div>
-            <CheckCircle className="h-8 w-8 text-green-500" />
-          </div>
-        </CardContent>
-      </Card>
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <StatsCard
+        title="Pending"
+        value={(queueStatus as any)?.pending || 0}
+        subtitle="Awaiting processing"
+        icon={<Database className="h-4 w-4" />}
+        iconBg="bg-muted/10"
+        iconColor="text-muted-foreground"
+        loading={isLoading}
+      />
+      <StatsCard
+        title="Processing"
+        value={(queueStatus as any)?.processing || 0}
+        subtitle="Currently analyzing"
+        icon={<RefreshCw className="h-4 w-4" />}
+        iconBg="bg-primary/10"
+        iconColor="text-primary"
+        loading={isLoading}
+      />
+      <StatsCard
+        title="Completed Today"
+        value={(queueStatus as any)?.completedToday || 0}
+        subtitle="Processed today"
+        icon={<CheckCircle className="h-4 w-4" />}
+        iconBg="bg-green-500/10"
+        iconColor="text-green-500"
+        loading={isLoading}
+      />
     </div>
   );
 }
@@ -172,50 +168,76 @@ function LearningAnalytics() {
 
   if (isLoading) {
     return (
-      <div className="text-sm text-muted-foreground">Loading analytics...</div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatsCard
+          title="Articles Created"
+          value={0}
+          icon={<FileText className="h-4 w-4" />}
+          loading={true}
+        />
+        <StatsCard
+          title="Avg. Effectiveness"
+          value="0%"
+          icon={<TrendingUp className="h-4 w-4" />}
+          loading={true}
+        />
+        <StatsCard
+          title="Auto-Responses Sent"
+          value={0}
+          icon={<MessageSquare className="h-4 w-4" />}
+          loading={true}
+        />
+        <StatsCard
+          title="Tickets Resolved by AI"
+          value={0}
+          icon={<Bot className="h-4 w-4" />}
+          loading={true}
+        />
+      </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              Articles Created
-            </span>
-            <span className="font-medium">
-              {(analytics as any)?.articlesCreated || 0}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              Avg. Effectiveness
-            </span>
-            <span className="font-medium">
-              {(((analytics as any)?.avgEffectiveness || 0) * 100).toFixed(1)}%
-            </span>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              Auto-Responses Sent
-            </span>
-            <span className="font-medium">
-              {(analytics as any)?.autoResponsesSent || 0}
-            </span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">
-              Tickets Resolved by AI
-            </span>
-            <span className="font-medium">
-              {(analytics as any)?.ticketsResolvedByAI || 0}
-            </span>
-          </div>
-        </div>
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatsCard
+          title="Articles Created"
+          value={(analytics as any)?.articlesCreated || 0}
+          subtitle="Knowledge articles generated"
+          icon={<FileText className="h-4 w-4" />}
+          iconBg="bg-blue-500/10"
+          iconColor="text-blue-500"
+          loading={isLoading}
+        />
+        <StatsCard
+          title="Avg. Effectiveness"
+          value={`${(((analytics as any)?.avgEffectiveness || 0) * 100).toFixed(
+            1
+          )}%`}
+          subtitle="Success rate of AI articles"
+          icon={<TrendingUp className="h-4 w-4" />}
+          iconBg="bg-green-500/10"
+          iconColor="text-green-500"
+          loading={isLoading}
+        />
+        <StatsCard
+          title="Auto-Responses Sent"
+          value={(analytics as any)?.autoResponsesSent || 0}
+          subtitle="AI-generated responses"
+          icon={<MessageSquare className="h-4 w-4" />}
+          iconBg="bg-purple-500/10"
+          iconColor="text-purple-500"
+          loading={isLoading}
+        />
+        <StatsCard
+          title="Tickets Resolved by AI"
+          value={(analytics as any)?.ticketsResolvedByAI || 0}
+          subtitle="Auto-resolved tickets"
+          icon={<Bot className="h-4 w-4" />}
+          iconBg="bg-orange-500/10"
+          iconColor="text-orange-500"
+          loading={isLoading}
+        />
       </div>
 
       {(analytics as any)?.topCategories &&
@@ -245,14 +267,18 @@ function LearningAnalytics() {
 
 export default function KnowledgeLearningQueue() {
   return (
-    <div className="flex flex-col gap-6">
+    <Card className="flex flex-col gap-6">
       {/* Learning Queue Status */}
-      <Card>
+      <Card className="border-none">
         <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <p className="text-muted-foreground">
-              Real-time status of the knowledge base learning queue
-            </p>
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <CardTitle>Learning Queue Status</CardTitle>
+              <CardDescription>
+                Real-time monitoring of tickets being processed for knowledge
+                base learning
+              </CardDescription>
+            </div>
             <Button
               variant="outline"
               size="sm"
@@ -265,15 +291,15 @@ export default function KnowledgeLearningQueue() {
               <RefreshCw className="h-4 w-4 mr-2" />
               Refresh
             </Button>
-          </CardTitle>
+          </div>
         </CardHeader>
         <CardContent>
           <QueueStatusDisplay />
         </CardContent>
       </Card>
-
+      <Separator />
       {/* Learning Analytics */}
-      <Card>
+      <Card className="border-none">
         <CardHeader>
           <CardTitle>Learning Analytics</CardTitle>
           <CardDescription>
@@ -284,9 +310,9 @@ export default function KnowledgeLearningQueue() {
           <LearningAnalytics />
         </CardContent>
       </Card>
-
+      <Separator />
       {/* Historical Ticket Processing */}
-      <Card>
+      <Card className="border-none">
         <CardHeader>
           <CardTitle>Historical Ticket Processing</CardTitle>
           <CardDescription>
@@ -298,6 +324,6 @@ export default function KnowledgeLearningQueue() {
           <BatchProcessingControls />
         </CardContent>
       </Card>
-    </div>
+    </Card>
   );
 }

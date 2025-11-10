@@ -351,6 +351,7 @@ export interface IStorage {
   ): Promise<Department>;
   deleteDepartment(id: number): Promise<void>;
   getAllDepartments(): Promise<Department[]>;
+  getAllDepartmentsIncludingInactive(): Promise<Department[]>;
   getDepartmentById(id: number): Promise<Department | undefined>;
 
   // User Invitation operations

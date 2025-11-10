@@ -14,12 +14,25 @@
   "admin": {
     "totalUsers": "Total Users",
     "activeUsers": "active",
+    "totalDepartments": "Total Departments",
+    "departmentsSubtitle": "Active departments",
     "totalTeams": "Total Teams",
     "acrossDepartments": "Across all departments",
+    "totalTickets": "Total Tickets",
+    "allTickets": "All tickets",
     "openTickets": "Open Tickets",
-    "highPriority": "high priority",
+    "highPriority": "High Priority",
+    "highPriorityTickets": "High priority tickets",
+    "urgentPriority": "Urgent Priority",
+    "urgentTickets": "Urgent tickets",
+    "priorityTickets": "Priority Tickets",
+    "highUrgent": "High / Urgent",
+    "ticketStatus": "Ticket Status",
+    "openInProgressCompleted": "Open / In Progress / Completed",
     "avgResolutionTime": "Avg Resolution Time",
-    "hours": "hours"
+    "hours": "hours",
+    "pendingArticles": "Pending Articles",
+    "pendingArticlesSubtitle": "Awaiting approval"
   },
   "recentActivity": {
     "title": "Recent Activity",

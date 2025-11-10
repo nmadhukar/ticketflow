@@ -38,6 +38,8 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useBedrockCostNotifications } from "@/hooks/useBedrockCostNotifications";
+import { useDepartmentTeams } from "@/hooks/useDepartments";
+import { useAuth } from "@/hooks/useAuth";
 
 import {
   Card,
@@ -61,6 +63,16 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
   Brain,
@@ -111,6 +123,7 @@ interface AISettings {
 
 export default function AISettings() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const { handleApiError } = useBedrockCostNotifications();
   const [hasChanges, setHasChanges] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
@@ -131,10 +144,18 @@ export default function AISettings() {
     queryKey: ["/api/admin/ai-settings"],
   });
 
-  // Fetch teams for escalation
-  const { data: teams } = useQuery({
-    queryKey: ["/api/teams"],
+  // Fetch departments for escalation team selection
+  const { data: departments } = useQuery({
+    queryKey: ["/api/teams/departments"],
   });
+
+  // State for escalation department selection
+  const [escalationDepartmentId, setEscalationDepartmentId] = useState<
+    number | undefined
+  >(undefined);
+
+  // Fetch teams for the selected department
+  const { data: departmentTeams } = useDepartmentTeams(escalationDepartmentId);
 
   // Fetch API key status
   const { data: apiKeys } = useQuery({
@@ -180,6 +201,28 @@ export default function AISettings() {
       setFormData(settings as AISettings);
     }
   }, [settings]);
+
+  // Derive department from existing escalation team when settings load
+  useEffect(() => {
+    if (formData.escalationTeamId && !escalationDepartmentId) {
+      // Fetch the team to get its department
+      const fetchTeamDepartment = async () => {
+        try {
+          const res = await apiRequest(
+            "GET",
+            `/api/teams/${formData.escalationTeamId}`
+          );
+          const team = await res.json();
+          if (team?.departmentId) {
+            setEscalationDepartmentId(team.departmentId);
+          }
+        } catch (error) {
+          console.error("Failed to fetch team department:", error);
+        }
+      };
+      fetchTeamDepartment();
+    }
+  }, [formData.escalationTeamId, escalationDepartmentId]);
 
   // Load Bedrock settings when data is fetched
   useEffect(() => {
@@ -295,14 +338,214 @@ export default function AISettings() {
     },
   });
 
+  // localStorage utility functions
+  const getStorageKey = (feature: string) => {
+    const userId = (user as any)?.id || "anonymous";
+    return `ai-settings-backup-${userId}-${feature}`;
+  };
+
+  const saveBackupToLocalStorage = (
+    feature: "autoResponse" | "escalation" | "autoLearn",
+    values: any
+  ) => {
+    try {
+      const key = getStorageKey(feature);
+      localStorage.setItem(key, JSON.stringify(values));
+    } catch (error) {
+      console.error("Failed to save backup to localStorage:", error);
+    }
+  };
+
+  const getBackupFromLocalStorage = (
+    feature: "autoResponse" | "escalation" | "autoLearn"
+  ) => {
+    try {
+      const key = getStorageKey(feature);
+      const data = localStorage.getItem(key);
+      return data ? JSON.parse(data) : null;
+    } catch (error) {
+      console.error("Failed to get backup from localStorage:", error);
+      return null;
+    }
+  };
+
+  const clearBackupFromLocalStorage = (
+    feature: "autoResponse" | "escalation" | "autoLearn"
+  ) => {
+    try {
+      const key = getStorageKey(feature);
+      localStorage.removeItem(key);
+    } catch (error) {
+      console.error("Failed to clear backup from localStorage:", error);
+    }
+  };
+
   const handleChange = (key: keyof AISettings, value: any) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
     if (isRateField(key)) setRatePreset("Custom");
     setHasChanges(true);
   };
 
+  // Handle feature toggle with confirmation
+  const handleFeatureToggle = (
+    feature: "autoResponse" | "escalation" | "autoLearn",
+    enabled: boolean
+  ) => {
+    // If enabling, just toggle (no confirmation needed)
+    if (enabled) {
+      // Remove from reset list if it was there
+      setFeaturesToReset((prev) => {
+        const updated = { ...prev };
+        delete updated[feature];
+        return updated;
+      });
+      clearBackupFromLocalStorage(feature);
+
+      if (feature === "autoResponse") {
+        handleChange("autoResponseEnabled", true);
+      } else if (feature === "escalation") {
+        handleChange("escalationEnabled", true);
+      } else if (feature === "autoLearn") {
+        handleChange("autoLearnEnabled", true);
+      }
+      return;
+    }
+
+    // If disabling, show confirmation dialog
+    // First, backup current values
+    let backupValues: any = {};
+    if (feature === "autoResponse") {
+      backupValues = {
+        confidenceThreshold: formData.confidenceThreshold,
+        maxResponseLength: formData.maxResponseLength,
+        responseTimeout: formData.responseTimeout,
+      };
+    } else if (feature === "escalation") {
+      backupValues = {
+        complexityThreshold: formData.complexityThreshold,
+        escalationTeamId: formData.escalationTeamId,
+        escalationDepartmentId: escalationDepartmentId,
+      };
+    } else if (feature === "autoLearn") {
+      backupValues = {
+        minResolutionScore: formData.minResolutionScore,
+        articleApprovalRequired: formData.articleApprovalRequired,
+      };
+    }
+
+    saveBackupToLocalStorage(feature, backupValues);
+
+    // Disable the feature immediately (user can cancel to restore)
+    if (feature === "autoResponse") {
+      handleChange("autoResponseEnabled", false);
+    } else if (feature === "escalation") {
+      handleChange("escalationEnabled", false);
+    } else if (feature === "autoLearn") {
+      handleChange("autoLearnEnabled", false);
+    }
+
+    setConfirmationDialog({
+      open: true,
+      feature,
+      action: null,
+    });
+  };
+
+  // Handle confirmation dialog actions
+  const handleConfirmationAction = (action: "reset" | "keep" | "cancel") => {
+    if (!confirmationDialog.feature) return;
+
+    if (action === "cancel") {
+      // Restore toggle to enabled state and restore values from backup
+      const backup = getBackupFromLocalStorage(confirmationDialog.feature);
+
+      if (confirmationDialog.feature === "autoResponse") {
+        handleChange("autoResponseEnabled", true);
+        if (backup) {
+          setFormData((prev) => ({
+            ...prev,
+            confidenceThreshold: backup.confidenceThreshold,
+            maxResponseLength: backup.maxResponseLength,
+            responseTimeout: backup.responseTimeout,
+          }));
+        }
+      } else if (confirmationDialog.feature === "escalation") {
+        handleChange("escalationEnabled", true);
+        if (backup) {
+          setFormData((prev) => ({
+            ...prev,
+            complexityThreshold: backup.complexityThreshold,
+            escalationTeamId: backup.escalationTeamId,
+          }));
+          if (backup.escalationDepartmentId) {
+            setEscalationDepartmentId(backup.escalationDepartmentId);
+          }
+        }
+      } else if (confirmationDialog.feature === "autoLearn") {
+        handleChange("autoLearnEnabled", true);
+        if (backup) {
+          setFormData((prev) => ({
+            ...prev,
+            minResolutionScore: backup.minResolutionScore,
+            articleApprovalRequired: backup.articleApprovalRequired,
+          }));
+        }
+      }
+      clearBackupFromLocalStorage(confirmationDialog.feature);
+    } else if (action === "reset") {
+      // Mark feature for reset on save
+      setFeaturesToReset((prev) => ({
+        ...prev,
+        [confirmationDialog.feature!]: true,
+      }));
+      // Toggle is already disabled by handleFeatureToggle
+    } else if (action === "keep") {
+      // Keep current values, don't reset
+      setFeaturesToReset((prev) => {
+        const updated = { ...prev };
+        delete updated[confirmationDialog.feature!];
+        return updated;
+      });
+      // Toggle is already disabled by handleFeatureToggle
+    }
+
+    setConfirmationDialog({ open: false, feature: null, action: null });
+  };
+
   const handleSave = async () => {
-    await updateSettings.mutateAsync(formData);
+    // Create a copy of formData to modify
+    let dataToSave = { ...formData };
+
+    // Reset values for disabled features that are marked for reset
+    if (featuresToReset.autoResponse && !dataToSave.autoResponseEnabled) {
+      dataToSave.confidenceThreshold =
+        DEFAULT_VALUES.autoResponse.confidenceThreshold;
+      dataToSave.maxResponseLength =
+        DEFAULT_VALUES.autoResponse.maxResponseLength;
+      dataToSave.responseTimeout = DEFAULT_VALUES.autoResponse.responseTimeout;
+      clearBackupFromLocalStorage("autoResponse");
+    }
+
+    if (featuresToReset.escalation && !dataToSave.escalationEnabled) {
+      dataToSave.complexityThreshold =
+        DEFAULT_VALUES.escalation.complexityThreshold;
+      dataToSave.escalationTeamId = DEFAULT_VALUES.escalation.escalationTeamId;
+      setEscalationDepartmentId(undefined);
+      clearBackupFromLocalStorage("escalation");
+    }
+
+    if (featuresToReset.autoLearn && !dataToSave.autoLearnEnabled) {
+      dataToSave.minResolutionScore =
+        DEFAULT_VALUES.autoLearn.minResolutionScore;
+      dataToSave.articleApprovalRequired =
+        DEFAULT_VALUES.autoLearn.articleApprovalRequired;
+      clearBackupFromLocalStorage("autoLearn");
+    }
+
+    // Clear reset tracking
+    setFeaturesToReset({});
+
+    await updateSettings.mutateAsync(dataToSave);
   };
 
   const handleBedrockChange = (field: string, value: any) => {
@@ -447,6 +690,41 @@ export default function AISettings() {
       (k) => (formData as any)[k] !== (workflowSnapshot as any)[k]
     );
   })();
+
+  // Confirmation dialog state for feature disabling
+  const [confirmationDialog, setConfirmationDialog] = useState<{
+    open: boolean;
+    feature: "autoResponse" | "escalation" | "autoLearn" | null;
+    action: "reset" | "keep" | null;
+  }>({
+    open: false,
+    feature: null,
+    action: null,
+  });
+
+  // Track which features should be reset to defaults on save
+  const [featuresToReset, setFeaturesToReset] = useState<{
+    autoResponse?: boolean;
+    escalation?: boolean;
+    autoLearn?: boolean;
+  }>({});
+
+  // Default values
+  const DEFAULT_VALUES = {
+    autoResponse: {
+      confidenceThreshold: 0.7,
+      maxResponseLength: 1000,
+      responseTimeout: 30,
+    },
+    escalation: {
+      complexityThreshold: 70,
+      escalationTeamId: undefined,
+    },
+    autoLearn: {
+      minResolutionScore: 0.8,
+      articleApprovalRequired: true,
+    },
+  };
 
   const getConfidenceLabel = (value: number) => {
     if (value >= 0.8) return "High (80%+)";
@@ -978,7 +1256,7 @@ export default function AISettings() {
                 <Switch
                   checked={formData.autoResponseEnabled}
                   onCheckedChange={(checked) =>
-                    handleChange("autoResponseEnabled", checked)
+                    handleFeatureToggle("autoResponse", checked)
                   }
                   disabled={!isEditingWorkflow}
                 />
@@ -1050,6 +1328,8 @@ export default function AISettings() {
               </div>
             </div>
 
+            <Separator />
+
             {/* Escalation */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -1062,7 +1342,7 @@ export default function AISettings() {
                 <Switch
                   checked={formData.escalationEnabled}
                   onCheckedChange={(checked) =>
-                    handleChange("escalationEnabled", checked)
+                    handleFeatureToggle("escalation", checked)
                   }
                   disabled={!isEditingWorkflow}
                 />
@@ -1097,30 +1377,75 @@ export default function AISettings() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="escalationTeam">Escalation Team</Label>
-                <Select
-                  value={formData.escalationTeamId?.toString() || ""}
-                  onValueChange={(value) =>
-                    handleChange(
-                      "escalationTeamId",
-                      value ? parseInt(value) : undefined
-                    )
-                  }
-                  disabled={!isEditingWorkflow}
-                >
-                  <SelectTrigger id="escalationTeam">
-                    <SelectValue placeholder="Select team for escalations" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(teams as any)?.map((team: any) => (
-                      <SelectItem key={team.id} value={team.id.toString()}>
-                        {team.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="escalationDepartment">
+                  Select team for escalations
+                </Label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {/* Department Selection */}
+                  <Select
+                    value={escalationDepartmentId?.toString() || ""}
+                    onValueChange={(value) => {
+                      const deptId = value ? parseInt(value) : undefined;
+                      setEscalationDepartmentId(deptId);
+                      // Clear team selection when department changes
+                      handleChange("escalationTeamId", undefined);
+                    }}
+                    disabled={!isEditingWorkflow}
+                  >
+                    <SelectTrigger id="escalationDepartment">
+                      <SelectValue placeholder="Select department for escalations" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(departments as any)?.map((dept: any) => (
+                        <SelectItem key={dept.id} value={dept.id.toString()}>
+                          {dept.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  {/* Team Selection */}
+                  <Select
+                    value={formData.escalationTeamId?.toString() || ""}
+                    onValueChange={(value) =>
+                      handleChange(
+                        "escalationTeamId",
+                        value ? parseInt(value) : undefined
+                      )
+                    }
+                    disabled={!isEditingWorkflow || !escalationDepartmentId}
+                  >
+                    <SelectTrigger id="escalationTeam">
+                      <SelectValue
+                        placeholder={
+                          !escalationDepartmentId
+                            ? "Select department first"
+                            : departmentTeams && departmentTeams.length > 0
+                            ? "Select team"
+                            : "No teams available"
+                        }
+                      />
+                    </SelectTrigger>
+                    {departmentTeams && departmentTeams.length > 0 && (
+                      <SelectContent>
+                        {departmentTeams.map((team: any) => (
+                          <SelectItem key={team.id} value={team.id.toString()}>
+                            {team.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    )}
+                  </Select>
+                  {escalationDepartmentId && departmentTeams?.length === 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      This department has no teams. Please create a team first.
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
+
+            <Separator />
 
             {/* Knowledge Learning */}
             <div className="space-y-4 col-span-1 md:col-span-2 lg:col-span-1">
@@ -1135,7 +1460,7 @@ export default function AISettings() {
                 <Switch
                   checked={formData.autoLearnEnabled}
                   onCheckedChange={(checked) =>
-                    handleChange("autoLearnEnabled", checked)
+                    handleFeatureToggle("autoLearn", checked)
                   }
                   disabled={!isEditingWorkflow}
                 />
@@ -1212,7 +1537,7 @@ export default function AISettings() {
                 <>
                   <Button
                     onClick={async () => {
-                      await updateSettings.mutateAsync(formData);
+                      await handleSave();
                       setIsEditingWorkflow(false);
                       setWorkflowSnapshot(null);
                     }}
@@ -1224,6 +1549,7 @@ export default function AISettings() {
                   <Button
                     variant="outline"
                     onClick={() => {
+                      // Restore from workflow snapshot
                       if (workflowSnapshot) {
                         const restored: any = { ...formData };
                         workflowFields.forEach((k) => {
@@ -1231,6 +1557,54 @@ export default function AISettings() {
                         });
                         setFormData(restored);
                       }
+
+                      // Restore from localStorage backups if available
+                      const autoResponseBackup =
+                        getBackupFromLocalStorage("autoResponse");
+                      if (autoResponseBackup) {
+                        setFormData((prev) => ({
+                          ...prev,
+                          confidenceThreshold:
+                            autoResponseBackup.confidenceThreshold,
+                          maxResponseLength:
+                            autoResponseBackup.maxResponseLength,
+                          responseTimeout: autoResponseBackup.responseTimeout,
+                        }));
+                        clearBackupFromLocalStorage("autoResponse");
+                      }
+
+                      const escalationBackup =
+                        getBackupFromLocalStorage("escalation");
+                      if (escalationBackup) {
+                        setFormData((prev) => ({
+                          ...prev,
+                          complexityThreshold:
+                            escalationBackup.complexityThreshold,
+                          escalationTeamId: escalationBackup.escalationTeamId,
+                        }));
+                        if (escalationBackup.escalationDepartmentId) {
+                          setEscalationDepartmentId(
+                            escalationBackup.escalationDepartmentId
+                          );
+                        }
+                        clearBackupFromLocalStorage("escalation");
+                      }
+
+                      const autoLearnBackup =
+                        getBackupFromLocalStorage("autoLearn");
+                      if (autoLearnBackup) {
+                        setFormData((prev) => ({
+                          ...prev,
+                          minResolutionScore:
+                            autoLearnBackup.minResolutionScore,
+                          articleApprovalRequired:
+                            autoLearnBackup.articleApprovalRequired,
+                        }));
+                        clearBackupFromLocalStorage("autoLearn");
+                      }
+
+                      // Clear reset tracking
+                      setFeaturesToReset({});
                       setIsEditingWorkflow(false);
                       setWorkflowSnapshot(null);
                     }}
@@ -1244,6 +1618,94 @@ export default function AISettings() {
           </CardFooter>
         </Card>
       </CardContent>
+
+      {/* Confirmation Dialog for Feature Disabling */}
+      <AlertDialog
+        open={confirmationDialog.open}
+        onOpenChange={(open) => {
+          if (!open) {
+            // If dialog is closed without action, treat as cancel
+            handleConfirmationAction("cancel");
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Disable{" "}
+              {confirmationDialog.feature === "autoResponse"
+                ? "Auto-Response"
+                : confirmationDialog.feature === "escalation"
+                ? "Auto-Escalation"
+                : "Auto-Learning"}
+              ?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-3">
+              {confirmationDialog.feature === "autoResponse" && (
+                <>
+                  <p>
+                    Disabling Auto-Response will reset the following settings to
+                    defaults when you save:
+                  </p>
+                  <ul className="list-disc list-inside space-y-1 text-sm">
+                    <li>Confidence Threshold: 70%</li>
+                    <li>Max Response Length: 1000 characters</li>
+                    <li>Response Timeout: 30 seconds</li>
+                  </ul>
+                </>
+              )}
+              {confirmationDialog.feature === "escalation" && (
+                <>
+                  <p>
+                    Disabling Auto-Escalation will reset the following settings
+                    to defaults when you save:
+                  </p>
+                  <ul className="list-disc list-inside space-y-1 text-sm">
+                    <li>Complexity Threshold: 70</li>
+                    <li>Escalation Team: (cleared)</li>
+                  </ul>
+                </>
+              )}
+              {confirmationDialog.feature === "autoLearn" && (
+                <>
+                  <p>
+                    Disabling Auto-Learning will reset the following settings to
+                    defaults when you save:
+                  </p>
+                  <ul className="list-disc list-inside space-y-1 text-sm">
+                    <li>Minimum Resolution Score: 80%</li>
+                    <li>Article Approval Required: Yes</li>
+                  </ul>
+                </>
+              )}
+              <Separator className="my-3" />
+              <p>
+                Your current values will be saved locally and can be restored if
+                you cancel.
+              </p>
+              <p className="font-medium">What would you like to do?</p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => handleConfirmationAction("cancel")}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <Button
+              variant="outline"
+              onClick={() => handleConfirmationAction("keep")}
+            >
+              Keep Current Values
+            </Button>
+            <AlertDialogAction
+              onClick={() => handleConfirmationAction("reset")}
+            >
+              Reset to Defaults
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

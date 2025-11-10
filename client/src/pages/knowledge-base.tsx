@@ -104,6 +104,15 @@ export default function KnowledgeBase() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
 
+  // Handle status query parameter from URL (e.g., from dashboard pending articles card)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const statusParam = params.get("status");
+    if (statusParam === "draft") {
+      setStatusFilter("draft");
+    }
+  }, []);
+
   // Form states for article creation/editing
   const [articleTitle, setArticleTitle] = useState("");
   const [articleSummary, setArticleSummary] = useState("");

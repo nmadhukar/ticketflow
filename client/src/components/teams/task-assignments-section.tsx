@@ -50,27 +50,48 @@ import {
 import { useTeamPermissions, useTeamAdmins } from "@/hooks/useTeamAdmins";
 import type { TeamMember, TeamTaskAssignment } from "@/types/teams";
 import { Spinner } from "@/components/ui/spinner";
+import { UserSelectItem } from "@/components/ui/user-select-item";
+import type { User as FullUser } from "@shared/schema";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 
 interface TaskAssignmentsSectionProps {
   teamId: string | number;
   taskId: string | number;
-  members: TeamMember[];
+  members?: TeamMember[]; // Optional - if not provided, will fetch with taskId filter
   variant?: "default" | "nested"; // For nested usage (e.g., inside accordion)
 }
 
 export function TaskAssignmentsSection({
   teamId,
   taskId,
-  members,
+  members: membersProp,
   variant = "default",
 }: TaskAssignmentsSectionProps) {
   const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
-  const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   const [selectedAssignment, setSelectedAssignment] =
     useState<TeamTaskAssignment | null>(null);
   const [selectedUserId, setSelectedUserId] = useState("");
   const [notes, setNotes] = useState("");
   const [priority, setPriority] = useState("");
+  const [status, setStatus] = useState("active");
+
+  // Fetch members with taskId filter to exclude already assigned members
+  const { data: fetchedMembers } = useQuery<TeamMember[]>({
+    queryKey: ["/api/teams", teamId, "members", taskId],
+    queryFn: async () => {
+      const res = await apiRequest(
+        "GET",
+        `/api/teams/${teamId}/members?taskId=${taskId}`
+      );
+      return res.json();
+    },
+    enabled: !!teamId && !!taskId && !membersProp,
+    retry: false,
+  });
+
+  // Use provided members or fetched members
+  const members = membersProp || fetchedMembers || [];
 
   const { data: assignments, isLoading: assignmentsLoading } =
     useTaskAssignments(teamId, taskId);
@@ -122,43 +143,63 @@ export function TaskAssignmentsSection({
 
   const handleAssign = () => {
     if (!selectedUserId) return;
-    createAssignmentMutation.mutate(
-      {
-        userId: selectedUserId,
-        notes: notes || undefined,
-        priority: priority || undefined,
-      },
-      {
-        onSuccess: () => {
-          setIsAssignDialogOpen(false);
-          setSelectedUserId("");
-          setNotes("");
-          setPriority("");
+
+    // If editing an existing assignment, update it
+    if (selectedAssignment?.id) {
+      updateAssignmentMutation.mutate(
+        {
+          status: status || "active",
+          notes: notes || undefined,
+          priority: priority || undefined,
         },
-      }
-    );
+        {
+          onSuccess: () => {
+            setIsAssignDialogOpen(false);
+            resetForm();
+          },
+        }
+      );
+    } else {
+      // Otherwise, create a new assignment
+      createAssignmentMutation.mutate(
+        {
+          userId: selectedUserId,
+          notes: notes || undefined,
+          priority: priority || undefined,
+        },
+        {
+          onSuccess: () => {
+            setIsAssignDialogOpen(false);
+            resetForm();
+          },
+        }
+      );
+    }
+  };
+
+  const resetForm = () => {
+    setSelectedAssignment(null);
+    setSelectedUserId("");
+    setNotes("");
+    setPriority("");
+    setStatus("active");
   };
 
   const handleUpdate = (assignment: TeamTaskAssignment) => {
     setSelectedAssignment(assignment);
-    setIsUpdateDialogOpen(true);
+    // Pre-fill form with assignment values
+    setSelectedUserId(assignment.assignedUserId || "");
+    setNotes(assignment.notes || "");
+    setPriority(assignment.priority || "");
+    setStatus(assignment.status || "active");
+    setIsAssignDialogOpen(true);
   };
 
-  const handleUpdateSubmit = () => {
-    if (!selectedAssignment) return;
-    updateAssignmentMutation.mutate(
-      {
-        status: selectedAssignment.status,
-        notes: selectedAssignment.notes || undefined,
-        priority: selectedAssignment.priority || undefined,
-      },
-      {
-        onSuccess: () => {
-          setIsUpdateDialogOpen(false);
-          setSelectedAssignment(null);
-        },
-      }
-    );
+  const handleDialogClose = (open: boolean) => {
+    setIsAssignDialogOpen(open);
+    if (!open) {
+      resetForm();
+    }
   };
 
   const handleDelete = (assignment: TeamTaskAssignment) => {
@@ -179,11 +220,17 @@ export function TaskAssignmentsSection({
   const assignmentsContent = (
     <div className={variant === "nested" ? "space-y-4" : ""}>
       {variant === "nested" && canAssignTask && (
-        <div className="flex justify-end">
+        <div className="flex items-center justify-between mb-4 pb-2 border-b">
+          <div>
+            <h4 className="font-semibold text-sm">Task Assignments</h4>
+            <p className="text-xs text-muted-foreground">
+              Team members assigned to work on this task
+            </p>
+          </div>
           <Button
             size="sm"
             onClick={() => setIsAssignDialogOpen(true)}
-            className="bg-blue-600 hover:bg-blue-700"
+            className="bg-primary hover:bg-primary/90"
           >
             <UserPlus className="h-4 w-4 mr-2" />
             Assign Task
@@ -337,32 +384,64 @@ export function TaskAssignmentsSection({
         assignmentsContent
       )}
 
-      {/* Assign Task Dialog */}
-      <Dialog open={isAssignDialogOpen} onOpenChange={setIsAssignDialogOpen}>
+      {/* Assign/Edit Task Dialog */}
+      <Dialog open={isAssignDialogOpen} onOpenChange={handleDialogClose}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Assign Task to Team Member</DialogTitle>
+            <DialogTitle>
+              {selectedAssignment?.id
+                ? "Edit Assignment"
+                : "Assign Task to Team Member"}
+            </DialogTitle>
             <DialogDescription>
-              Select a team member to assign this task to
+              {selectedAssignment?.id
+                ? "Update the assignment details"
+                : "Select a team member to assign this task to"}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
               <Label htmlFor="member-select">Team Member *</Label>
-              <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+              <Select
+                value={selectedUserId}
+                onValueChange={setSelectedUserId}
+                disabled={!!selectedAssignment?.id}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Choose a member..." />
                 </SelectTrigger>
                 <SelectContent>
                   {members.map((member) => (
-                    <SelectItem key={member.userId} value={member.userId}>
-                      {member.user.firstName} {member.user.lastName} (
-                      {member.user.email})
-                    </SelectItem>
+                    <UserSelectItem
+                      key={member.userId}
+                      user={member.user as FullUser}
+                      value={member.userId}
+                    />
                   ))}
                 </SelectContent>
               </Select>
+              {selectedAssignment?.id && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  User cannot be changed when editing an assignment
+                </p>
+              )}
             </div>
+            {selectedAssignment?.id && (
+              <div>
+                <Label htmlFor="status-select">Status</Label>
+                <Select value={status} onValueChange={setStatus}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="reassigned">Reassigned</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div>
               <Label htmlFor="priority-select">Priority (Optional)</Label>
               <Select value={priority} onValueChange={setPriority}>
@@ -397,117 +476,24 @@ export function TaskAssignmentsSection({
             </Button>
             <Button
               onClick={handleAssign}
-              disabled={createAssignmentMutation.isPending || !selectedUserId}
+              disabled={
+                createAssignmentMutation.isPending ||
+                updateAssignmentMutation.isPending ||
+                !selectedUserId
+              }
               className="bg-blue-600 hover:bg-blue-700"
             >
-              {createAssignmentMutation.isPending ? (
+              {createAssignmentMutation.isPending ||
+              updateAssignmentMutation.isPending ? (
                 <>
                   <Spinner size="sm" className="mr-2" />
-                  Assigning...
+                  {selectedAssignment?.id ? "Updating..." : "Assigning..."}
                 </>
               ) : (
                 <>
                   <UserPlus className="h-4 w-4 mr-2" />
-                  Assign
+                  {selectedAssignment?.id ? "Update" : "Assign"}
                 </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Update Assignment Dialog */}
-      <Dialog open={isUpdateDialogOpen} onOpenChange={setIsUpdateDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Update Assignment</DialogTitle>
-            <DialogDescription>
-              Update the status, notes, or priority of this assignment
-            </DialogDescription>
-          </DialogHeader>
-          {selectedAssignment && (
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="status-select">Status</Label>
-                <Select
-                  value={selectedAssignment.status}
-                  onValueChange={(value) =>
-                    setSelectedAssignment({
-                      ...selectedAssignment,
-                      status: value as any,
-                    })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="reassigned">Reassigned</SelectItem>
-                    <SelectItem value="cancelled">Cancelled</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="priority-select">Priority</Label>
-                <Select
-                  value={selectedAssignment.priority || ""}
-                  onValueChange={(value) =>
-                    setSelectedAssignment({
-                      ...selectedAssignment,
-                      priority: value,
-                    })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select priority..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">None</SelectItem>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea
-                  id="notes"
-                  placeholder="Add notes..."
-                  value={selectedAssignment.notes || ""}
-                  onChange={(e) =>
-                    setSelectedAssignment({
-                      ...selectedAssignment,
-                      notes: e.target.value,
-                    })
-                  }
-                  rows={3}
-                />
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsUpdateDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleUpdateSubmit}
-              disabled={updateAssignmentMutation.isPending}
-              className="bg-blue-600 hover:bg-blue-700"
-            >
-              {updateAssignmentMutation.isPending ? (
-                <>
-                  <Spinner size="sm" className="mr-2" />
-                  Updating...
-                </>
-              ) : (
-                "Update"
               )}
             </Button>
           </DialogFooter>

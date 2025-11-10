@@ -32,6 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { UserSelectItem } from "@/components/ui/user-select-item";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import MainWrapper from "@/components/main-wrapper";
 import { TeamAdminsSection } from "@/components/teams/team-admins-section";
@@ -88,9 +89,12 @@ export default function TeamDetail() {
   const { data: permissions } = useTeamPermissions(id);
 
   const { data: allUsers } = useQuery<User[]>({
-    queryKey: ["/api/users"],
+    queryKey: ["/api/users", "forTeamMemberSelection"],
     queryFn: async () => {
-      const res = await apiRequest("GET", "/api/users");
+      const res = await apiRequest(
+        "GET",
+        "/api/users?forTeamMemberSelection=true"
+      );
       return res.json();
     },
     retry: false,
@@ -181,6 +185,7 @@ export default function TeamDetail() {
   };
 
   // Filter out users who are already members
+  // Server already filters by role (agents, managers, and admins if requester is admin)
   const availableUsers =
     allUsers?.filter(
       (user) => !members?.some((member) => member.userId === user.id)
@@ -368,9 +373,7 @@ export default function TeamDetail() {
                 </SelectTrigger>
                 <SelectContent>
                   {availableUsers.map((user: any) => (
-                    <SelectItem key={user.id} value={user.id}>
-                      {user.firstName} {user.lastName} ({user.email})
-                    </SelectItem>
+                    <UserSelectItem key={user.id} user={user} value={user.id} />
                   ))}
                 </SelectContent>
               </Select>

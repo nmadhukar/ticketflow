@@ -286,11 +286,7 @@ export default function Teams() {
               <h3 className="text-lg font-medium text-slate-900 mb-2">
                 {t("teams:my.emptyTitle")}
               </h3>
-              <p className="text-slate-500 mb-4">
-                {t("teams:my.emptyDesc", {
-                  extra: isUserAdminOrManager ? t("teams:my.extraAdmin") : "",
-                })}
-              </p>
+              <p className="text-slate-500 mb-4">{t("teams:my.emptyDesc")}</p>
               {isUserAdminOrManager ? (
                 <Button
                   onClick={() => setIsCreateDialogOpen(true)}

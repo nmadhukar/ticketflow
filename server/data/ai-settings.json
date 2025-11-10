@@ -1,16 +1,18 @@
 {
   "autoResponseEnabled": true,
   "confidenceThreshold": 0.7,
-  "maxResponseLength": 1000,
-  "responseTimeout": 30,
+  "maxResponseLength": 5000,
+  "responseTimeout": 49,
   "autoLearnEnabled": true,
-  "minResolutionScore": 0.8,
+  "minResolutionScore": 0.9,
   "articleApprovalRequired": true,
-  "complexityThreshold": 70,
+  "complexityThreshold": 80,
   "escalationEnabled": true,
+  "escalationTeamId": 29,
   "bedrockModel": "anthropic.claude-3-sonnet-20240229-v1:0",
   "temperature": 0.3,
   "maxTokens": 2000,
   "maxRequestsPerMinute": 20,
+  "maxRequestsPerHour": 0,
   "maxRequestsPerDay": 1000
 }

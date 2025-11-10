@@ -1003,7 +1003,7 @@ export class DatabaseStorage implements IStorage {
 
   async getTaskComments(
     taskId: number
-  ): Promise<(TaskComment & { userName?: string })[]> {
+  ): Promise<(TaskComment & { user?: User })[]> {
     const comments = await db
       .select({
         id: taskComments.id,
@@ -1011,8 +1011,7 @@ export class DatabaseStorage implements IStorage {
         userId: taskComments.userId,
         content: taskComments.content,
         createdAt: taskComments.createdAt,
-        userName: users.firstName,
-        userEmail: users.email,
+        user: users,
       })
       .from(taskComments)
       .leftJoin(users, eq(taskComments.userId, users.id))
@@ -1025,7 +1024,7 @@ export class DatabaseStorage implements IStorage {
       userId: comment.userId,
       content: comment.content,
       createdAt: comment.createdAt,
-      userName: comment.userName || comment.userEmail || comment.userId,
+      user: comment.user || undefined,
     }));
   }
 
@@ -1033,10 +1032,13 @@ export class DatabaseStorage implements IStorage {
   async getAdminStats(): Promise<{
     totalUsers: number;
     activeUsers: number;
+    totalDepartments: number;
     totalTeams: number;
+    totalTickets: number;
     openTickets: number;
     urgentTickets: number;
     avgResolutionTime: number | null;
+    pendingArticles: number;
   }> {
     const [userCount] = await db.select({ count: count() }).from(users);
     const [activeUserCount] = await db
@@ -1044,7 +1046,13 @@ export class DatabaseStorage implements IStorage {
       .from(users)
       .where(eq(users.isActive, true));
 
+    const [departmentCount] = await db
+      .select({ count: count() })
+      .from(departments);
+
     const [teamCount] = await db.select({ count: count() }).from(teams);
+
+    const [totalTicketCount] = await db.select({ count: count() }).from(tasks);
 
     const [openTicketCount] = await db
       .select({ count: count() })
@@ -1054,7 +1062,7 @@ export class DatabaseStorage implements IStorage {
     const [urgentTicketCount] = await db
       .select({ count: count() })
       .from(tasks)
-      .where(and(eq(tasks.status, "open"), eq(tasks.priority, "high")));
+      .where(and(eq(tasks.status, "open"), eq(tasks.priority, "urgent")));
 
     // Calculate average resolution time (in hours)
     const resolvedTasks = await db
@@ -1072,15 +1080,29 @@ export class DatabaseStorage implements IStorage {
           resolvedTasks.length
         : null;
 
+    // Count pending articles (draft status or not published)
+    const [pendingArticlesCount] = await db
+      .select({ count: count() })
+      .from(knowledgeArticles)
+      .where(
+        or(
+          eq(knowledgeArticles.status, "draft"),
+          eq(knowledgeArticles.isPublished, false)
+        )
+      );
+
     return {
       totalUsers: userCount.count,
       activeUsers: activeUserCount.count,
+      totalDepartments: departmentCount.count,
       totalTeams: teamCount.count,
+      totalTickets: totalTicketCount.count,
       openTickets: openTicketCount.count,
       urgentTickets: urgentTicketCount.count,
       avgResolutionTime: avgResolutionTime
         ? Math.round(avgResolutionTime)
         : null,
+      pendingArticles: pendingArticlesCount.count,
     };
   }
 
@@ -1910,6 +1932,10 @@ export class DatabaseStorage implements IStorage {
       .from(departments)
       .where(eq(departments.isActive, true))
       .orderBy(departments.name);
+  }
+
+  async getAllDepartmentsIncludingInactive(): Promise<Department[]> {
+    return await db.select().from(departments).orderBy(departments.name);
   }
 
   async getDepartmentById(id: number): Promise<Department | undefined> {

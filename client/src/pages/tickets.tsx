@@ -274,10 +274,30 @@ export default function Tasks() {
       const res = await apiRequest("PATCH", `/api/tasks/${id}`, updates);
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tasks/my"] });
       queryClient.invalidateQueries({ queryKey: [tasksUrl] });
+
+      // Find the task in the current list to get old assigneeTeamId
+      const currentTask = tasks?.find((t: any) => t.id === variables.id);
+      const oldTeamId = currentTask?.assigneeTeamId;
+      const newTeamId = variables.updates.assigneeTeamId;
+
+      // Invalidate new team's tasks if assigned to a team
+      if (newTeamId) {
+        queryClient.invalidateQueries({
+          queryKey: ["/api/teams", newTeamId, "tasks"],
+        });
+      }
+
+      // Invalidate old team's tasks if task was moved from a team
+      if (oldTeamId && oldTeamId !== newTeamId) {
+        queryClient.invalidateQueries({
+          queryKey: ["/api/teams", oldTeamId, "tasks"],
+        });
+      }
+
       toast({
         title: t("messages.success"),
         description: t("tickets.taskUpdated", {
@@ -674,11 +694,11 @@ export default function Tasks() {
                     <th className="text-left p-4 font-medium">
                       {t("tickets:table.columns.category")}
                     </th>
-                    <th className="min-w-max text-left p-4 font-medium">
+                    <th className="min-w-max text-left p-4 font-medium ">
                       {t("tickets:table.columns.assignedTo")}
                     </th>
-                    {(role === "admin" || role === "manager") && (
-                      <th className="min-w-max text-left p-4 font-medium">
+                    {role === "admin" && (
+                      <th className="min-w-max text-left p-4 font-medium whitespace-nowrap">
                         AI Info
                       </th>
                     )}
@@ -770,11 +790,11 @@ export default function Tasks() {
                             <span> {task.category?.toUpperCase()}</span>
                           </Badge>
                         </td>
-                        <td className="p-4 whitespace-nowrap">
+                        <td className="p-4">
                           {task.assigneeType === "team" &&
                           task.assigneeTeamId ? (
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                              <Users className="h-4 w-4" />
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground w-32 break-all">
+                              <Users className="min-w-4 min-h-4 h-4 w-4" />
                               <span>
                                 {task.teamName ||
                                   task.assigneeName ||
@@ -782,8 +802,8 @@ export default function Tasks() {
                               </span>
                             </div>
                           ) : task.assigneeId ? (
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                              <User className="h-4 w-4" />
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground w-32 break-all">
+                              <User className="min-w-4 min-h-4 h-4 w-4" />
                               <span>
                                 {task.assigneeName || task.assigneeId}
                               </span>
@@ -794,7 +814,7 @@ export default function Tasks() {
                             </span>
                           )}
                         </td>
-                        {(role === "admin" || role === "manager") && (
+                        {role === "admin" && (
                           <td className="p-4 whitespace-nowrap">
                             {task.hasAutoResponse ? (
                               <div className="flex items-center gap-2">
@@ -907,7 +927,7 @@ export default function Tasks() {
                                         <DropdownMenuSubTrigger>
                                           Quick Assign
                                         </DropdownMenuSubTrigger>
-                                        <DropdownMenuSubContent>
+                                        <DropdownMenuSubContent className="max-h-[300px] overflow-y-auto">
                                           <DropdownMenuItem
                                             onClick={() => {
                                               if (!currentUserId) return;

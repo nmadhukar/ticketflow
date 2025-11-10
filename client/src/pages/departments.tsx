@@ -38,6 +38,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { UserSelectItem } from "@/components/ui/user-select-item";
 import { useToast } from "@/hooks/use-toast";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -46,11 +48,13 @@ import { Loader2, Plus, Building, Users } from "lucide-react";
 import type { Department, User } from "@shared/schema";
 import MainWrapper from "@/components/main-wrapper";
 import { useTranslation } from "react-i18next";
+import { useAuth } from "@/hooks/useAuth";
 
 const departmentSchema = z.object({
   name: z.string().min(2, "Department name must be at least 2 characters"),
-  description: z.string().optional(),
+  description: z.string().min(1, "Description is required"),
   managerId: z.string().optional(),
+  isActive: z.boolean().default(true),
 });
 
 type DepartmentFormData = z.infer<typeof departmentSchema>;
@@ -61,6 +65,8 @@ export default function Departments() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = (user as any)?.role === "admin";
 
   const { data: departments = [], isLoading } = useQuery<Department[]>({
     queryKey: ["/api/departments"],
@@ -78,6 +84,7 @@ export default function Departments() {
       name: "",
       description: "",
       managerId: "none",
+      isActive: true,
     },
   });
 
@@ -129,7 +136,7 @@ export default function Departments() {
       title={t("departments:title")}
       subTitle={t("departments:subtitle")}
       action={
-        departments?.length ? (
+        isAdmin && departments?.length ? (
           <Button className="gap-2" onClick={() => setIsCreateOpen(true)}>
             <Plus className="w-4 h-4" />
             {t("departments:actions.add")}
@@ -152,22 +159,30 @@ export default function Departments() {
             >
               <CardHeader className="pb-4">
                 <div className="flex justify-between items-start">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-1">
                     <Building className="w-8 h-8 text-primary" />
-                    <div>
+                    <div className="flex-1">
                       <CardTitle className="text-lg">
                         {department.name}
                       </CardTitle>
-                      {department.isActive ? (
-                        <Badge variant="secondary" className="mt-1">
-                          {t("departments:status.active")}
-                        </Badge>
-                      ) : (
-                        <Badge variant="destructive" className="mt-1">
-                          {t("departments:status.inactive")}
-                        </Badge>
-                      )}
                     </div>
+                  </div>
+                  <div className="ml-2">
+                    {department.isActive ? (
+                      <Badge
+                        variant="secondary"
+                        className="bg-green-100 text-green-700 hover:bg-green-100 border-green-200"
+                      >
+                        {t("departments:status.active")}
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="destructive"
+                        className="bg-red-100 text-red-700 hover:bg-red-100 border-red-200"
+                      >
+                        {t("departments:status.inactive")}
+                      </Badge>
+                    )}
                   </div>
                 </div>
               </CardHeader>
@@ -205,13 +220,15 @@ export default function Departments() {
           <p className="text-slate-500 mb-6 max-w-xl mx-auto">
             {t("departments:empty.desc")}
           </p>
-          <Button
-            onClick={() => setIsCreateOpen(true)}
-            className="gap-2 bg-blue-600 hover:bg-blue-700"
-          >
-            <Plus className="h-4 w-4" />
-            {t("departments:empty.create")}
-          </Button>
+          {isAdmin && (
+            <Button
+              onClick={() => setIsCreateOpen(true)}
+              className="gap-2 bg-blue-600 hover:bg-blue-700"
+            >
+              <Plus className="h-4 w-4" />
+              {t("departments:empty.create")}
+            </Button>
+          )}
         </Card>
       )}
 
@@ -281,13 +298,40 @@ export default function Departments() {
                               user.role === "admin" || user.role === "manager"
                           )
                           .map((user: User) => (
-                            <SelectItem key={user.id} value={user.id}>
-                              {user.firstName} {user.lastName} ({user.email})
-                            </SelectItem>
+                            <UserSelectItem
+                              key={user.id}
+                              user={user}
+                              value={user.id}
+                            />
                           ))}
                       </SelectContent>
                     </Select>
                     <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={createForm.control}
+                name="isActive"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">
+                        {t("departments:labels.status")}
+                      </FormLabel>
+                      <FormDescription>
+                        {t("departments:labels.statusDescription", {
+                          defaultValue:
+                            "Enable or disable this department. Inactive departments cannot be assigned to new tickets.",
+                        })}
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
                   </FormItem>
                 )}
               />

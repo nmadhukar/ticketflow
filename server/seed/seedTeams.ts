@@ -325,18 +325,16 @@ export async function seedTeams() {
 
       if (members.length === 0) continue;
 
-      // Separate agents and managers
+      // Separate agents, managers, and system admins
       const memberUserIds = members.map((m) => m.userId);
       const memberUsers = await db
         .select({ id: users.id, role: users.role })
         .from(users)
         .where(inArray(users.id, memberUserIds));
 
-      const agentIds = memberUsers
-        .filter((u) => u.role === "agent")
-        .map((u) => u.id);
-      const managerIds = memberUsers
-        .filter((u) => u.role === "manager")
+      // Only managers and system admins can be team admins (exclude agents)
+      const eligibleAdminIds = memberUsers
+        .filter((u) => u.role === "manager" || u.role === "admin")
         .map((u) => u.id);
 
       // Check existing admins
@@ -347,71 +345,41 @@ export async function seedTeams() {
 
       const existingAdminIds = new Set(existingAdmins.map((a) => a.userId));
 
-      // Randomly decide admin count (0-2, but prefer at least 1 if managers available)
+      // Randomly decide admin count (0-2, but prefer at least 1 if eligible users available)
       let adminCount = 0;
-      if (managerIds.length > 0) {
-        // 70% chance of having admins if managers are available
+      if (eligibleAdminIds.length > 0) {
+        // 70% chance of having admins if eligible users (managers/admins) are available
         adminCount =
           Math.random() < 0.7 ? Math.floor(Math.random() * 2) + 1 : 0;
-      } else {
-        // 50% chance if only agents available
-        adminCount = Math.random() < 0.5 ? 1 : 0;
       }
 
       const adminsToAdd: string[] = [];
-      let hasAgentAdmin = false;
-      let hasManagerAdmin = false;
 
-      // Select admins: prefer managers, but allow agents
-      if (adminCount > 0) {
-        const shuffledManagers = shuffle(managerIds);
-        const shuffledAgents = shuffle(agentIds);
+      // Select admins: only from managers and system admins (no agents allowed)
+      if (adminCount > 0 && eligibleAdminIds.length > 0) {
+        const shuffledEligible = shuffle(eligibleAdminIds);
 
-        // First, try to add managers (prefer managers)
+        // Add eligible users (managers or system admins) as team admins
         for (
           let i = 0;
-          i < Math.min(adminCount, shuffledManagers.length);
+          i < Math.min(adminCount, shuffledEligible.length);
           i++
         ) {
-          if (!existingAdminIds.has(shuffledManagers[i])) {
-            adminsToAdd.push(shuffledManagers[i]);
-            hasManagerAdmin = true;
+          if (!existingAdminIds.has(shuffledEligible[i])) {
+            adminsToAdd.push(shuffledEligible[i]);
           }
         }
 
-        // If we still need more admins and have agents, add an agent
-        if (adminsToAdd.length < adminCount && shuffledAgents.length > 0) {
-          const agentAdmin = shuffledAgents.find(
-            (id) => !existingAdminIds.has(id)
-          );
-          if (agentAdmin) {
-            adminsToAdd.push(agentAdmin);
-            hasAgentAdmin = true;
-          }
-        }
-
-        // Rule: If agent is admin, ensure at least one manager is also admin
-        if (hasAgentAdmin && !hasManagerAdmin && shuffledManagers.length > 0) {
-          const managerToAdd = shuffledManagers.find(
-            (id) => !existingAdminIds.has(id) && !adminsToAdd.includes(id)
-          );
-          if (managerToAdd) {
-            adminsToAdd.push(managerToAdd);
-            hasManagerAdmin = true;
-          }
-        }
-
-        // If we still have room and managers available, add another manager
+        // If we still have room and eligible users available, add another one
         if (
           adminsToAdd.length < 2 &&
-          shuffledManagers.length >
-            adminsToAdd.filter((id) => managerIds.includes(id)).length
+          shuffledEligible.length > adminsToAdd.length
         ) {
-          const additionalManager = shuffledManagers.find(
+          const additionalAdmin = shuffledEligible.find(
             (id) => !existingAdminIds.has(id) && !adminsToAdd.includes(id)
           );
-          if (additionalManager) {
-            adminsToAdd.push(additionalManager);
+          if (additionalAdmin) {
+            adminsToAdd.push(additionalAdmin);
           }
         }
       }
@@ -426,7 +394,7 @@ export async function seedTeams() {
             grantedAt: new Date(),
           });
           const user = memberUsers.find((u) => u.id === userId);
-          const roleLabel = user?.role === "manager" ? "manager" : "agent";
+          const roleLabel = user?.role || "user";
           console.log(
             `  ✓ Granted admin status to ${roleLabel} ${userId} in team ${team.name}`
           );

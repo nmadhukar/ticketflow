@@ -21,6 +21,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import SignOutButton from "./signOutButton";
 import { setThemeFromPrimary } from "@/theme/color";
+import { RoleBadge } from "@/components/ui/role-badge";
 import {
   Menubar,
   MenubarContent,
@@ -263,9 +264,14 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
             </MenubarTrigger>
             <MenubarContent className="w-[18rem]">
               <div className="px-4 py-3">
-                <p className="text-sm font-medium truncate">
-                  {(user as any)?.firstName} {(user as any)?.lastName}
-                </p>
+                <div className="flex items-center gap-2 mb-1">
+                  <p className="text-sm font-medium truncate">
+                    {(user as any)?.firstName} {(user as any)?.lastName}
+                  </p>
+                  {(user as any)?.role && (
+                    <RoleBadge role={(user as any)?.role} size="sm" />
+                  )}
+                </div>
                 <p className="text-xs text-muted-foreground truncate">
                   {(user as any)?.email}
                 </p>

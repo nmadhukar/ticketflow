@@ -32,6 +32,7 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -39,6 +40,8 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import { UserSelectItem } from "@/components/ui/user-select-item";
 import {
   Select,
   SelectContent,
@@ -63,8 +66,9 @@ import type { User } from "@shared/schema";
 
 const departmentSchema = z.object({
   name: z.string().min(2, "Department name must be at least 2 characters"),
-  description: z.string().optional(),
+  description: z.string().min(1, "Description is required"),
   managerId: z.string().optional(),
+  isActive: z.boolean().default(true),
 });
 
 type DepartmentFormData = z.infer<typeof departmentSchema>;
@@ -135,11 +139,8 @@ export default function DepartmentDetail() {
     }
   }, [departmentError, toast, setLocation, t]);
 
-  // Check permissions: Admin can edit all, Manager can only edit their departments
-  const canEdit =
-    (user as any)?.role === "admin" ||
-    ((user as any)?.role === "manager" &&
-      department?.managerId === (user as any)?.id);
+  // Only admins can edit departments
+  const canEdit = (user as any)?.role === "admin";
 
   // Check if user can view this department
   const canView =
@@ -231,6 +232,7 @@ export default function DepartmentDetail() {
         name: department.name,
         description: department.description || "",
         managerId: department.managerId || "none",
+        isActive: department.isActive ?? true,
       });
       setIsEditOpen(true);
     }
@@ -598,13 +600,40 @@ export default function DepartmentDetail() {
                               user.role === "admin" || user.role === "manager"
                           )
                           .map((user: User) => (
-                            <SelectItem key={user.id} value={user.id}>
-                              {user.firstName} {user.lastName} ({user.email})
-                            </SelectItem>
+                            <UserSelectItem
+                              key={user.id}
+                              user={user}
+                              value={user.id}
+                            />
                           ))}
                       </SelectContent>
                     </Select>
                     <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={editForm.control}
+                name="isActive"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">
+                        {t("departments:labels.status")}
+                      </FormLabel>
+                      <FormDescription>
+                        {t("departments:labels.statusDescription", {
+                          defaultValue:
+                            "Enable or disable this department. Inactive departments cannot be assigned to new tickets.",
+                        })}
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
                   </FormItem>
                 )}
               />

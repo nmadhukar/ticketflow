@@ -66,6 +66,8 @@ import {
   Paperclip,
 } from "lucide-react";
 import TaskAttachments from "./task-attachments";
+import { UserSelectItem } from "@/components/ui/user-select-item";
+import type { User as FullUser } from "@shared/schema";
 
 interface TaskModalProps {
   isOpen: boolean;
@@ -1436,14 +1438,12 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                   </SelectTrigger>
                                   <SelectContent>
                                     {assignableUsers?.map((user: any) => (
-                                      <SelectItem key={user.id} value={user.id}>
-                                        <div className="flex items-center gap-2">
-                                          <User className="h-4 w-4" />
-                                          {user.firstName && user.lastName
-                                            ? `${user.firstName} ${user.lastName}`
-                                            : user.email}
-                                        </div>
-                                      </SelectItem>
+                                      <UserSelectItem
+                                        key={user.id}
+                                        user={user as FullUser}
+                                        value={user.id}
+                                        showEmail={false}
+                                      />
                                     ))}
                                   </SelectContent>
                                 </Select>

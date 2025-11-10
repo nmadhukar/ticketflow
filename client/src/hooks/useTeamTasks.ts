@@ -70,6 +70,10 @@ export function useCreateTaskAssignment(
       queryClient.invalidateQueries({
         queryKey: ["/api/teams", teamId, "tasks"],
       });
+      // Invalidate members query with taskId filter so assigned member is removed from dropdown
+      queryClient.invalidateQueries({
+        queryKey: ["/api/teams", teamId, "members", taskId],
+      });
       toast({
         title: "Success",
         description: "Task assigned to team member",
@@ -179,6 +183,10 @@ export function useDeleteTaskAssignment(
       queryClient.invalidateQueries({
         queryKey: ["/api/teams", teamId, "tasks"],
       });
+      // Invalidate members query with taskId filter so removed member appears in dropdown again
+      queryClient.invalidateQueries({
+        queryKey: ["/api/teams", teamId, "members", taskId],
+      });
       toast({
         title: "Success",
         description: "Assignment removed",
@@ -204,4 +212,3 @@ export function useDeleteTaskAssignment(
     },
   });
 }
-

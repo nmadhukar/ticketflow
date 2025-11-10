@@ -304,9 +304,30 @@ export function registerTeamsRoutes(app: Express): void {
       // Admin and authorized users can proceed
       const members = await storage.getTeamMembers(teamId);
 
+      // If taskId is provided, filter out members already assigned to this task
+      let filteredMembers = members;
+      const taskId = req.query.taskId
+        ? parseInt(req.query.taskId as string)
+        : null;
+      if (taskId && !isNaN(taskId)) {
+        const existingAssignments = await storage.getTaskAssignments(
+          taskId,
+          teamId
+        );
+        const assignedUserIds = new Set(
+          existingAssignments
+            .map((assignment) => assignment.assignedUserId)
+            .filter((id): id is string => id !== null)
+        );
+
+        filteredMembers = members.filter(
+          (member) => !assignedUserIds.has(member.userId)
+        );
+      }
+
       // Add isAdmin flag to each member (remove role field from response)
       const membersWithAdminFlag = await Promise.all(
-        members.map(async (member) => {
+        filteredMembers.map(async (member) => {
           const { role, ...memberWithoutRole } = member;
           const isAdmin = await storage.isTeamAdmin(member.userId, teamId);
           return {

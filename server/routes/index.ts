@@ -168,21 +168,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerAdminRoutes(app);
   registerTeamsRoutes(app);
 
+  // Helper to get user ID from request
+  const getUserId = (req: any): string => {
+    return req.user?.id || req.user?.claims?.sub;
+  };
+
   // Users route
-  app.get("/api/users", isAuthenticated, async (req, res) => {
+  app.get("/api/users", isAuthenticated, async (req: any, res) => {
     try {
-      const users = await storage.getAllUsers();
-      res.json(users);
+      const forTeamMemberSelection =
+        req.query.forTeamMemberSelection === "true";
+
+      if (forTeamMemberSelection) {
+        // Filter for team member selection: agents, managers, and admins (if requester is admin)
+        const requesterId = getUserId(req);
+        const requester = await storage.getUser(requesterId);
+        const isRequesterAdmin = requester?.role === "admin";
+
+        let query = db.select().from(users);
+
+        if (isRequesterAdmin) {
+          // Admins can see agents, managers, and other admins
+          query = query.where(
+            or(
+              eq(users.role, "agent"),
+              eq(users.role, "manager"),
+              eq(users.role, "admin")
+            )
+          ) as any;
+        } else {
+          // Non-admins can only see agents and managers
+          query = query.where(
+            or(eq(users.role, "agent"), eq(users.role, "manager"))
+          ) as any;
+        }
+
+        const filteredUsers = await query;
+        return res.json(filteredUsers);
+      }
+
+      // Default: return all users (backward compatible)
+      const allUsers = await storage.getAllUsers();
+      res.json(allUsers);
     } catch (error) {
       console.error("Error fetching users:", error);
       res.status(500).json({ message: "Failed to fetch users" });
     }
   });
-
-  // Helper to get user ID from request
-  const getUserId = (req: any): string => {
-    return req.user?.id || req.user?.claims?.sub;
-  };
 
   // Task routes
   app.get("/api/tasks", isAuthenticated, async (req: any, res) => {
@@ -1927,6 +1959,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
 
+      // Validate escalation team if provided
+      if (
+        req.body.escalationTeamId !== undefined &&
+        req.body.escalationTeamId !== null
+      ) {
+        const teamId = Number(req.body.escalationTeamId);
+        if (isNaN(teamId)) {
+          return res.status(400).json({
+            message: "Invalid escalation team ID",
+          });
+        }
+
+        // Check if team exists
+        const team = await storage.getTeam(teamId);
+        if (!team) {
+          return res.status(400).json({
+            message: "Escalation team not found",
+          });
+        }
+
+        // Verify team has a department (required by schema)
+        if (!team.departmentId) {
+          return res.status(400).json({
+            message: "Escalation team must belong to a department",
+          });
+        }
+
+        // Verify department exists and is active
+        const department = await storage.getDepartmentById(team.departmentId);
+        if (!department) {
+          return res.status(400).json({
+            message: "Escalation team's department not found",
+          });
+        }
+        if (!department.isActive) {
+          return res.status(400).json({
+            message: "Escalation team's department is not active",
+          });
+        }
+      }
+
       const next = validateAISettings({
         ...(await getAISettings()),
         ...(req.body || {}),
@@ -3447,7 +3520,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (user.role === "admin") {
-        const rows = await storage.getAllDepartments();
+        // Admins can see all departments (active and inactive)
+        const rows = await storage.getAllDepartmentsIncludingInactive();
         return res.json(rows);
       }
 
@@ -3481,13 +3555,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
 
+      // Validate required fields
+      if (!req.body.name || !req.body.description) {
+        return res.status(400).json({
+          message: "Name and description are required",
+        });
+      }
+
       const department = await storage.createDepartment(req.body);
 
       // Broadcast department created event
       if ((app as any).broadcastToAll) {
         (app as any).broadcastToAll({
           type: "department:created",
-          data: { id: department.id, ...department },
+          data: { ...department },
           ts: Date.now(),
           v: 1,
         });
@@ -3509,6 +3590,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
 
+      // Validate required fields
+      if (!req.body.name || !req.body.description) {
+        return res.status(400).json({
+          message: "Name and description are required",
+        });
+      }
+
       const id = parseInt(req.params.id);
       const department = await storage.updateDepartment(id, req.body);
 
@@ -3516,7 +3604,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if ((app as any).broadcastToAll) {
         (app as any).broadcastToAll({
           type: "department:updated",
-          data: { id: department.id, ...department },
+          data: { ...department },
           ts: Date.now(),
           v: 1,
         });
