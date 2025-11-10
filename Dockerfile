@@ -3,7 +3,7 @@ WORKDIR /app
 
 # 1) Install dependencies 
 COPY package*.json ./
-RUN npm install --no-audit --no-fund
+RUN npm install --include=dev --no-audit --no-fund
 
 # 2) Copy source and build (produces ./dist)
 COPY . .
