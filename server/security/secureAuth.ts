@@ -208,7 +208,7 @@ export const loginUser = async (
 
     // Find user - simplified for demo
     // const user = await storage.getUserByEmail(email);
-    const user = null; // Simplified for demo
+    const user: any = null; // Simplified for demo
     if (!user) {
       recordFailedAttempt(email);
       logAuthEvent({
@@ -326,7 +326,7 @@ export const requestPasswordReset = async (
     const resetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
     // Save reset token
-    await storage.savePasswordResetToken(user.id, resetToken, resetExpires);
+    await storage.setPasswordResetToken(user.id, resetToken, resetExpires);
 
     // Log password reset request
     logAuthEvent({
@@ -361,7 +361,7 @@ export const resetPassword = async (
 ): Promise<{ success: boolean; message: string }> => {
   try {
     // Find user by reset token
-    const user = await storage.getUserByResetToken(token);
+    const user: any = await storage.getUserByResetToken(token);
     if (
       !user ||
       !user.passwordResetExpires ||
@@ -383,7 +383,7 @@ export const resetPassword = async (
     // Log password reset
     logAuthEvent({
       userId: user.id,
-      email: user.email,
+      email: user?.email || "unknown",
       action: "password_reset",
       success: true,
       ip: req.ip,
@@ -442,11 +442,11 @@ export const logoutUser = async (
     // In production, add token to blacklist in Redis
     // For now, we'll just log the logout event
 
-    const user = await storage.getUser(userId);
+    const user: any = await storage.getUser(userId);
     if (user) {
       logAuthEvent({
         userId,
-        email: user.email,
+        email: user?.email || "unknown",
         action: "logout",
         success: true,
         ip: req.ip,
@@ -460,7 +460,7 @@ export const logoutUser = async (
 // Clean up expired login attempts (call periodically)
 export const cleanupLoginAttempts = (): void => {
   const now = Date.now();
-  for (const [email, attempts] of loginAttempts.entries()) {
+  for (const [email, attempts] of Array.from(loginAttempts.entries())) {
     if (attempts.lockedUntil && now > attempts.lockedUntil) {
       loginAttempts.delete(email);
     }

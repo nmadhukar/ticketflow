@@ -1,6 +1,6 @@
 server {
   listen 80;
-  server_name _;
+  server_name ${SERVER_NAME};
 
   client_max_body_size 25m;
 
@@ -27,5 +27,4 @@ server {
     proxy_send_timeout 300s;
   }
 }
-
 

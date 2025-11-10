@@ -1,17 +1,98 @@
+# Dependencies
 node_modules
-npm-debug.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Build outputs (will be created during build)
 dist
+build
+*.tsbuildinfo
+
+# Git
 .git
 .gitignore
-.DS_Store
+.gitattributes
+.github
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
 **/*.local
-**/*.env
-attached_assets
-docs
-server/__tests__
-client/src/__tests__
-config
+**/*.env.local
 
+# Documentation
+*.md
+!README.md
+docs/
+DEPLOYMENT_OPS.md
+SECURITY.md
+SECURITY_IMPLEMENTATION.md
+DEVELOPER_DOCUMENTATION.md
+API_Documentation.md
+API_ENDPOINTS_REFERENCE.md
+DATABASE_SCHEMA_GUIDE.md
+
+# Tests
+**/__tests__/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+jest.config.*
+jest.setup.*
+coverage/
+.nyc_output
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-*
+
+# Deployment configs (not needed in container)
+docker-compose.yml
 render.yaml
+.dockerignore
+Dockerfile
 
+# Logs
+logs/
+*.log
 
+# Temporary files
+tmp/
+temp/
+*.tmp
+.cache
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Database migrations (if not needed at runtime)
+migrations/
+# Keep if you need to run migrations in container, remove if migrations run separately
+
+# Config files with secrets
+config/cred.txt
+config/*.txt
+
+# Attachments and uploads
+attached_assets/
+uploads/
+
+# Reports
+report/
+
+# Other deployment files
+replit.md
+shell
+COMMIT_MESSAGE.txt
+TicketFlow_API_Collection.postman_collection.json
+db-push-force.sql

@@ -11,13 +11,9 @@ import {
 import {
   generalRateLimit,
   authRateLimit,
-  passwordResetRateLimit,
   ticketCreationRateLimit,
   knowledgeCreationRateLimit,
   aiApiRateLimit,
-  fileUploadRateLimit,
-  searchRateLimit,
-  adminActionRateLimit,
 } from "./rateLimiting";
 import {
   sanitizeInput,
@@ -287,16 +283,12 @@ export {
   // JWT
   authenticateJWT,
   optionalJWT,
-  generateTokens,
-  verifyToken,
-  refreshAccessToken,
 
   // RBAC
   requireRole,
   requirePermission,
   requireAdmin,
   requireAgentOrAdmin,
-  hasPermission,
 
   // Rate Limiting
   generalRateLimit,
