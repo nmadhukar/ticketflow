@@ -1,50 +1,38 @@
 version: "3.9"
 services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    # PostgreSQL port exposure:
-    # - Development: Set POSTGRES_PORT=5432 in .env to expose port for Adminer
-    # - Production: Omit POSTGRES_PORT or set to empty to keep port internal only
-    # Note: In production, rely on security groups/firewall even if port is mapped
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    restart: unless-stopped
+  # Database: Use Neon.tech, AWS RDS, or any external PostgreSQL database
+  # Set DATABASE_URL in .env file with your database connection string
+  # Examples:
+  #   Neon: postgresql://user:pass@ep-xxx.region.neon.tech/db?sslmode=require
+  #   RDS: postgresql://user:pass@rds-endpoint.region.rds.amazonaws.com:5432/db
+  #   Other: postgresql://user:pass@host:5432/db
 
   migrate:
     build: .
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
       NODE_ENV: ${NODE_ENV:-production}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}
+      # DATABASE_URL must be set in .env file
+      DATABASE_URL: ${DATABASE_URL}
+      # Database driver: 'neon' for Neon.tech, 'pg' for standard PostgreSQL
+      # Auto-detection: If hostname ends with .neon.tech, uses Neon driver automatically
+      DB_DRIVER: ${DB_DRIVER:-}
     command: ["npm", "run", "db:push"]
     restart: "no"
 
   app:
     build: .
     depends_on:
-      postgres:
-        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     environment:
       # Core runtime
       NODE_ENV: ${NODE_ENV:-production}
       PORT: ${PORT:-5000}
-      # Prefer explicit DATABASE_URL if provided; otherwise build from POSTGRES_*
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}
+      # DATABASE_URL must be set in .env file
+      DATABASE_URL: ${DATABASE_URL}
+      # Database driver: 'neon' for Neon.tech, 'pg' for standard PostgreSQL
+      # Auto-detection: If hostname ends with .neon.tech, uses Neon driver automatically
+      DB_DRIVER: ${DB_DRIVER:-}
 
       # Security & Auth
       SESSION_SECRET: ${SESSION_SECRET}
@@ -97,6 +85,3 @@ services:
       - ./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
       # - ./certs:/etc/ssl/private:ro  # if using manual TLS
     restart: unless-stopped
-
-volumes:
-  pgdata:
