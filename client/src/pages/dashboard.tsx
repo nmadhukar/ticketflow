@@ -71,14 +71,14 @@ export default function Dashboard() {
     }
   }, [isAuthenticated, isLoading, toast]);
 
-  const { data: stats } = useQuery<any>({
+  const { data: stats, isLoading: statsLoading } = useQuery<any>({
     queryKey: ["/api/stats"],
     retry: false,
     enabled: isAuthenticated && hasManagerOrAdminRole,
   });
 
   // Admin-only system overview stats
-  const { data: systemStats } = useQuery<any>({
+  const { data: systemStats, isLoading: systemStatsLoading } = useQuery<any>({
     queryKey: ["/api/admin/stats"],
     retry: false,
     refetchOnMount: "always",
@@ -123,6 +123,7 @@ export default function Dashboard() {
           icon={<Users className="h-4 w-4" />}
           iconBg="bg-primary/10"
           iconColor="text-primary"
+          loading={systemStatsLoading}
         />
         <StatsCard
           title={t("dashboard:admin.totalDepartments")}
@@ -131,6 +132,7 @@ export default function Dashboard() {
           icon={<Building className="h-4 w-4" />}
           iconBg="bg-secondary/10"
           iconColor="text-secondary-foreground"
+          loading={systemStatsLoading}
         />
         <StatsCard
           title={t("dashboard:admin.totalTeams")}
@@ -139,6 +141,7 @@ export default function Dashboard() {
           icon={<UserCog className="h-4 w-4" />}
           iconBg="bg-accent/10"
           iconColor="text-accent-foreground"
+          loading={systemStatsLoading}
         />
         <StatsCard
           title={t("dashboard:admin.totalTickets")}
@@ -147,6 +150,7 @@ export default function Dashboard() {
           icon={<Ticket className="h-4 w-4" />}
           iconBg="bg-muted/10"
           iconColor="text-muted-foreground"
+          loading={systemStatsLoading}
         />
       </div>
 
@@ -161,6 +165,7 @@ export default function Dashboard() {
           icon={<BarChart3 className="h-4 w-4" />}
           iconBg="bg-blue-500/10"
           iconColor="text-blue-500"
+          loading={systemStatsLoading || statsLoading}
         />
         <StatsCard
           title={t("dashboard:admin.priorityTickets")}
@@ -171,6 +176,7 @@ export default function Dashboard() {
           icon={<AlertTriangle className="h-4 w-4" />}
           iconBg="bg-orange-500/10"
           iconColor="text-orange-500"
+          loading={systemStatsLoading || statsLoading}
         />
         <StatsCard
           title={t("dashboard:admin.avgResolutionTime")}
@@ -179,6 +185,7 @@ export default function Dashboard() {
           icon={<Settings className="h-4 w-4" />}
           iconBg="bg-muted/10"
           iconColor="text-muted-foreground"
+          loading={systemStatsLoading}
         />
         <StatsCard
           title={t("dashboard:admin.pendingArticles")}
@@ -187,6 +194,7 @@ export default function Dashboard() {
           icon={<FileCheck className="h-4 w-4" />}
           iconBg="bg-amber-500/10"
           iconColor="text-amber-500"
+          loading={systemStatsLoading}
           onClick={() => {
             window.location.href = "/knowledge-base?status=draft";
           }}

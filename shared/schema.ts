@@ -77,6 +77,27 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// User preferences table
+export const userPreferences = pgTable("user_preferences", {
+  userId: varchar("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  // Display Preferences
+  theme: varchar("theme", { length: 20 }).default("light"), // light, dark, system
+  language: varchar("language", { length: 10 }).default("en"), // en, es, fr, de, zh
+  timezone: varchar("timezone", { length: 100 }).default("UTC"), // IANA format
+  dateFormat: varchar("date_format", { length: 20 }).default("MM/DD/YYYY"),
+  // Notification Preferences
+  emailNotifications: boolean("email_notifications").default(true),
+  pushNotifications: boolean("push_notifications").default(false),
+  taskUpdates: boolean("task_updates").default(true),
+  teamUpdates: boolean("team_updates").default(true),
+  mentions: boolean("mentions").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Departments table
 export const departments = pgTable("departments", {
   id: serial("id").primaryKey(),
@@ -93,7 +114,9 @@ export const teams = pgTable("teams", {
   id: serial("id").primaryKey(),
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
-  departmentId: integer("department_id").references(() => departments.id).notNull(),
+  departmentId: integer("department_id")
+    .references(() => departments.id)
+    .notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   createdBy: varchar("created_by").references(() => users.id),
 });
@@ -583,6 +606,8 @@ export const insertUserSchema = createInsertSchema(users).omit({
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
+export type UserPreferences = typeof userPreferences.$inferSelect;
+export type InsertUserPreferences = typeof userPreferences.$inferInsert;
 export type EmailProvider = typeof emailProviders.$inferSelect;
 export type InsertEmailProvider = z.infer<typeof insertEmailProviderSchema>;
 

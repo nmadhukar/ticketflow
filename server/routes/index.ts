@@ -216,6 +216,116 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // User preferences routes
+  app.get("/api/user/preferences", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      let preferences = await storage.getUserPreferences(userId);
+
+      // If preferences don't exist, return defaults (lazy initialization)
+      // Client will handle language from localStorage
+      if (!preferences) {
+        preferences = {
+          userId,
+          theme: "light",
+          language: "en",
+          timezone: "UTC",
+          dateFormat: "MM/DD/YYYY",
+          emailNotifications: true,
+          pushNotifications: false,
+          taskUpdates: true,
+          teamUpdates: true,
+          mentions: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+      }
+
+      res.json(preferences);
+    } catch (error) {
+      console.error("Error fetching user preferences:", error);
+      res.status(500).json({ message: "Failed to fetch user preferences" });
+    }
+  });
+
+  app.patch("/api/user/preferences", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const updates = req.body;
+
+      // Validation
+      const allowedThemes = ["light", "dark", "system"];
+      const allowedLanguages = ["en", "es", "fr", "de", "zh"];
+      const allowedDateFormats = [
+        "MM/DD/YYYY",
+        "DD/MM/YYYY",
+        "YYYY-MM-DD",
+        "DD MMM YYYY",
+      ];
+
+      if (updates.theme && !allowedThemes.includes(updates.theme)) {
+        return res.status(400).json({
+          message: `Invalid theme. Must be one of: ${allowedThemes.join(", ")}`,
+        });
+      }
+
+      if (updates.language && !allowedLanguages.includes(updates.language)) {
+        return res.status(400).json({
+          message: `Invalid language. Must be one of: ${allowedLanguages.join(
+            ", "
+          )}`,
+        });
+      }
+
+      if (
+        updates.dateFormat &&
+        !allowedDateFormats.includes(updates.dateFormat)
+      ) {
+        return res.status(400).json({
+          message: `Invalid date format. Must be one of: ${allowedDateFormats.join(
+            ", "
+          )}`,
+        });
+      }
+
+      // Validate timezone (basic check - should be IANA format)
+      if (updates.timezone && typeof updates.timezone !== "string") {
+        return res.status(400).json({
+          message: "Timezone must be a string (IANA format)",
+        });
+      }
+
+      // Validate booleans
+      const booleanFields = [
+        "emailNotifications",
+        "pushNotifications",
+        "taskUpdates",
+        "teamUpdates",
+        "mentions",
+      ];
+      for (const field of booleanFields) {
+        if (
+          updates[field] !== undefined &&
+          typeof updates[field] !== "boolean"
+        ) {
+          return res.status(400).json({
+            message: `${field} must be a boolean`,
+          });
+        }
+      }
+
+      const updatedPreferences = await storage.upsertUserPreferences(
+        userId,
+        updates
+      );
+
+      res.json(updatedPreferences);
+    } catch (error) {
+      console.error("Error updating user preferences:", error);
+      res.status(500).json({ message: "Failed to update user preferences" });
+    }
+  });
+
   // Task routes
   app.get("/api/tasks", isAuthenticated, async (req: any, res) => {
     try {

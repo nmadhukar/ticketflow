@@ -42,6 +42,7 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ThemeProvider } from "next-themes";
 import { useAuth } from "@/hooks/useAuth";
 import { Layout } from "@/components/layout";
 import { AiChatBot } from "@/components/AiChatBot";
@@ -63,6 +64,7 @@ import UserGuides from "@/pages/user-guides";
 import Departments from "@/pages/departments";
 import KnowledgeBase from "@/pages/knowledge-base";
 import { WebSocketProvider } from "@/hooks/useWebSocket";
+import { PreferencesLoader } from "@/components/preferences-loader";
 import AdminPanel from "./pages/admin";
 
 function RedirectHome() {
@@ -98,6 +100,7 @@ function Router() {
           </>
         ) : (
           <WebSocketProvider>
+            <PreferencesLoader />
             <Layout>
               <Switch>
                 <Route path="/">
@@ -181,10 +184,17 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Router />
-      </TooltipProvider>
+      <ThemeProvider
+        attribute="class"
+        defaultTheme="light"
+        enableSystem
+        storageKey="theme"
+      >
+        <TooltipProvider>
+          <Toaster />
+          <Router />
+        </TooltipProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

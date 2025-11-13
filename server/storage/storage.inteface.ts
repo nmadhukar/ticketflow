@@ -54,6 +54,7 @@ import {
   type UserGuide,
   type UserGuideCategory,
   type UserInvitation,
+  type UserPreferences,
 } from "@shared/schema";
 
 /**
@@ -133,6 +134,13 @@ export interface IStorage {
    * @param userId - User ID
    */
   clearPasswordResetToken(userId: string): Promise<void>;
+
+  // User preferences operations
+  getUserPreferences(userId: string): Promise<UserPreferences | null>;
+  upsertUserPreferences(
+    userId: string,
+    preferences: Partial<UserPreferences>
+  ): Promise<UserPreferences>;
 
   // Task operations
   createTask(task: InsertTask): Promise<Task>;

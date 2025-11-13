@@ -18,6 +18,7 @@ import {
   userGuideCategories,
   departments,
   userInvitations,
+  userPreferences,
   teamsIntegrationSettings,
   type User,
   type UpsertUser,
@@ -55,6 +56,7 @@ import {
   type InsertDepartment,
   type UserInvitation,
   type InsertUserInvitation,
+  type UserPreferences,
   type TeamsIntegrationSettings,
   type InsertTeamsIntegrationSettings,
   ssoConfiguration,
@@ -206,6 +208,71 @@ export class DatabaseStorage implements IStorage {
         updatedAt: new Date(),
       })
       .where(eq(users.id, userId));
+  }
+
+  // User preferences operations
+  async getUserPreferences(userId: string): Promise<UserPreferences | null> {
+    const preferences = await db
+      .select()
+      .from(userPreferences)
+      .where(eq(userPreferences.userId, userId))
+      .limit(1);
+
+    return preferences[0] || null;
+  }
+
+  async upsertUserPreferences(
+    userId: string,
+    preferences: Partial<UserPreferences>
+  ): Promise<UserPreferences> {
+    // Get current preferences or defaults
+    const existing = await this.getUserPreferences(userId);
+
+    // Default values
+    const defaults: UserPreferences = {
+      userId,
+      theme: "light",
+      language: "en",
+      timezone: "UTC",
+      dateFormat: "MM/DD/YYYY",
+      emailNotifications: true,
+      pushNotifications: false,
+      taskUpdates: true,
+      teamUpdates: true,
+      mentions: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const updatedPreferences = {
+      ...defaults,
+      ...(existing || {}),
+      ...preferences,
+      userId,
+      updatedAt: new Date(),
+    };
+
+    const result = await db
+      .insert(userPreferences)
+      .values(updatedPreferences)
+      .onConflictDoUpdate({
+        target: userPreferences.userId,
+        set: {
+          theme: updatedPreferences.theme,
+          language: updatedPreferences.language,
+          timezone: updatedPreferences.timezone,
+          dateFormat: updatedPreferences.dateFormat,
+          emailNotifications: updatedPreferences.emailNotifications,
+          pushNotifications: updatedPreferences.pushNotifications,
+          taskUpdates: updatedPreferences.taskUpdates,
+          teamUpdates: updatedPreferences.teamUpdates,
+          mentions: updatedPreferences.mentions,
+          updatedAt: updatedPreferences.updatedAt,
+        },
+      })
+      .returning();
+
+    return result[0];
   }
 
   // Helper function to generate the next ticket number

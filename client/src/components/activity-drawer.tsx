@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/spinner";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "wouter";
+import { format, isToday, isYesterday, parseISO } from "date-fns";
 
 export function ActivityDrawer() {
   const [open, setOpen] = useState(false);
@@ -55,6 +56,65 @@ export function ActivityDrawer() {
     setOpen(false);
   };
 
+  // Group activities by date
+  const groupedActivities = useMemo(() => {
+    if (!activity || activity.length === 0) return {};
+
+    const groups: Record<string, any[]> = {};
+
+    activity.forEach((item: any) => {
+      const date = parseISO(item.createdAt);
+      let dateKey: string;
+
+      if (isToday(date)) {
+        dateKey = "Today";
+      } else if (isYesterday(date)) {
+        dateKey = "Yesterday";
+      } else {
+        dateKey = format(date, "MMMM d, yyyy");
+      }
+
+      if (!groups[dateKey]) {
+        groups[dateKey] = [];
+      }
+      groups[dateKey].push(item);
+    });
+
+    return groups;
+  }, [activity]);
+
+  // Get sorted date keys (Today, Yesterday, then chronological)
+  const sortedDateKeys = useMemo(() => {
+    const keys = Object.keys(groupedActivities);
+    const today = "Today";
+    const yesterday = "Yesterday";
+    const otherDates: string[] = [];
+
+    keys.forEach((key) => {
+      if (key !== today && key !== yesterday) {
+        otherDates.push(key);
+      }
+    });
+
+    // Sort other dates in descending order (newest first)
+    otherDates.sort((a, b) => {
+      const dateA = parseISO(
+        groupedActivities[a][0]?.createdAt || new Date().toISOString()
+      );
+      const dateB = parseISO(
+        groupedActivities[b][0]?.createdAt || new Date().toISOString()
+      );
+      return dateB.getTime() - dateA.getTime();
+    });
+
+    const result: string[] = [];
+    if (keys.includes(today)) result.push(today);
+    if (keys.includes(yesterday)) result.push(yesterday);
+    result.push(...otherDates);
+
+    return result;
+  }, [groupedActivities]);
+
   return (
     <TooltipProvider>
       <Tooltip>
@@ -82,7 +142,7 @@ export function ActivityDrawer() {
           side="right"
           className="!w-full sm:!w-3/4 md:!w-1/2 !max-w-none p-0"
         >
-          <div className="flex flex-col h-full">
+          <div className="flex flex-col gap-2 h-full">
             <SheetHeader className="border-b px-6 py-4 sticky top-0 bg-background z-10">
               <div className="flex items-center justify-between">
                 <div>
@@ -93,70 +153,81 @@ export function ActivityDrawer() {
                 </div>
               </div>
             </SheetHeader>
-            <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex-1 overflow-y-auto px-6">
               {activityLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <Spinner size="lg" />
                 </div>
               ) : activity && activity.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {activity.map((item: any) => (
-                    <div
-                      key={item.id}
-                      onClick={() =>
-                        item.taskId && handleActivityClick(item.taskId)
-                      }
-                      className={cn(
-                        "flex space-x-3 p-3 rounded-md transition-colors",
-                        item.taskId
-                          ? "cursor-pointer hover:bg-muted/50"
-                          : "cursor-default"
-                      )}
-                    >
-                      <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                        {item.action === "created" && (
-                          <Plus className="h-5 w-5 text-blue-600" />
-                        )}
-                        {item.action === "completed" && (
-                          <CheckCircle className="h-5 w-5 text-green-600" />
-                        )}
-                        {item.action === "commented" && (
-                          <MessageCircle className="h-5 w-5 text-yellow-600" />
-                        )}
-                        {item.action === "updated" && (
-                          <UserCheck className="h-5 w-5 text-purple-600" />
-                        )}
-                        {![
-                          "created",
-                          "completed",
-                          "commented",
-                          "updated",
-                        ].includes(item.action) && (
-                          <Activity className="h-5 w-5 text-slate-600" />
-                        )}
+                <div className="space-y-6">
+                  {sortedDateKeys.map((dateKey) => (
+                    <div key={dateKey} className="space-y-4">
+                      <div className="sticky top-0 bg-background z-10 py-2 border-b">
+                        <h3 className="text-sm font-semibold text-slate-700">
+                          {dateKey}
+                        </h3>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-slate-800">
-                          <span className="font-medium">
-                            {item.userName || item.userId || "System"}
-                          </span>{" "}
-                          {item.action}{" "}
-                          {item.taskTitle ? "a ticket" : "an item"}
-                        </p>
-                        {item.taskTitle && (
-                          <p className="text-xs text-muted-foreground font-medium mt-1 truncate">
-                            {item.taskTitle}
-                          </p>
-                        )}
-                        {item.field && item.oldValue && item.newValue && (
-                          <p className="text-xs text-slate-500 mt-1">
-                            Changed {item.field} from "{item.oldValue}" to "
-                            {item.newValue}"
-                          </p>
-                        )}
-                        <p className="text-xs text-slate-500 mt-2">
-                          {new Date(item.createdAt).toLocaleString()}
-                        </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {groupedActivities[dateKey].map((item: any) => (
+                          <div
+                            key={item.id}
+                            onClick={() =>
+                              item.taskId && handleActivityClick(item.taskId)
+                            }
+                            className={cn(
+                              "flex space-x-3 p-3 rounded-md transition-colors",
+                              item.taskId
+                                ? "cursor-pointer hover:bg-muted/50"
+                                : "cursor-default"
+                            )}
+                          >
+                            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                              {item.action === "created" && (
+                                <Plus className="h-5 w-5 text-blue-600" />
+                              )}
+                              {item.action === "completed" && (
+                                <CheckCircle className="h-5 w-5 text-green-600" />
+                              )}
+                              {item.action === "commented" && (
+                                <MessageCircle className="h-5 w-5 text-yellow-600" />
+                              )}
+                              {item.action === "updated" && (
+                                <UserCheck className="h-5 w-5 text-purple-600" />
+                              )}
+                              {![
+                                "created",
+                                "completed",
+                                "commented",
+                                "updated",
+                              ].includes(item.action) && (
+                                <Activity className="h-5 w-5 text-slate-600" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-slate-800">
+                                <span className="font-medium">
+                                  {item.userName || item.userId || "System"}
+                                </span>{" "}
+                                {item.action}{" "}
+                                {item.taskTitle ? "a ticket" : "an item"}
+                              </p>
+                              {item.taskTitle && (
+                                <p className="text-xs text-muted-foreground font-medium mt-1 truncate">
+                                  {item.taskTitle}
+                                </p>
+                              )}
+                              {item.field && item.oldValue && item.newValue && (
+                                <p className="text-xs text-slate-500 mt-1">
+                                  Changed {item.field} from "{item.oldValue}" to
+                                  "{item.newValue}"
+                                </p>
+                              )}
+                              <p className="text-xs text-slate-500 mt-2">
+                                {format(parseISO(item.createdAt), "h:mm a")}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ))}
