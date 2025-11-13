@@ -1,7 +1,9 @@
 import express, { type Express } from "express";
 import fs from "fs";
 import path from "path";
+import { createServer as createViteServer, createLogger } from "vite";
 import { type Server } from "http";
+import viteConfig from "../vite.config";
 import { nanoid } from "nanoid";
 
 export function log(message: string, source = "express") {
@@ -15,13 +17,9 @@ export function log(message: string, source = "express") {
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
+const viteLogger = createLogger();
+
 export async function setupVite(app: Express, server: Server) {
-  // Dynamic import of vite only in development to avoid bundling it in production
-  const { createServer: createViteServer, createLogger } = await import("vite");
-  const viteConfig = (await import("../vite.config")).default;
-
-  const viteLogger = createLogger();
-
   const serverOptions = {
     middlewareMode: true,
     hmr: { server },
