@@ -7,25 +7,12 @@ services:
   #   RDS: postgresql://user:pass@rds-endpoint.region.rds.amazonaws.com:5432/db
   #   Other: postgresql://user:pass@host:5432/db
 
-  # Migrate service - reuses the image built by app service
-  # Note: Docker Compose will build the app service first (creating ticketflow:latest),
-  # then this service will use that image to run migrations
-  migrate:
-    image: ticketflow:latest
-    environment:
-      NODE_ENV: ${NODE_ENV:-production}
-      DATABASE_URL: ${DATABASE_URL}
-      DB_DRIVER: neon
-    command: ["npm", "run", "db:push"]
-    restart: "no"
-
-  # Build the image once and reuse it for both services
+  # Build the image and run migrations before starting the app
   app:
     build: .
     image: ticketflow:latest
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
+    # Run database migrations before starting the application
+    command: sh -c "npm run db:push && node dist/index.js"
     environment:
       # Core runtime
       NODE_ENV: ${NODE_ENV:-production}
