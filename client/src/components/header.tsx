@@ -6,6 +6,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/useAuth";
+import { UnreadNotification, User } from "@/types/user";
 import { cn } from "@/lib/utils";
 import {
   Bell,
@@ -23,6 +24,10 @@ import SignOutButton from "./signOutButton";
 import { setThemeFromPrimary } from "@/theme/color";
 import { RoleBadge } from "@/components/ui/role-badge";
 import {
+  useUserPreferences,
+  useUpdateUserPreferences,
+} from "@/hooks/useUserPreferences";
+import {
   Menubar,
   MenubarContent,
   MenubarItem,
@@ -30,37 +35,35 @@ import {
   MenubarSeparator,
   MenubarTrigger,
 } from "./ui/menubar";
+import { LOCALE_COUNTRY } from "@/constants";
 
 interface HeaderProps {
-  title: string;
-  subtitle?: string;
   action?: React.ReactNode;
 }
 
-export default function Header({ title, subtitle, action }: HeaderProps) {
+export default function Header({ action }: HeaderProps) {
   const { user } = useAuth();
+  const typedUser = user as User | undefined;
   const { i18n, t } = useTranslation();
   const [location] = useLocation();
   const { data: companyBranding } = useQuery({
     queryKey: ["/api/company-settings/branding"],
   });
-
-  // Map language -> country for flag display
-  const LOCALE_COUNTRY: Record<string, string> = {
-    en: "US",
-    es: "ES",
-    fr: "FR",
-    de: "DE",
-    zh: "CN",
-  };
+  const { data: preferences } = useUserPreferences();
+  const updatePreferences = useUpdateUserPreferences();
 
   const getFlagUrl = (langCode: string) => {
     const cc = (LOCALE_COUNTRY[langCode] || "US").toLowerCase();
-    // Use FlagCDN SVGs to avoid OS emoji issues
     return `https://flagcdn.com/${cc}.svg`;
   };
 
-  // Apply branding primary color to CSS variables so UI updates globally
+  // Sync i18n language when preferences change
+  useEffect(() => {
+    if (preferences?.language && preferences.language !== i18n.language) {
+      i18n.changeLanguage(preferences.language);
+    }
+  }, [preferences?.language, i18n]);
+
   useEffect(() => {
     const primary = (companyBranding as any)?.primaryColor as
       | string
@@ -68,16 +71,6 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
     if (!primary) return;
     setThemeFromPrimary(primary);
   }, [companyBranding]);
-
-  // Unread notifications
-  interface UnreadNotification {
-    id: number;
-    title: string;
-    content: string;
-    type: string;
-    relatedTaskId?: number | null;
-    createdAt?: string;
-  }
 
   const { data: unreadNotifications = [], refetch: refetchUnread } = useQuery<
     UnreadNotification[]
@@ -104,13 +97,13 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
   });
 
   const userDropdownActions = useMemo(() => {
-    return (user as any)?.role === "admin"
+    return typedUser?.role === "admin"
       ? [{ name: t("nav.settings"), href: "/settings", icon: Settings }]
       : [
           { name: t("nav.userGuides"), href: "/guides", icon: BookOpen },
           { name: t("nav.settings"), href: "/settings", icon: Settings },
         ];
-  }, [user]);
+  }, [typedUser, t]);
 
   return (
     <header className="bg-card shadow-business p-5 sticky top-0 backdrop-blur-md flex items-center justify-between z-50">
@@ -149,19 +142,35 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
             >
               <span className="flex items-center gap-2">
                 <img
-                  src={getFlagUrl(i18n.language?.split?.("-")?.[0] || "en")}
+                  src={getFlagUrl(
+                    (preferences?.language || i18n.language || "en")?.split?.(
+                      "-"
+                    )?.[0] || "en"
+                  )}
                   alt="flag"
                   className="h-3.5 w-5 rounded-sm object-cover"
                   loading="lazy"
                   referrerPolicy="no-referrer"
                 />
-                <span>{i18n.language?.toUpperCase?.() || "EN"}</span>
+                <span>
+                  {(
+                    preferences?.language ||
+                    i18n.language ||
+                    "en"
+                  )?.toUpperCase?.() || "EN"}
+                </span>
               </span>
               <ChevronDown className="h-3 w-3" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent>
-            <DropdownMenuItem onClick={() => i18n.changeLanguage("en")}>
+            <DropdownMenuItem
+              onClick={() => {
+                const lang = "en";
+                i18n.changeLanguage(lang);
+                updatePreferences.mutate({ language: lang });
+              }}
+            >
               <img
                 src={getFlagUrl("en")}
                 alt="US"
@@ -169,7 +178,13 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
               />
               English
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => i18n.changeLanguage("es")}>
+            <DropdownMenuItem
+              onClick={() => {
+                const lang = "es";
+                i18n.changeLanguage(lang);
+                updatePreferences.mutate({ language: lang });
+              }}
+            >
               <img
                 src={getFlagUrl("es")}
                 alt="ES"
@@ -177,7 +192,13 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
               />
               Español
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => i18n.changeLanguage("fr")}>
+            <DropdownMenuItem
+              onClick={() => {
+                const lang = "fr";
+                i18n.changeLanguage(lang);
+                updatePreferences.mutate({ language: lang });
+              }}
+            >
               <img
                 src={getFlagUrl("fr")}
                 alt="FR"
@@ -185,7 +206,13 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
               />
               Français
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => i18n.changeLanguage("de")}>
+            <DropdownMenuItem
+              onClick={() => {
+                const lang = "de";
+                i18n.changeLanguage(lang);
+                updatePreferences.mutate({ language: lang });
+              }}
+            >
               <img
                 src={getFlagUrl("de")}
                 alt="DE"
@@ -193,7 +220,13 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
               />
               Deutsch
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => i18n.changeLanguage("zh")}>
+            <DropdownMenuItem
+              onClick={() => {
+                const lang = "zh";
+                i18n.changeLanguage(lang);
+                updatePreferences.mutate({ language: lang });
+              }}
+            >
               <img
                 src={getFlagUrl("zh")}
                 alt="CN"
@@ -266,14 +299,14 @@ export default function Header({ title, subtitle, action }: HeaderProps) {
               <div className="px-4 py-3">
                 <div className="flex items-center gap-2 mb-1">
                   <p className="text-sm font-medium truncate">
-                    {(user as any)?.firstName} {(user as any)?.lastName}
+                    {typedUser?.firstName} {typedUser?.lastName}
                   </p>
-                  {(user as any)?.role && (
-                    <RoleBadge role={(user as any)?.role} size="sm" />
+                  {typedUser?.role && (
+                    <RoleBadge role={typedUser.role} size="sm" />
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground truncate">
-                  {(user as any)?.email}
+                  {typedUser?.email}
                 </p>
               </div>
               <MenubarSeparator />

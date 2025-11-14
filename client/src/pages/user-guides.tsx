@@ -157,10 +157,7 @@ export default function UserGuides() {
   }
 
   return (
-    <MainWrapper
-      title="User Guide Management"
-      subTitle="Create and manage user guides, tutorials, and help documentation"
-    >
+    <MainWrapper>
       {/* Search Bar */}
       <div className="mb-6">
         <div className="relative max-w-md">
@@ -239,7 +236,10 @@ export default function UserGuides() {
                     <span className="ml-1">{selectedGuide.type}</span>
                   </Badge>
                   <span className="text-sm text-muted-foreground">
-                    {format(new Date(selectedGuide.createdAt), "MMMM d, yyyy")}
+                    {format(
+                      new Date(selectedGuide?.createdAt || ""),
+                      "MMMM d, yyyy"
+                    )}
                   </span>
                 </div>
                 {selectedGuide.tags && selectedGuide.tags.length > 0 && (
@@ -349,67 +349,71 @@ export default function UserGuides() {
                     <div key={category} className="space-y-4">
                       <h2 className="text-xl font-semibold">{category}</h2>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {categoryGuides.map((guide: UserGuide) => (
-                          <Card
-                            key={guide.id}
-                            className="cursor-pointer hover:shadow-lg transition-shadow"
-                            onClick={() => setSelectedGuide(guide)}
-                          >
-                            <CardHeader>
-                              <div className="flex items-start justify-between">
-                                <div className="flex-1">
-                                  <CardTitle className="text-lg flex items-center gap-2">
-                                    {getTypeIcon(guide.type)}
-                                    {guide.title}
-                                  </CardTitle>
-                                  {guide.description && (
-                                    <CardDescription className="mt-2">
-                                      {guide.description}
-                                    </CardDescription>
-                                  )}
+                        {(categoryGuides as UserGuide[]).map(
+                          (guide: UserGuide) => (
+                            <Card
+                              key={guide.id}
+                              className="cursor-pointer hover:shadow-lg transition-shadow"
+                              onClick={() => setSelectedGuide(guide)}
+                            >
+                              <CardHeader>
+                                <div className="flex items-start justify-between">
+                                  <div className="flex-1">
+                                    <CardTitle className="text-lg flex items-center gap-2">
+                                      {getTypeIcon(guide.type)}
+                                      {guide.title}
+                                    </CardTitle>
+                                    {guide.description && (
+                                      <CardDescription className="mt-2">
+                                        {guide.description}
+                                      </CardDescription>
+                                    )}
+                                  </div>
+                                  <ChevronRight className="h-5 w-5 text-muted-foreground" />
                                 </div>
-                                <ChevronRight className="h-5 w-5 text-muted-foreground" />
-                              </div>
-                            </CardHeader>
-                            <CardContent>
-                              <div className="flex items-center justify-between text-sm text-muted-foreground">
-                                <span>
-                                  {guide.createdAt
-                                    ? format(
-                                        new Date(guide.createdAt),
-                                        "MMM d, yyyy"
-                                      )
-                                    : "Unknown"}
-                                </span>
-                                <div className="flex items-center gap-1">
-                                  <Eye className="h-3 w-3" />
-                                  {guide.viewCount}
+                              </CardHeader>
+                              <CardContent>
+                                <div className="flex items-center justify-between text-sm text-muted-foreground">
+                                  <span>
+                                    {guide.createdAt
+                                      ? format(
+                                          new Date(guide.createdAt),
+                                          "MMM d, yyyy"
+                                        )
+                                      : "Unknown"}
+                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    <Eye className="h-3 w-3" />
+                                    {guide.viewCount}
+                                  </div>
                                 </div>
-                              </div>
-                              {guide.tags && guide.tags.length > 0 && (
-                                <div className="flex flex-wrap gap-1 mt-2">
-                                  {guide.tags.slice(0, 3).map((tag, index) => (
-                                    <Badge
-                                      key={index}
-                                      variant="outline"
-                                      className="text-xs"
-                                    >
-                                      {tag}
-                                    </Badge>
-                                  ))}
-                                  {guide.tags.length > 3 && (
-                                    <Badge
-                                      variant="outline"
-                                      className="text-xs"
-                                    >
-                                      +{guide.tags.length - 3}
-                                    </Badge>
-                                  )}
-                                </div>
-                              )}
-                            </CardContent>
-                          </Card>
-                        ))}
+                                {guide.tags && guide.tags.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-2">
+                                    {guide.tags
+                                      .slice(0, 3)
+                                      .map((tag, index) => (
+                                        <Badge
+                                          key={index}
+                                          variant="outline"
+                                          className="text-xs"
+                                        >
+                                          {tag}
+                                        </Badge>
+                                      ))}
+                                    {guide.tags.length > 3 && (
+                                      <Badge
+                                        variant="outline"
+                                        className="text-xs"
+                                      >
+                                        +{guide.tags.length - 3}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                )}
+                              </CardContent>
+                            </Card>
+                          )
+                        )}
                       </div>
                     </div>
                   )

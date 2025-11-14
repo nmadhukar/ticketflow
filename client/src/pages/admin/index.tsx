@@ -102,12 +102,5 @@ export default function AdminPanel() {
 
   const sectionToRender = sections[activeTab] ?? sections["users"];
 
-  return (
-    <MainWrapper
-      title="Admin Panel"
-      subTitle="Manage Users, Teams, Invitations, Api, Policies, Configuration, AI Analytics, AI Settings and more"
-    >
-      {sectionToRender}
-    </MainWrapper>
-  );
+  return <MainWrapper>{sectionToRender}</MainWrapper>;
 }

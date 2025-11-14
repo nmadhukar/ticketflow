@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useUserPreferences } from "@/hooks/useUserPreferences";
 import { useTheme } from "next-themes";
@@ -11,36 +11,25 @@ import { useTranslation } from "react-i18next";
 export function PreferencesLoader() {
   const { isAuthenticated } = useAuth();
   const { data: preferences } = useUserPreferences();
-  const { setTheme } = useTheme();
+  const { setTheme, theme: currentTheme } = useTheme();
   const { i18n } = useTranslation();
+  const hasInitialized = useRef(false);
 
   useEffect(() => {
-    if (isAuthenticated && preferences) {
-      // Only apply preferences on initial load, not on every preference change
-      // This prevents overriding user's manual theme changes in settings
-      const hasAppliedPreferences =
-        typeof window !== "undefined"
-          ? sessionStorage.getItem("preferences_applied") === "true"
-          : false;
-
-      if (!hasAppliedPreferences) {
-        // Apply theme
-        if (preferences.theme) {
-          setTheme(preferences.theme);
-        }
-
-        // Apply language
-        if (preferences.language && preferences.language !== i18n.language) {
-          i18n.changeLanguage(preferences.language);
-        }
-
-        // Mark as applied to prevent re-applying
-        if (typeof window !== "undefined") {
-          sessionStorage.setItem("preferences_applied", "true");
-        }
+    if (isAuthenticated && preferences && !hasInitialized.current) {
+      // Apply theme immediately when preferences are first loaded
+      if (preferences.theme && preferences.theme !== currentTheme) {
+        setTheme(preferences.theme);
       }
+
+      // Apply language immediately when preferences are first loaded
+      if (preferences.language && preferences.language !== i18n.language) {
+        i18n.changeLanguage(preferences.language);
+      }
+
+      hasInitialized.current = true;
     }
-  }, [isAuthenticated, preferences, setTheme, i18n]);
+  }, [isAuthenticated, preferences, setTheme, i18n, currentTheme]);
 
   return null;
 }

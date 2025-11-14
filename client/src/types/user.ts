@@ -1,9 +1,25 @@
+import { Theme, Language, DateFormat } from "@/enum";
+export interface User {
+  id: string;
+  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  profileImageUrl?: string | null;
+  role: string;
+  phone?: string | null;
+  password?: string | null;
+  createdAt?: string | Date | null;
+  updatedAt?: string | Date | null;
+  isActive?: boolean;
+  isApproved?: boolean;
+}
+
 export interface UserPreferences {
   userId: string;
-  theme: "light" | "dark" | "system";
-  language: "en" | "es" | "fr" | "de" | "zh";
+  theme: Theme;
+  language: Language;
   timezone: string; // IANA format
-  dateFormat: "MM/DD/YYYY" | "DD/MM/YYYY" | "YYYY-MM-DD" | "DD MMM YYYY";
+  dateFormat: DateFormat;
   emailNotifications: boolean;
   pushNotifications: boolean;
   taskUpdates: boolean;
@@ -16,3 +32,22 @@ export interface UserPreferences {
 export type UserPreferencesUpdate = Partial<
   Omit<UserPreferences, "userId" | "createdAt" | "updatedAt">
 >;
+
+export interface UnreadNotification {
+  id: number;
+  title: string;
+  content: string;
+  type: string;
+  relatedTaskId?: number | null;
+  createdAt?: string;
+}
+
+export interface UserSession {
+  sessionId: string;
+  createdAt: Date;
+  lastActive: Date;
+  expiresAt: Date;
+  isCurrent: boolean;
+  userAgent?: string;
+  ipAddress?: string;
+}

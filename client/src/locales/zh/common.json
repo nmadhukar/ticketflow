@@ -12,7 +12,12 @@
     "update": "更新",
     "close": "关闭",
     "signOut": "退出登录",
-    "signingOut": "正在退出..."
+    "signingOut": "正在退出...",
+    "saving": "保存中..."
+  },
+  "messages": {
+    "success": "成功",
+    "error": "错误"
   },
   "nav": {
     "settings": "设置",
@@ -22,7 +27,54 @@
   "settings": {
     "title": "设置",
     "subtitle": "管理您的账户设置和偏好",
-    "language": "语言"
+    "language": "语言",
+    "profile": "个人资料",
+    "preferences": "偏好设置",
+    "firstName": "名字",
+    "lastName": "姓氏",
+    "email": "电子邮件",
+    "role": "角色",
+    "phone": "电话",
+    "notProvided": "未提供",
+    "authenticatedVia": "通过以下方式验证",
+    "accountCreated": "账户创建时间",
+    "activeSessions": "活动会话",
+    "noActiveSessions": "未找到活动会话",
+    "currentSession": "当前会话",
+    "active": "活动",
+    "lastActive": "最后活动",
+    "ip": "IP",
+    "expires": "过期",
+    "sessionRevokedSuccess": "会话已成功撤销",
+    "failedToRevokeSession": "撤销会话失败",
+    "revokeSessionConfirm": "您确定要撤销此会话吗？",
+    "preferencesTitle": "偏好设置",
+    "preferencesDescription": "自定义应用程序的外观和行为",
+    "displayPreferences": "显示偏好",
+    "theme": "主题",
+    "timezone": "时区",
+    "dateFormat": "日期格式",
+    "notificationPreferences": "通知偏好",
+    "emailNotifications": "电子邮件通知",
+    "emailNotificationsDesc": "通过电子邮件接收通知",
+    "pushNotifications": "推送通知",
+    "pushNotificationsDesc": "接收浏览器推送通知",
+    "ticketUpdates": "工单更新",
+    "ticketUpdatesDesc": "分配给您的工单的通知",
+    "teamUpdates": "团队更新",
+    "teamUpdatesDesc": "团队活动的通知",
+    "mentions": "提及",
+    "mentionsDesc": "当有人提及您时的通知",
+    "savePreferences": "保存偏好设置",
+    "authMethod": {
+      "microsoftSSO": "Microsoft SSO",
+      "emailPassword": "电子邮件/密码验证"
+    },
+    "themeOptions": {
+      "light": "浅色",
+      "dark": "深色",
+      "system": "系统"
+    }
   },
   "header": {
     "language": "语言"

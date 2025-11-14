@@ -335,10 +335,7 @@ export default function DepartmentDetail() {
   }
 
   return (
-    <MainWrapper
-      title={t("departments:title")}
-      subTitle={t("departments:subtitle")}
-    >
+    <MainWrapper>
       {departmentLoading ? (
         <div className="text-center py-8">
           <Spinner size="lg" className="mx-auto mb-4" />

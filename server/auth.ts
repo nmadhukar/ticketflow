@@ -216,15 +216,6 @@ export function setupAuth(app: Express) {
         if (!existingUser.password) {
           const hashedPassword = await hashPassword(validatedData.password);
 
-          // Get department name if departmentId is provided
-          let departmentName = existingUser.department;
-          if (invitation.departmentId) {
-            const dept = await storage.getDepartmentById(
-              invitation.departmentId
-            );
-            departmentName = dept?.name || existingUser.department;
-          }
-
           await storage.upsertUser({
             id: existingUser.id,
             email: existingUser.email,
@@ -234,7 +225,6 @@ export function setupAuth(app: Express) {
             role: invitation.role,
             isApproved: true,
             isActive: existingUser.isActive,
-            department: departmentName,
           });
 
           await storage.markInvitationAccepted(invitation.id);
@@ -267,13 +257,6 @@ export function setupAuth(app: Express) {
       // Hash password
       const hashedPassword = await hashPassword(validatedData.password);
 
-      // Get department name if invitation has departmentId
-      let departmentName: string | null | undefined = undefined;
-      if (invitation?.departmentId) {
-        const dept = await storage.getDepartmentById(invitation.departmentId);
-        departmentName = dept?.name;
-      }
-
       // Create user
       const newUser: InsertUser = {
         id: randomUUID(),
@@ -284,7 +267,6 @@ export function setupAuth(app: Express) {
         role: invitation ? invitation.role : "customer", // Use invitation role if exists
         isActive: true,
         isApproved: invitation ? true : false, // Auto-approve if invited
-        department: departmentName,
       };
 
       const user = await storage.createUser(newUser);
@@ -400,7 +382,9 @@ export function setupAuth(app: Express) {
       lastName: user.lastName,
       role: user.role,
       profileImageUrl: user.profileImageUrl,
-      department: user.department,
+      phone: user.phone,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
     });
   });
 

@@ -133,8 +133,6 @@ export default function Departments() {
 
   return (
     <MainWrapper
-      title={t("departments:title")}
-      subTitle={t("departments:subtitle")}
       action={
         isAdmin && departments?.length ? (
           <Button className="gap-2" onClick={() => setIsCreateOpen(true)}>

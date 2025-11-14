@@ -12,7 +12,12 @@
     "update": "Actualizar",
     "close": "Cerrar",
     "signOut": "Cerrar sesión",
-    "signingOut": "Cerrando sesión..."
+    "signingOut": "Cerrando sesión...",
+    "saving": "Guardando..."
+  },
+  "messages": {
+    "success": "Éxito",
+    "error": "Error"
   },
   "nav": {
     "settings": "Configuración",
@@ -22,7 +27,54 @@
   "settings": {
     "title": "Configuración",
     "subtitle": "Administra la configuración y preferencias de tu cuenta",
-    "language": "Idioma"
+    "language": "Idioma",
+    "profile": "Perfil",
+    "preferences": "Preferencias",
+    "firstName": "Nombre",
+    "lastName": "Apellido",
+    "email": "Correo electrónico",
+    "role": "Rol",
+    "phone": "Teléfono",
+    "notProvided": "No proporcionado",
+    "authenticatedVia": "Autenticado mediante",
+    "accountCreated": "Cuenta creada",
+    "activeSessions": "Sesiones activas",
+    "noActiveSessions": "No se encontraron sesiones activas",
+    "currentSession": "Sesión actual",
+    "active": "Activo",
+    "lastActive": "Última actividad",
+    "ip": "IP",
+    "expires": "Expira",
+    "sessionRevokedSuccess": "Sesión revocada exitosamente",
+    "failedToRevokeSession": "Error al revocar la sesión",
+    "revokeSessionConfirm": "¿Estás seguro de que deseas revocar esta sesión?",
+    "preferencesTitle": "Preferencias",
+    "preferencesDescription": "Personaliza cómo se ve y se comporta la aplicación",
+    "displayPreferences": "Preferencias de visualización",
+    "theme": "Tema",
+    "timezone": "Zona horaria",
+    "dateFormat": "Formato de fecha",
+    "notificationPreferences": "Preferencias de notificaciones",
+    "emailNotifications": "Notificaciones por correo electrónico",
+    "emailNotificationsDesc": "Recibir notificaciones por correo electrónico",
+    "pushNotifications": "Notificaciones push",
+    "pushNotificationsDesc": "Recibir notificaciones push del navegador",
+    "ticketUpdates": "Actualizaciones de tickets",
+    "ticketUpdatesDesc": "Notificaciones para tickets asignados a ti",
+    "teamUpdates": "Actualizaciones del equipo",
+    "teamUpdatesDesc": "Notificaciones para actividades del equipo",
+    "mentions": "Menciones",
+    "mentionsDesc": "Notificaciones cuando alguien te menciona",
+    "savePreferences": "Guardar preferencias",
+    "authMethod": {
+      "microsoftSSO": "Microsoft SSO",
+      "emailPassword": "Autenticación por correo/contraseña"
+    },
+    "themeOptions": {
+      "light": "Claro",
+      "dark": "Oscuro",
+      "system": "Sistema"
+    }
   },
   "header": {
     "language": "Idioma"

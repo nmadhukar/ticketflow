@@ -193,8 +193,6 @@ export default function Teams() {
 
   return (
     <MainWrapper
-      title={t("teams:title")}
-      subTitle={t("teams:subtitle")}
       action={
         isUserAdminOrManager &&
         !myTeamsLoading &&

@@ -462,10 +462,6 @@ export default function Tasks() {
 
   return (
     <MainWrapper
-      title={t("tickets:title")}
-      subTitle={t("tickets:subtitle", {
-        defaultValue: "Manage and track all tickets across your projects",
-      })}
       action={
         !isLoading &&
         !!tasks?.length &&

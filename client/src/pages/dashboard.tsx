@@ -100,10 +100,7 @@ export default function Dashboard() {
   }
 
   return (
-    <MainWrapper
-      title={t("dashboard:title")}
-      subTitle={t("dashboard:subtitle")}
-    >
+    <MainWrapper>
       {/* WebSocket Connection Status */}
       {isConnected && (
         <div className="flex items-center gap-2 text-sm text-green-600 mb-3">

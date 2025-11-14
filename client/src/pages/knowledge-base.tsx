@@ -444,8 +444,6 @@ export default function KnowledgeBase() {
 
   return (
     <MainWrapper
-      title={t("knowledge:title")}
-      subTitle={t("knowledge:subtitle")}
       action={
         (user as any)?.role === "admin" &&
         !learningStatusError && (

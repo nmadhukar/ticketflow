@@ -20,6 +20,7 @@ import {
   userInvitations,
   userPreferences,
   teamsIntegrationSettings,
+  sessions,
   type User,
   type UpsertUser,
   type InsertUser,
@@ -96,6 +97,7 @@ import {
   isNotNull,
   inArray,
   ilike,
+  gt,
 } from "drizzle-orm";
 import { IStorage } from "./storage.inteface";
 
@@ -1180,7 +1182,6 @@ export class DatabaseStorage implements IStorage {
       lastName?: string;
       email?: string;
       role?: string;
-      department?: string;
       phone?: string;
       isActive?: boolean;
     }
@@ -1194,8 +1195,6 @@ export class DatabaseStorage implements IStorage {
       cleanUpdates.lastName = updates.lastName;
     if (updates.email !== undefined) cleanUpdates.email = updates.email;
     if (updates.role !== undefined) cleanUpdates.role = updates.role;
-    if (updates.department !== undefined)
-      cleanUpdates.department = updates.department;
     if (updates.phone !== undefined) cleanUpdates.phone = updates.phone;
     if (updates.isActive !== undefined)
       cleanUpdates.isActive = updates.isActive;
@@ -1308,33 +1307,6 @@ export class DatabaseStorage implements IStorage {
     return updatedMember;
   }
 
-  async getDepartments(): Promise<string[]> {
-    const departments = await db
-      .selectDistinct({ department: users.department })
-      .from(users)
-      .where(isNotNull(users.department));
-
-    const validDepartments = departments
-      .map((d) => d.department)
-      .filter((dept): dept is string => dept !== null && dept !== undefined)
-      .sort();
-
-    // If no departments exist, return some common ones
-    if (validDepartments.length === 0) {
-      return [
-        "Engineering",
-        "Product",
-        "Sales",
-        "Marketing",
-        "Support",
-        "HR",
-        "Finance",
-      ];
-    }
-
-    return validDepartments;
-  }
-
   // Statistics
   async getTaskStats(userId?: string): Promise<{
     total: number;
@@ -1435,6 +1407,93 @@ export class DatabaseStorage implements IStorage {
     // 4. Force password change on next login
 
     return { tempPassword };
+  }
+
+  // Session operations
+  async getUserSessions(userId: string): Promise<
+    Array<{
+      sessionId: string;
+      createdAt: Date;
+      lastActive: Date;
+      expiresAt: Date;
+      isCurrent: boolean;
+      userAgent?: string;
+      ipAddress?: string;
+    }>
+  > {
+    // Get all sessions that haven't expired
+    const allSessions = await db
+      .select({
+        sid: sessions.sid,
+        sess: sessions.sess,
+        expire: sessions.expire,
+      })
+      .from(sessions)
+      .where(gt(sessions.expire, new Date()));
+
+    const userSessions: Array<{
+      sessionId: string;
+      createdAt: Date;
+      lastActive: Date;
+      expiresAt: Date;
+      isCurrent: boolean;
+      userAgent?: string;
+      ipAddress?: string;
+    }> = [];
+
+    // Parse session data from JSONB
+    for (const session of allSessions) {
+      try {
+        const sessData = session.sess as any;
+        let sessionUserId: string | undefined;
+
+        // Check different session structures
+        // Local auth: passport.user is the user ID (string) after serialization
+        // Microsoft auth: passport.user.claims.sub is the user ID
+        // Or passport.user.id for deserialized user object
+        if (typeof sessData.passport?.user === "string") {
+          // Serialized user ID (local auth)
+          sessionUserId = sessData.passport.user;
+        } else if (sessData.passport?.user?.id) {
+          // Deserialized user object with id property
+          sessionUserId = sessData.passport.user.id;
+        } else if (sessData.passport?.user?.claims?.sub) {
+          // Microsoft auth structure
+          sessionUserId = sessData.passport.user.claims.sub;
+        }
+
+        // Check if this session belongs to the user
+        if (sessionUserId === userId) {
+          const cookie = sessData.cookie || {};
+          const createdAt = cookie.originalMaxAge
+            ? new Date(session.expire.getTime() - cookie.originalMaxAge)
+            : session.expire;
+
+          userSessions.push({
+            sessionId: session.sid,
+            createdAt: createdAt,
+            lastActive: sessData.lastActive
+              ? new Date(sessData.lastActive)
+              : createdAt,
+            expiresAt: session.expire,
+            isCurrent: false, // Will be set by the API endpoint using current session ID
+            userAgent: sessData.userAgent,
+            ipAddress: sessData.ipAddress,
+          });
+        }
+      } catch (error) {
+        // Skip sessions with invalid data
+        console.error("Error parsing session data:", error);
+      }
+    }
+
+    return userSessions.sort(
+      (a, b) => b.lastActive.getTime() - a.lastActive.getTime()
+    );
+  }
+
+  async revokeSession(sessionId: string): Promise<void> {
+    await db.delete(sessions).where(eq(sessions.sid, sessionId));
   }
 
   // Attachment operations

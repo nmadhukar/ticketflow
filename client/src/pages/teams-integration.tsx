@@ -2,17 +2,37 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, AlertCircle, CheckCircle2, Users, Key, TestTube, ExternalLink } from "lucide-react";
+import {
+  Loader2,
+  AlertCircle,
+  CheckCircle2,
+  Users,
+  Key,
+  TestTube,
+  ExternalLink,
+} from "lucide-react";
 import { Link } from "wouter";
 import MainWrapper from "@/components/main-wrapper";
 
@@ -24,14 +44,26 @@ const notificationTypes = [
   { id: "ticket_commented", label: "New Comment Added" },
 ];
 
+interface TeamsIntegrationSettings {
+  enabled?: boolean;
+  webhookUrl?: string;
+  notificationTypes?: string[];
+  teamId?: string;
+  teamName?: string;
+  channelId?: string;
+  channelName?: string;
+}
+
 export default function TeamsIntegration() {
   const { toast } = useToast();
   const [webhookUrl, setWebhookUrl] = useState("");
-  const [selectedTeam, setSelectedTeam] = useState("");
-  const [selectedChannel, setSelectedChannel] = useState("");
-  const [selectedNotificationTypes, setSelectedNotificationTypes] = useState<string[]>([]);
+  const [selectedNotificationTypes, setSelectedNotificationTypes] = useState<
+    string[]
+  >([]);
 
-  const { data: settings, isLoading: settingsLoading } = useQuery({
+  const { data: settings, isLoading: settingsLoading } = useQuery<
+    TeamsIntegrationSettings | undefined
+  >({
     queryKey: ["/api/teams-integration/settings"],
   });
 
@@ -39,20 +71,23 @@ export default function TeamsIntegration() {
     queryKey: ["/api/teams-integration/teams"],
     enabled: false, // Only fetch when user wants to connect via Microsoft Graph
   });
-  
+
   const { data: ssoStatus } = useQuery<{ configured: boolean }>({
     queryKey: ["/api/sso/status"],
   });
 
   const updateSettingsMutation = useMutation({
-    mutationFn: async (data: any) => {
-      await apiRequest("/api/teams-integration/settings", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
+    mutationFn: async (data: {
+      enabled: boolean;
+      webhookUrl: string;
+      notificationTypes: string[];
+    }) => {
+      await apiRequest("POST", "/api/teams-integration/settings", data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/teams-integration/settings"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/teams-integration/settings"],
+      });
       toast({
         title: "Settings Updated",
         description: "Your Teams integration settings have been saved.",
@@ -69,12 +104,12 @@ export default function TeamsIntegration() {
 
   const disableIntegrationMutation = useMutation({
     mutationFn: async () => {
-      await apiRequest("/api/teams-integration/settings", {
-        method: "DELETE",
-      });
+      await apiRequest("DELETE", "/api/teams-integration/settings");
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/teams-integration/settings"] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/teams-integration/settings"],
+      });
       toast({
         title: "Integration Disabled",
         description: "Teams integration has been disabled.",
@@ -84,9 +119,7 @@ export default function TeamsIntegration() {
 
   const testNotificationMutation = useMutation({
     mutationFn: async () => {
-      await apiRequest("/api/teams-integration/test", {
-        method: "POST",
-      });
+      await apiRequest("POST", "/api/teams-integration/test");
     },
     onSuccess: () => {
       toast({
@@ -97,7 +130,8 @@ export default function TeamsIntegration() {
     onError: () => {
       toast({
         title: "Test Failed",
-        description: "Failed to send test notification. Please check your settings.",
+        description:
+          "Failed to send test notification. Please check your settings.",
         variant: "destructive",
       });
     },
@@ -107,7 +141,8 @@ export default function TeamsIntegration() {
     if (!webhookUrl || selectedNotificationTypes.length === 0) {
       toast({
         title: "Missing Information",
-        description: "Please provide a webhook URL and select at least one notification type.",
+        description:
+          "Please provide a webhook URL and select at least one notification type.",
         variant: "destructive",
       });
       return;
@@ -133,7 +168,7 @@ export default function TeamsIntegration() {
   }
 
   return (
-    <MainWrapper title="Microsoft Teams Integration" subTitle=" Connect TicketFlow with Microsoft Teams to receive real-time notifications about tickets.">
+    <MainWrapper>
       {settings?.enabled ? (
         <Alert className="mb-6">
           <CheckCircle2 className="h-4 w-4" />
@@ -147,7 +182,8 @@ export default function TeamsIntegration() {
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Teams Integration Not Configured</AlertTitle>
           <AlertDescription>
-            Set up Teams integration to receive ticket notifications in Microsoft Teams.
+            Set up Teams integration to receive ticket notifications in
+            Microsoft Teams.
           </AlertDescription>
         </Alert>
       )}
@@ -155,7 +191,9 @@ export default function TeamsIntegration() {
       <Tabs defaultValue="webhook" className="space-y-4">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="webhook">Webhook Integration</TabsTrigger>
-          <TabsTrigger value="microsoft" disabled>Microsoft Graph (Coming Soon)</TabsTrigger>
+          <TabsTrigger value="microsoft" disabled>
+            Microsoft Graph (Coming Soon)
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="webhook">
@@ -163,7 +201,8 @@ export default function TeamsIntegration() {
             <CardHeader>
               <CardTitle>Webhook Configuration</CardTitle>
               <CardDescription>
-                Use an incoming webhook to send notifications to a Teams channel.
+                Use an incoming webhook to send notifications to a Teams
+                channel.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -202,10 +241,15 @@ export default function TeamsIntegration() {
                         }
                         onCheckedChange={(checked) => {
                           if (checked) {
-                            setSelectedNotificationTypes([...selectedNotificationTypes, type.id]);
+                            setSelectedNotificationTypes([
+                              ...selectedNotificationTypes,
+                              type.id,
+                            ]);
                           } else {
                             setSelectedNotificationTypes(
-                              selectedNotificationTypes.filter((t) => t !== type.id)
+                              selectedNotificationTypes.filter(
+                                (t) => t !== type.id
+                              )
                             );
                           }
                         }}
@@ -277,7 +321,8 @@ export default function TeamsIntegration() {
                 <AlertCircle className="h-4 w-4" />
                 <AlertTitle>Coming Soon</AlertTitle>
                 <AlertDescription>
-                  Direct Microsoft Graph integration is under development. Please use webhook integration for now.
+                  Direct Microsoft Graph integration is under development.
+                  Please use webhook integration for now.
                 </AlertDescription>
               </Alert>
             </CardContent>
@@ -299,10 +344,15 @@ export default function TeamsIntegration() {
                 <CheckCircle2 className="h-4 w-4 text-green-600" />
                 <AlertTitle>SSO Configured</AlertTitle>
                 <AlertDescription>
-                  Microsoft 365 SSO is configured and ready to use. Users can sign in with their Microsoft accounts.
+                  Microsoft 365 SSO is configured and ready to use. Users can
+                  sign in with their Microsoft accounts.
                   <div className="mt-2 space-y-1">
-                    <Link to="/api/auth/microsoft" className="inline-flex items-center gap-2 text-sm underline">
-                      Sign in with Microsoft 365 <ExternalLink className="h-3 w-3" />
+                    <Link
+                      to="/api/auth/microsoft"
+                      className="inline-flex items-center gap-2 text-sm underline"
+                    >
+                      Sign in with Microsoft 365{" "}
+                      <ExternalLink className="h-3 w-3" />
                     </Link>
                   </div>
                 </AlertDescription>
@@ -312,16 +362,25 @@ export default function TeamsIntegration() {
                 <Key className="h-4 w-4" />
                 <AlertTitle>Configuration Required</AlertTitle>
                 <AlertDescription>
-                  Microsoft 365 SSO can be configured in the Admin Panel under the SSO tab.
+                  Microsoft 365 SSO can be configured in the Admin Panel under
+                  the SSO tab.
                   <p className="mt-2 text-sm">
-                    If you're an administrator, <Link to="/admin?tab=sso" className="underline">configure SSO settings here</Link>.
+                    If you're an administrator,{" "}
+                    <Link to="/admin?tab=sso" className="underline">
+                      configure SSO settings here
+                    </Link>
+                    .
                   </p>
                 </AlertDescription>
               </>
             )}
           </Alert>
 
-          <Button onClick={handleMicrosoftAuthClick} variant="outline" className="w-full">
+          <Button
+            onClick={handleMicrosoftAuthClick}
+            variant="outline"
+            className="w-full"
+          >
             <Users className="mr-2 h-4 w-4" />
             Sign in with Microsoft 365
           </Button>

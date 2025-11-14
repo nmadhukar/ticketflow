@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -33,66 +33,10 @@ interface NotificationDTO {
   relatedTaskId?: number | null;
   isRead?: boolean;
   createdAt?: string;
+  actionUrl?: string;
 }
 
-// Mock notifications data - in a real app, this would come from an API
-const mockNotifications: NotificationDTO[] = [
-  {
-    id: "1",
-    type: "task_assigned",
-    title: "New Task Assigned",
-    message: "You have been assigned to 'Fix login authentication issue'",
-    read: false,
-    createdAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(), // 30 minutes ago
-    actionUrl: "/tasks/1",
-  },
-  {
-    id: "2",
-    type: "comment_added",
-    title: "New Comment",
-    message: "John Doe commented on 'Update user dashboard'",
-    read: false,
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), // 2 hours ago
-    actionUrl: "/tasks/2",
-  },
-  {
-    id: "3",
-    type: "task_updated",
-    title: "Task Status Changed",
-    message: "Task 'Implement dark mode' has been marked as resolved",
-    read: true,
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), // 1 day ago
-    actionUrl: "/tasks/3",
-  },
-  {
-    id: "4",
-    type: "team_invite",
-    title: "Team Invitation",
-    message: "You have been invited to join the 'Backend Development' team",
-    read: true,
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 48).toISOString(), // 2 days ago
-    actionUrl: "/teams/2",
-  },
-  {
-    id: "5",
-    type: "system",
-    title: "System Maintenance",
-    message: "Scheduled maintenance will occur tonight from 11 PM to 1 AM EST",
-    read: true,
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 72).toISOString(), // 3 days ago
-  },
-  {
-    id: "6",
-    type: "reminder",
-    title: "Task Due Soon",
-    message: "Task 'Prepare quarterly report' is due in 2 days",
-    read: false,
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 96).toISOString(), // 4 days ago
-    actionUrl: "/tasks/4",
-  },
-];
-
-function getNotificationIcon(type: Notification["type"]) {
+function getNotificationIcon(type: NotificationDTO["type"]) {
   switch (type) {
     case "task_assigned":
     case "task_updated":
@@ -110,7 +54,7 @@ function getNotificationIcon(type: Notification["type"]) {
   }
 }
 
-function getNotificationColor(type: Notification["type"]) {
+function getNotificationColor(type: NotificationDTO["type"]) {
   switch (type) {
     case "task_assigned":
     case "task_updated":
@@ -150,8 +94,14 @@ export default function Notifications() {
       return res.json();
     },
     refetchOnMount: "always",
-    onSuccess: (data) => setNotificationList(data),
   });
+
+  // Update notification list when data changes
+  useEffect(() => {
+    if (notifications) {
+      setNotificationList(notifications);
+    }
+  }, [notifications]);
 
   const unreadCount = notificationList.filter((n) => !n.isRead).length;
   const readNotifications = notificationList.filter((n) => n.isRead);
@@ -196,8 +146,6 @@ export default function Notifications() {
 
   return (
     <MainWrapper
-      title="Notifications"
-      subTitle="Stay updated with your tasks and team activities"
       action={
         <div className="flex items-center gap-3">
           {unreadCount > 0 && (
@@ -366,7 +314,7 @@ export default function Notifications() {
         </Card>
       )}
 
-      {notifications.length === 0 && (
+      {(!notifications || notifications.length === 0) && (
         <Card>
           <CardContent className="text-center py-12">
             <Bell className="h-12 w-12 text-muted-foreground mx-auto mb-4" />

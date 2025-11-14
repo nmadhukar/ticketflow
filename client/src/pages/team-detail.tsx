@@ -199,10 +199,7 @@ export default function TeamDetail() {
     false;
 
   return (
-    <MainWrapper
-      title="Teams"
-      subTitle="Manage your teams and collaborate effectively"
-    >
+    <MainWrapper>
       {teamLoading ? (
         <div className="text-center py-8">Loading team details...</div>
       ) : (

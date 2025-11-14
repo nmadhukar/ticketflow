@@ -12,7 +12,12 @@
     "update": "Aktualisieren",
     "close": "Schließen",
     "signOut": "Abmelden",
-    "signingOut": "Abmelden..."
+    "signingOut": "Abmelden...",
+    "saving": "Speichern..."
+  },
+  "messages": {
+    "success": "Erfolg",
+    "error": "Fehler"
   },
   "nav": {
     "settings": "Einstellungen",
@@ -22,7 +27,54 @@
   "settings": {
     "title": "Einstellungen",
     "subtitle": "Verwalten Sie Ihre Kontoeinstellungen und -präferenzen",
-    "language": "Sprache"
+    "language": "Sprache",
+    "profile": "Profil",
+    "preferences": "Einstellungen",
+    "firstName": "Vorname",
+    "lastName": "Nachname",
+    "email": "E-Mail",
+    "role": "Rolle",
+    "phone": "Telefon",
+    "notProvided": "Nicht angegeben",
+    "authenticatedVia": "Authentifiziert über",
+    "accountCreated": "Konto erstellt",
+    "activeSessions": "Aktive Sitzungen",
+    "noActiveSessions": "Keine aktiven Sitzungen gefunden",
+    "currentSession": "Aktuelle Sitzung",
+    "active": "Aktiv",
+    "lastActive": "Zuletzt aktiv",
+    "ip": "IP",
+    "expires": "Läuft ab",
+    "sessionRevokedSuccess": "Sitzung erfolgreich widerrufen",
+    "failedToRevokeSession": "Sitzung konnte nicht widerrufen werden",
+    "revokeSessionConfirm": "Sind Sie sicher, dass Sie diese Sitzung widerrufen möchten?",
+    "preferencesTitle": "Einstellungen",
+    "preferencesDescription": "Passen Sie das Aussehen und Verhalten der Anwendung an",
+    "displayPreferences": "Anzeigeeinstellungen",
+    "theme": "Design",
+    "timezone": "Zeitzone",
+    "dateFormat": "Datumsformat",
+    "notificationPreferences": "Benachrichtigungseinstellungen",
+    "emailNotifications": "E-Mail-Benachrichtigungen",
+    "emailNotificationsDesc": "Benachrichtigungen per E-Mail erhalten",
+    "pushNotifications": "Push-Benachrichtigungen",
+    "pushNotificationsDesc": "Browser-Push-Benachrichtigungen erhalten",
+    "ticketUpdates": "Ticket-Updates",
+    "ticketUpdatesDesc": "Benachrichtigungen für Ihnen zugewiesene Tickets",
+    "teamUpdates": "Team-Updates",
+    "teamUpdatesDesc": "Benachrichtigungen für Teamaktivitäten",
+    "mentions": "Erwähnungen",
+    "mentionsDesc": "Benachrichtigungen, wenn jemand Sie erwähnt",
+    "savePreferences": "Einstellungen speichern",
+    "authMethod": {
+      "microsoftSSO": "Microsoft SSO",
+      "emailPassword": "E-Mail/Passwort-Authentifizierung"
+    },
+    "themeOptions": {
+      "light": "Hell",
+      "dark": "Dunkel",
+      "system": "System"
+    }
   },
   "header": {
     "language": "Sprache"

@@ -51,6 +51,7 @@ import { setupMicrosoftAuth, isMicrosoftUser } from "../microsoftAuth";
 import { teamsIntegration } from "../microsoftTeams";
 import { sendTestEmail } from "../ses";
 import { canManageTeam } from "../permissions/teams";
+import { sessionTrackingMiddleware } from "../middleware/sessionTracking.middleware";
 import {
   insertTaskSchema,
   insertTeamSchema,
@@ -167,6 +168,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   registerAdminRoutes(app);
   registerTeamsRoutes(app);
+  // Session tracking middleware
+  app.use(sessionTrackingMiddleware);
 
   // Helper to get user ID from request
   const getUserId = (req: any): string => {
@@ -325,6 +328,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to update user preferences" });
     }
   });
+
+  // Get user's active sessions
+  app.get("/api/user/sessions", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = getUserId(req);
+      const currentSessionId = req.sessionID;
+
+      // Save session with updated info
+      req.session.save((err: any) => {
+        if (err) {
+          console.error("Error saving session:", err);
+        }
+      });
+
+      const sessions = await storage.getUserSessions(userId);
+
+      // Mark current session
+      const sessionsWithCurrent = sessions.map((session) => ({
+        ...session,
+        isCurrent: session.sessionId === currentSessionId,
+      }));
+
+      res.json(sessionsWithCurrent);
+    } catch (error) {
+      console.error("Error fetching user sessions:", error);
+      res.status(500).json({ message: "Failed to fetch sessions" });
+    }
+  });
+
+  // Revoke a session
+  app.delete(
+    "/api/user/sessions/:sessionId",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const userId = getUserId(req);
+        const { sessionId } = req.params;
+        const currentSessionId = req.sessionID;
+
+        // Prevent revoking current session (user should logout instead)
+        if (sessionId === currentSessionId) {
+          return res.status(400).json({
+            message: "Cannot revoke current session. Please logout instead.",
+          });
+        }
+
+        // Verify the session belongs to the user
+        const userSessions = await storage.getUserSessions(userId);
+        const sessionExists = userSessions.some(
+          (s) => s.sessionId === sessionId
+        );
+
+        if (!sessionExists) {
+          return res.status(404).json({ message: "Session not found" });
+        }
+
+        await storage.revokeSession(sessionId);
+        res.json({ message: "Session revoked successfully" });
+      } catch (error) {
+        console.error("Error revoking session:", error);
+        res.status(500).json({ message: "Failed to revoke session" });
+      }
+    }
+  );
 
   // Task routes
   app.get("/api/tasks", isAuthenticated, async (req: any, res) => {
@@ -1435,21 +1502,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
   );
-
-  app.get("/api/admin/departments", isAuthenticated, async (req: any, res) => {
-    try {
-      const user = await storage.getUser(getUserId(req));
-      if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
-      }
-
-      const departments = await storage.getDepartments();
-      res.json(departments);
-    } catch (error) {
-      console.error("Error fetching departments:", error);
-      res.status(500).json({ message: "Failed to fetch departments" });
-    }
-  });
 
   app.post(
     "/api/admin/users/:userId/reset-password",

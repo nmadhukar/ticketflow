@@ -67,7 +67,6 @@ export const users = pgTable("users", {
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
   role: varchar("role", { length: 50 }).notNull().default("user"), // user, admin, manager, customer
-  department: varchar("department", { length: 100 }),
   phone: varchar("phone", { length: 50 }),
   isActive: boolean("is_active").default(true),
   isApproved: boolean("is_approved").default(false), // Admin must approve before login

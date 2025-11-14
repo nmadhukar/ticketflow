@@ -255,8 +255,21 @@ export interface IStorage {
     teamId: number,
     role: string
   ): Promise<TeamMember>;
-  getDepartments(): Promise<string[]>;
   resetUserPassword(userId: string): Promise<{ tempPassword: string }>;
+
+  // Session operations
+  getUserSessions(userId: string): Promise<
+    Array<{
+      sessionId: string;
+      createdAt: Date;
+      lastActive: Date;
+      expiresAt: Date;
+      isCurrent: boolean;
+      userAgent?: string;
+      ipAddress?: string;
+    }>
+  >;
+  revokeSession(sessionId: string): Promise<void>;
 
   // Attachment operations
   addTaskAttachment(attachment: InsertTaskAttachment): Promise<TaskAttachment>;
