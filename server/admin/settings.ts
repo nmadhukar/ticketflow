@@ -6,7 +6,7 @@
  */
 
 import type { Express } from "express";
-import { isAuthenticated } from "../auth";
+import { isAuthenticated } from "../services/auth";
 import { getUserId, requireAdmin } from "../middleware/admin.middleware";
 import { storage } from "../storage";
 

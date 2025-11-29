@@ -1,11 +1,11 @@
-import { db } from "./db";
+import { db } from "../../storage/db";
 import {
   tasks,
   knowledgeArticles,
   taskComments,
   taskHistory,
 } from "@shared/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, ilike } from "drizzle-orm";
 import type { Task, InsertKnowledgeArticle } from "@shared/schema";
 import {
   BedrockRuntimeClient,
@@ -377,6 +377,19 @@ ${aiEnhancement?.variations?.join("\n") || ""}
       .update(knowledgeArticles)
       .set({ isPublished: false })
       .where(eq(knowledgeArticles.id, articleId));
+  }
+
+  async semanticSearch(query: string, limit: number): Promise<any[]> {
+    return await db
+      .select()
+      .from(knowledgeArticles)
+      .where(
+        and(
+          eq(knowledgeArticles.isPublished, true),
+          ilike(knowledgeArticles.content, `%${query}%`)
+        )
+      )
+      .limit(limit);
   }
 }
 

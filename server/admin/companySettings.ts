@@ -8,7 +8,7 @@ import {
 import { SaveEmailSettingsSchema, TestEmailSchema } from "@shared/email";
 import { getEmailAdapter } from "../email/adapters";
 import { getUserId, isAdmin } from "../middleware/admin.middleware";
-import { isAuthenticated } from "../auth";
+import { isAuthenticated } from "../services/auth";
 import { s3Service } from "../services/s3Service";
 
 export function registerCompanySettingsRoutes(app: Express): void {

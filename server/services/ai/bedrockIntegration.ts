@@ -11,7 +11,7 @@ import {
   InvokeModelCommand,
 } from "@aws-sdk/client-bedrock-runtime";
 import { Task } from "@shared/schema";
-import { storage } from "./storage";
+import { storage } from "../../storage";
 import {
   estimateCost,
   estimateTokens,
@@ -19,7 +19,7 @@ import {
   shouldBlockRequest,
   loadCostLimits,
   CostEstimate,
-} from "./costMonitoring";
+} from "../../services/ai/costMonitoring";
 
 // Bedrock model configuration - prioritize cheaper models for cost control
 const DEFAULT_MODEL_ID = "amazon.titan-text-express-v1"; // Globally available, cost-effective option
@@ -668,7 +668,9 @@ export async function testBedrockConnection(): Promise<{
  * Get cost statistics for dashboard
  */
 export async function getCostStatistics() {
-  const { getCostStatistics } = await import("./costMonitoring");
+  const { getCostStatistics } = await import(
+    "../../services/ai/costMonitoring"
+  );
   return getCostStatistics();
 }
 
@@ -676,9 +678,11 @@ export async function getCostStatistics() {
  * Update cost limits
  */
 export async function updateCostLimits(
-  limits: Partial<import("./costMonitoring").CostLimits>
+  limits: Partial<import("../../services/ai/costMonitoring").CostLimits>
 ) {
-  const { loadCostLimits, saveCostLimits } = await import("./costMonitoring");
+  const { loadCostLimits, saveCostLimits } = await import(
+    "../../services/ai/costMonitoring"
+  );
   const currentLimits = loadCostLimits();
   // Free-tier enforcement: cap values even if client attempts higher
   let merged = { ...currentLimits, ...limits };
@@ -720,7 +724,7 @@ export async function updateCostLimits(
  * Reset usage data (for testing or manual reset)
  */
 export async function resetUsageData() {
-  const { resetUsageData } = await import("./costMonitoring");
+  const { resetUsageData } = await import("../../services/ai/costMonitoring");
   return resetUsageData();
 }
 
@@ -728,7 +732,7 @@ export async function resetUsageData() {
  * Export usage data for analysis
  */
 export async function exportUsageData(startDate?: string, endDate?: string) {
-  const { exportUsageData } = await import("./costMonitoring");
+  const { exportUsageData } = await import("../../services/ai/costMonitoring");
   return exportUsageData(startDate, endDate);
 }
 

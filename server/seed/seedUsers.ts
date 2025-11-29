@@ -1,4 +1,4 @@
-import { db } from "../db";
+import { db } from "../storage/db";
 import { users } from "@shared/schema";
 import { eq, inArray } from "drizzle-orm";
 import { scrypt, randomBytes, randomUUID } from "crypto";

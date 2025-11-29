@@ -14,8 +14,8 @@ import {
   BedrockRuntimeClient,
   InvokeModelCommand,
 } from "@aws-sdk/client-bedrock-runtime";
-import { storage } from "./storage";
-import { logSecurityEvent } from "./security";
+import { storage } from "../../storage";
+import { logSecurityEvent } from "../../security";
 
 /**
  * Initialize AWS Bedrock client for knowledge extraction
@@ -311,7 +311,7 @@ export const processKnowledgeLearning = async (): Promise<{
         `Analyzing ${tickets.length} resolved tickets in category: ${category}`
       );
 
-      const patterns = await analyzeResolvedTickets(tickets);
+      const patterns = await analyzeResolvedTickets(tickets as any);
       totalPatterns += patterns.length;
 
       // Generate articles for significant patterns
@@ -323,9 +323,8 @@ export const processKnowledgeLearning = async (): Promise<{
                 t.title
                   .toLowerCase()
                   .includes(pattern.problemType.toLowerCase()) ||
-                t.description
-                  .toLowerCase()
-                  .includes(pattern.problemType.toLowerCase())
+                t.description ||
+                "".toLowerCase().includes(pattern.problemType.toLowerCase())
             )
             .map((t) => t.id);
 
@@ -348,8 +347,6 @@ export const processKnowledgeLearning = async (): Promise<{
                 // Always draft; admin will publish after review per requirements
                 isPublished: false,
                 status: "draft",
-                createdAt: new Date(),
-                updatedAt: new Date(),
               });
 
               totalArticles++;
@@ -594,7 +591,7 @@ Only suggest updates if the new data provides valuable insights not already cove
       if (improvement.shouldUpdate && improvement.confidence >= 70) {
         await storage.updateKnowledgeArticle(articleId, {
           content: improvement.improvedContent,
-          updatedAt: new Date(),
+          // updatedAt: new Date(),
         });
 
         console.log(

@@ -7,8 +7,8 @@ import {
 } from "@shared/schema";
 import { and, desc, eq, or, not, inArray } from "drizzle-orm";
 import type { Express } from "express";
-import { isAuthenticated } from "server/auth";
-import { db } from "server/db";
+import { isAuthenticated } from "server/services/auth";
+import { db } from "server/storage/db";
 import { getUserId } from "server/middleware/admin.middleware";
 import {
   canGrantTeamAdmin,

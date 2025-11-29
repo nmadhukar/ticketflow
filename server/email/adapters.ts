@@ -24,7 +24,7 @@ class AwsSesAdapter implements EmailAdapter {
   async sendTest(
     options: SendTestOptions
   ): Promise<{ success: boolean; message?: string }> {
-    const { sendTestEmail } = await import("../ses");
+    const { sendTestEmail } = await import("../services/ses");
     const ok = await sendTestEmail(
       "",
       0,

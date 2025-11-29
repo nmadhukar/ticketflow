@@ -84,8 +84,10 @@ import {
   bedrockSettings,
   type BedrockSettings,
   type InsertBedrockSettings,
+  TeamTaskAssignment,
+  InsertTeamTaskAssignment,
 } from "@shared/schema";
-import { db } from "../db";
+import { db } from "./db";
 import {
   eq,
   desc,

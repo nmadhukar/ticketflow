@@ -46,10 +46,13 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "../storage";
-import { setupAuth, isAuthenticated } from "../auth";
-import { setupMicrosoftAuth, isMicrosoftUser } from "../microsoftAuth";
-import { teamsIntegration } from "../microsoftTeams";
-import { sendTestEmail } from "../ses";
+import { setupAuth, isAuthenticated } from "../services/auth";
+import {
+  setupMicrosoftAuth,
+  isMicrosoftUser,
+} from "../services/auth/microsoftAuth";
+import { teamsIntegration } from "../services/microsoftTeams";
+import { sendTestEmail } from "../services/ses";
 import { canManageTeam } from "../permissions/teams";
 import { sessionTrackingMiddleware } from "../middleware/sessionTracking.middleware";
 import {
@@ -69,19 +72,18 @@ import {
   taskAttachments,
 } from "@shared/schema";
 import {
-  processTicketWithAI,
   analyzeTicket,
   generateAutoResponse,
-} from "../aiTicketAnalysis";
+} from "../services/ai/aiAutoResponse";
 import {
   processKnowledgeLearning,
   intelligentKnowledgeSearch,
   scheduleKnowledgeLearning,
-} from "../knowledgeBaseLearning";
+} from "../services/ai/knowledgeBaseLearning";
 import { z } from "zod";
 import { createHash } from "crypto";
 import multer from "multer";
-import { db } from "../db";
+import { db } from "../storage/db";
 import {
   eq,
   desc,
@@ -102,7 +104,7 @@ import {
   validateAISettings,
 } from "../admin/aiSettings";
 import { registerAdminRoutes } from "../admin";
-import { bedrockIntegration } from "../bedrockIntegration";
+import { bedrockIntegration } from "../services/ai/bedrockIntegration";
 import { s3Service } from "../services/s3Service";
 import { DEFAULT_COMPANY } from "@shared/constants";
 import { getTicketMetaForUser } from "../permissions/tickets";
@@ -164,7 +166,7 @@ const upload = multer({
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
   setupAuth(app);
-  //await setupMicrosoftAuth(app);
+  setupMicrosoftAuth(app);
 
   registerAdminRoutes(app);
   registerTeamsRoutes(app);
@@ -964,7 +966,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         if (bedrockConfigured) {
           try {
-            const { aiAutoResponseService } = await import("../aiAutoResponse");
+            const { aiAutoResponseService } = await import(
+              "../services/ai/aiAutoResponse"
+            );
             const analysis = await aiAutoResponseService.analyzeTicket(task);
 
             // Save complexity score
@@ -1105,7 +1109,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Optional: enforce simple status transitions, except for admin
-      if (user?.role !== "admin" && "status" in result?.prunedPayload) {
+      if (user?.role !== "admin" && "status" in result) {
         const transitionMap: Record<string, string[]> = {
           open: ["in_progress", "on_hold"],
           in_progress: ["resolved", "on_hold"],
@@ -1114,7 +1118,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           closed: [],
         };
         const current = (task as any).status || "open";
-        const next = result.prunedPayload.status;
+        const next = (result as any).status || "open";
         const allowedNext = transitionMap[current] || [];
         if (!allowedNext.includes(next)) {
           try {
@@ -1135,7 +1139,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // If task was resolved, trigger knowledge base learning (policy-aware)
       if (updates.status === "resolved" && task.status !== "resolved") {
         try {
-          const { knowledgeBaseService } = await import("../knowledgeBase");
+          const { knowledgeBaseService } = await import(
+            "../services/ai/knowledgeBase"
+          );
           const { getAISettings } = await import("../admin/aiSettings");
           const aiSettings = await getAISettings();
           if (aiSettings.autoLearnEnabled) {
@@ -1979,8 +1985,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.createApiKey({
           userId: "system",
           name: "Perplexity API Key",
-          keyHash: apiKey,
-          keyPrefix: apiKey.substring(0, 8),
+          // keyHash: apiKey,
+          // keyPrefix: apiKey.substring(0, 8),
           permissions: ["ai_chat"],
           isActive: true,
         });
@@ -3203,7 +3209,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error("Error testing Bedrock connection:", error);
         res.status(500).json({
           success: false,
-          message: error?.message || "Failed to test Bedrock connection",
+          message:
+            (error as any)?.message || "Failed to test Bedrock connection",
         });
       }
     }
@@ -3576,17 +3583,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         // Send invitation email using the template
-        const smtpSettings = await storage.getSmtpSettings();
+        //  const smtpSettings = await storage.getSmtpSettings();
         const emailTemplate = await storage.getEmailTemplate("user_invitation");
         const companySettings = await storage.getCompanySettings();
 
         if (
-          smtpSettings &&
-          emailTemplate &&
-          smtpSettings.awsAccessKeyId &&
-          smtpSettings.awsSecretAccessKey
+          //  smtpSettings &&
+          emailTemplate
+          //smtpSettings.awsAccessKeyId &&
+          //smtpSettings.awsSecretAccessKey
         ) {
-          const { sendEmailWithTemplate } = await import("../ses");
+          const { sendEmailWithTemplate } = await import("../services/ses");
           const inviteUrl = `${req.protocol}://${req.get(
             "host"
           )}/auth?mode=register&email=${encodeURIComponent(
@@ -3615,11 +3622,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
               registrationUrl: inviteUrl,
               year: new Date().getFullYear().toString(),
             },
-            fromEmail: smtpSettings.fromEmail,
-            fromName: smtpSettings.fromName,
-            awsAccessKeyId: smtpSettings.awsAccessKeyId,
-            awsSecretAccessKey: smtpSettings.awsSecretAccessKey,
-            awsRegion: smtpSettings.awsRegion,
+            // fromEmail: smtpSettings.fromEmail,
+            // fromName: smtpSettings.fromName,
+            // awsAccessKeyId: smtpSettings.awsAccessKeyId,
+            // awsSecretAccessKey: smtpSettings.awsSecretAccessKey,
+            // awsRegion: smtpSettings.awsRegion,
+            fromEmail: "no-reply@ticketflow.com",
+            fromName: "TicketFlow",
+            awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID,
+            awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+            awsRegion: process.env.AWS_REGION,
           });
         }
 
@@ -4028,17 +4040,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Send invitation email using the template
-      const smtpSettings = await storage.getSmtpSettings();
+      //  const smtpSettings = await storage.getSmtpSettings();
       const emailTemplate = await storage.getEmailTemplate("user_invitation");
       const companySettings = await storage.getCompanySettings();
 
       if (
-        smtpSettings &&
-        emailTemplate &&
-        smtpSettings.awsAccessKeyId &&
-        smtpSettings.awsSecretAccessKey
+        //smtpSettings &&
+        emailTemplate
+        //smtpSettings.awsAccessKeyId &&
+        //smtpSettings.awsSecretAccessKey
       ) {
-        const { sendEmailWithTemplate } = await import("../ses");
+        const { sendEmailWithTemplate } = await import("../services/ses");
         const inviteUrl = `${req.protocol}://${req.get(
           "host"
         )}/auth?mode=register&email=${encodeURIComponent(
@@ -4066,11 +4078,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             registrationUrl: inviteUrl,
             year: new Date().getFullYear().toString(),
           },
-          fromEmail: smtpSettings.fromEmail,
-          fromName: smtpSettings.fromName,
-          awsAccessKeyId: smtpSettings.awsAccessKeyId,
-          awsSecretAccessKey: smtpSettings.awsSecretAccessKey,
-          awsRegion: smtpSettings.awsRegion,
+          // fromEmail: smtpSettings.fromEmail,
+          // fromName: smtpSettings.fromName,
+          // awsAccessKeyId: smtpSettings.awsAccessKeyId,
+          // awsSecretAccessKey: smtpSettings.awsSecretAccessKey,
+          // awsRegion: smtpSettings.awsRegion,
+          fromEmail: "no-reply@ticketflow.com",
+          fromName: "TicketFlow",
+          awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID,
+          awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+          awsRegion: process.env.AWS_REGION,
         });
       }
 
@@ -4253,7 +4270,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           createdBy: userId,
           createdAt: new Date(),
           updatedAt: new Date(),
-        } as Task;
+        } as any;
 
         const actionUrl = `${req.protocol}://${req.get("host")}/`;
         let success = false;
@@ -4316,7 +4333,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const taskId = parseInt(req.params.id);
         const { wasHelpful } = req.body;
 
-        const { aiAutoResponseService } = await import("../aiAutoResponse");
+        const { aiAutoResponseService } = await import(
+          "../services/ai/aiAutoResponse"
+        );
         await aiAutoResponseService.updateResponseEffectiveness(
           taskId,
           wasHelpful
@@ -4470,7 +4489,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const articleId = parseInt(req.params.id);
         const { isPublished } = req.body;
 
-        const { knowledgeBaseService } = await import("../knowledgeBase");
+        const { knowledgeBaseService } = await import(
+          "../services/ai/knowledgeBase"
+        );
         if (isPublished) {
           await knowledgeBaseService.publishArticle(articleId);
         } else {
@@ -4491,7 +4512,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const articleId = parseInt(req.params.id);
       const { wasHelpful } = req.body;
 
-      const { knowledgeBaseService } = await import("../knowledgeBase");
+      const { knowledgeBaseService } = await import(
+        "../services/ai/knowledgeBase"
+      );
       await knowledgeBaseService.updateArticleEffectiveness(
         articleId,
         wasHelpful
@@ -4749,7 +4772,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(400).json({ message: "Search query is required" });
         }
 
-        const results = await intelligentKnowledgeSearch(query, null, limit);
+        const results = await intelligentKnowledgeSearch(
+          query,
+          undefined,
+          limit
+        );
 
         res.json(results);
       } catch (error) {
@@ -4922,11 +4949,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     ws.on("message", (message) => {
       try {
-        const data = JSON.parse(message.toString());
+        const data: any = JSON.parse(message.toString());
 
         if (data.type === "auth" && data.userId) {
           userId = data.userId;
-          clients.set(userId, ws);
+          //clients.set(userId, ws);
           ws.send(
             JSON.stringify({
               type: "connected",
@@ -4992,9 +5019,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           description,
           category: category || "support",
           priority: priority || "medium",
-          reporterId: userId,
-        },
-        userId
+          reporterId: userId || "system",
+        } as any
+        //userId
       );
 
       if (!analysis) {
@@ -5011,7 +5038,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if ((error as any).isBlocked) {
         return res.status(429).json({
           message: "Request blocked due to cost limits",
-          reason: error.message,
+          reason: (error as any).message,
           costEstimate: (error as any).costEstimate,
           isBlocked: true,
         });
@@ -5035,7 +5062,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const autoResponse = await generateAutoResponse(
-          { title, description, category, priority },
+          { title, description, category, priority } as any,
           analysis
         );
 
@@ -5120,7 +5147,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let smtp = undefined as any;
       let bedrock = undefined as any;
       try {
-        smtp = await storage.getSmtpSettings();
+        //smtp = await storage.getSmtpSettings();
       } catch {}
       try {
         bedrock = await storage.getBedrockSettings();

@@ -1,9 +1,20 @@
-import { db } from "./db";
-import { tasks, ticketAutoResponses, knowledgeArticles, ticketComplexityScores, taskComments, learningQueue } from "@shared/schema";
+import { db } from "../../storage/db";
+import {
+  tasks,
+  ticketAutoResponses,
+  knowledgeArticles,
+  ticketComplexityScores,
+  taskComments,
+  learningQueue,
+} from "@shared/schema";
 import { eq, desc, sql, and, or, ilike } from "drizzle-orm";
-import type { Task, InsertTicketAutoResponse, InsertTicketComplexityScore } from "@shared/schema";
+import type {
+  Task,
+  InsertTicketAutoResponse,
+  InsertTicketComplexityScore,
+} from "@shared/schema";
 import { bedrockIntegration } from "./bedrockIntegration";
-// import { getKnowledgeLearningService } from "./knowledgeBaseLearning";
+import { knowledgeBaseService } from "./knowledgeBase";
 
 interface ComplexityFactors {
   keywords: number;
@@ -28,24 +39,33 @@ export class AIAutoResponseService {
   }> {
     try {
       // Search for similar resolved tickets
-      const similarTickets = await this.findSimilarResolvedTickets(ticket.title, ticket.description || '');
-      
+      const similarTickets = await this.findSimilarResolvedTickets(
+        ticket.title,
+        ticket.description || ""
+      );
+
       // Search knowledge base
-      const relevantArticles = await this.searchKnowledgeBase(ticket.title, ticket.description || '');
-      
+      const relevantArticles = await this.searchKnowledgeBase(
+        ticket.title,
+        ticket.description || ""
+      );
+
       // Use Bedrock to analyze the ticket
       const analysis = await bedrockIntegration.analyzeTicket(ticket);
-      
+
       // Generate AI response using Bedrock
-      const responseResult = await bedrockIntegration.generateResponse(ticket, relevantArticles);
-      
+      const responseResult = await bedrockIntegration.generateResponse(
+        ticket,
+        relevantArticles
+      );
+
       // Calculate confidence using Bedrock
       const confidenceResult = await bedrockIntegration.calculateConfidence(
         ticket,
         relevantArticles.length,
         analysis.complexityScore
       );
-      
+
       // Calculate complexity factors
       const factors = this.calculateComplexityFactors(ticket, similarTickets);
 
@@ -67,23 +87,36 @@ export class AIAutoResponseService {
         shouldEscalate: !confidenceResult.shouldAutoRespond,
       };
     } catch (error) {
-      console.error('Error analyzing ticket:', error);
+      console.error("Error analyzing ticket:", error);
       return {
         autoResponse: null,
         confidence: 0,
         complexity: 50,
-        factors: { keywords: 0, urgency: 0, technical: 0, historical: 0, sentiment: 0 },
+        factors: {
+          keywords: 0,
+          urgency: 0,
+          technical: 0,
+          historical: 0,
+          sentiment: 0,
+        },
         shouldEscalate: true,
       };
     }
   }
 
-  private async findSimilarResolvedTickets(title: string, description: string, limit = 5): Promise<any[]> {
+  private async findSimilarResolvedTickets(
+    title: string,
+    description: string,
+    limit = 5
+  ): Promise<any[]> {
     try {
       // Search for similar tickets by title and description
-      const searchTerms = `${title} ${description}`.toLowerCase().split(' ').filter(term => term.length > 3);
-      
-      const conditions = searchTerms.map(term => 
+      const searchTerms = `${title} ${description}`
+        .toLowerCase()
+        .split(" ")
+        .filter((term) => term.length > 3);
+
+      const conditions = searchTerms.map((term) =>
         or(
           ilike(tasks.title, `%${term}%`),
           ilike(tasks.description, `%${term}%`)
@@ -100,10 +133,7 @@ export class AIAutoResponseService {
           tags: tasks.tags,
         })
         .from(tasks)
-        .where(and(
-          eq(tasks.status, 'resolved'),
-          or(...conditions)
-        ))
+        .where(and(eq(tasks.status, "resolved"), or(...conditions)))
         .orderBy(desc(tasks.updatedAt))
         .limit(limit);
 
@@ -115,23 +145,28 @@ export class AIAutoResponseService {
           .where(eq(taskComments.taskId, ticket.id))
           .orderBy(desc(taskComments.createdAt))
           .limit(3);
-        
-        ticket.resolution = comments.map(c => c.content).join('\n');
+
+        ticket.resolution = comments.map((c) => c.content).join("\n");
       }
 
       return similarTickets;
     } catch (error) {
-      console.error('Error finding similar tickets:', error);
+      console.error("Error finding similar tickets:", error);
       return [];
     }
   }
 
-  private async searchKnowledgeBase(title: string, description: string, limit = 3): Promise<any[]> {
+  private async searchKnowledgeBase(
+    title: string,
+    description: string,
+    limit = 3
+  ): Promise<any[]> {
     try {
-      // First try semantic search for better results
-      const knowledgeService = getKnowledgeLearningService();
-      const semanticResults = await knowledgeService.semanticSearch(`${title} ${description}`, limit);
-      
+      const semanticResults = await knowledgeBaseService.semanticSearch(
+        `${title} ${description}`,
+        limit
+      );
+
       if (semanticResults.length > 0) {
         // Update usage count for accessed articles
         for (const result of semanticResults) {
@@ -142,29 +177,32 @@ export class AIAutoResponseService {
             })
             .where(eq(knowledgeArticles.id, result.article.id));
         }
-        
-        return semanticResults.map(r => r.article);
+
+        return semanticResults.map((r) => r.article);
       }
-      
+
       // Fallback to keyword search if semantic search fails
-      const searchTerms = `${title} ${description}`.toLowerCase().split(' ').filter(term => term.length > 3);
-      
-      const conditions = searchTerms.map(term => 
+      const searchTerms = `${title} ${description}`
+        .toLowerCase()
+        .split(" ")
+        .filter((term) => term.length > 3);
+
+      const conditions = searchTerms.map((term) =>
         or(
           ilike(knowledgeArticles.title, `%${term}%`),
           ilike(knowledgeArticles.content, `%${term}%`),
-          sql`${knowledgeArticles.tags}::text ILIKE ${'%' + term + '%'}`
+          sql`${knowledgeArticles.tags}::text ILIKE ${"%" + term + "%"}`
         )
       );
 
       const articles = await db
         .select()
         .from(knowledgeArticles)
-        .where(and(
-          eq(knowledgeArticles.isPublished, true),
-          or(...conditions)
-        ))
-        .orderBy(desc(knowledgeArticles.effectivenessScore), desc(knowledgeArticles.usageCount))
+        .where(and(eq(knowledgeArticles.isPublished, true), or(...conditions)))
+        .orderBy(
+          desc(knowledgeArticles.effectivenessScore),
+          desc(knowledgeArticles.usageCount)
+        )
         .limit(limit);
 
       // Increment usage count
@@ -177,12 +215,15 @@ export class AIAutoResponseService {
 
       return articles;
     } catch (error) {
-      console.error('Error searching knowledge base:', error);
+      console.error("Error searching knowledge base:", error);
       return [];
     }
   }
 
-  private calculateComplexityFactors(ticket: Task, similarTickets: any[]): ComplexityFactors {
+  private calculateComplexityFactors(
+    ticket: Task,
+    similarTickets: any[]
+  ): ComplexityFactors {
     const factors: ComplexityFactors = {
       keywords: 0,
       urgency: 0,
@@ -198,53 +239,78 @@ export class AIAutoResponseService {
       medium: 10,
       low: 5,
     };
-    factors.urgency = urgencyMap[ticket.priority] || 10;
+    factors.urgency =
+      urgencyMap[ticket.priority as keyof typeof urgencyMap] || 10;
 
     // Technical complexity based on keywords
     const technicalKeywords = [
-      'api', 'integration', 'database', 'error', 'crash', 'performance',
-      'security', 'authentication', 'authorization', 'deployment', 'migration',
+      "api",
+      "integration",
+      "database",
+      "error",
+      "crash",
+      "performance",
+      "security",
+      "authentication",
+      "authorization",
+      "deployment",
+      "migration",
     ];
     const text = `${ticket.title} ${ticket.description}`.toLowerCase();
-    factors.technical = technicalKeywords.filter(keyword => text.includes(keyword)).length * 10;
+    factors.technical =
+      technicalKeywords.filter((keyword) => text.includes(keyword)).length * 10;
 
     // Historical complexity (no similar resolved tickets)
     factors.historical = similarTickets.length === 0 ? 30 : 0;
 
     // Keyword complexity
-    const complexKeywords = ['complex', 'difficult', 'urgent', 'critical', 'broken', 'down'];
-    factors.keywords = complexKeywords.filter(keyword => text.includes(keyword)).length * 15;
+    const complexKeywords = [
+      "complex",
+      "difficult",
+      "urgent",
+      "critical",
+      "broken",
+      "down",
+    ];
+    factors.keywords =
+      complexKeywords.filter((keyword) => text.includes(keyword)).length * 15;
 
     return factors;
   }
 
-  private async storeAutoResponse(ticketId: number, response: {
-    response: string;
-    confidence: number;
-    suggestedArticles: number[];
-    applied: boolean;
-  }): Promise<void> {
+  private async storeAutoResponse(
+    ticketId: number,
+    response: {
+      response: string;
+      confidence: number;
+      suggestedArticles: number[];
+      applied: boolean;
+    }
+  ): Promise<void> {
     try {
       const autoResponse: InsertTicketAutoResponse = {
         ticketId,
-        response: response.response,
-        confidence: response.confidence,
-        suggestedArticles: response.suggestedArticles,
-        applied: response.applied,
-        createdAt: new Date(),
+        aiResponse: response.response,
+        confidenceScore: response.confidence.toString(),
+        // suggestedArticles: response.suggestedArticles,
+        wasApplied: response.applied,
+        respondedBy: "system",
       };
 
       await db.insert(ticketAutoResponses).values(autoResponse);
     } catch (error) {
-      console.error('Error storing auto response:', error);
+      console.error("Error storing auto response:", error);
     }
   }
 
   // Knowledge base learning method for resolved tickets
   async updateKnowledgeBase(ticket: Task, resolution: string): Promise<void> {
     try {
-      const knowledge = await bedrockIntegration.updateKnowledgeBase(ticket, resolution);
-      
+      const knowledge = await bedrockIntegration.updateKnowledgeBase(
+        ticket,
+        resolution
+      );
+
       // Store the extracted knowledge in the database
       await db.insert(knowledgeArticles).values({
         title: knowledge.title,
@@ -252,15 +318,17 @@ export class AIAutoResponseService {
         content: knowledge.content,
         category: knowledge.category,
         tags: knowledge.tags,
-        sourceTicketId: ticket.id,
-        status: 'draft',
-        createdBy: ticket.createdBy || 'system',
-        updatedBy: ticket.createdBy || 'system',
+        // sourceTicketIds: [ticket.id],
+        // status: "draft",
+        // createdBy: "system",
+        // updatedBy: "system",
       });
-      
-      console.log(`Knowledge article created from ticket #${ticket.ticketNumber}`);
+
+      console.log(
+        `Knowledge article created from ticket #${ticket.ticketNumber}`
+      );
     } catch (error) {
-      console.error('Error updating knowledge base:', error);
+      console.error("Error updating knowledge base:", error);
     }
   }
 
@@ -280,7 +348,7 @@ export class AIAutoResponseService {
 
       await db.insert(ticketAutoResponses).values(autoResponse);
     } catch (error) {
-      console.error('Error saving auto response:', error);
+      console.error("Error saving auto response:", error);
     }
   }
 
@@ -311,7 +379,7 @@ export class AIAutoResponseService {
           },
         });
     } catch (error) {
-      console.error('Error saving complexity score:', error);
+      console.error("Error saving complexity score:", error);
     }
   }
 
@@ -325,7 +393,7 @@ export class AIAutoResponseService {
         .set({ wasHelpful })
         .where(eq(ticketAutoResponses.ticketId, ticketId));
     } catch (error) {
-      console.error('Error updating response effectiveness:', error);
+      console.error("Error updating response effectiveness:", error);
     }
   }
 }
@@ -333,19 +401,37 @@ export class AIAutoResponseService {
 export const aiAutoResponseService = new AIAutoResponseService();
 
 // Export individual functions for testing
-export const analyzeTicket = (ticket: Task) => aiAutoResponseService.analyzeTicket(ticket);
-export const generateResponse = (ticket: Task, knowledgeContext: any[], settings?: any) => 
+export const analyzeTicket = (ticket: Task) =>
   aiAutoResponseService.analyzeTicket(ticket);
-export const calculateConfidence = (ticket: Task, response: string, knowledgeMatches: any[]) => {
+
+export const generateAutoResponse = (
+  ticket: Task,
+  knowledgeContext: any[],
+  settings?: any
+) => aiAutoResponseService.analyzeTicket(ticket);
+export const calculateConfidence = (
+  ticket: Task,
+  response: string,
+  knowledgeMatches: any[]
+) => {
   // Simplified confidence calculation for testing
-  const hasKeywords = ['login', 'password', 'authentication', 'connection'].some(keyword => 
-    ticket.title.toLowerCase().includes(keyword) || 
-    (ticket.description || '').toLowerCase().includes(keyword)
+  const hasKeywords = [
+    "login",
+    "password",
+    "authentication",
+    "connection",
+  ].some(
+    (keyword) =>
+      ticket.title.toLowerCase().includes(keyword) ||
+      (ticket.description || "").toLowerCase().includes(keyword)
   );
-  
+
   const baseConfidence = hasKeywords ? 0.7 : 0.4;
   const knowledgeBoost = Math.min(knowledgeMatches.length * 0.1, 0.3);
   const lengthPenalty = response.length < 50 ? -0.2 : 0;
-  
-  return Math.max(0, Math.min(1, baseConfidence + knowledgeBoost + lengthPenalty));
+
+  return Math.max(
+    0,
+    Math.min(1, baseConfidence + knowledgeBoost + lengthPenalty)
+  );
 };

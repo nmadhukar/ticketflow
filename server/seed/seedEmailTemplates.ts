@@ -1,6 +1,6 @@
-import { db } from "../db";
+import { db } from "../storage/db";
 import { emailTemplates } from "@shared/schema";
-import { defaultEmailTemplates } from "../emailTemplates";
+import { defaultEmailTemplates } from "../services/ses/emailTemplates";
 import { eq } from "drizzle-orm";
 
 export async function seedEmailTemplates(): Promise<void> {

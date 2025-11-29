@@ -19,7 +19,7 @@ import session from "express-session";
 import connectPg from "connect-pg-simple";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
-import { storage } from "./storage";
+import { storage } from "../../storage";
 import { User as SelectUser, InsertUser } from "@shared/schema";
 import { z } from "zod";
 import { randomUUID } from "crypto";

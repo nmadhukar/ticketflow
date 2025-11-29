@@ -1,4 +1,4 @@
-import { db } from "../db";
+import { db } from "../storage/db";
 import { tasks, users, departments } from "@shared/schema";
 import { eq, inArray, desc } from "drizzle-orm";
 
