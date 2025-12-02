@@ -1,3 +1,5 @@
+export const AI_SYSTEM_STATUS_REFRESH_INTERVAL = 30000; // 30 seconds
+
 export const LOCALE_COUNTRY: Record<string, string> = {
   en: "US",
   es: "ES",

@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { AI_SYSTEM_STATUS_REFRESH_INTERVAL } from "@/config/constant";
+import { AI_SYSTEM_STATUS_REFRESH_INTERVAL } from "@/constants";
 import { toConfidencePercent } from "@/utils/ai.util";
 
 export default function AIAnalyticsPage() {
