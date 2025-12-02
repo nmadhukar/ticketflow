@@ -1,24 +1,54 @@
 version: "3.9"
 services:
-  # Database: Use Neon.tech, AWS RDS, or any external PostgreSQL database
-  # Set DATABASE_URL in .env file with your database connection string
-  # Examples:
-  #   Neon: postgresql://user:pass@ep-xxx.region.neon.tech/db?sslmode=require
-  #   RDS: postgresql://user:pass@rds-endpoint.region.rds.amazonaws.com:5432/db
-  #   Other: postgresql://user:pass@host:5432/db
+  # PostgreSQL Database Service
+  postgres:
+    image: postgres:16-alpine
+    container_name: ticketflow-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ticketflow_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ticketflow_password}
+      POSTGRES_DB: ${POSTGRES_DB:-ticketflow}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-ticketflow_user} -d ${POSTGRES_DB:-ticketflow}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - ticketflow-network
 
   # Build the image and run migrations before starting the app
   app:
     build: .
     image: ticketflow:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
     # Run database migrations before starting the application
     command: sh -c "npm run db:push && node dist/index.js"
     environment:
       # Core runtime
       NODE_ENV: ${NODE_ENV:-production}
       PORT: ${PORT:-5000}
-      DATABASE_URL: ${DATABASE_URL}
-      DB_DRIVER: neon
+      # Use local postgres if DATABASE_URL not provided, otherwise use external
+      # Default to local postgres service connection string
+      DATABASE_URL: ${DATABASE_URL:-postgresql://ticketflow_user:ticketflow_password@postgres:5432/ticketflow}
+      DB_DRIVER: ${DB_DRIVER:-pg}
+      # PostgreSQL connection details (used if DATABASE_URL not set)
+      POSTGRES_USER: ${POSTGRES_USER:-ticketflow_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ticketflow_password}
+      POSTGRES_DB: ${POSTGRES_DB:-ticketflow}
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
 
       # Security & Auth
       SESSION_SECRET: ${SESSION_SECRET}
@@ -57,6 +87,8 @@ services:
       DEBUG: ${DEBUG:-}
       LOG_LEVEL: ${LOG_LEVEL:-}
     restart: unless-stopped
+    networks:
+      - ticketflow-network
 
   nginx:
     image: nginx:1.27-alpine
@@ -71,3 +103,13 @@ services:
       - ./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
       # - ./certs:/etc/ssl/private:ro  # if using manual TLS
     restart: unless-stopped
+    networks:
+      - ticketflow-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  ticketflow-network:
+    driver: bridge
