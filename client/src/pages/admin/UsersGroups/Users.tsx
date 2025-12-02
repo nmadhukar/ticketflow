@@ -253,11 +253,11 @@ const Users = () => {
                 })
                 .map((user: any) => (
                   <TableRow key={user.id}>
-                    <TableCell>
+                    <TableCell className="capitalize w-44 line-clamp-1">
                       {user.firstName} {user.lastName}
                     </TableCell>
                     <TableCell>{user.email}</TableCell>
-                    <TableCell>
+                    <TableCell className="capitalize whitespace-nowrap">
                       <Badge
                         variant={
                           user.role === "admin"

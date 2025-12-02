@@ -80,12 +80,7 @@ import {
   Sliders,
   Save,
   AlertTriangle,
-  CheckCircle,
-  Zap,
   Shield,
-  Database,
-  Key,
-  Globe,
   RefreshCw,
   Pencil,
   XIcon,
@@ -157,15 +152,23 @@ export default function AISettings() {
   // Fetch teams for the selected department
   const { data: departmentTeams } = useDepartmentTeams(escalationDepartmentId);
 
-  // Fetch API key status
-  const { data: apiKeys } = useQuery({
-    queryKey: ["/api/admin/api-keys"],
-  });
-
   // Fetch Bedrock settings
   const { data: bedrockData } = useQuery({
     queryKey: ["/api/bedrock/settings"],
   });
+
+  const { data: costStats } = useQuery({
+    queryKey: ["/api/bedrock/cost-statistics"],
+  });
+
+  useEffect(() => {
+    if (costStats && (costStats as any).limits) {
+      setCostLimits((prev) => ({
+        ...prev,
+        ...(costStats as any).limits,
+      }));
+    }
+  }, [costStats]);
 
   const [formData, setFormData] = useState<AISettings>({
     autoResponseEnabled: true,
@@ -597,6 +600,7 @@ export default function AISettings() {
         dailyLimitUSD: 2,
         monthlyLimitUSD: 15,
         maxTokensPerRequest: 2000,
+        maxRequestsPerDay: 1000,
       }));
     } else if (preset === "Generous") {
       setFormData((p) => ({
@@ -610,6 +614,7 @@ export default function AISettings() {
         dailyLimitUSD: 3,
         monthlyLimitUSD: 25,
         maxTokensPerRequest: 3000,
+        maxRequestsPerDay: 5000,
       }));
     }
   };
@@ -996,7 +1001,7 @@ export default function AISettings() {
                 />
                 {costLimits.isFreeTierAccount && (
                   <p className="text-xs text-muted-foreground">
-                    Managed by Free Tier policy
+                    Managed by Safe Mode policy
                   </p>
                 )}
               </div>
@@ -1019,7 +1024,7 @@ export default function AISettings() {
                 />
                 {costLimits.isFreeTierAccount && (
                   <p className="text-xs text-muted-foreground">
-                    Managed by Free Tier policy
+                    Managed by Safe Mode policy
                   </p>
                 )}
               </div>
@@ -1043,13 +1048,13 @@ export default function AISettings() {
                 />
                 {costLimits.isFreeTierAccount && (
                   <p className="text-xs text-muted-foreground">
-                    Managed by Free Tier policy
+                    Managed by Safe Mode policy
                   </p>
                 )}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="freeTier">Free Tier Account</Label>
+                <Label htmlFor="freeTier">Safe Cost Mode</Label>
                 <div className="flex items-center space-x-2">
                   <Switch
                     id="freeTier"
@@ -1181,13 +1186,19 @@ export default function AISettings() {
                   id="maxRequestsPerDay"
                   type="number"
                   value={formData.maxRequestsPerDay}
-                  onChange={(e) =>
-                    handleChange("maxRequestsPerDay", parseInt(e.target.value))
-                  }
+                  onChange={(e) => {
+                    handleChange("maxRequestsPerDay", parseInt(e.target.value));
+                    setCostLimits((prev) => ({
+                      ...prev,
+                      maxRequestsPerDay: parseInt(e.target.value),
+                    }));
+                  }}
                   min={10}
                   max={10000}
                   step={10}
-                  disabled={costLimits.isFreeTierAccount}
+                  disabled={
+                    costLimits.isFreeTierAccount || !isEditingCostLimits
+                  }
                 />
                 <p className="text-xs text-muted-foreground">
                   Budget cap for the entire request (prompt + response).

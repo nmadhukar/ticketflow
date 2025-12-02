@@ -74,6 +74,10 @@ interface CostStatistics {
   monthlyUsage: DailyUsage;
   limits: CostLimits;
   recentUsage: UsageRecord[];
+  config?: {
+    currentModelId: string | null;
+    isFreeTierAccount: boolean;
+  };
 }
 
 export function BedrockCostMonitoring() {
@@ -295,43 +299,46 @@ export function BedrockCostMonitoring() {
     );
   }
 
-  const { dailyUsage, monthlyUsage, limits, recentUsage } = costStats || {
-    dailyUsage: {
-      date: "",
-      totalInputTokens: 0,
-      totalOutputTokens: 0,
-      totalCost: 0,
-      requestCount: 0,
-      operations: {},
-    },
-    monthlyUsage: {
-      date: "",
-      totalInputTokens: 0,
-      totalOutputTokens: 0,
-      totalCost: 0,
-      requestCount: 0,
-      operations: {},
-    },
-    limits: {
-      dailyLimitUSD: 5,
-      monthlyLimitUSD: 50,
-      maxTokensPerRequest: 1000,
-      maxRequestsPerDay: 50,
-      maxRequestsPerHour: 10,
-      isFreeTierAccount: true,
-    },
-    recentUsage: [],
-  };
+  const { dailyUsage, monthlyUsage, limits, recentUsage, config } =
+    costStats || {
+      dailyUsage: {
+        date: "",
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalCost: 0,
+        requestCount: 0,
+        operations: {},
+      },
+      monthlyUsage: {
+        date: "",
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalCost: 0,
+        requestCount: 0,
+        operations: {},
+      },
+      limits: {
+        dailyLimitUSD: 5,
+        monthlyLimitUSD: 50,
+        maxTokensPerRequest: 1000,
+        maxRequestsPerDay: 50,
+        maxRequestsPerHour: 10,
+        isFreeTierAccount: true,
+      },
+      recentUsage: [],
+    };
   const dailyStatus = getCostStatus(dailyUsage.totalCost, limits.dailyLimitUSD);
   const monthlyStatus = getCostStatus(
     monthlyUsage.totalCost,
     limits.monthlyLimitUSD
   );
 
+  const currentModelId = config?.currentModelId;
+
   return (
     <div className="space-y-6">
       {/* Cost Overview Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
@@ -340,10 +347,10 @@ export function BedrockCostMonitoring() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <h5 className="text-2xl font-bold mb-2">
               ${dailyUsage.totalCost.toFixed(4)}
-            </div>
-            <div className="flex items-center space-x-2 text-xs text-muted-foreground">
+            </h5>
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
               <Progress
                 value={getCostPercentage(
                   dailyUsage.totalCost,
@@ -385,10 +392,10 @@ export function BedrockCostMonitoring() {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <h5 className="text-2xl font-bold mb-2">
               ${monthlyUsage.totalCost.toFixed(4)}
-            </div>
-            <div className="flex items-center space-x-2 text-xs text-muted-foreground">
+            </h5>
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
               <Progress
                 value={getCostPercentage(
                   monthlyUsage.totalCost,
@@ -430,28 +437,30 @@ export function BedrockCostMonitoring() {
             <Shield className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
+            <h5 className="text-2xl font-bold mb-2">
               {limits.isFreeTierAccount
                 ? t("bedrock:cards.accountType.free", {
                     defaultValue: "Free Tier",
                   })
                 : t("bedrock:cards.accountType.paid", { defaultValue: "Paid" })}
+            </h5>
+            <div className="flex flex-col gap-1">
+              <Badge variant="secondary" className="text-xs">
+                {t("bedrock:cards.accountType.model", {
+                  defaultValue: "Current model: {{model}}",
+                  model: currentModelId || "Not configured",
+                })}
+              </Badge>
+              <Badge
+                variant={limits.isFreeTierAccount ? "secondary" : "default"}
+                className="text-xs w-fit"
+              >
+                {t("bedrock:cards.accountType.reqPerDay", {
+                  defaultValue: "{{count}} req/day",
+                  count: limits.maxRequestsPerDay,
+                })}
+              </Badge>
             </div>
-            <p className="text-xs text-muted-foreground">
-              {limits.isFreeTierAccount
-                ? t("bedrock:cards.accountType.freeNote", {
-                    defaultValue: "Strict cost limits enabled",
-                  })
-                : t("bedrock:cards.accountType.paidNote", {
-                    defaultValue: "Standard cost limits",
-                  })}
-            </p>
-            <Badge variant={limits.isFreeTierAccount ? "secondary" : "default"}>
-              {t("bedrock:cards.accountType.reqPerDay", {
-                defaultValue: "{{count}} req/day",
-                count: limits.maxRequestsPerDay,
-              })}
-            </Badge>
           </CardContent>
         </Card>
       </div>

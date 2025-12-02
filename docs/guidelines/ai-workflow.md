@@ -144,3 +144,73 @@ Operational Notes
 - File‑based persistence (settings/cost) is intentional to avoid DB migrations; migrate to DB tables when convenient.
 - For production, consider Redis for rate‑limit trackers.
 - Keep model lists synced with account availability; show warnings when premium models are selected under strict free‑tier policy.
+
+#### End-to-End Ticket AI Pipeline (`processTicketWithAI`)
+
+The `processTicketWithAI` helper in `server/services/ai/aiTicketAnalysis.ts` runs the **full AI workflow** for a single ticket in one call:
+
+export const processTicketWithAI = async (ticketData: {
+id: number;
+title: string;
+description: string;
+category: string;
+priority: string;
+reporterId: string;
+}): Promise<{
+analysis: TicketAnalysis | null;
+autoResponse: AutoResponse | null;
+complexityScore: number;
+shouldEscalate: boolean;
+applied: boolean;
+}>;It performs these steps:
+
+1. **Analyze ticket (Bedrock)**
+
+   - Calls `analyzeTicket(ticketData)` to produce a `TicketAnalysis`:
+     - `complexity`, `category`, `priority`, `estimatedResolutionTime`, `tags`, `confidence`, `reasoning`.
+   - If analysis fails, returns a result with `analysis: null` and no side effects.
+
+2. **Search knowledge base**
+
+   - Calls `searchKnowledgeBaseForTicket(ticketData)` to build a short context from up to 3 relevant KB articles.
+   - This context is passed into the response generator so replies can reference existing knowledge.
+
+3. **Generate AI auto-response**
+
+   - Calls `generateAutoResponseForTicket(ticketData, analysis, knowledgeContext)` to get an `AutoResponse`:
+     - `response`, `confidence`, `knowledgeBaseArticles`, `followUpActions`, `escalationNeeded`.
+   - If response generation fails, it returns the analysis and a conservative escalation recommendation, but does **not** apply or store a response.
+
+4. **Calculate complexity and escalation**
+
+   - Computes a numeric `complexityScore` via `calculateComplexityScore(analysis)`.
+   - Determines whether the ticket should be escalated using `shouldEscalateTicket(analysis, autoResponse)` and current AI settings.
+
+5. **Optionally apply the auto-response & update ticket**
+
+   - Reads AI settings (`autoResponseEnabled`, `confidenceThreshold`, `maxResponseLength`, escalation flags).
+   - If conditions are met:
+     - Adds the AI response as a **comment** to the ticket.
+     - Stores an auto-response record in `ticket_auto_responses`.
+     - Optionally reassigns the ticket to an escalation team when `escalationTeamId` is configured.
+
+6. **Persist complexity metrics**
+   - Writes/updates a row in `ticket_complexity_scores` for the ticket with:
+     - `score`, `factors` (complexity, priority, estimatedTime, confidence), and `calculatedAt`.
+
+**When to use `processTicketWithAI`**
+
+Use `processTicketWithAI` when you want a **single call** that:
+
+- Analyzes a ticket,
+- Optionally generates and applies an AI response,
+- Calculates and stores complexity metrics, and
+- Decides/escalates according to admin-configured AI policies.
+
+Typical integration points:
+
+- A background job that runs when a new ticket is created.
+- A “Run full AI assist” action in the agent UI.
+- Batch processing of existing tickets (e.g., nightly AI enrichment).
+
+For **admin test tools** (like `/api/ai/analyze-ticket` and `/api/ai/generate-response` in the AI Analytics page), call the underlying pieces (`analyzeTicket`, `generateAutoResponseForTicket`) without side effects, and reserve `processTicketWithAI` for real workflow automation.

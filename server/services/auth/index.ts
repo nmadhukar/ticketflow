@@ -24,6 +24,7 @@ import { User as SelectUser, InsertUser } from "@shared/schema";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import * as client from "openid-client";
+import { EMAIL_PROVIDERS } from "@shared/constants";
 
 declare global {
   namespace Express {
@@ -395,7 +396,7 @@ export function setupAuth(app: Express) {
 
       const user = await storage.getUserByEmail(validatedData.email);
       if (!user) {
-        // Don't reveal if email exists
+        // Don't reveal if email exists for security
         return res.json({
           message: "If the email exists, a reset link has been sent",
         });
@@ -408,9 +409,112 @@ export function setupAuth(app: Express) {
       // Store reset token
       await storage.setPasswordResetToken(user.id, resetToken, resetExpires);
 
-      // TODO: Send email with reset link
-      // For now, log the token (remove in production)
-      console.log(`Password reset token for ${user.email}: ${resetToken}`);
+      // Send password reset email using the template
+      const emailTemplate = await storage.getEmailTemplate("password_reset");
+      const companySettings = await storage.getCompanySettings();
+      const emailProvider = await storage.getActiveEmailProvider();
+
+      if (emailTemplate && emailProvider) {
+        const resetUrl = `${req.protocol}://${req.get(
+          "host"
+        )}/auth?mode=reset&token=${resetToken}`;
+
+        // Generate a 6-digit reset code from the token (first 6 characters)
+        const resetCode = resetToken.substring(0, 6).toUpperCase();
+
+        // Get fromEmail and fromName: prioritize email provider, fallback to company settings, then defaults
+        const fromName =
+          emailProvider.fromName ||
+          companySettings?.companyName ||
+          "TicketFlow";
+        const fromEmail =
+          emailProvider.fromEmail ||
+          (companySettings?.companyName
+            ? `${companySettings.companyName
+                .toLowerCase()
+                .replace(/\s+/g, "")}@ticketflow.com`
+            : "no-reply@ticketflow.com");
+
+        // Get user's first name or use email prefix
+        const userName = user.firstName || user.email?.split("@")[0] || "User";
+
+        // Get IP address and timestamp
+        const ipAddress = req.ip || req.socket.remoteAddress || "Unknown";
+        const timestamp = new Date().toLocaleString();
+
+        // Use appropriate email service based on provider
+        if (emailProvider.provider === EMAIL_PROVIDERS.MAILTRAP) {
+          const { sendEmailWithTemplate } = await import(
+            "../../services/mailtrap"
+          );
+          const mailtrapToken =
+            emailProvider.metadata?.mailtrapToken || process.env.MAILTRAP_TOKEN;
+
+          const emailSent = await sendEmailWithTemplate({
+            to: user.email || "",
+            template: emailTemplate,
+            variables: {
+              companyName: companySettings?.companyName || "TicketFlow",
+              userName: userName,
+              resetCode: resetCode,
+              resetUrl: resetUrl,
+              ipAddress: ipAddress,
+              timestamp: timestamp,
+              year: new Date().getFullYear().toString(),
+            },
+            fromEmail,
+            fromName,
+            mailtrapToken,
+          });
+
+          if (!emailSent) {
+            console.error("Failed to send password reset email via Mailtrap");
+            // Still return success to user for security (don't reveal email sending failure)
+          }
+        } else if (emailProvider.provider === EMAIL_PROVIDERS.AWS) {
+          const { sendEmailWithTemplate } = await import("../../services/ses");
+          // Extract AWS credentials from email provider metadata
+          const awsCredentials = emailProvider.metadata
+            ? {
+                awsAccessKeyId: emailProvider.metadata.awsAccessKeyId,
+                awsSecretAccessKey: emailProvider.metadata.awsSecretAccessKey,
+                awsRegion: emailProvider.metadata.awsRegion,
+              }
+            : {};
+
+          const emailSent = await sendEmailWithTemplate({
+            to: user.email || "",
+            template: emailTemplate,
+            variables: {
+              companyName: companySettings?.companyName || "TicketFlow",
+              userName: userName,
+              resetCode: resetCode,
+              resetUrl: resetUrl,
+              ipAddress: ipAddress,
+              timestamp: timestamp,
+              year: new Date().getFullYear().toString(),
+            },
+            fromEmail,
+            fromName,
+            ...awsCredentials,
+          });
+
+          if (!emailSent) {
+            console.error("Failed to send password reset email via AWS SES");
+            // Still return success to user for security (don't reveal email sending failure)
+          }
+        } else {
+          console.warn(
+            `Email provider ${emailProvider.provider} not supported for password reset`
+          );
+        }
+      } else {
+        console.warn(
+          "Password reset email not sent: email template or provider not configured"
+        );
+        // Log token for development/debugging (remove in production)
+        console.log(`Password reset token for ${user.email}: ${resetToken}`);
+      }
 
       res.json({ message: "If the email exists, a reset link has been sent" });
     } catch (error) {

@@ -49,6 +49,7 @@ import {
   Clock,
   Check,
   X,
+  AlertCircle,
 } from "lucide-react";
 import { format } from "date-fns";
 import type { UserInvitation, Department } from "@shared/schema";
@@ -75,6 +76,23 @@ export default function Invitations() {
     queryKey: ["/api/departments"],
   });
 
+  const { data: users } = useQuery<Array<{ email: string }>>({
+    queryKey: ["/api/users"],
+  });
+
+  // Check email service configuration
+  const { data: emailStatus } = useQuery<{
+    isConfigured: boolean;
+    hasEmailProvider: boolean;
+    hasEmailTemplate: boolean;
+    message: string;
+  }>({
+    queryKey: ["/api/admin/email-service/status"],
+  });
+
+  const isEmailConfigured =
+    emailStatus?.hasEmailProvider && emailStatus?.hasEmailTemplate;
+
   const form = useForm<InvitationFormData>({
     resolver: zodResolver(invitationSchema),
     defaultValues: {
@@ -84,6 +102,18 @@ export default function Invitations() {
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days from now
     },
   });
+
+  // Check for pending invitations and existing users when email changes
+  const emailValue = form.watch("email");
+  const hasPendingInvitation = invitations?.some(
+    (inv) =>
+      inv.email.toLowerCase() === emailValue?.toLowerCase() &&
+      inv.status === "pending" &&
+      new Date(inv.expiresAt) > new Date()
+  );
+  const userExists = users?.some(
+    (user) => user.email.toLowerCase() === emailValue?.toLowerCase()
+  );
 
   const createMutation = useMutation({
     mutationFn: async (data: InvitationFormData) => {
@@ -222,13 +252,40 @@ export default function Invitations() {
             </CardDescription>
           </CardHeader>
           <CardHeader>
-            <Button className="gap-2" onClick={() => setIsCreateOpen(true)}>
+            <Button
+              className="gap-2"
+              onClick={() => setIsCreateOpen(true)}
+              disabled={!isEmailConfigured}
+              title={
+                !isEmailConfigured
+                  ? "Email service is not configured. Please configure AWS SES credentials and email templates."
+                  : ""
+              }
+            >
               <UserPlus className="w-4 h-4" />
               Send Invitation
             </Button>
           </CardHeader>
         </div>
         <CardContent className="space-y-4">
+          {!isEmailConfigured && (
+            <Card className="border-yellow-500/20 bg-yellow-500/5">
+              <CardContent className="pt-4">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-yellow-900 dark:text-yellow-100">
+                      Email service not configured
+                    </p>
+                    <p className="text-xs text-yellow-700 dark:text-yellow-300 mt-1">
+                      {emailStatus?.message ||
+                        "Please configure AWS SES credentials and email templates to send invitations."}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
           {invitations?.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12">
@@ -292,7 +349,14 @@ export default function Invitations() {
                               onClick={() =>
                                 resendMutation.mutate(invitation.id)
                               }
-                              disabled={resendMutation.isPending}
+                              disabled={
+                                resendMutation.isPending || !isEmailConfigured
+                              }
+                              title={
+                                !isEmailConfigured
+                                  ? "Email service is not configured"
+                                  : ""
+                              }
                             >
                               {resendMutation.isPending ? (
                                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -356,6 +420,26 @@ export default function Invitations() {
                     <FormDescription>
                       An invitation email will be sent to this address
                     </FormDescription>
+                    {userExists && emailValue && (
+                      <div className="flex items-center gap-2 text-sm text-destructive">
+                        <AlertCircle className="h-4 w-4" />
+                        <span>
+                          A user with this email address already exists in the
+                          system. You cannot send an invitation to an existing
+                          user.
+                        </span>
+                      </div>
+                    )}
+                    {hasPendingInvitation && emailValue && !userExists && (
+                      <div className="flex items-center gap-2 text-sm text-destructive">
+                        <AlertCircle className="h-4 w-4" />
+                        <span>
+                          A pending invitation already exists for this email
+                          address. Please wait for it to expire or be accepted
+                          before sending a new invitation.
+                        </span>
+                      </div>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )}
@@ -438,8 +522,26 @@ export default function Invitations() {
                   </FormItem>
                 )}
               />
+              {!isEmailConfigured && (
+                <div className="flex items-start gap-2 p-3 rounded-md bg-yellow-500/10 border border-yellow-500/20">
+                  <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5 flex-shrink-0" />
+                  <p className="text-xs text-yellow-700 dark:text-yellow-300">
+                    Email service is not configured. Invitations cannot be sent
+                    until AWS SES credentials and email templates are
+                    configured.
+                  </p>
+                </div>
+              )}
               <DialogFooter>
-                <Button type="submit" disabled={createMutation.isPending}>
+                <Button
+                  type="submit"
+                  disabled={
+                    createMutation.isPending ||
+                    !isEmailConfigured ||
+                    hasPendingInvitation ||
+                    userExists
+                  }
+                >
                   {createMutation.isPending && (
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   )}

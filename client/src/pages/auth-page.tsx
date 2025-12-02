@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -16,7 +16,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CheckCircle, AlertCircle, Building2 } from "lucide-react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
@@ -85,21 +85,45 @@ export default function AuthPage() {
 
   const errorMessage = getErrorMessage(error);
   const [resetToken, setResetToken] = useState<string>("");
+  const [invitationError, setInvitationError] = useState<string | null>(null);
+  const [isValidatingInvitation, setIsValidatingInvitation] = useState(false);
 
   // Support password reset deep-link: ?mode=reset&token=...
-  // If present, reveal reset form immediately
-  if (mode === "reset" && !resetToken) {
-    const t = urlParams.get("token");
-    if (t) setResetToken(t);
-  }
+  // Extract token from URL params
+  useEffect(() => {
+    if (mode === "reset") {
+      const t = urlParams.get("token");
+      if (t && !resetToken) {
+        setResetToken(t);
+      }
+    }
+  }, [mode, resetToken, urlParams]);
 
-  // Login form
-  const loginForm = useForm<LoginForm>({
-    resolver: zodResolver(loginSchema),
-    defaultValues: {
-      email: "",
-      password: "",
+  // Validate invitation token when page loads with invitation params
+  const { data: invitationData } = useQuery({
+    queryKey: ["/api/invitations", invitationToken],
+    queryFn: async () => {
+      if (!invitationToken) return null;
+      setIsValidatingInvitation(true);
+      try {
+        const res = await apiRequest(
+          "GET",
+          `/api/invitations/${invitationToken}`
+        );
+        if (!res.ok) {
+          const error = await res.json();
+          throw new Error(error.message || "Invalid invitation token");
+        }
+        return res.json();
+      } catch (error: any) {
+        setInvitationError(error.message || "Invalid or expired invitation");
+        throw error;
+      } finally {
+        setIsValidatingInvitation(false);
+      }
     },
+    enabled: !!invitationToken && mode === "register",
+    retry: false,
   });
 
   // Register form
@@ -129,6 +153,29 @@ export default function AuthPage() {
       token: resetToken,
       password: "",
       confirmPassword: "",
+    },
+  });
+
+  // Update token in form when resetToken changes
+  useEffect(() => {
+    if (resetToken) {
+      resetForm.setValue("token", resetToken);
+    }
+  }, [resetToken, resetForm]);
+
+  // Update email in form when invitation is validated
+  useEffect(() => {
+    if (invitationData && invitationEmail) {
+      registerForm.setValue("email", invitationEmail);
+    }
+  }, [invitationData, invitationEmail, registerForm]);
+
+  // Login form
+  const loginForm = useForm<LoginForm>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: {
+      email: "",
+      password: "",
     },
   });
 
@@ -266,12 +313,19 @@ export default function AuthPage() {
                   )}
                 >
                   <div className="space-y-4">
+                    <Alert>
+                      <CheckCircle className="h-4 w-4" />
+                      <AlertDescription>
+                        Enter your new password below. This reset link will
+                        expire in 1 hour.
+                      </AlertDescription>
+                    </Alert>
                     <div className="space-y-2">
                       <Label htmlFor="reset-password">New Password</Label>
                       <Input
                         id="reset-password"
                         type="password"
-                        placeholder="Enter new password"
+                        placeholder="Enter new password (min 8 characters)"
                         {...resetForm.register("password")}
                       />
                       {resetForm.formState.errors.password && (
@@ -387,13 +441,32 @@ export default function AuthPage() {
                     >
                       <div className="space-y-4">
                         {invitationEmail && invitationToken && (
-                          <Alert>
-                            <CheckCircle className="h-4 w-4" />
-                            <AlertDescription>
-                              You've been invited to join TicketFlow! Complete
-                              the form below to create your account.
-                            </AlertDescription>
-                          </Alert>
+                          <>
+                            {isValidatingInvitation ? (
+                              <Alert>
+                                <AlertCircle className="h-4 w-4 animate-spin" />
+                                <AlertDescription>
+                                  Validating invitation...
+                                </AlertDescription>
+                              </Alert>
+                            ) : invitationError ? (
+                              <Alert variant="destructive">
+                                <AlertCircle className="h-4 w-4" />
+                                <AlertDescription>
+                                  {invitationError}
+                                </AlertDescription>
+                              </Alert>
+                            ) : invitationData ? (
+                              <Alert>
+                                <CheckCircle className="h-4 w-4" />
+                                <AlertDescription>
+                                  You've been invited to join TicketFlow!
+                                  Complete the form below to create your
+                                  account.
+                                </AlertDescription>
+                              </Alert>
+                            ) : null}
+                          </>
                         )}
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-2">
@@ -479,7 +552,13 @@ export default function AuthPage() {
                         <Button
                           type="submit"
                           className="w-full"
-                          disabled={registerMutation.isPending}
+                          disabled={
+                            !!(
+                              registerMutation.isPending ||
+                              isValidatingInvitation ||
+                              (invitationToken && !!invitationError)
+                            )
+                          }
                         >
                           {registerMutation.isPending
                             ? "Creating account..."

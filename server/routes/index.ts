@@ -47,20 +47,14 @@ import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "../storage";
 import { setupAuth, isAuthenticated } from "../services/auth";
-import {
-  setupMicrosoftAuth,
-  isMicrosoftUser,
-} from "../services/auth/microsoftAuth";
+import { setupMicrosoftAuth } from "../services/auth/microsoftAuth";
 import { teamsIntegration } from "../services/microsoftTeams";
-import { sendTestEmail } from "../services/ses";
 import { canManageTeam } from "../permissions/teams";
 import { sessionTrackingMiddleware } from "../middleware/sessionTracking.middleware";
 import {
   insertTaskSchema,
-  insertTeamSchema,
   insertTaskCommentSchema,
   insertTaskAttachmentSchema,
-  insertCompanySettingsSchema,
   insertApiKeySchema,
   ticketAutoResponses,
   ticketComplexityScores,
@@ -71,10 +65,7 @@ import {
   tasks,
   taskAttachments,
 } from "@shared/schema";
-import {
-  analyzeTicket,
-  generateAutoResponse,
-} from "../services/ai/aiAutoResponse";
+
 import {
   processKnowledgeLearning,
   intelligentKnowledgeSearch,
@@ -106,9 +97,10 @@ import {
 import { registerAdminRoutes } from "../admin";
 import { bedrockIntegration } from "../services/ai/bedrockIntegration";
 import { s3Service } from "../services/s3Service";
-import { DEFAULT_COMPANY } from "@shared/constants";
+import { DEFAULT_COMPANY, EMAIL_PROVIDERS } from "@shared/constants";
 import { getTicketMetaForUser } from "../permissions/tickets";
 import { registerTeamsRoutes } from "./teams";
+import { generateAutoResponseForTicket } from "server/services/ai/aiTicketAnalysis";
 
 // Helper function to sanitize company name for S3 key
 function sanitizeCompanyNameForS3(companyName: string): string {
@@ -3041,32 +3033,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/bedrock/usage/summary", isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-
-      if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
-      }
-
-      const startDate = req.query.startDate
-        ? new Date(req.query.startDate as string)
-        : undefined;
-      const endDate = req.query.endDate
-        ? new Date(req.query.endDate as string)
-        : undefined;
-
-      const summary = await storage.getBedrockUsageSummary(startDate, endDate);
-      res.json(summary);
-    } catch (error) {
-      console.error("Error fetching Bedrock usage summary:", error);
-      res
-        .status(500)
-        .json({ message: "Failed to fetch Bedrock usage summary" });
-    }
-  });
-
   // Cost monitoring and management endpoints
   app.get(
     "/api/bedrock/cost-statistics",
@@ -3583,17 +3549,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         // Send invitation email using the template
-        //  const smtpSettings = await storage.getSmtpSettings();
         const emailTemplate = await storage.getEmailTemplate("user_invitation");
         const companySettings = await storage.getCompanySettings();
+        const emailProvider = await storage.getActiveEmailProvider();
 
-        if (
-          //  smtpSettings &&
-          emailTemplate
-          //smtpSettings.awsAccessKeyId &&
-          //smtpSettings.awsSecretAccessKey
-        ) {
-          const { sendEmailWithTemplate } = await import("../services/ses");
+        if (emailTemplate && emailProvider) {
           const inviteUrl = `${req.protocol}://${req.get(
             "host"
           )}/auth?mode=register&email=${encodeURIComponent(
@@ -3605,34 +3565,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
             : null;
           const inviter = await storage.getUser(invitation.invitedBy);
 
-          await sendEmailWithTemplate({
-            to: invitation.email,
-            template: emailTemplate,
-            variables: {
-              companyName: companySettings?.companyName || "TicketFlow",
-              invitedName: invitation.email.split("@")[0], // Use email prefix as name
-              inviterName: inviter
-                ? `${inviter.firstName} ${inviter.lastName}`
-                : "Admin",
-              email: invitation.email,
-              role:
-                invitation.role.charAt(0).toUpperCase() +
-                invitation.role.slice(1),
-              department: department?.name || "Not assigned",
-              registrationUrl: inviteUrl,
-              year: new Date().getFullYear().toString(),
-            },
-            // fromEmail: smtpSettings.fromEmail,
-            // fromName: smtpSettings.fromName,
-            // awsAccessKeyId: smtpSettings.awsAccessKeyId,
-            // awsSecretAccessKey: smtpSettings.awsSecretAccessKey,
-            // awsRegion: smtpSettings.awsRegion,
-            fromEmail: "no-reply@ticketflow.com",
-            fromName: "TicketFlow",
-            awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID,
-            awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-            awsRegion: process.env.AWS_REGION,
-          });
+          // Get fromEmail and fromName: prioritize email provider, fallback to company settings, then defaults
+          const fromName =
+            emailProvider.fromName ||
+            companySettings?.companyName ||
+            "TicketFlow";
+          const fromEmail =
+            emailProvider.fromEmail ||
+            (companySettings?.companyName
+              ? `${companySettings.companyName
+                  .toLowerCase()
+                  .replace(/\s+/g, "")}@ticketflow.com`
+              : "no-reply@ticketflow.com");
+
+          // Use appropriate email service based on provider
+          if (emailProvider.provider === EMAIL_PROVIDERS.MAILTRAP) {
+            const { sendEmailWithTemplate } = await import(
+              "../services/mailtrap"
+            );
+            const mailtrapToken =
+              emailProvider.metadata?.mailtrapToken ||
+              process.env.MAILTRAP_TOKEN;
+
+            await sendEmailWithTemplate({
+              to: invitation.email,
+              template: emailTemplate,
+              variables: {
+                companyName: companySettings?.companyName || "TicketFlow",
+                invitedName: invitation.email.split("@")[0], // Use email prefix as name
+                inviterName: inviter
+                  ? `${inviter.firstName} ${inviter.lastName}`
+                  : "Admin",
+                email: invitation.email,
+                role:
+                  invitation.role.charAt(0).toUpperCase() +
+                  invitation.role.slice(1),
+                department: department?.name || "Not assigned",
+                registrationUrl: inviteUrl,
+                year: new Date().getFullYear().toString(),
+              },
+              fromEmail,
+              fromName,
+              mailtrapToken,
+            });
+          } else if (emailProvider.provider === EMAIL_PROVIDERS.AWS) {
+            const { sendEmailWithTemplate } = await import("../services/ses");
+            // Extract AWS credentials from email provider metadata
+            const awsCredentials = emailProvider.metadata
+              ? {
+                  awsAccessKeyId: emailProvider.metadata.awsAccessKeyId,
+                  awsSecretAccessKey: emailProvider.metadata.awsSecretAccessKey,
+                  awsRegion: emailProvider.metadata.awsRegion,
+                }
+              : {};
+
+            await sendEmailWithTemplate({
+              to: invitation.email,
+              template: emailTemplate,
+              variables: {
+                companyName: companySettings?.companyName || "TicketFlow",
+                invitedName: invitation.email.split("@")[0], // Use email prefix as name
+                inviterName: inviter
+                  ? `${inviter.firstName} ${inviter.lastName}`
+                  : "Admin",
+                email: invitation.email,
+                role:
+                  invitation.role.charAt(0).toUpperCase() +
+                  invitation.role.slice(1),
+                department: department?.name || "Not assigned",
+                registrationUrl: inviteUrl,
+                year: new Date().getFullYear().toString(),
+              },
+              fromEmail,
+              fromName,
+              ...awsCredentials,
+            });
+          }
         }
 
         res.json({ message: "Invitation resent successfully" });
@@ -4008,28 +4016,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
 
-      // Check if a user with this email already exists
+      // Check if a user with this email already exists (case-insensitive)
       const existingUser = await storage.getUserByEmail(req.body.email);
       if (existingUser) {
         return res.status(400).json({
           message:
-            "A user with this email address already exists in the system.",
+            "A user with this email address already exists in the system. You cannot send an invitation to an existing user.",
         });
       }
 
-      // Check for existing pending invitations
+      // Check for existing pending invitations (not expired)
       const existingInvitations = await storage.getUserInvitations({
         status: "pending",
       });
+      const now = new Date();
       const hasPendingInvitation = existingInvitations.some(
         (inv) =>
-          inv.email === req.body.email && new Date(inv.expiresAt) > new Date()
+          inv.email.toLowerCase() === req.body.email.toLowerCase() &&
+          inv.status === "pending" &&
+          new Date(inv.expiresAt) > now
       );
 
       if (hasPendingInvitation) {
         return res.status(400).json({
           message:
-            "An invitation has already been sent to this email address and is still pending.",
+            "An invitation has already been sent to this email address and is still pending. Please wait for it to expire or be accepted before sending a new invitation.",
         });
       }
 
@@ -4040,17 +4051,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Send invitation email using the template
-      //  const smtpSettings = await storage.getSmtpSettings();
       const emailTemplate = await storage.getEmailTemplate("user_invitation");
       const companySettings = await storage.getCompanySettings();
+      const emailProvider = await storage.getActiveEmailProvider();
 
-      if (
-        //smtpSettings &&
-        emailTemplate
-        //smtpSettings.awsAccessKeyId &&
-        //smtpSettings.awsSecretAccessKey
-      ) {
-        const { sendEmailWithTemplate } = await import("../services/ses");
+      if (emailTemplate && emailProvider) {
         const inviteUrl = `${req.protocol}://${req.get(
           "host"
         )}/auth?mode=register&email=${encodeURIComponent(
@@ -4061,34 +4066,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ? await storage.getDepartmentById(invitation.departmentId)
           : null;
 
-        await sendEmailWithTemplate({
-          to: invitation.email,
-          template: emailTemplate,
-          variables: {
-            companyName: companySettings?.companyName || "TicketFlow",
-            invitedName: invitation.email.split("@")[0], // Use email prefix as name
-            inviterName: user.firstName
-              ? `${user.firstName} ${user.lastName}`
-              : "Admin",
-            email: invitation.email,
-            role:
-              invitation.role.charAt(0).toUpperCase() +
-              invitation.role.slice(1),
-            department: department?.name || "Not assigned",
-            registrationUrl: inviteUrl,
-            year: new Date().getFullYear().toString(),
-          },
-          // fromEmail: smtpSettings.fromEmail,
-          // fromName: smtpSettings.fromName,
-          // awsAccessKeyId: smtpSettings.awsAccessKeyId,
-          // awsSecretAccessKey: smtpSettings.awsSecretAccessKey,
-          // awsRegion: smtpSettings.awsRegion,
-          fromEmail: "no-reply@ticketflow.com",
-          fromName: "TicketFlow",
-          awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID,
-          awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-          awsRegion: process.env.AWS_REGION,
-        });
+        // Get fromEmail and fromName: prioritize email provider, fallback to company settings, then defaults
+        const fromName =
+          emailProvider.fromName ||
+          companySettings?.companyName ||
+          "TicketFlow";
+        const fromEmail =
+          emailProvider.fromEmail ||
+          (companySettings?.companyName
+            ? `${companySettings.companyName
+                .toLowerCase()
+                .replace(/\s+/g, "")}@ticketflow.com`
+            : "no-reply@ticketflow.com");
+
+        // Use appropriate email service based on provider
+        if (emailProvider.provider === EMAIL_PROVIDERS.MAILTRAP) {
+          const { sendEmailWithTemplate } = await import(
+            "../services/mailtrap"
+          );
+          const mailtrapToken =
+            emailProvider.metadata?.mailtrapToken || process.env.MAILTRAP_TOKEN;
+
+          await sendEmailWithTemplate({
+            to: invitation.email,
+            template: emailTemplate,
+            variables: {
+              companyName: companySettings?.companyName || "TicketFlow",
+              invitedName: invitation.email.split("@")[0], // Use email prefix as name
+              inviterName: user.firstName
+                ? `${user.firstName} ${user.lastName}`
+                : "Admin",
+              email: invitation.email,
+              role:
+                invitation.role.charAt(0).toUpperCase() +
+                invitation.role.slice(1),
+              department: department?.name || "Not assigned",
+              registrationUrl: inviteUrl,
+              year: new Date().getFullYear().toString(),
+            },
+            fromEmail,
+            fromName,
+            mailtrapToken,
+          });
+        } else if (emailProvider.provider === EMAIL_PROVIDERS.AWS) {
+          const { sendEmailWithTemplate } = await import("../services/ses");
+          // Extract AWS credentials from email provider metadata
+          const awsCredentials = emailProvider.metadata
+            ? {
+                awsAccessKeyId: emailProvider.metadata.awsAccessKeyId,
+                awsSecretAccessKey: emailProvider.metadata.awsSecretAccessKey,
+                awsRegion: emailProvider.metadata.awsRegion,
+              }
+            : {};
+
+          await sendEmailWithTemplate({
+            to: invitation.email,
+            template: emailTemplate,
+            variables: {
+              companyName: companySettings?.companyName || "TicketFlow",
+              invitedName: invitation.email.split("@")[0], // Use email prefix as name
+              inviterName: user.firstName
+                ? `${user.firstName} ${user.lastName}`
+                : "Admin",
+              email: invitation.email,
+              role:
+                invitation.role.charAt(0).toUpperCase() +
+                invitation.role.slice(1),
+              department: department?.name || "Not assigned",
+              registrationUrl: inviteUrl,
+              year: new Date().getFullYear().toString(),
+            },
+            fromEmail,
+            fromName,
+            ...awsCredentials,
+          });
+        }
       }
 
       res.json(invitation);
@@ -4097,6 +4149,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to create invitation" });
     }
   });
+
+  // Check email service configuration status (admin only)
+  app.get(
+    "/api/admin/email-service/status",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+        // Check for active email provider
+        let emailProviderConfigured = false;
+        try {
+          const emailProvider = await storage.getActiveEmailProvider();
+          emailProviderConfigured =
+            (emailProvider?.provider === EMAIL_PROVIDERS.MAILTRAP &&
+              emailProvider?.metadata?.mailtrapToken) ||
+            (emailProvider?.provider === EMAIL_PROVIDERS.AWS &&
+              emailProvider?.metadata?.awsSecretAccessKey &&
+              emailProvider?.metadata?.awsAccessKeyId);
+        } catch (error) {
+          // Email provider check failed, continue with env check
+        }
+
+        // Check if email template exists
+        let emailTemplateExists = false;
+        try {
+          const template = await storage.getEmailTemplate("user_invitation");
+          emailTemplateExists = !!template;
+        } catch (error) {
+          // Template check failed
+        }
+
+        const isEmailConfigured =
+          emailProviderConfigured && emailTemplateExists;
+
+        res.json({
+          isConfigured: isEmailConfigured,
+          hasEmailProvider: emailProviderConfigured,
+          hasEmailTemplate: emailTemplateExists,
+          message: isEmailConfigured
+            ? "Email service is configured and ready"
+            : "Email service is not configured. Please configure AWS SES credentials and email templates.",
+        });
+      } catch (error) {
+        console.error("Error checking email service status:", error);
+        res
+          .status(500)
+          .json({ message: "Failed to check email service status" });
+      }
+    }
+  );
 
   // Public route to accept invitation
   app.get("/api/invitations/:token", async (req, res) => {
@@ -4885,7 +4990,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
-  // Get learning queue status
+  // Get learning queue status (returns object format for client)
+  app.get(
+    "/api/admin/learning-queue",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const statusArray = await db
+          .select({
+            status: learningQueue.processStatus,
+            count: count(),
+          })
+          .from(learningQueue)
+          .groupBy(learningQueue.processStatus);
+
+        // Transform array to object format expected by client
+        const statusObj: any = {
+          pending: 0,
+          processing: 0,
+          completedToday: 0,
+        };
+
+        // Get today's completed count separately
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const [completedTodayResult] = await db
+          .select({ count: count() })
+          .from(learningQueue)
+          .where(
+            and(
+              eq(learningQueue.processStatus, "completed"),
+              sql`${learningQueue.processedAt} >= ${today}`
+            )
+          );
+
+        statusArray.forEach((item: any) => {
+          const status = item.status || "pending";
+          const count = Number(item.count) || 0;
+
+          if (status === "pending") {
+            statusObj.pending = count;
+          } else if (status === "processing") {
+            statusObj.processing = count;
+          }
+        });
+
+        statusObj.completedToday = Number(completedTodayResult?.count || 0);
+        statusObj.isProcessing = statusObj.processing > 0;
+        statusObj.totalInQueue = statusObj.pending + statusObj.processing;
+
+        res.json(statusObj);
+      } catch (error) {
+        console.error("Error fetching learning queue status:", error);
+        res
+          .status(500)
+          .json({ message: "Failed to fetch learning queue status" });
+      }
+    }
+  );
+
+  // Get learning queue status (alternative endpoint with array format)
   app.get(
     "/api/admin/learning-queue/status",
     isAuthenticated,
@@ -4913,6 +5082,192 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
   );
+
+  // Batch process historical tickets for knowledge learning (admin only)
+  app.post(
+    "/api/admin/batch-process",
+    isAuthenticated,
+    async (req: any, res) => {
+      try {
+        const user = await storage.getUser(getUserId(req));
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Admin access required" });
+        }
+
+        const { start, end } = req.body;
+
+        if (!start || !end) {
+          return res.status(400).json({
+            message: "Start and end dates are required",
+          });
+        }
+
+        // Parse dates
+        const startDate = new Date(start);
+        const endDate = new Date(end);
+
+        // Validate dates
+        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+          return res.status(400).json({
+            message: "Invalid date format. Use YYYY-MM-DD format",
+          });
+        }
+
+        if (startDate > endDate) {
+          return res.status(400).json({
+            message: "Start date must be before end date",
+          });
+        }
+
+        // Check if there are any items currently being processed
+        const [processingCountResult] = await db
+          .select({ count: count() })
+          .from(learningQueue)
+          .where(eq(learningQueue.processStatus, "processing"))
+          .limit(1);
+
+        const processingCount = Number(processingCountResult?.count || 0);
+
+        if (processingCount > 0) {
+          return res.status(409).json({
+            message:
+              "Batch processing is already in progress. Please wait for the current process to complete.",
+            isProcessing: true,
+            processingCount,
+          });
+        }
+
+        // Get ticket count for the date range
+        const tickets = await storage.getResolvedTicketsByDateRange(
+          startDate,
+          endDate
+        );
+
+        const ticketCount = tickets.length;
+
+        if (ticketCount === 0) {
+          return res.json({
+            ticketCount: 0,
+            message: "No resolved tickets found in the specified date range",
+          });
+        }
+
+        // Add all tickets to learning queue with "pending" status
+        let addedCount = 0;
+        for (const ticket of tickets) {
+          if (!ticket.id) continue;
+
+          // Check if already in queue to avoid duplicates
+          const existing = await db
+            .select()
+            .from(learningQueue)
+            .where(eq(learningQueue.ticketId, ticket.id))
+            .limit(1);
+
+          if (existing.length === 0) {
+            await db.insert(learningQueue).values({
+              ticketId: ticket.id,
+              processStatus: "pending",
+            });
+            addedCount++;
+          }
+        }
+
+        console.log(
+          `Added ${addedCount} tickets to learning queue (${
+            ticketCount - addedCount
+          } already in queue)`
+        );
+
+        // Process knowledge learning asynchronously for the date range
+        // Pass useQueueItems flag to process from queue
+        processKnowledgeLearning({
+          startDate,
+          endDate,
+          useQueueItems: true,
+        }).catch((error) => {
+          console.error("Error processing batch learning:", error);
+        });
+
+        res.json({
+          ticketCount,
+          message: `Batch processing started for ${ticketCount} resolved tickets from ${start} to ${end}`,
+        });
+      } catch (error) {
+        console.error("Error starting batch processing:", error);
+        res.status(500).json({ message: "Failed to start batch processing" });
+      }
+    }
+  );
+
+  // Get AI analytics for learning dashboard
+  app.get("/api/admin/ai-analytics", isAuthenticated, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(getUserId(req));
+      if (!user || user.role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      // Get knowledge articles statistics
+      const [articlesCount] = await db
+        .select({ count: count() })
+        .from(knowledgeArticles);
+
+      // Get average effectiveness score
+      const [avgEffectivenessResult] = await db
+        .select({
+          avgScore: avg(knowledgeArticles.effectivenessScore),
+        })
+        .from(knowledgeArticles)
+        .where(
+          and(
+            sql`${knowledgeArticles.effectivenessScore} IS NOT NULL`,
+            sql`${knowledgeArticles.effectivenessScore} > 0`
+          )
+        );
+
+      const avgEffectiveness = avgEffectivenessResult?.avgScore
+        ? Number(avgEffectivenessResult.avgScore)
+        : 0;
+
+      // Get auto-responses sent count
+      const [autoResponsesCount] = await db
+        .select({ count: count() })
+        .from(ticketAutoResponses);
+
+      // Get tickets resolved by AI (where wasApplied is true)
+      const [ticketsResolvedByAIResult] = await db
+        .select({ count: count() })
+        .from(ticketAutoResponses)
+        .where(eq(ticketAutoResponses.wasApplied, true));
+
+      // Get top categories by article count
+      const topCategories = await db
+        .select({
+          category: knowledgeArticles.category,
+          count: count(),
+        })
+        .from(knowledgeArticles)
+        .where(sql`${knowledgeArticles.category} IS NOT NULL`)
+        .groupBy(knowledgeArticles.category)
+        .orderBy(desc(count()))
+        .limit(5);
+
+      res.json({
+        articlesCreated: Number(articlesCount?.count || 0),
+        avgEffectiveness: avgEffectiveness,
+        autoResponsesSent: Number(autoResponsesCount?.count || 0),
+        ticketsResolvedByAI: Number(ticketsResolvedByAIResult?.count || 0),
+        topCategories: topCategories.map((cat: any) => ({
+          category: cat.category || "uncategorized",
+          count: Number(cat.count || 0),
+        })),
+      });
+    } catch (error) {
+      console.error("Error fetching AI analytics:", error);
+      res.status(500).json({ message: "Failed to fetch AI analytics" });
+    }
+  });
 
   const httpServer = createServer(app);
 
@@ -5001,7 +5356,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   (app as any).broadcastToUser = broadcastToUser;
   (app as any).broadcastToAll = broadcastToAll;
 
-  // AI Analysis and Auto-Response Routes
+  /* Admin-only endpoint used by AI Analytics page to test ticket analysis.
+   * Runs Bedrock-powered analysis on ad-hoc ticket data and returns a TicketAnalysis
+   * (complexity, category, priority, tags, confidence, reasoning) without mutating any tickets.
+   */
   app.post("/api/ai/analyze-ticket", isAuthenticated, async (req: any, res) => {
     try {
       const { title, description, category, priority } = req.body;
@@ -5013,7 +5371,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .json({ message: "Title and description are required" });
       }
 
-      const analysis = await analyzeTicket(
+      const { aiAutoResponseService } = await import(
+        "../services/ai/aiAutoResponse"
+      );
+      const analysis = await aiAutoResponseService.analyzeTicket(
         {
           title,
           description,
@@ -5053,29 +5414,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     isAuthenticated,
     async (req: any, res) => {
       try {
+        const userId = getUserId(req);
         const { title, description, category, priority, analysis } = req.body;
 
+        // Basic validation
         if (!title || !description || !analysis) {
-          return res
-            .status(400)
-            .json({ message: "Title, description, and analysis are required" });
+          return res.status(400).json({
+            message: "Title, description, and analysis are required",
+          });
         }
 
-        const autoResponse = await generateAutoResponse(
-          { title, description, category, priority } as any,
+        // Normalize ticket data shape expected by aiTicketAnalysis
+        const ticketData = {
+          title,
+          description,
+          category: category || "support",
+          priority: priority || "medium",
+          reporterId: userId || "system",
+        };
+
+        const autoResponse = await generateAutoResponseForTicket(
+          ticketData,
           analysis
         );
 
         if (!autoResponse) {
-          return res
-            .status(503)
-            .json({ message: "AI response generation service unavailable" });
+          return res.status(503).json({
+            message: "AI response generation service unavailable",
+          });
         }
 
-        res.json(autoResponse);
-      } catch (error) {
+        return res.json(autoResponse);
+      } catch (error: any) {
         console.error("AI response generation error:", error);
-        res.status(500).json({ message: "Failed to generate response" });
+
+        // If Bedrock/cost limits blocked the request, surface that clearly
+        if ((error as any).isBlocked) {
+          return res.status(429).json({
+            message: "Request blocked due to cost limits",
+            reason: (error as any).message,
+            costEstimate: (error as any).costEstimate,
+            isBlocked: true,
+          });
+        }
+
+        return res.status(500).json({ message: "Failed to generate response" });
       }
     }
   );

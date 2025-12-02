@@ -491,6 +491,10 @@ export interface IStorage {
   saveComplexityScore(data: any): Promise<void>;
   saveAIAnalytics(analytics: any): Promise<void>;
   getRecentResolvedTickets(days: number): Promise<Task[]>;
+  getResolvedTicketsByDateRange(
+    startDate: Date,
+    endDate: Date
+  ): Promise<Task[]>;
   updateKnowledgeLearningStats(stats: any): Promise<void>;
 
   // Stats operations

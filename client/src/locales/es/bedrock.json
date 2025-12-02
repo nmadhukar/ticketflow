@@ -13,9 +13,9 @@
     "of": "de ${{amount}}",
     "requests": "{{count}} solicitudes",
     "accountType": {
-      "title": "Tipo de cuenta",
-      "free": "Free Tier",
-      "paid": "De pago",
+      "title": "Política de uso",
+      "free": "Modo seguro",
+      "paid": "Modo estándar",
       "freeNote": "Límites de costo estrictos habilitados",
       "paidNote": "Límites de costo estándar",
       "reqPerDay": "{{count}} sol/día"

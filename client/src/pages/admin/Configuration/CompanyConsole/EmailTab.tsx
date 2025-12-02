@@ -349,6 +349,20 @@ const EmailTab = () => {
             </div>
 
             <div className="space-y-5">
+              {/* Warning for unsupported providers */}
+              {provider !== EMAIL_PROVIDERS.MAILTRAP &&
+                provider !== EMAIL_PROVIDERS.AWS && (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Unsupported Email Provider</AlertTitle>
+                    <AlertDescription>
+                      Sorry, currently only AWS SES and Mailtrap are supported
+                      for email sending. Please select one of these providers to
+                      configure email functionality.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
               {provider === EMAIL_PROVIDERS.MAILTRAP && (
                 <div id="email-integrations" className="space-y-4">
                   {!(import.meta as any).env?.VITE_MAILTRAP_TOKEN ? (
@@ -641,7 +655,11 @@ const EmailTab = () => {
             <Button
               className="bg-primary hover:bg-primary/90"
               onClick={() => saveEmailSettingsMutation.mutate()}
-              disabled={saveEmailSettingsMutation.isPending}
+              disabled={
+                saveEmailSettingsMutation.isPending ||
+                (provider !== EMAIL_PROVIDERS.MAILTRAP &&
+                  provider !== EMAIL_PROVIDERS.AWS)
+              }
             >
               {saveEmailSettingsMutation.isPending
                 ? "Saving..."

@@ -5,52 +5,19 @@ import {
   taskComments,
   taskHistory,
 } from "@shared/schema";
-import { eq, and, sql, ilike } from "drizzle-orm";
-import type { Task, InsertKnowledgeArticle } from "@shared/schema";
+import { eq, and, ilike, sql } from "drizzle-orm";
+import type {
+  Task,
+  InsertKnowledgeArticle,
+  KnowledgeArticle,
+} from "@shared/schema";
+import { buildCreateKnowledgeArticlePrompt } from "./prompts";
 import {
-  BedrockRuntimeClient,
-  InvokeModelCommand,
-} from "@aws-sdk/client-bedrock-runtime";
+  getBedrockClient,
+  runKnowledgeArticleGenerationPrompt,
+} from "./bedrockIntegration";
 
 export class KnowledgeBaseService {
-  private bedrockClient: BedrockRuntimeClient | null = null;
-
-  constructor() {
-    this.initializeBedrockClient();
-  }
-
-  private async initializeBedrockClient() {
-    try {
-      const [bedrockConfigRaw] = await db
-        .select()
-        .from(sql`api_keys`)
-        .where(sql`service = 'bedrock'`)
-        .limit(1);
-      const bedrockConfig: any = bedrockConfigRaw as any;
-      if (
-        !bedrockConfig?.key ||
-        !bedrockConfig?.secret ||
-        !bedrockConfig?.region
-      ) {
-        console.log("AWS Bedrock not configured for knowledge base");
-        return;
-      }
-
-      this.bedrockClient = new BedrockRuntimeClient({
-        region: bedrockConfig.region,
-        credentials: {
-          accessKeyId: bedrockConfig.key,
-          secretAccessKey: bedrockConfig.secret,
-        },
-      });
-    } catch (error) {
-      console.error(
-        "Failed to initialize Bedrock client for knowledge base:",
-        error
-      );
-    }
-  }
-
   async learnFromResolvedTicket(
     ticketId: number,
     options?: { minScore?: number; requireApproval?: boolean }
@@ -216,8 +183,9 @@ export class KnowledgeBaseService {
     resolution: any,
     requireApproval: boolean = true
   ): Promise<void> {
-    if (!this.bedrockClient) {
-      // Create article without AI enhancement
+    const { bedrockClient, bedrockModelId: modelId } = await getBedrockClient();
+
+    if (!bedrockClient || !modelId) {
       await this.saveKnowledgeArticle(
         ticket,
         resolution,
@@ -229,49 +197,10 @@ export class KnowledgeBaseService {
 
     try {
       // Use AI to generate a comprehensive knowledge article
-      const prompt = `Create a knowledge base article from this resolved ticket:
+      const prompt = buildCreateKnowledgeArticlePrompt(resolution);
+      const result = await runKnowledgeArticleGenerationPrompt(prompt);
 
-Problem: ${resolution.problem}
-
-Solution: ${resolution.solution}
-
-Resolution Steps: ${resolution.steps.join("\n")}
-
-Generate a well-structured knowledge article with:
-1. A clear, searchable title
-2. A brief summary (2-3 sentences)
-3. Detailed content with step-by-step instructions
-4. Prerequisites or requirements
-5. Common variations of this issue
-
-Format as JSON:
-{
-  "title": "Clear title for the knowledge article",
-  "summary": "Brief summary of the issue and solution",
-  "content": "Detailed article content with markdown formatting",
-  "prerequisites": ["list", "of", "prerequisites"],
-  "variations": ["common", "variations", "of", "this", "issue"]
-}`;
-
-      const command = new InvokeModelCommand({
-        modelId: "anthropic.claude-3-sonnet-20240229-v1:0",
-        contentType: "application/json",
-        accept: "application/json",
-        body: JSON.stringify({
-          messages: [
-            {
-              role: "user",
-              content: prompt,
-            },
-          ],
-          max_tokens: 1500,
-          temperature: 0.3,
-        }),
-      });
-
-      const response = await this.bedrockClient.send(command);
-      const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-      const aiArticle = JSON.parse(responseBody.content[0].text);
+      const aiArticle = JSON.parse(result.response) as KnowledgeArticle;
 
       // Save the enhanced article
       await this.saveKnowledgeArticle(

@@ -90,6 +90,7 @@ function Router() {
     <>
       <Switch>
         <Route path="/login" component={AuthPage} />
+        <Route path="/auth" component={AuthPage} />
         <Route path="/api-docs" component={ApiDocs} />
         <Route path="/404" component={NotFound} />
 

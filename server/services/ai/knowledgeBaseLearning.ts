@@ -10,37 +10,26 @@
  * - Provides insights for improving support processes
  */
 
-import {
-  BedrockRuntimeClient,
-  InvokeModelCommand,
-} from "@aws-sdk/client-bedrock-runtime";
 import { storage } from "../../storage";
 import { logSecurityEvent } from "../../security";
-
-/**
- * Initialize AWS Bedrock client for knowledge extraction
- * Uses same credentials as ticket analysis but with separate error handling
- */
-const getBedrockClient = () => {
-  const region = process.env.AWS_REGION || "us-east-1";
-  const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
-
-  if (!accessKeyId || !secretAccessKey) {
-    console.warn(
-      "AWS credentials not configured. Knowledge base learning disabled."
-    );
-    return null;
-  }
-
-  return new BedrockRuntimeClient({
-    region,
-    credentials: {
-      accessKeyId,
-      secretAccessKey,
-    },
-  });
-};
+import type { Task } from "@shared/schema";
+import { db } from "../../storage/db";
+import { learningQueue } from "@shared/schema";
+import { eq, inArray } from "drizzle-orm";
+import {
+  buildImproveKnowledgeArticlePrompt,
+  buildKnowledgeArticlePrompt,
+  buildKnowledgeSearchRankingPrompt,
+  buildResolvedTicketsPatternPrompt,
+} from "./prompts";
+import {
+  getBedrockClient,
+  runKnowledgeImproveArticlePrompt,
+  runKnowledgePatternAnalysisPrompt,
+  runKnowledgePatternPrompt,
+  runKnowledgeSearchPrompt,
+} from "./bedrockIntegration";
+import { loadCostLimits, estimateTokens } from "./costMonitoring";
 
 /**
  * Structure for AI-generated knowledge articles
@@ -97,8 +86,8 @@ export const analyzeResolvedTickets = async (
     comments: Array<{ content: string; userId: string; createdAt: Date }>;
   }>
 ): Promise<ResolutionPattern[]> => {
-  const client = getBedrockClient();
-  if (!client || ticketBatch.length === 0) return [];
+  const { bedrockClient, bedrockModelId: modelId } = await getBedrockClient();
+  if (!bedrockClient || !modelId || ticketBatch.length === 0) return [];
 
   try {
     const ticketSummaries = ticketBatch
@@ -116,71 +105,23 @@ Comments: ${ticket.comments.map((c) => c.content).join("; ")}
       )
       .join("\n");
 
-    const prompt = `
-You are an expert knowledge management AI. Analyze these resolved support tickets to identify common patterns and create actionable knowledge.
+    const prompt = buildResolvedTicketsPatternPrompt(ticketSummaries);
+    const result = await runKnowledgePatternAnalysisPrompt(prompt);
 
-Resolved Tickets:
-${ticketSummaries}
+    const patterns = JSON.parse(result.response) as ResolutionPattern[];
 
-Identify resolution patterns and respond with a JSON array of patterns:
-[
-  {
-    "problemType": "Clear description of the problem type",
-    "commonSolutions": ["solution1", "solution2", "solution3"],
-    "preventiveMeasures": ["prevention1", "prevention2"],
-    "frequency": estimated_frequency_score_1_to_10,
-    "averageResolutionTime": average_hours,
-    "successRate": success_rate_0_to_100
-  }
-]
-
-Focus on:
-1. Recurring problem types
-2. Effective solution patterns
-3. Preventive measures
-4. Time-saving approaches
-5. Common user mistakes
-
-Limit to the top 5 most significant patterns. Respond only with valid JSON.`;
-
-    const command = new InvokeModelCommand({
-      modelId: "anthropic.claude-3-sonnet-20240229-v1:0",
-      body: JSON.stringify({
-        anthropic_version: "bedrock-2023-05-31",
-        max_tokens: 2000,
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      }),
-      contentType: "application/json",
-      accept: "application/json",
+    // Log learning activity
+    logSecurityEvent({
+      action: "knowledge_learning",
+      resource: "tickets",
+      success: true,
+      details: {
+        ticketsAnalyzed: ticketBatch.length,
+        patternsFound: patterns.length,
+      },
     });
 
-    const response = await client.send(command);
-    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-
-    if (responseBody.content && responseBody.content[0]?.text) {
-      const patternsText = responseBody.content[0].text;
-      const patterns = JSON.parse(patternsText) as ResolutionPattern[];
-
-      // Log learning activity
-      logSecurityEvent({
-        action: "knowledge_learning",
-        resource: "tickets",
-        success: true,
-        details: {
-          ticketsAnalyzed: ticketBatch.length,
-          patternsFound: patterns.length,
-        },
-      });
-
-      return patterns;
-    }
-
-    return [];
+    return patterns;
   } catch (error) {
     console.error("Knowledge pattern analysis error:", error);
     logSecurityEvent({
@@ -200,89 +141,216 @@ export const generateKnowledgeArticle = async (
   pattern: ResolutionPattern,
   relatedTickets: number[]
 ): Promise<KnowledgeArticle | null> => {
-  const client = getBedrockClient();
-  if (!client) return null;
+  const { bedrockClient, bedrockModelId: modelId } = await getBedrockClient();
+  if (!bedrockClient || !modelId) return null;
 
   try {
-    const prompt = `
-You are a technical writer creating a knowledge base article. Based on this resolution pattern, create a comprehensive, user-friendly article.
+    const prompt = buildKnowledgeArticlePrompt(pattern);
+    const result = await runKnowledgePatternPrompt(prompt);
 
-Resolution Pattern:
-Problem Type: ${pattern.problemType}
-Common Solutions: ${pattern.commonSolutions.join(", ")}
-Preventive Measures: ${pattern.preventiveMeasures.join(", ")}
-Average Resolution Time: ${pattern.averageResolutionTime} hours
-Success Rate: ${pattern.successRate}%
+    const articleData = JSON.parse(result.response) as KnowledgeArticle;
 
-Create a knowledge base article with this JSON structure:
-{
-  "title": "Clear, descriptive title",
-  "content": "Comprehensive article content in markdown format",
-  "category": "support|technical|howto|troubleshooting|faq",
-  "tags": ["tag1", "tag2", "tag3"],
-  "difficulty": "beginner|intermediate|advanced",
-  "estimatedReadTime": estimated_minutes_to_read,
-  "confidence": confidence_score_0_to_100
-}
+    const article: KnowledgeArticle = {
+      ...articleData,
+      relatedTickets,
+      isPublished: false,
+      createdBy: "ai-learning",
+    };
 
-Article content should include:
-1. Problem description
-2. Step-by-step solutions
-3. Prevention tips
-4. Common pitfalls to avoid
-5. Related information
-
-Write for non-technical users. Use clear, actionable language. Include specific steps and examples.`;
-
-    const command = new InvokeModelCommand({
-      modelId: "anthropic.claude-3-sonnet-20240229-v1:0",
-      body: JSON.stringify({
-        anthropic_version: "bedrock-2023-05-31",
-        max_tokens: 3000,
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      }),
-      contentType: "application/json",
-      accept: "application/json",
-    });
-
-    const response = await client.send(command);
-    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-
-    if (responseBody.content && responseBody.content[0]?.text) {
-      const articleText = responseBody.content[0].text;
-      const articleData = JSON.parse(articleText);
-
-      const article: KnowledgeArticle = {
-        ...articleData,
-        relatedTickets,
-        isPublished: articleData.confidence >= 70, // Auto-publish high confidence articles
-        createdBy: "ai-learning",
-      };
-
-      return article;
-    }
-
-    return null;
+    return article;
   } catch (error) {
     console.error("Knowledge article generation error:", error);
     return null;
   }
 };
 
+/**
+ * Process enriched tickets in batches based on token limits
+ * @param enrichedTickets - Array of enriched ticket data
+ * @param totalTicketsCount - Total number of tickets (for logging)
+ * @returns Array of resolution patterns found
+ */
+async function processTicketsInBatches(
+  enrichedTickets: Array<{
+    id: number;
+    title: string;
+    description: string;
+    category: string;
+    priority: string;
+    resolution: string;
+    resolutionTime: number;
+    comments: Array<{ content: string; userId: string; createdAt: Date }>;
+  }>,
+  totalTicketsCount: number
+): Promise<ResolutionPattern[]> {
+  // Calculate dynamic batch size based on maxTokensPerRequest
+  const limits = loadCostLimits();
+  const maxTokensPerRequest = limits.maxTokensPerRequest || 2000;
+
+  // Estimate tokens for base prompt (without tickets)
+  const basePrompt = buildResolvedTicketsPatternPrompt("");
+  const basePromptTokens = estimateTokens(basePrompt);
+
+  // Reserve tokens for: base prompt + output response (estimate 500 tokens for JSON output)
+  const reservedTokens = basePromptTokens + 500;
+  const availableTokens = maxTokensPerRequest - reservedTokens;
+
+  // Estimate tokens per ticket by building a sample ticket summary
+  let batchSize = 3; // Default fallback
+  if (enrichedTickets.length > 0 && availableTokens > 0) {
+    const sampleTicket = enrichedTickets[0];
+    const sampleSummary = `
+Ticket ${sampleTicket.id}:
+Title: ${sampleTicket.title}
+Category: ${sampleTicket.category}
+Priority: ${sampleTicket.priority}
+Problem: ${sampleTicket.description}
+Resolution: ${sampleTicket.resolution}
+Time to resolve: ${sampleTicket.resolutionTime} hours
+Comments: ${sampleTicket.comments.map((c) => c.content).join("; ")}
+---`;
+    const tokensPerTicket = estimateTokens(sampleSummary);
+
+    // Calculate batch size (ensure at least 1, but respect limits)
+    const calculatedBatchSize = Math.max(
+      1,
+      Math.floor(availableTokens / tokensPerTicket)
+    );
+
+    // Cap batch size to reasonable limits (min 2 for pattern detection, max 10 for quality)
+    batchSize = Math.max(2, Math.min(calculatedBatchSize, 10));
+
+    console.log(
+      `📊 Token budget: ${maxTokensPerRequest} total, ${reservedTokens} reserved, ` +
+        `~${tokensPerTicket} per ticket → Processing ${totalTicketsCount} tickets in batches of ${batchSize}`
+    );
+  }
+
+  // Process tickets in batches
+  const allPatterns: ResolutionPattern[] = [];
+  for (let i = 0; i < enrichedTickets.length; i += batchSize) {
+    const batch = enrichedTickets.slice(i, i + batchSize);
+
+    try {
+      const patterns = await analyzeResolvedTickets(batch);
+      allPatterns.push(...patterns);
+      console.log(
+        `  ✓ Batch ${Math.floor(i / batchSize) + 1}: Analyzed ${
+          batch.length
+        } tickets, found ${patterns.length} patterns`
+      );
+    } catch (error: any) {
+      // If batch still fails due to token limits, try smaller batch
+      if (error.isBlocked && error.message.includes("max tokens")) {
+        console.warn(
+          `  ⚠ Batch ${Math.floor(i / batchSize) + 1} still too large. ` +
+            `Trying individual tickets...`
+        );
+
+        // Fallback: process tickets individually
+        for (const singleTicket of batch) {
+          try {
+            const singlePatterns = await analyzeResolvedTickets([singleTicket]);
+            allPatterns.push(...singlePatterns);
+          } catch (singleError: any) {
+            console.error(
+              `  ✗ Failed to analyze ticket ${singleTicket.id}: ${
+                singleError.message || "Unknown error"
+              }`
+            );
+          }
+        }
+      } else {
+        console.error(
+          `  ✗ Batch ${Math.floor(i / batchSize) + 1} failed: ${
+            error.message || "Unknown error"
+          }`
+        );
+      }
+    }
+  }
+
+  return allPatterns;
+}
+
 // Main learning process - analyze recent resolved tickets
-export const processKnowledgeLearning = async (): Promise<{
+export const processKnowledgeLearning = async (options?: {
+  startDate?: Date;
+  endDate?: Date;
+  useQueueItems?: boolean;
+}): Promise<{
   patternsFound: number;
   articlesCreated: number;
   articlesPublished: number;
 }> => {
+  // Declare queueItems outside try block so it's accessible in catch block
+  let queueItems: Array<{ id: number; ticketId: number }> = [];
+
   try {
-    // Get recently resolved tickets (last 30 days)
-    const recentResolvedTickets = await storage.getRecentResolvedTickets(30);
+    // Get resolved tickets - either from queue or directly
+    let recentResolvedTickets: Task[];
+
+    if (options?.useQueueItems) {
+      // Get pending items from learning queue
+      const pendingQueueItems = await storage.getLearningQueueItems("pending");
+      console.log(
+        `Processing ${pendingQueueItems.length} tickets from learning queue`
+      );
+
+      if (pendingQueueItems.length === 0) {
+        console.log("No pending items in learning queue");
+        return {
+          patternsFound: 0,
+          articlesCreated: 0,
+          articlesPublished: 0,
+        };
+      }
+
+      // Update queue items to "processing" status
+      for (const queueItem of pendingQueueItems) {
+        await storage.updateLearningQueueItem(queueItem.id, {
+          processStatus: "processing",
+          processingAttempts: (queueItem.processingAttempts || 0) + 1,
+        });
+      }
+
+      // Get ticket IDs from queue items
+      const ticketIds = pendingQueueItems.map((item) => item.ticketId);
+      queueItems = pendingQueueItems.map((item) => ({
+        id: item.id,
+        ticketId: item.ticketId,
+      }));
+
+      // Fetch tickets by IDs
+      const tickets = await Promise.all(
+        ticketIds.map(async (ticketId) => {
+          const task = await storage.getTask(ticketId);
+          return task;
+        })
+      );
+
+      recentResolvedTickets = tickets.filter(
+        (ticket): ticket is Task =>
+          ticket !== null &&
+          ticket !== undefined &&
+          ticket.status === "resolved"
+      );
+
+      console.log(
+        `Found ${recentResolvedTickets.length} resolved tickets from queue`
+      );
+    } else if (options?.startDate && options?.endDate) {
+      recentResolvedTickets = await storage.getResolvedTicketsByDateRange(
+        options.startDate,
+        options.endDate
+      );
+      console.log(
+        `Processing resolved tickets from ${options.startDate.toISOString()} to ${options.endDate.toISOString()}`
+      );
+    } else {
+      // Default: Get recently resolved tickets (last 30 days)
+      recentResolvedTickets = await storage.getRecentResolvedTickets(30);
+    }
 
     if (recentResolvedTickets.length < 5) {
       console.log(
@@ -311,11 +379,61 @@ export const processKnowledgeLearning = async (): Promise<{
         `Analyzing ${tickets.length} resolved tickets in category: ${category}`
       );
 
-      const patterns = await analyzeResolvedTickets(tickets as any);
-      totalPatterns += patterns.length;
+      // Enrich tickets with comments and resolution data
+      const enrichedTickets = await Promise.all(
+        tickets.map(async (ticket) => {
+          // Fetch comments for this ticket
+          const comments = await storage.getTaskComments(ticket.id!);
+
+          // Calculate resolution time (hours between created and resolved)
+          const resolutionTime = ticket.resolvedAt
+            ? Math.max(
+                1,
+                Math.round(
+                  (ticket.resolvedAt.getTime() -
+                    (ticket.createdAt?.getTime() || Date.now())) /
+                    (1000 * 60 * 60)
+                )
+              )
+            : 4; // Default to 4 hours if no resolvedAt
+
+          // Extract resolution from last few comments (typically contain the solution)
+          const resolutionComments = comments.slice(-3);
+          const resolution =
+            resolutionComments
+              .map((c) => c.content)
+              .join("\n\n")
+              .trim() ||
+            ticket.notes ||
+            "Issue resolved";
+
+          return {
+            id: ticket.id!,
+            title: ticket.title,
+            description: ticket.description || "",
+            category: ticket.category,
+            priority: ticket.priority,
+            resolution,
+            resolutionTime,
+            comments: comments.map((c) => ({
+              content: c.content,
+              userId: c.userId,
+              createdAt: c.createdAt || new Date(),
+            })),
+          };
+        })
+      );
+
+      // Process tickets in batches using private function
+      const categoryPatterns = await processTicketsInBatches(
+        enrichedTickets,
+        tickets.length
+      );
+
+      totalPatterns += categoryPatterns.length;
 
       // Generate articles for significant patterns
-      for (const pattern of patterns) {
+      for (const pattern of categoryPatterns) {
         if (pattern.frequency >= 3 && pattern.successRate >= 70) {
           const relatedTicketIds = tickets
             .filter(
@@ -378,6 +496,19 @@ export const processKnowledgeLearning = async (): Promise<{
       articlesPublished: totalPublished,
     });
 
+    // If processing from queue, mark all queue items as completed
+    if (options?.useQueueItems && queueItems.length > 0) {
+      const queueItemIds = queueItems.map((item) => item.id);
+      await db
+        .update(learningQueue)
+        .set({
+          processStatus: "completed",
+          processedAt: new Date(),
+        })
+        .where(inArray(learningQueue.id, queueItemIds));
+      console.log(`Marked ${queueItems.length} queue items as completed`);
+    }
+
     console.log(
       `Knowledge learning completed: ${totalPatterns} patterns, ${totalArticles} articles created, ${totalPublished} published`
     );
@@ -389,6 +520,20 @@ export const processKnowledgeLearning = async (): Promise<{
     };
   } catch (error) {
     console.error("Knowledge learning process error:", error);
+
+    // If processing from queue, mark queue items as failed
+    if (options?.useQueueItems && queueItems.length > 0) {
+      const queueItemIds = queueItems.map((item) => item.id);
+      await db
+        .update(learningQueue)
+        .set({
+          processStatus: "failed",
+          error: error instanceof Error ? error.message : String(error),
+        })
+        .where(inArray(learningQueue.id, queueItemIds));
+      console.log(`Marked ${queueItems.length} queue items as failed`);
+    }
+
     return { patternsFound: 0, articlesCreated: 0, articlesPublished: 0 };
   }
 };
@@ -405,8 +550,8 @@ export const intelligentKnowledgeSearch = async (
     matchedContent: string;
   }>
 > => {
-  const client = getBedrockClient();
-  if (!client) {
+  const { bedrockClient, bedrockModelId: modelId } = await getBedrockClient();
+  if (!bedrockClient || !modelId) {
     // Fallback to basic search
     return await basicKnowledgeSearch(query, category, maxResults);
   }
@@ -430,55 +575,23 @@ Content Preview: ${article.content.substring(0, 300)}...
       )
       .join("\n");
 
-    const prompt = `
-You are a search relevance AI. Rank these knowledge base articles by relevance to the user query.
+    const prompt = buildKnowledgeSearchRankingPrompt(
+      query,
+      articleSummaries,
+      maxResults
+    );
 
-User Query: "${query}"
+    const result = await runKnowledgeSearchPrompt(prompt);
 
-Available Articles:
-${articleSummaries}
+    const rankings = JSON.parse(result.response) as any[];
 
-Respond with a JSON array of relevant articles, ranked by relevance:
-[
-  {
-    "articleIndex": 0,
-    "relevanceScore": 95,
-    "matchedContent": "Brief excerpt explaining why this is relevant"
-  }
-]
-
-Only include articles with relevance score >= 30. Limit to top ${maxResults} results.`;
-
-    const command = new InvokeModelCommand({
-      modelId: "anthropic.claude-3-sonnet-20240229-v1:0",
-      body: JSON.stringify({
-        anthropic_version: "bedrock-2023-05-31",
-        max_tokens: 1500,
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      }),
-      contentType: "application/json",
-      accept: "application/json",
-    });
-
-    const response = await client.send(command);
-    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-
-    if (responseBody.content && responseBody.content[0]?.text) {
-      const rankingsText = responseBody.content[0].text;
-      const rankings = JSON.parse(rankingsText);
-
+    if (rankings.length > 0) {
       return rankings.map((ranking: any) => ({
         article: articles[ranking.articleIndex],
         relevanceScore: ranking.relevanceScore,
         matchedContent: ranking.matchedContent,
       }));
     }
-
     return await basicKnowledgeSearch(query, category, maxResults);
   } catch (error) {
     console.error(
@@ -536,57 +649,26 @@ export const improveKnowledgeArticle = async (
     success: boolean;
   }
 ): Promise<boolean> => {
-  const client = getBedrockClient();
-  if (!client) return false;
+  const { bedrockClient, bedrockModelId: modelId } = await getBedrockClient();
+  if (!bedrockClient || !modelId) return false;
 
   try {
     const article = await storage.getKnowledgeArticle(articleId);
     if (!article) return false;
 
-    const prompt = `
-You are improving a knowledge base article based on new resolution data. 
+    const prompt = buildImproveKnowledgeArticlePrompt(
+      { title: article.title, content: article.content },
+      {
+        resolution: newResolutionData.resolution,
+        resolutionTime: newResolutionData.resolutionTime,
+        success: newResolutionData.success,
+      }
+    );
 
-Current Article:
-Title: ${article.title}
-Content: ${article.content}
+    const result = await runKnowledgeImproveArticlePrompt(prompt);
 
-New Resolution Data:
-Resolution: ${newResolutionData.resolution}
-Time taken: ${newResolutionData.resolutionTime} hours
-Success: ${newResolutionData.success}
-
-Suggest improvements to make the article more helpful. Respond with JSON:
-{
-  "shouldUpdate": true/false,
-  "improvedContent": "Updated article content if improvements needed",
-  "improvementReason": "Brief explanation of what was improved",
-  "confidence": confidence_score_0_to_100
-}
-
-Only suggest updates if the new data provides valuable insights not already covered.`;
-
-    const command = new InvokeModelCommand({
-      modelId: "anthropic.claude-3-sonnet-20240229-v1:0",
-      body: JSON.stringify({
-        anthropic_version: "bedrock-2023-05-31",
-        max_tokens: 2000,
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      }),
-      contentType: "application/json",
-      accept: "application/json",
-    });
-
-    const response = await client.send(command);
-    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-
-    if (responseBody.content && responseBody.content[0]?.text) {
-      const improvementText = responseBody.content[0].text;
-      const improvement = JSON.parse(improvementText);
+    if (result.response) {
+      const improvement = JSON.parse(result.response) as any;
 
       if (improvement.shouldUpdate && improvement.confidence >= 70) {
         await storage.updateKnowledgeArticle(articleId, {

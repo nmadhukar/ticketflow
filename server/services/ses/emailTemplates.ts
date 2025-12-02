@@ -32,12 +32,16 @@ export const defaultEmailTemplates = [
         .button {
             display: inline-block;
             background-color: #1e40af;
-            color: white;
+            color: white !important;
             padding: 14px 28px;
             text-decoration: none;
             border-radius: 6px;
             margin: 20px 0;
             font-weight: bold;
+        }
+        .button:hover {
+            background-color: #1e3a8a;
+            color: white !important;
         }
         .footer {
             text-align: center;
@@ -98,7 +102,16 @@ export const defaultEmailTemplates = [
 </body>
 </html>
     `,
-    variables: ["companyName", "invitedName", "inviterName", "email", "role", "department", "registrationUrl", "year"],
+    variables: [
+      "companyName",
+      "invitedName",
+      "inviterName",
+      "email",
+      "role",
+      "department",
+      "registrationUrl",
+      "year",
+    ],
     isActive: true,
   },
   {
@@ -215,7 +228,15 @@ export const defaultEmailTemplates = [
 </body>
 </html>
     `,
-    variables: ["companyName", "userName", "resetCode", "resetUrl", "ipAddress", "timestamp", "year"],
+    variables: [
+      "companyName",
+      "userName",
+      "resetCode",
+      "resetUrl",
+      "ipAddress",
+      "timestamp",
+      "year",
+    ],
     isActive: true,
   },
   {
@@ -318,7 +339,19 @@ export const defaultEmailTemplates = [
 </body>
 </html>
     `,
-    variables: ["companyName", "assigneeName", "ticketTitle", "ticketNumber", "priority", "category", "creatorName", "dueDate", "description", "ticketUrl", "year"],
+    variables: [
+      "companyName",
+      "assigneeName",
+      "ticketTitle",
+      "ticketNumber",
+      "priority",
+      "category",
+      "creatorName",
+      "dueDate",
+      "description",
+      "ticketUrl",
+      "year",
+    ],
     isActive: true,
   },
   {
@@ -419,7 +452,19 @@ export const defaultEmailTemplates = [
 </body>
 </html>
     `,
-    variables: ["companyName", "recipientName", "ticketNumber", "ticketTitle", "updaterName", "updateType", "updateDetails", "comment", "currentStatus", "ticketUrl", "year"],
+    variables: [
+      "companyName",
+      "recipientName",
+      "ticketNumber",
+      "ticketTitle",
+      "updaterName",
+      "updateType",
+      "updateDetails",
+      "comment",
+      "currentStatus",
+      "ticketUrl",
+      "year",
+    ],
     isActive: true,
-  }
+  },
 ];

@@ -58,13 +58,12 @@ export function useBedrockCostNotifications() {
   };
 
   const showCostLimitUpdatedNotification = (limits: any) => {
+    const policyLabel = limits.isFreeTierAccount
+      ? "Safe Mode"
+      : "Standard Mode";
     toast({
       title: "✅ Cost Limits Updated",
-      description: `Your AWS Bedrock cost limits have been updated:\n\nDaily Limit: $${
-        limits.dailyLimitUSD
-      }\nMonthly Limit: $${limits.monthlyLimitUSD}\nMax Requests/Day: ${
-        limits.maxRequestsPerDay
-      }\nAccount Type: ${limits.isFreeTierAccount ? "Free Tier" : "Paid"}`,
+      description: `Your AWS Bedrock cost limits have been updated:\n\nDaily Limit: $${limits.dailyLimitUSD}\nMonthly Limit: $${limits.monthlyLimitUSD}\nMax Requests/Day: ${limits.maxRequestsPerDay}\nUsage Policy: ${policyLabel}`,
       duration: 6000,
     });
   };

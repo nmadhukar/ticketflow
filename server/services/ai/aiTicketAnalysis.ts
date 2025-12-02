@@ -10,38 +10,15 @@
  * - Escalation detection for complex issues
  */
 
+import { storage } from "../../storage";
+import { getAISettings } from "../../admin/aiSettings";
+import { logSecurityEvent } from "../../security";
+import { buildAutoResponsePrompt, buildTicketAnalysisPrompt } from "./prompts";
 import {
-  BedrockRuntimeClient,
-  InvokeModelCommand,
-} from "@aws-sdk/client-bedrock-runtime";
-import { storage } from "./storage";
-import { getAISettings } from "./admin/aiSettings";
-import { logSecurityEvent } from "./security";
-
-/**
- * Initialize AWS Bedrock client with security validation
- * Returns null if credentials are not configured, allowing graceful degradation
- */
-const getBedrockClient = () => {
-  const region = process.env.AWS_REGION || "us-east-1";
-  const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
-
-  if (!accessKeyId || !secretAccessKey) {
-    console.warn(
-      "AWS credentials not configured. AI features will be disabled."
-    );
-    return null;
-  }
-
-  return new BedrockRuntimeClient({
-    region,
-    credentials: {
-      accessKeyId,
-      secretAccessKey,
-    },
-  });
-};
+  getBedrockClient,
+  runTicketAnalysisPrompt,
+  runAutoResponseForTicketPrompt,
+} from "./bedrockIntegration";
 
 /**
  * Structure for AI ticket analysis results
@@ -96,8 +73,11 @@ export const analyzeTicket = async (ticketData: {
   priority?: string;
   reporterId: string;
 }): Promise<TicketAnalysis | null> => {
-  const client = getBedrockClient();
-  if (!client) return null;
+  const { bedrockClient, bedrockModelId: modelId } = await getBedrockClient();
+  if (!bedrockClient || !modelId) {
+    console.error("No Bedrock model configured for ticket analysis");
+    return null;
+  }
 
   try {
     const settings = await getAISettings();
@@ -105,83 +85,31 @@ export const analyzeTicket = async (ticketData: {
       Math.max(5, Math.min(120, Number(settings.responseTimeout || 30))) * 1000;
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
-    const prompt = `
-You are an expert helpdesk AI analyst. Analyze this support ticket and provide structured insights.
+    const prompt = buildTicketAnalysisPrompt(ticketData);
 
-Ticket Details:
-Title: ${ticketData.title}
-Description: ${ticketData.description}
-Current Category: ${ticketData.category || "Not specified"}
-Current Priority: ${ticketData.priority || "Not specified"}
+    const result = await runTicketAnalysisPrompt(prompt);
 
-Please analyze this ticket and respond with a JSON object containing:
-{
-  "complexity": "low|medium|high|critical",
-  "category": "bug|feature|support|enhancement|incident|request",
-  "priority": "low|medium|high|urgent",
-  "estimatedResolutionTime": number_of_hours,
-  "tags": ["tag1", "tag2", "tag3"],
-  "confidence": confidence_score_0_to_100,
-  "reasoning": "Brief explanation of your analysis"
-}
+    const analysis = JSON.parse(result.response) as TicketAnalysis;
 
-Consider these factors:
-- Technical complexity indicators
-- User impact level
-- Urgency keywords
-- Similar historical patterns
-- Required expertise level
-
-Respond only with valid JSON.`;
-
-    const command = new InvokeModelCommand({
-      modelId: "anthropic.claude-3-sonnet-20240229-v1:0",
-      body: JSON.stringify({
-        anthropic_version: "bedrock-2023-05-31",
-        max_tokens: 1000,
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      }),
-      contentType: "application/json",
-      accept: "application/json",
+    // Store analysis in database
+    await storage.saveTicketAnalysis(ticketData.reporterId, {
+      ...analysis,
+      timestamp: new Date(),
     });
 
-    const response = await client.send(command, {
-      abortSignal: abortController.signal as any,
+    // Log AI usage for security audit
+    logSecurityEvent({
+      userId: ticketData.reporterId,
+      action: "ai_analysis",
+      resource: "ticket",
+      success: true,
+      details: {
+        confidence: analysis.confidence,
+        complexity: analysis.complexity,
+      },
     });
-    clearTimeout(timeoutId);
-    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
 
-    if (responseBody.content && responseBody.content[0]?.text) {
-      const analysisText = responseBody.content[0].text;
-      const analysis = JSON.parse(analysisText) as TicketAnalysis;
-
-      // Store analysis in database
-      await storage.saveTicketAnalysis(ticketData.reporterId, {
-        ...analysis,
-        timestamp: new Date(),
-      });
-
-      // Log AI usage for security audit
-      logSecurityEvent({
-        userId: ticketData.reporterId,
-        action: "ai_analysis",
-        resource: "ticket",
-        success: true,
-        details: {
-          confidence: analysis.confidence,
-          complexity: analysis.complexity,
-        },
-      });
-
-      return analysis;
-    }
-
-    return null;
+    return analysis;
   } catch (error) {
     console.error("AI ticket analysis error:", error);
     logSecurityEvent({
@@ -198,7 +126,7 @@ Respond only with valid JSON.`;
 };
 
 // Generate AI auto-response for ticket
-export const generateAutoResponse = async (
+export const generateAutoResponseForTicket = async (
   ticketData: {
     title: string;
     description: string;
@@ -208,8 +136,11 @@ export const generateAutoResponse = async (
   analysis: TicketAnalysis,
   knowledgeBaseContext?: string[]
 ): Promise<AutoResponse | null> => {
-  const client = getBedrockClient();
-  if (!client) return null;
+  const { bedrockClient, bedrockModelId: modelId } = await getBedrockClient();
+  if (!bedrockClient || !modelId) {
+    console.error("No Bedrock model configured for auto response");
+    return null;
+  }
 
   try {
     const settings = await getAISettings();
@@ -217,72 +148,24 @@ export const generateAutoResponse = async (
       Math.max(5, Math.min(120, Number(settings.responseTimeout || 30))) * 1000;
     const abortController = new AbortController();
     const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+
     const knowledgeContext =
       knowledgeBaseContext && knowledgeBaseContext.length > 0
-        ? `\n\nRelevant Knowledge Base Articles:\n${knowledgeBaseContext.join(
-            "\n---\n"
-          )}`
+        ? knowledgeBaseContext.join("\n---\n")
         : "";
 
-    const prompt = `
-You are a professional helpdesk support agent. Generate a helpful, empathetic response to this support ticket.
-
-Ticket Information:
-Title: ${ticketData.title}
-Description: ${ticketData.description}
-Category: ${ticketData.category}
-Priority: ${ticketData.priority}
-AI Analysis: Complexity ${analysis.complexity}, Est. resolution ${analysis.estimatedResolutionTime}h
-${knowledgeContext}
-
-Generate a response that:
-1. Acknowledges the issue empathetically
-2. Provides immediate helpful information or next steps
-3. Sets appropriate expectations for resolution time
-4. Includes relevant troubleshooting steps if applicable
-5. Mentions when they can expect follow-up
-
-Respond with a JSON object:
-{
-  "response": "Your professional support response",
-  "confidence": confidence_score_0_to_100,
-  "knowledgeBaseArticles": ["article_ids_referenced"],
-  "followUpActions": ["action1", "action2"],
-  "escalationNeeded": boolean
-}
-
-Keep the tone professional yet friendly. Be specific and actionable.`;
-
-    const command = new InvokeModelCommand({
-      modelId: "anthropic.claude-3-sonnet-20240229-v1:0",
-      body: JSON.stringify({
-        anthropic_version: "bedrock-2023-05-31",
-        max_tokens: 1500,
-        messages: [
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-      }),
-      contentType: "application/json",
-      accept: "application/json",
+    const prompt = buildAutoResponsePrompt({
+      title: ticketData.title,
+      description: ticketData.description,
+      category: ticketData.category,
+      priority: ticketData.priority,
+      analysis,
+      knowledgeContext,
     });
 
-    const response = await client.send(command, {
-      abortSignal: abortController.signal as any,
-    });
-    clearTimeout(timeoutId);
-    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-
-    if (responseBody.content && responseBody.content[0]?.text) {
-      const responseText = responseBody.content[0].text;
-      const autoResponse = JSON.parse(responseText) as AutoResponse;
-
-      return autoResponse;
-    }
-
-    return null;
+    const result = await runAutoResponseForTicketPrompt(prompt);
+    const autoResponse = JSON.parse(result.response) as AutoResponse;
+    return autoResponse;
   } catch (error) {
     console.error("AI auto-response generation error:", error);
     return null;
@@ -391,7 +274,7 @@ export const processTicketWithAI = async (ticketData: {
     const knowledgeContext = await searchKnowledgeBaseForTicket(ticketData);
 
     // Step 3: Generate auto-response
-    const autoResponse = await generateAutoResponse(
+    const autoResponse = await generateAutoResponseForTicket(
       ticketData,
       analysis,
       knowledgeContext

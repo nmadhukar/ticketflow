@@ -158,7 +158,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.email, email));
+    // Case-insensitive email lookup
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(ilike(users.email, email));
     return user;
   }
 
@@ -2676,6 +2680,29 @@ export class DatabaseStorage implements IStorage {
         and(
           eq(tasks.status, "resolved"),
           sql`${tasks.updatedAt} >= ${cutoffDate}`
+        )
+      )
+      .orderBy(desc(tasks.updatedAt));
+  }
+
+  async getResolvedTicketsByDateRange(
+    startDate: Date,
+    endDate: Date
+  ): Promise<Task[]> {
+    // Set time to start of day for startDate and end of day for endDate
+    const start = new Date(startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    return await db
+      .select()
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.status, "resolved"),
+          sql`${tasks.updatedAt} >= ${start}`,
+          sql`${tasks.updatedAt} <= ${end}`
         )
       )
       .orderBy(desc(tasks.updatedAt));

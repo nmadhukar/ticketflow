@@ -40,11 +40,13 @@ import {
 import { format } from "date-fns";
 
 // Queue Status Display Component
-function QueueStatusDisplay() {
-  const { data: queueStatus, isLoading } = useQuery({
-    queryKey: ["/api/admin/learning-queue"],
-  });
-
+function QueueStatusDisplay({
+  isLoading,
+  queueStatus,
+}: {
+  isLoading: boolean;
+  queueStatus: any;
+}) {
   if (isLoading) {
     return (
       <div className="text-sm text-muted-foreground">
@@ -97,6 +99,23 @@ function BatchProcessingControls() {
     end: format(new Date(), "yyyy-MM-dd"),
   });
 
+  // Get queue status to check if processing is active
+  const { data: queueStatus } = useQuery({
+    queryKey: ["/api/admin/learning-queue"],
+    refetchInterval: (query) => {
+      // Auto-refresh every 5 seconds if processing is active
+      const data = query.state.data as any;
+      const isProcessing = data?.isProcessing || data?.processing > 0;
+      return isProcessing ? 5000 : false;
+    },
+  });
+
+  const isProcessing =
+    (queueStatus as any)?.isProcessing || (queueStatus as any)?.processing > 0;
+  const pendingCount = (queueStatus as any)?.pending || 0;
+  const processingCount = (queueStatus as any)?.processing || 0;
+  const completedToday = (queueStatus as any)?.completedToday || 0;
+
   const processBatch = useMutation({
     mutationFn: async () => {
       const res = await apiRequest(
@@ -104,12 +123,22 @@ function BatchProcessingControls() {
         "/api/admin/batch-process",
         dateRange
       );
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || "Failed to start batch processing");
+      }
+
       return res.json();
     },
     onSuccess: (data) => {
       toast({
         title: "Batch processing started",
         description: `Processing ${data.ticketCount} resolved tickets...`,
+      });
+      // Invalidate queue status to refresh immediately
+      queryClient.invalidateQueries({
+        queryKey: ["/api/admin/learning-queue"],
       });
     },
     onError: (error: Error) => {
@@ -133,6 +162,7 @@ function BatchProcessingControls() {
             onChange={(e) =>
               setDateRange((prev) => ({ ...prev, start: e.target.value }))
             }
+            disabled={isProcessing}
           />
         </div>
         <div className="space-y-2">
@@ -144,17 +174,40 @@ function BatchProcessingControls() {
             onChange={(e) =>
               setDateRange((prev) => ({ ...prev, end: e.target.value }))
             }
+            disabled={isProcessing}
           />
         </div>
       </div>
 
+      {/* Processing Status Indicator */}
+      {isProcessing && (
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="pt-4">
+            <div className="flex items-center gap-3">
+              <RefreshCw className="h-5 w-5 animate-spin text-primary" />
+              <div className="flex-1">
+                <p className="text-sm font-medium">Processing in progress...</p>
+                <p className="text-xs text-muted-foreground">
+                  {processingCount} processing • {pendingCount} pending •{" "}
+                  {completedToday} completed today
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Button
         onClick={() => processBatch.mutate()}
-        disabled={processBatch.isPending}
+        disabled={processBatch.isPending || isProcessing}
         className="w-full"
       >
         <Zap className="h-4 w-4 mr-2" />
-        {processBatch.isPending ? "Processing..." : "Start Batch Processing"}
+        {processBatch.isPending
+          ? "Starting..."
+          : isProcessing
+          ? "Processing in progress..."
+          : "Start Batch Processing"}
       </Button>
     </div>
   );
@@ -242,7 +295,7 @@ function LearningAnalytics() {
 
       {(analytics as any)?.topCategories &&
         (analytics as any).topCategories.length > 0 && (
-          <div className="space-y-2">
+          <div className="space-y-2 px-10">
             <p className="text-sm font-medium">Top Knowledge Categories</p>
             <div className="space-y-1">
               {(analytics as any).topCategories.map(
@@ -266,6 +319,15 @@ function LearningAnalytics() {
 }
 
 export default function KnowledgeLearningQueue() {
+  // Get query state to track fetching status for animation
+  const {
+    isFetching,
+    data: queueStatus,
+    isLoading,
+  } = useQuery({
+    queryKey: ["/api/admin/learning-queue"],
+  });
+
   return (
     <Card className="flex flex-col gap-6">
       {/* Learning Queue Status */}
@@ -287,14 +349,19 @@ export default function KnowledgeLearningQueue() {
                   queryKey: ["/api/admin/learning-queue"],
                 })
               }
+              disabled={isFetching}
             >
-              <RefreshCw className="h-4 w-4 mr-2" />
+              <RefreshCw
+                className={`h-4 w-4 mr-2 ${
+                  isFetching || isLoading ? "animate-spin" : ""
+                }`}
+              />
               Refresh
             </Button>
           </div>
         </CardHeader>
         <CardContent>
-          <QueueStatusDisplay />
+          <QueueStatusDisplay isLoading={isLoading} queueStatus={queueStatus} />
         </CardContent>
       </Card>
       <Separator />

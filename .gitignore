@@ -44,3 +44,5 @@ config
 report
 
 DOCKER_USAGE.md
+
+.cursor

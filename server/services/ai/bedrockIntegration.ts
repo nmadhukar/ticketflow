@@ -20,28 +20,25 @@ import {
   loadCostLimits,
   CostEstimate,
 } from "../../services/ai/costMonitoring";
+import { PROMPT_TEMPLATES } from "./prompts";
+import { getAISettings } from "server/admin/aiSettings";
 
-// Bedrock model configuration - prioritize cheaper models for cost control
-const DEFAULT_MODEL_ID = "amazon.titan-text-express-v1"; // Globally available, cost-effective option
-const CLAUDE_3_SONNET_MODEL_ID = "anthropic.claude-3-sonnet-20240229-v1:0";
-const CLAUDE_3_OPUS_MODEL_ID = "anthropic.claude-3-opus-20240229-v1:0";
-
-// Initialize Bedrock client
-let bedrockClient: BedrockRuntimeClient | null = null;
-
-/**
- * Initialize AWS Bedrock client with credentials
- */
-export async function initializeBedrockClient() {
-  const { bedrockAccessKeyId, bedrockSecretAccessKey, bedrockRegion } =
-    await getBedrockConfig();
+export async function getBedrockClient(): Promise<{
+  bedrockClient: BedrockRuntimeClient | null;
+  bedrockModelId: string;
+}> {
+  const settings = await storage.getBedrockSettings();
+  const bedrockAccessKeyId = settings?.bedrockAccessKeyId;
+  const bedrockSecretAccessKey = settings?.bedrockSecretAccessKey;
+  const bedrockRegion = settings?.bedrockRegion || "us-east-1";
+  const bedrockModelId = settings?.bedrockModelId || "";
 
   if (!bedrockAccessKeyId || !bedrockSecretAccessKey || !bedrockRegion) {
     console.warn("AWS Bedrock credentials not configured");
-    return null;
+    return { bedrockClient: null, bedrockModelId: "" };
   }
 
-  bedrockClient = new BedrockRuntimeClient({
+  const bedrockClient = new BedrockRuntimeClient({
     region: bedrockRegion,
     credentials: {
       accessKeyId: bedrockAccessKeyId,
@@ -49,127 +46,14 @@ export async function initializeBedrockClient() {
     },
   });
 
-  return bedrockClient;
+  return { bedrockClient, bedrockModelId };
 }
 
-/**
- * Get Bedrock configuration from environment or database
- */
-async function getBedrockConfig() {
-  try {
-    const settings = await storage.getBedrockSettings();
-    if (settings) {
-      return {
-        bedrockAccessKeyId: settings.bedrockAccessKeyId,
-        bedrockSecretAccessKey: settings.bedrockSecretAccessKey,
-        bedrockRegion: settings.bedrockRegion || "us-east-1",
-      };
-    }
-  } catch (error) {
-    console.error("Error fetching Bedrock config from database:", error);
-  }
-
-  // Fallback to environment variables
-  return {
-    bedrockAccessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    bedrockSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    bedrockRegion: process.env.AWS_REGION || "us-east-1",
-  };
-}
-
-/**
- * Prompt templates for different ticket operations
- */
-const PROMPT_TEMPLATES = {
-  analyzeTicket: (ticket: Task) => `
-You are an expert IT support analyst. Analyze the following ticket and provide structured information.
-
-Ticket Information:
-Title: ${ticket.title}
-Description: ${ticket.description || "No description provided"}
-Current Status: ${ticket.status}
-Priority: ${ticket.priority}
-Category: ${ticket.category}
-
-Please analyze this ticket and provide:
-1. Key issues identified (list main problems)
-2. Suggested category (bug, feature, support, enhancement, incident, or request)
-3. Recommended priority (low, medium, high, or urgent)
-4. Complexity assessment (1-100 scale where 100 is most complex)
-5. Required expertise areas (list technical skills needed)
-6. Estimated resolution time (in hours)
-
-Format your response as JSON with these exact keys:
-{
-  "keyIssues": ["issue1", "issue2"],
-  "suggestedCategory": "category",
-  "recommendedPriority": "priority",
-  "complexityScore": 50,
-  "requiredExpertise": ["skill1", "skill2"],
-  "estimatedHours": 4
-}
-`,
-
-  generateResponse: (ticket: Task, knowledgeBase: string) => `
-You are a helpful IT support assistant. Generate a response for the following ticket based on available knowledge.
-
-Ticket Information:
-Title: ${ticket.title}
-Description: ${ticket.description || "No description provided"}
-Category: ${ticket.category}
-
-Relevant Knowledge Base Articles:
-${knowledgeBase || "No relevant articles found"}
-
-Please generate a helpful response that:
-1. Acknowledges the user's issue
-2. Provides clear, actionable steps if possible
-3. References relevant knowledge base articles if available
-4. Maintains a professional and friendly tone
-5. Suggests next steps or escalation if needed
-
-Keep the response concise but thorough. Do not exceed 500 words.
-`,
-
-  extractKnowledge: (ticket: Task, resolution: string) => `
-You are a knowledge management expert. Extract reusable knowledge from this resolved ticket.
-
-Ticket Information:
-Title: ${ticket.title}
-Description: ${ticket.description || "No description provided"}
-Category: ${ticket.category}
-
-Resolution:
-${resolution}
-
-Please extract knowledge that can help resolve similar issues in the future:
-1. Problem summary (one sentence)
-2. Root cause (if identifiable)
-3. Solution steps (numbered list)
-4. Prevention tips (if applicable)
-5. Related keywords for search
-
-Format your response as JSON:
-{
-  "title": "Brief descriptive title",
-  "summary": "One sentence problem summary",
-  "content": "Detailed solution with numbered steps",
-  "category": "${ticket.category}",
-  "tags": ["keyword1", "keyword2"],
-  "rootCause": "Root cause if known",
-  "preventionTips": ["tip1", "tip2"]
-}
-`,
-};
-
-/**
- * Invoke Claude model with cost monitoring and request blocking
- */
-async function invokeClaudeModel(
+async function invokeBedrockModel(
   prompt: string,
   operation: string = "general",
-  modelId: string = DEFAULT_MODEL_ID,
   maxTokens: number = 1000,
+  temperature: number = 0.3,
   userId?: string,
   ticketId?: string
 ): Promise<{
@@ -177,11 +61,9 @@ async function invokeClaudeModel(
   costEstimate: CostEstimate;
   actualTokens: { input: number; output: number };
 }> {
-  if (!bedrockClient) {
-    bedrockClient = await initializeBedrockClient();
-    if (!bedrockClient) {
-      throw new Error("AWS Bedrock client not initialized");
-    }
+  const { bedrockClient, bedrockModelId: modelId } = await getBedrockClient();
+  if (!bedrockClient || !modelId) {
+    throw new Error("No Bedrock model configured");
   }
 
   // Estimate tokens before making the request
@@ -242,7 +124,7 @@ async function invokeClaudeModel(
     requestBody = {
       anthropic_version: "bedrock-2023-05-31",
       max_tokens: effectiveMaxTokens,
-      temperature: 0.3,
+      temperature,
       messages: [
         {
           role: "user",
@@ -256,7 +138,7 @@ async function invokeClaudeModel(
       inputText: prompt,
       textGenerationConfig: {
         maxTokenCount: effectiveMaxTokens,
-        temperature: 0.3,
+        temperature,
         topP: 0.9,
       },
     };
@@ -265,7 +147,7 @@ async function invokeClaudeModel(
     requestBody = {
       prompt: prompt,
       maxTokens: effectiveMaxTokens,
-      temperature: 0.3,
+      temperature,
       topP: 0.9,
     };
   } else if (modelId.startsWith("meta.llama")) {
@@ -273,7 +155,7 @@ async function invokeClaudeModel(
     requestBody = {
       prompt: prompt,
       max_gen_len: effectiveMaxTokens,
-      temperature: 0.3,
+      temperature,
       top_p: 0.9,
     };
   } else {
@@ -281,7 +163,7 @@ async function invokeClaudeModel(
     requestBody = {
       anthropic_version: "bedrock-2023-05-31",
       max_tokens: effectiveMaxTokens,
-      temperature: 0.3,
+      temperature,
       messages: [
         {
           role: "user",
@@ -402,11 +284,14 @@ export async function analyzeTicket(
 }> {
   try {
     const prompt = PROMPT_TEMPLATES.analyzeTicket(ticket);
-    const result = await invokeClaudeModel(
+    const settings = await getAISettings();
+    const cap = Math.min(settings.maxTokens, 500);
+    const temperature = settings.temperature;
+    const result = await invokeBedrockModel(
       prompt,
       "analyzeTicket",
-      DEFAULT_MODEL_ID, // Use cheapest model for analysis
-      500, // Limit output tokens for cost control
+      cap,
+      temperature,
       userId,
       ticket.id?.toString()
     );
@@ -463,11 +348,14 @@ export async function generateResponse(
       .join("\n");
 
     const prompt = PROMPT_TEMPLATES.generateResponse(ticket, knowledgeBase);
-    const result = await invokeClaudeModel(
+    const settings = await getAISettings();
+    const cap = Math.min(settings.maxTokens, 800);
+    const temperature = settings.temperature;
+    const result = await invokeBedrockModel(
       prompt,
       "generateResponse",
-      DEFAULT_MODEL_ID, // Use cheapest model for responses
-      800, // Limit output tokens for cost control
+      cap,
+      temperature,
       userId,
       ticket.id?.toString()
     );
@@ -515,11 +403,15 @@ export async function updateKnowledgeBase(
 }> {
   try {
     const prompt = PROMPT_TEMPLATES.extractKnowledge(ticket, resolution);
-    const result = await invokeClaudeModel(
+    const settings = await getAISettings();
+    const cap = Math.min(settings.maxTokens, 600);
+    const temperature = settings.temperature;
+
+    const result = await invokeBedrockModel(
       prompt,
       "updateKnowledgeBase",
-      DEFAULT_MODEL_ID, // Use cheapest model for knowledge extraction
-      600, // Limit output tokens for cost control
+      cap,
+      temperature,
       userId,
       ticket.id?.toString()
     );
@@ -627,15 +519,23 @@ export async function testBedrockConnection(): Promise<{
   error?: string;
 }> {
   try {
-    await initializeBedrockClient();
+    const response = await getBedrockClient();
+
+    if (!response?.bedrockModelId) {
+      return {
+        success: false,
+        error: "No Bedrock model configured",
+      };
+    }
+
     const testPrompt =
       "Hello, this is a test. Please respond with 'Connection successful'.";
 
-    const result = await invokeClaudeModel(
+    const result = await invokeBedrockModel(
       testPrompt,
       "testConnection",
-      DEFAULT_MODEL_ID,
       50, // Very small response for testing
+      undefined,
       "system"
     );
 
@@ -665,13 +565,42 @@ export async function testBedrockConnection(): Promise<{
 }
 
 /**
- * Get cost statistics for dashboard
+ * Get a lightweight Bedrock configuration snapshot for dashboards
+ * - currentModelId: from bedrock_settings.bedrock_model_id (if configured)
+ * - isFreeTierAccount: from cost-limits configuration
+ */
+export async function getBedrockConfigSummary(): Promise<{
+  currentModelId: string | null;
+  isFreeTierAccount: boolean;
+}> {
+  const [settings] = await Promise.all([
+    storage.getBedrockSettings(),
+    // Load limits to determine account type
+  ]);
+
+  const { loadCostLimits } = await import("../../services/ai/costMonitoring");
+  const limits = loadCostLimits();
+
+  return {
+    currentModelId: settings?.bedrockRegion ? settings.bedrockModelId : null,
+    isFreeTierAccount: !!limits.isFreeTierAccount,
+  };
+}
+
+/**
+ * Get cost statistics plus configuration for dashboard
  */
 export async function getCostStatistics() {
   const { getCostStatistics } = await import(
     "../../services/ai/costMonitoring"
   );
-  return getCostStatistics();
+  const stats = getCostStatistics();
+  const config = await getBedrockConfigSummary();
+
+  return {
+    ...stats,
+    config,
+  };
 }
 
 /**
@@ -736,16 +665,98 @@ export async function exportUsageData(startDate?: string, endDate?: string) {
   return exportUsageData(startDate, endDate);
 }
 
+export async function runTicketAnalysisPrompt(prompt: string) {
+  const settings = await getAISettings();
+  const cap = Math.min(settings.maxTokens, 1000);
+  const temperature = settings.temperature;
+  return invokeBedrockModel(prompt, "ticketAnalysis", cap, temperature);
+}
+
+export async function runAutoResponseForTicketPrompt(prompt: string) {
+  const settings = await getAISettings();
+  const cap = Math.min(settings.maxTokens, 1500);
+  const temperature = settings.temperature;
+  return invokeBedrockModel(prompt, "autoResponse", cap, temperature);
+}
+
+export async function runKnowledgePatternPrompt(prompt: string) {
+  const settings = await getAISettings();
+  const cap = Math.min(settings.maxTokens, 2000);
+  const temperature = settings.temperature;
+  return invokeBedrockModel(
+    prompt,
+    "knowledge_analyzeResolvedTickets",
+    cap,
+    temperature
+  );
+}
+
+export async function runKnowledgeArticleGenerationPrompt(prompt: string) {
+  const settings = await getAISettings();
+  const cap = Math.min(settings.maxTokens, 1500); // keep your existing per-feature limit
+  const temperature = settings.temperature;
+  return invokeBedrockModel(
+    prompt,
+    "knowledge_generateArticle",
+    cap,
+    temperature
+  );
+}
+
+export async function runKnowledgePatternAnalysisPrompt(prompt: string) {
+  const settings = await getAISettings();
+  const cap = Math.min(settings.maxTokens, 2000);
+  const temperature = settings.temperature;
+  return invokeBedrockModel(
+    prompt,
+    "knowledge_analyzeResolvedTickets",
+    cap,
+    temperature
+  );
+}
+
+export async function runKnowledgeSearchPrompt(prompt: string) {
+  const settings = await getAISettings();
+  const cap = Math.min(settings.maxTokens, 1500);
+  const temperature = settings.temperature;
+  return invokeBedrockModel(
+    prompt,
+    "knowledge_searchRanking",
+    cap,
+    temperature
+  );
+}
+
+export async function runKnowledgeImproveArticlePrompt(prompt: string) {
+  const settings = await getAISettings();
+  const cap = Math.min(settings.maxTokens, 2000);
+  const temperature = settings.temperature;
+  return invokeBedrockModel(
+    prompt,
+    "knowledge_improveArticle",
+    cap,
+    temperature
+  );
+}
+
 // Export initialization function
 export const bedrockIntegration = {
-  initialize: initializeBedrockClient,
+  getBedrockClient,
   analyzeTicket,
   generateResponse,
   updateKnowledgeBase,
   calculateConfidence,
   testConnection: testBedrockConnection,
   getCostStatistics,
+  getBedrockConfigSummary,
   updateCostLimits,
   resetUsageData,
   exportUsageData,
+  runTicketAnalysisPrompt,
+  runAutoResponseForTicketPrompt,
+  runKnowledgePatternPrompt,
+  runKnowledgeArticleGenerationPrompt,
+  runKnowledgePatternAnalysisPrompt,
+  runKnowledgeSearchPrompt,
+  runKnowledgeImproveArticlePrompt,
 };

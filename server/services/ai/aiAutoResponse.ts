@@ -25,11 +25,6 @@ interface ComplexityFactors {
 }
 
 export class AIAutoResponseService {
-  constructor() {
-    // Initialize Bedrock client on service creation
-    bedrockIntegration.initialize();
-  }
-
   async analyzeTicket(ticket: Task): Promise<{
     autoResponse: string | null;
     confidence: number;
@@ -400,15 +395,6 @@ export class AIAutoResponseService {
 
 export const aiAutoResponseService = new AIAutoResponseService();
 
-// Export individual functions for testing
-export const analyzeTicket = (ticket: Task) =>
-  aiAutoResponseService.analyzeTicket(ticket);
-
-export const generateAutoResponse = (
-  ticket: Task,
-  knowledgeContext: any[],
-  settings?: any
-) => aiAutoResponseService.analyzeTicket(ticket);
 export const calculateConfidence = (
   ticket: Task,
   response: string,

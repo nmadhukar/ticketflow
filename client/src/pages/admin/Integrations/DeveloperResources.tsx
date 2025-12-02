@@ -3,8 +3,6 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-// Removed Tabs components; we render sections conditionally by activeTab
-import { BedrockUsageStats } from "@/components/bedrock-usage-stats";
 import { FaqCacheManager } from "@/components/faq-cache-manager";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -229,14 +227,6 @@ const DeveloperResources = () => {
               View API Documentation
             </a>
           </Button>
-        </div>
-
-        <Separator />
-
-        {/* Bedrock Usage Statistics */}
-        <div className="space-y-4">
-          <h4 className="text-sm font-medium">AI Usage Statistics</h4>
-          <BedrockUsageStats />
         </div>
 
         <Separator />

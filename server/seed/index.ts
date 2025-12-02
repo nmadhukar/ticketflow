@@ -5,3 +5,4 @@ export { seedTickets } from "./seedTickets";
 export { seedKnowledgeArticles } from "./seedKnowledge";
 export { seedHelpAndDocs } from "./seedHelpAndDocs";
 export { seedEmailTemplates } from "./seedEmailTemplates";
+export { seedKnowledgeLearning } from "./seed-knowledge-learning";

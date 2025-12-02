@@ -71,6 +71,7 @@ app.use((req, res, next) => {
         seedKnowledgeArticles,
         seedHelpAndDocs,
         seedEmailTemplates,
+        seedKnowledgeLearning,
       } = await import("./seed");
       await seedUsers();
       await seedDepartments();
@@ -79,6 +80,7 @@ app.use((req, res, next) => {
       await seedKnowledgeArticles();
       await seedHelpAndDocs();
       await seedEmailTemplates();
+      await seedKnowledgeLearning();
     } catch (error) {
       console.error("Failed to run seeders:", error);
     }

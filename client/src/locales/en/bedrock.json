@@ -13,9 +13,9 @@
     "of": "of ${{amount}}",
     "requests": "{{count}} requests",
     "accountType": {
-      "title": "Account Type",
-      "free": "Free Tier",
-      "paid": "Paid",
+      "title": "Usage Policy",
+      "free": "Safe Mode",
+      "paid": "Standard Mode",
       "freeNote": "Strict cost limits enabled",
       "paidNote": "Standard cost limits",
       "reqPerDay": "{{count}} req/day"
