@@ -739,6 +739,18 @@ export async function runKnowledgeImproveArticlePrompt(prompt: string) {
   );
 }
 
+export async function runChatPrompt(
+  systemMessage: string,
+  userMessage: string,
+  userId?: string
+) {
+  const settings = await getAISettings();
+  const cap = Math.min(settings.maxTokens, 1000);
+  const temperature = settings.temperature;
+  const prompt = `${systemMessage}\n\n${userMessage}`;
+  return invokeBedrockModel(prompt, "chat", cap, temperature, userId);
+}
+
 // Export initialization function
 export const bedrockIntegration = {
   getBedrockClient,
@@ -759,4 +771,5 @@ export const bedrockIntegration = {
   runKnowledgePatternAnalysisPrompt,
   runKnowledgeSearchPrompt,
   runKnowledgeImproveArticlePrompt,
+  runChatPrompt,
 };

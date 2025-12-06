@@ -83,6 +83,7 @@ export const PROMPT_TEMPLATES = {
     "preventionTips": ["tip1", "tip2"]
   }
   `,
+  aiChat:"You are a helpful assistant for TicketFlow, a ticketing system. Answer questions based on the provided context when available. Be concise and helpful."
 };
 
 // For AI ticket analysis (aiTicketAnalysis.ts)

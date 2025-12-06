@@ -101,6 +101,7 @@ import { DEFAULT_COMPANY, EMAIL_PROVIDERS } from "@shared/constants";
 import { getTicketMetaForUser } from "../permissions/tickets";
 import { registerTeamsRoutes } from "./teams";
 import { generateAutoResponseForTicket } from "server/services/ai/aiTicketAnalysis";
+import { PROMPT_TEMPLATES } from "server/services/ai/prompts";
 
 // Helper function to sanitize company name for S3 key
 function sanitizeCompanyNameForS3(companyName: string): string {
@@ -2704,13 +2705,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let response = "";
       const relevantDocIds: number[] = [];
       let usageData = null;
+      let aiSucceeded = false;
 
       if (hasBedrockCredentials) {
         // Use AWS Bedrock for intelligent responses
         try {
-          // Import AWS Bedrock client
-          const { BedrockRuntimeClient, InvokeModelCommand } = await import(
-            "@aws-sdk/client-bedrock-runtime"
+          // Import helper function (same pattern as knowledgeBaseLearning.ts)
+          const { runChatPrompt } = await import(
+            "../services/ai/bedrockIntegration"
           );
 
           // Get help documents for context
@@ -2729,124 +2731,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
 
-          // Configure AWS Bedrock client using Bedrock settings or environment variables
-          const bedrockClient = new BedrockRuntimeClient({
-            region:
-              bedrock?.bedrockRegion || process.env.AWS_REGION || "us-east-1",
-            credentials: {
-              accessKeyId: bedrock?.bedrockAccessKeyId || "",
-              secretAccessKey: bedrock?.bedrockSecretAccessKey || "",
-            },
-          });
-
-          // Prepare the system message and user message
-          const systemMessage =
-            "You are a helpful assistant for TicketFlow, a ticketing system. Answer questions based on the provided context when available. Be concise and helpful.";
-
           let userMessage = trimmedMessage;
           if (context) {
             userMessage = `Context:\n${context}\n\nUser question: ${trimmedMessage}`;
           }
 
-          // Enforce selected model only from Bedrock settings
-          const modelId = bedrock?.bedrockModelId || "";
-          if (!modelId) {
-            const currentUser = await storage.getUser(userId);
-            const msg =
-              currentUser?.role === "admin"
-                ? "No active AI model configured. Please select a model in AI Settings."
-                : "AI service is not configured. Please contact an administrator.";
-            return res.status(409).json({ message: msg });
-          }
-
-          // Validate against supported model families
-          const supportedFamilies = [
-            "amazon.titan",
-            "anthropic.claude",
-            "ai21.j2",
-            "meta.llama",
-          ];
-          if (!supportedFamilies.some((p) => modelId.startsWith(p))) {
-            const currentUser = await storage.getUser(userId);
-            const msg =
-              currentUser?.role === "admin"
-                ? `Selected model '${modelId}' is not supported. Choose a supported model (e.g., amazon.titan-text-express-v1).`
-                : "The selected AI model is not available. Please contact an administrator.";
-            return res.status(409).json({ message: msg });
-          }
-
-          // Build payload based on model family
-          let commandBody: any;
-          if (modelId.startsWith("amazon.titan")) {
-            commandBody = {
-              inputText: `${systemMessage}\n\n${userMessage}`,
-              textGenerationConfig: {
-                maxTokenCount: 1000,
-                temperature: 0.2,
-                topP: 0.9,
-              },
-            };
-          } else if (modelId.startsWith("anthropic.claude")) {
-            commandBody = {
-              anthropic_version: "bedrock-2023-05-31",
-              max_tokens: 1000,
-              temperature: 0.2,
-              system: systemMessage,
-              messages: [
-                {
-                  role: "user",
-                  content: userMessage,
-                },
-              ],
-            };
-          } else {
-            // Fallback to Claude-style payload if unknown
-            commandBody = {
-              anthropic_version: "bedrock-2023-05-31",
-              max_tokens: 1000,
-              temperature: 0.2,
-              system: systemMessage,
-              messages: [
-                {
-                  role: "user",
-                  content: userMessage,
-                },
-              ],
-            };
-          }
-
-          const command = new InvokeModelCommand({
-            modelId,
-            contentType: "application/json",
-            accept: "application/json",
-            body: JSON.stringify(commandBody),
-          });
-
-          // Invoke the model
-          const bedrockResponse = await bedrockClient.send(command);
-          const responseBody = JSON.parse(
-            new TextDecoder().decode(bedrockResponse.body)
+          // Use the helper function (handles model type, cost monitoring, token limits, etc.)
+          const result = await runChatPrompt(
+            PROMPT_TEMPLATES.aiChat,
+            userMessage,
+            userId
           );
-          if (modelId.startsWith("amazon.titan")) {
-            response = responseBody?.results?.[0]?.outputText || "";
-          } else {
-            response = responseBody.content?.[0]?.text || "";
+          response = result.response;
+
+          // Mark AI as successful if we got a valid response
+          if (response && response.trim().length > 0) {
+            aiSucceeded = true;
           }
 
-          // Track usage
-          const inputTokens = estimateTokenCount(systemMessage + userMessage);
-          const outputTokens = estimateTokenCount(response);
-          const totalTokens = inputTokens + outputTokens;
-          const cost = calculateBedrockCost(inputTokens, outputTokens, modelId);
-
+          // Track usage using actual tokens from the result
           usageData = await storage.trackBedrockUsage({
             userId,
             sessionId,
-            inputTokens,
-            outputTokens,
-            totalTokens,
-            modelId,
-            cost: cost.toFixed(6),
+            inputTokens: result.actualTokens.input,
+            outputTokens: result.actualTokens.output,
+            totalTokens: result.actualTokens.input + result.actualTokens.output,
+            modelId: result.costEstimate.modelId,
+            cost: result.costEstimate.estimatedCost.toFixed(6),
           });
 
           // Cache the response if it's a straightforward Q&A (not context-dependent)
@@ -2859,32 +2770,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
             });
           }
         } catch (error: any) {
-          console.error("Error calling AWS Bedrock:", error);
+          // If AI fails, fall back to help documents search (same as "AI not configured")
+          console.error(
+            "Error calling AWS Bedrock, falling back to help documents:",
+            error
+          );
           console.error("Error details:", error?.message, error?.name);
-          const currentUser = await storage.getUser(userId);
-          const isAdmin = currentUser?.role === "admin";
-          const unsupportedRegion =
-            typeof error?.message === "string" &&
-            /unsupported countries|unsupported regions|ValidationException/i.test(
-              error.message
-            );
-          if (unsupportedRegion) {
-            const adminMsg = `Selected model '${bedrock?.bedrockModelId}' is not available in this region. Please choose Amazon Titan Text Express or another supported model in AI Settings.`;
-            const userMsg =
-              "The AI model is not available right now. An administrator needs to adjust AI Settings.";
-            return res
-              .status(409)
-              .json({ message: isAdmin ? adminMsg : userMsg });
-          }
 
-          const adminMsg = `Failed to invoke model '${bedrock?.bedrockModelId}'. Check model access/permissions in AWS Bedrock or select a different model.`;
-          const userMsg =
-            "The AI service is temporarily unavailable. Please try again later.";
-          return res
-            .status(409)
-            .json({ message: isAdmin ? adminMsg : userMsg });
+          // Set flag to use fallback logic
+          aiSucceeded = false;
+          response = ""; // Clear any partial response
         }
-      } else {
+      }
+
+      // Fallback logic: Use help documents if AI is not configured OR if AI failed
+      if (!hasBedrockCredentials || !aiSucceeded || !response) {
         // No AWS credentials configured - use simple fallback
         try {
           // 1) Try company help documents
