@@ -756,23 +756,23 @@ export async function updateCostLimits(
       requestsPerHour: 300,
     };
     merged.dailyLimitUSD = Math.min(
-      merged.dailyLimitUSD || CAP.dailyUSD,
+      merged.dailyLimitUSD ?? CAP.dailyUSD,
       CAP.dailyUSD
     );
     merged.monthlyLimitUSD = Math.min(
-      merged.monthlyLimitUSD || CAP.monthlyUSD,
+      merged.monthlyLimitUSD ?? CAP.monthlyUSD,
       CAP.monthlyUSD
     );
     merged.maxTokensPerRequest = Math.min(
-      merged.maxTokensPerRequest || CAP.tokensPerRequest,
+      merged.maxTokensPerRequest ?? CAP.tokensPerRequest,
       CAP.tokensPerRequest
     );
     merged.maxRequestsPerDay = Math.min(
-      merged.maxRequestsPerDay || CAP.requestsPerDay,
+      merged.maxRequestsPerDay ?? CAP.requestsPerDay,
       CAP.requestsPerDay
     );
     merged.maxRequestsPerHour = Math.min(
-      merged.maxRequestsPerHour || CAP.requestsPerHour,
+      merged.maxRequestsPerHour ?? CAP.requestsPerHour,
       CAP.requestsPerHour
     );
   }

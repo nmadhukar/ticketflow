@@ -162,13 +162,13 @@ export default function AISettings() {
   });
 
   useEffect(() => {
-    if (costStats && (costStats as any).limits) {
+    if (costStats && (costStats as any).limits && !isEditingCostLimits) {
       setCostLimits((prev) => ({
         ...prev,
         ...(costStats as any).limits,
       }));
     }
-  }, [costStats]);
+  }, [costStats, isEditingCostLimits]);
 
   const [formData, setFormData] = useState<AISettings>({
     autoResponseEnabled: true,

@@ -153,12 +153,12 @@ export async function loadCostLimits(): Promise<CostLimits> {
     }
 
     return {
-      dailyLimitUSD: Number(settings.dailyLimitUsd || 50.0),
-      monthlyLimitUSD: Number(settings.monthlyLimitUsd || 100.0),
-      maxTokensPerRequest: settings.maxTokensPerRequest || 3000,
-      maxRequestsPerDay: settings.maxRequestsPerDay || 5000,
-      maxRequestsPerHour: settings.maxRequestsPerHour || 200,
-      isFreeTierAccount: settings.isFreeTierAccount || false,
+      dailyLimitUSD: Number(settings.dailyLimitUsd ?? 50.0),
+      monthlyLimitUSD: Number(settings.monthlyLimitUsd ?? 100.0),
+      maxTokensPerRequest: settings.maxTokensPerRequest ?? 3000,
+      maxRequestsPerDay: settings.maxRequestsPerDay ?? 5000,
+      maxRequestsPerHour: settings.maxRequestsPerHour ?? 200,
+      isFreeTierAccount: settings.isFreeTierAccount ?? false,
     };
   } catch (error) {
     console.error("Error loading cost limits:", error);
