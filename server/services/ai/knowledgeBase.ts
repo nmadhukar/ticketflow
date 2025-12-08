@@ -16,6 +16,7 @@ import {
   getBedrockClient,
   runKnowledgeArticleGenerationPrompt,
 } from "./bedrockIntegration";
+import { extractJSON } from "./jsonUtils";
 
 export class KnowledgeBaseService {
   async learnFromResolvedTicket(
@@ -200,7 +201,14 @@ export class KnowledgeBaseService {
       const prompt = buildCreateKnowledgeArticlePrompt(resolution);
       const result = await runKnowledgeArticleGenerationPrompt(prompt);
 
-      const aiArticle = JSON.parse(result.response) as KnowledgeArticle;
+      // Extract JSON from response (handles markdown code blocks and explanatory text)
+      let cleanedResponse = extractJSON(result.response);
+      if (!cleanedResponse || cleanedResponse.trim().length === 0) {
+        console.error("Empty response after JSON extraction");
+        return;
+      }
+
+      const aiArticle = JSON.parse(cleanedResponse) as KnowledgeArticle;
 
       // Save the enhanced article
       await this.saveKnowledgeArticle(

@@ -308,7 +308,7 @@ export const apiKeys = pgTable("api_keys", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-// AWS Bedrock settings for AI features
+// AWS Bedrock settings for AI features (consolidated - includes credentials, cost limits, and AI settings)
 export const bedrockSettings = pgTable("bedrock_settings", {
   id: serial("id").primaryKey(),
   // AWS Bedrock credentials
@@ -318,6 +318,44 @@ export const bedrockSettings = pgTable("bedrock_settings", {
   bedrockModelId: varchar("bedrock_model_id", { length: 100 }).default(
     "amazon.titan-text-express-v1"
   ),
+  // Cost Limits (from cost-limits.json)
+  dailyLimitUsd: decimal("daily_limit_usd", {
+    precision: 10,
+    scale: 2,
+  }).default("50.0"),
+  monthlyLimitUsd: decimal("monthly_limit_usd", {
+    precision: 10,
+    scale: 2,
+  }).default("100.0"),
+  maxTokensPerRequest: integer("max_tokens_per_request").default(3000),
+  maxRequestsPerDay: integer("max_requests_per_day").default(5000),
+  maxRequestsPerHour: integer("max_requests_per_hour").default(200),
+  isFreeTierAccount: boolean("is_free_tier_account").default(false),
+  // AI Settings - Auto-Response (from ai-settings.json)
+  autoResponseEnabled: boolean("auto_response_enabled").default(true),
+  confidenceThreshold: decimal("confidence_threshold", {
+    precision: 3,
+    scale: 2,
+  }).default("0.7"),
+  maxResponseLength: integer("max_response_length").default(1000),
+  responseTimeout: integer("response_timeout").default(30),
+  // AI Settings - Knowledge Base (from ai-settings.json)
+  autoLearnEnabled: boolean("auto_learn_enabled").default(true),
+  minResolutionScore: decimal("min_resolution_score", {
+    precision: 3,
+    scale: 2,
+  }).default("0.8"),
+  articleApprovalRequired: boolean("article_approval_required").default(true),
+  // AI Settings - Escalation (from ai-settings.json)
+  complexityThreshold: integer("complexity_threshold").default(70),
+  escalationEnabled: boolean("escalation_enabled").default(true),
+  escalationTeamId: integer("escalation_team_id").references(() => teams.id),
+  // AI Settings - Model Configuration (from ai-settings.json)
+  temperature: decimal("temperature", { precision: 3, scale: 2 }).default(
+    "0.3"
+  ),
+  maxTokens: integer("max_tokens").default(2000),
+  maxRequestsPerMinute: integer("max_requests_per_minute").default(20),
   // Configuration metadata
   isActive: boolean("is_active").default(true),
   updatedBy: varchar("updated_by").references(() => users.id),
@@ -675,20 +713,36 @@ export const teamsIntegrationSettings = pgTable("teams_integration_settings", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-// Bedrock usage tracking
-export const bedrockUsage = pgTable("bedrock_usage", {
-  id: serial("id").primaryKey(),
-  userId: varchar("user_id")
-    .references(() => users.id)
-    .notNull(),
-  sessionId: varchar("session_id", { length: 255 }).notNull(),
-  inputTokens: integer("input_tokens").notNull(),
-  outputTokens: integer("output_tokens").notNull(),
-  totalTokens: integer("total_tokens").notNull(),
-  modelId: varchar("model_id", { length: 255 }).notNull(),
-  cost: decimal("cost", { precision: 10, scale: 6 }).notNull(), // Cost in USD
-  createdAt: timestamp("created_at").defaultNow(),
-});
+// AI usage tracking (from bedrock-usage.json)
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    id: serial("id").primaryKey(),
+    timestamp: timestamp("timestamp").notNull().defaultNow(),
+    modelId: varchar("model_id", { length: 255 }).notNull(),
+    inputTokens: integer("input_tokens").notNull(),
+    outputTokens: integer("output_tokens").notNull(),
+    estimatedCost: decimal("estimated_cost", {
+      precision: 10,
+      scale: 6,
+    }).notNull(),
+    operation: varchar("operation", { length: 100 }).notNull(),
+    userId: varchar("user_id").references(() => users.id),
+    ticketId: integer("ticket_id").references(() => tasks.id),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    index("idx_ai_usage_timestamp").on(table.timestamp),
+    index("idx_ai_usage_operation").on(table.operation),
+    index("idx_ai_usage_user_id").on(table.userId),
+    index("idx_ai_usage_ticket_id").on(table.ticketId),
+    index("idx_ai_usage_model_id").on(table.modelId),
+    index("idx_ai_usage_timestamp_operation").on(
+      table.timestamp,
+      table.operation
+    ),
+  ]
+);
 
 // FAQ cache for frequently asked questions
 export const faqCache = pgTable("faq_cache", {
@@ -865,14 +919,13 @@ export type InsertSsoConfiguration = z.infer<
   typeof insertSsoConfigurationSchema
 >;
 
-// Bedrock usage schemas and types
-export const insertBedrockUsageSchema = createInsertSchema(bedrockUsage).omit({
+// AI usage schemas and types
+export const insertAIUsageSchema = createInsertSchema(aiUsage).omit({
   id: true,
   createdAt: true,
 });
-
-export type BedrockUsage = typeof bedrockUsage.$inferSelect;
-export type InsertBedrockUsage = z.infer<typeof insertBedrockUsageSchema>;
+export type AIUsage = typeof aiUsage.$inferSelect;
+export type InsertAIUsage = z.infer<typeof insertAIUsageSchema>;
 
 // FAQ cache schemas and types
 export const insertFaqCacheSchema = createInsertSchema(faqCache).omit({

@@ -1,6 +1,5 @@
 import { AISettings } from "@shared/interfaces";
-import fs from "fs";
-import path from "path";
+import { storage } from "../storage";
 
 const DEFAULT_SETTINGS: AISettings = {
   autoResponseEnabled: true,
@@ -25,38 +24,66 @@ const DEFAULT_SETTINGS: AISettings = {
   maxRequestsPerDay: 1000,
 };
 
-const DATA_DIR = path.join(process.cwd(), "server", "data");
-const SETTINGS_FILE = path.join(DATA_DIR, "ai-settings.json");
-
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
-
 export async function getAISettings(): Promise<AISettings> {
   try {
-    ensureDataDir();
-    if (!fs.existsSync(SETTINGS_FILE)) {
-      await saveAISettings(DEFAULT_SETTINGS);
+    const settings = await storage.getBedrockSettings();
+    if (!settings) {
       return DEFAULT_SETTINGS;
     }
-    const raw = fs.readFileSync(SETTINGS_FILE, "utf-8");
-    const parsed = JSON.parse(raw);
-    // Shallow merge with defaults to handle new fields
-    return { ...DEFAULT_SETTINGS, ...parsed };
-  } catch {
+
+    return {
+      autoResponseEnabled: settings.autoResponseEnabled ?? true,
+      confidenceThreshold: Number(settings.confidenceThreshold || 0.7),
+      maxResponseLength: settings.maxResponseLength || 1000,
+      responseTimeout: settings.responseTimeout || 30,
+      autoLearnEnabled: settings.autoLearnEnabled ?? true,
+      minResolutionScore: Number(settings.minResolutionScore || 0.8),
+      articleApprovalRequired: settings.articleApprovalRequired ?? true,
+      complexityThreshold: settings.complexityThreshold || 70,
+      escalationEnabled: settings.escalationEnabled ?? true,
+      escalationTeamId: settings.escalationTeamId || undefined,
+      bedrockModel: settings.bedrockModelId || "",
+      temperature: Number(settings.temperature || 0.3),
+      maxTokens: settings.maxTokens || 2000,
+      maxRequestsPerMinute: settings.maxRequestsPerMinute || 20,
+      maxRequestsPerHour: settings.maxRequestsPerHour || 0,
+      maxRequestsPerDay: settings.maxRequestsPerDay || 1000,
+    };
+  } catch (error) {
+    console.error("Error loading AI settings:", error);
     return DEFAULT_SETTINGS;
   }
 }
 
 export async function saveAISettings(
-  settings: Partial<AISettings>
+  settings: Partial<AISettings>,
+  userId: string = "system"
 ): Promise<AISettings> {
-  ensureDataDir();
   const current = await getAISettings();
   const merged = validateAISettings({ ...current, ...settings });
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(merged, null, 2), "utf-8");
+
+  await storage.updateBedrockSettings(
+    {
+      autoResponseEnabled: merged.autoResponseEnabled,
+      confidenceThreshold: merged.confidenceThreshold.toString(),
+      maxResponseLength: merged.maxResponseLength,
+      responseTimeout: merged.responseTimeout,
+      autoLearnEnabled: merged.autoLearnEnabled,
+      minResolutionScore: merged.minResolutionScore.toString(),
+      articleApprovalRequired: merged.articleApprovalRequired,
+      complexityThreshold: merged.complexityThreshold,
+      escalationEnabled: merged.escalationEnabled,
+      escalationTeamId: merged.escalationTeamId || null,
+      temperature: merged.temperature.toString(),
+      maxTokens: merged.maxTokens,
+      maxRequestsPerMinute: merged.maxRequestsPerMinute,
+      maxRequestsPerHour: merged.maxRequestsPerHour,
+      maxRequestsPerDay: merged.maxRequestsPerDay,
+      // Note: bedrockModel is stored in bedrockModelId, not updated here
+    },
+    userId
+  );
+
   return merged;
 }
 

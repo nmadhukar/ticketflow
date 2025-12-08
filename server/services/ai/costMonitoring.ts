@@ -5,8 +5,7 @@
  * for AWS Bedrock to prevent unexpected charges on free-tier accounts.
  */
 
-import fs from "fs";
-import path from "path";
+import { storage } from "../../storage";
 
 // AWS Bedrock pricing per 1M tokens (as of 2024)
 const BEDROCK_PRICING = {
@@ -101,10 +100,6 @@ export interface CostEstimate {
   operation: string;
 }
 
-const DATA_DIR = path.join(process.cwd(), "server", "data");
-const USAGE_FILE = path.join(DATA_DIR, "bedrock-usage.json");
-const LIMITS_FILE = path.join(DATA_DIR, "cost-limits.json");
-
 // Default cost limits for free-tier accounts
 const DEFAULT_FREE_TIER_LIMITS: CostLimits = {
   dailyLimitUSD: 5.0,
@@ -125,23 +120,22 @@ const DEFAULT_PAID_LIMITS: CostLimits = {
   isFreeTierAccount: false,
 };
 
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
-
 /**
- * Load usage records from file
+ * Load usage records from database
  */
-function loadUsageRecords(): UsageRecord[] {
+async function loadUsageRecords(): Promise<UsageRecord[]> {
   try {
-    ensureDataDir();
-    if (!fs.existsSync(USAGE_FILE)) {
-      return [];
-    }
-    const data = fs.readFileSync(USAGE_FILE, "utf-8");
-    return JSON.parse(data);
+    const records = await storage.getAIUsage();
+    return records.map((r) => ({
+      timestamp: r.timestamp.toISOString(),
+      modelId: r.modelId,
+      inputTokens: r.inputTokens,
+      outputTokens: r.outputTokens,
+      estimatedCost: Number(r.estimatedCost),
+      operation: r.operation,
+      userId: r.userId || undefined,
+      ticketId: r.ticketId?.toString() || undefined,
+    }));
   } catch (error) {
     console.error("Error loading usage records:", error);
     return [];
@@ -149,30 +143,23 @@ function loadUsageRecords(): UsageRecord[] {
 }
 
 /**
- * Save usage records to file
+ * Load cost limits from database
  */
-function saveUsageRecords(records: UsageRecord[]): void {
+export async function loadCostLimits(): Promise<CostLimits> {
   try {
-    ensureDataDir();
-    fs.writeFileSync(USAGE_FILE, JSON.stringify(records, null, 2), "utf-8");
-  } catch (error) {
-    console.error("Error saving usage records:", error);
-  }
-}
-
-/**
- * Load cost limits from file
- */
-export function loadCostLimits(): CostLimits {
-  try {
-    ensureDataDir();
-    if (!fs.existsSync(LIMITS_FILE)) {
-      const defaultLimits = DEFAULT_FREE_TIER_LIMITS;
-      saveCostLimits(defaultLimits);
-      return defaultLimits;
+    const settings = await storage.getBedrockSettings();
+    if (!settings) {
+      return DEFAULT_FREE_TIER_LIMITS;
     }
-    const data = fs.readFileSync(LIMITS_FILE, "utf-8");
-    return JSON.parse(data);
+
+    return {
+      dailyLimitUSD: Number(settings.dailyLimitUsd || 50.0),
+      monthlyLimitUSD: Number(settings.monthlyLimitUsd || 100.0),
+      maxTokensPerRequest: settings.maxTokensPerRequest || 3000,
+      maxRequestsPerDay: settings.maxRequestsPerDay || 5000,
+      maxRequestsPerHour: settings.maxRequestsPerHour || 200,
+      isFreeTierAccount: settings.isFreeTierAccount || false,
+    };
   } catch (error) {
     console.error("Error loading cost limits:", error);
     return DEFAULT_FREE_TIER_LIMITS;
@@ -180,12 +167,27 @@ export function loadCostLimits(): CostLimits {
 }
 
 /**
- * Save cost limits to file
+ * Save cost limits to database
  */
-export function saveCostLimits(limits: CostLimits): void {
+export async function saveCostLimits(
+  limits: CostLimits,
+  userId: string = "system"
+): Promise<void> {
   try {
-    ensureDataDir();
-    fs.writeFileSync(LIMITS_FILE, JSON.stringify(limits, null, 2), "utf-8");
+    const settings = await storage.getBedrockSettings();
+    if (settings) {
+      await storage.updateBedrockSettings(
+        {
+          dailyLimitUsd: limits.dailyLimitUSD.toString(),
+          monthlyLimitUsd: limits.monthlyLimitUSD.toString(),
+          maxTokensPerRequest: limits.maxTokensPerRequest,
+          maxRequestsPerDay: limits.maxRequestsPerDay,
+          maxRequestsPerHour: limits.maxRequestsPerHour,
+          isFreeTierAccount: limits.isFreeTierAccount,
+        },
+        userId
+      );
+    }
   } catch (error) {
     console.error("Error saving cost limits:", error);
   }
@@ -229,72 +231,72 @@ export function estimateTokens(text: string): number {
 /**
  * Record usage for billing analysis
  */
-export function recordUsage(
+export async function recordUsage(
   modelId: string,
   inputTokens: number,
   outputTokens: number,
   operation: string,
   userId?: string,
   ticketId?: string
-): void {
+): Promise<void> {
   const cost = estimateCost(modelId, inputTokens, outputTokens);
 
-  const usageRecord: UsageRecord = {
-    timestamp: new Date().toISOString(),
-    modelId,
-    inputTokens,
-    outputTokens,
-    estimatedCost: cost,
-    operation,
-    userId,
-    ticketId,
-  };
+  try {
+    // Validate userId - if it's "system" or empty, set to null to avoid foreign key constraint violation
+    // The user_id column is nullable, so null is valid for system operations
+    const validUserId =
+      userId && userId !== "system" && userId.trim() !== "" ? userId : null;
 
-  const records = loadUsageRecords();
-  records.push(usageRecord);
+    await storage.recordAIUsage({
+      timestamp: new Date(),
+      modelId,
+      inputTokens,
+      outputTokens,
+      estimatedCost: cost.toString(),
+      operation,
+      userId: validUserId,
+      ticketId: ticketId ? parseInt(ticketId) : null,
+    });
 
-  // Keep only last 30 days of records to prevent file from growing too large
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-  const filteredRecords = records.filter(
-    (record) => new Date(record.timestamp) > thirtyDaysAgo
-  );
-
-  saveUsageRecords(filteredRecords);
-
-  // Log usage for monitoring
-  console.log(
-    `[BEDROCK_USAGE] ${operation}: ${inputTokens} input + ${outputTokens} output tokens = $${cost.toFixed(
-      4
-    )}`
-  );
+    // Log usage for monitoring
+    console.log(
+      `[BEDROCK_USAGE] ${operation}: ${inputTokens} input + ${outputTokens} output tokens = $${cost.toFixed(
+        4
+      )}`
+    );
+  } catch (error) {
+    console.error("Error recording usage:", error);
+  }
 }
 
 /**
  * Get daily usage summary
  */
-export function getDailyUsage(date?: string): DailyUsage {
+export async function getDailyUsage(date?: string): Promise<DailyUsage> {
   const targetDate = date || new Date().toISOString().split("T")[0];
-  const records = loadUsageRecords();
+  const startDate = new Date(targetDate);
+  startDate.setHours(0, 0, 0, 0);
+  const endDate = new Date(targetDate);
+  endDate.setHours(23, 59, 59, 999);
 
-  const dayRecords = records.filter((record) =>
-    record.timestamp.startsWith(targetDate)
-  );
+  const records = await storage.getAIUsage({
+    startDate,
+    endDate,
+  });
 
   const summary: DailyUsage = {
     date: targetDate,
     totalInputTokens: 0,
     totalOutputTokens: 0,
     totalCost: 0,
-    requestCount: dayRecords.length,
+    requestCount: records.length,
     operations: {},
   };
 
-  dayRecords.forEach((record) => {
+  records.forEach((record) => {
     summary.totalInputTokens += record.inputTokens;
     summary.totalOutputTokens += record.outputTokens;
-    summary.totalCost += record.estimatedCost;
+    summary.totalCost += Number(record.estimatedCost);
     summary.operations[record.operation] =
       (summary.operations[record.operation] || 0) + 1;
   });
@@ -305,19 +307,22 @@ export function getDailyUsage(date?: string): DailyUsage {
 /**
  * Get monthly usage summary
  */
-export function getMonthlyUsage(year?: number, month?: number): DailyUsage {
+export async function getMonthlyUsage(
+  year?: number,
+  month?: number
+): Promise<DailyUsage> {
   const now = new Date();
   const targetYear = year || now.getFullYear();
   const targetMonth = month || now.getMonth() + 1;
 
-  const records = loadUsageRecords();
+  const startDate = new Date(targetYear, targetMonth - 1, 1);
+  startDate.setHours(0, 0, 0, 0);
+  const endDate = new Date(targetYear, targetMonth, 0);
+  endDate.setHours(23, 59, 59, 999);
 
-  const monthRecords = records.filter((record) => {
-    const recordDate = new Date(record.timestamp);
-    return (
-      recordDate.getFullYear() === targetYear &&
-      recordDate.getMonth() + 1 === targetMonth
-    );
+  const records = await storage.getAIUsage({
+    startDate,
+    endDate,
   });
 
   const summary: DailyUsage = {
@@ -325,14 +330,14 @@ export function getMonthlyUsage(year?: number, month?: number): DailyUsage {
     totalInputTokens: 0,
     totalOutputTokens: 0,
     totalCost: 0,
-    requestCount: monthRecords.length,
+    requestCount: records.length,
     operations: {},
   };
 
-  monthRecords.forEach((record) => {
+  records.forEach((record) => {
     summary.totalInputTokens += record.inputTokens;
     summary.totalOutputTokens += record.outputTokens;
-    summary.totalCost += record.estimatedCost;
+    summary.totalCost += Number(record.estimatedCost);
     summary.operations[record.operation] =
       (summary.operations[record.operation] || 0) + 1;
   });
@@ -343,13 +348,13 @@ export function getMonthlyUsage(year?: number, month?: number): DailyUsage {
 /**
  * Check if request should be blocked based on cost limits
  */
-export function shouldBlockRequest(
+export async function shouldBlockRequest(
   modelId: string,
   estimatedInputTokens: number,
   estimatedOutputTokens: number,
   operation: string
-): { blocked: boolean; reason?: string; estimatedCost: number } {
-  const limits = loadCostLimits();
+): Promise<{ blocked: boolean; reason?: string; estimatedCost: number }> {
+  const limits = await loadCostLimits();
   const estimatedCost = estimateCost(
     modelId,
     estimatedInputTokens,
@@ -357,7 +362,7 @@ export function shouldBlockRequest(
   );
 
   // Check daily cost limit
-  const dailyUsage = getDailyUsage();
+  const dailyUsage = await getDailyUsage();
   if (dailyUsage.totalCost + estimatedCost > limits.dailyLimitUSD) {
     return {
       blocked: true,
@@ -371,7 +376,7 @@ export function shouldBlockRequest(
   }
 
   // Check monthly cost limit
-  const monthlyUsage = getMonthlyUsage();
+  const monthlyUsage = await getMonthlyUsage();
   if (monthlyUsage.totalCost + estimatedCost > limits.monthlyLimitUSD) {
     return {
       blocked: true,
@@ -403,11 +408,10 @@ export function shouldBlockRequest(
     };
   }
 
-  // Check hourly request limit (approximate)
-  const hourlyRecords = loadUsageRecords().filter((record) => {
-    const recordTime = new Date(record.timestamp);
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    return recordTime > oneHourAgo;
+  // Check hourly request limit
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const hourlyRecords = await storage.getAIUsage({
+    startDate: oneHourAgo,
   });
 
   if (hourlyRecords.length >= limits.maxRequestsPerHour) {
@@ -424,16 +428,20 @@ export function shouldBlockRequest(
 /**
  * Get cost statistics for dashboard
  */
-export function getCostStatistics(): {
+export async function getCostStatistics(): Promise<{
   dailyUsage: DailyUsage;
   monthlyUsage: DailyUsage;
   limits: CostLimits;
   recentUsage: UsageRecord[];
-} {
-  const dailyUsage = getDailyUsage();
-  const monthlyUsage = getMonthlyUsage();
-  const limits = loadCostLimits();
-  const recentUsage = loadUsageRecords().slice(-10); // Last 10 requests
+}> {
+  const [dailyUsage, monthlyUsage, limits, allUsage] = await Promise.all([
+    getDailyUsage(),
+    getMonthlyUsage(),
+    loadCostLimits(),
+    loadUsageRecords(),
+  ]);
+
+  const recentUsage = allUsage.slice(-10); // Last 10 requests
 
   return {
     dailyUsage,
@@ -446,10 +454,9 @@ export function getCostStatistics(): {
 /**
  * Reset usage data (for testing or manual reset)
  */
-export function resetUsageData(): void {
+export async function resetUsageData(): Promise<void> {
   try {
-    ensureDataDir();
-    fs.writeFileSync(USAGE_FILE, "[]", "utf-8");
+    await storage.deleteAIUsage();
     console.log("Usage data reset successfully");
   } catch (error) {
     console.error("Error resetting usage data:", error);
@@ -459,21 +466,32 @@ export function resetUsageData(): void {
 /**
  * Export usage data for external analysis
  */
-export function exportUsageData(
+export async function exportUsageData(
   startDate?: string,
   endDate?: string
-): UsageRecord[] {
-  const records = loadUsageRecords();
+): Promise<UsageRecord[]> {
+  const filters: {
+    startDate?: Date;
+    endDate?: Date;
+  } = {};
 
-  if (!startDate && !endDate) {
-    return records;
+  if (startDate) {
+    filters.startDate = new Date(startDate);
+  }
+  if (endDate) {
+    filters.endDate = new Date(endDate);
   }
 
-  return records.filter((record) => {
-    const recordDate = new Date(record.timestamp);
-    const start = startDate ? new Date(startDate) : new Date(0);
-    const end = endDate ? new Date(endDate) : new Date();
+  const records = await storage.getAIUsage(filters);
 
-    return recordDate >= start && recordDate <= end;
-  });
+  return records.map((r) => ({
+    timestamp: r.timestamp.toISOString(),
+    modelId: r.modelId,
+    inputTokens: r.inputTokens,
+    outputTokens: r.outputTokens,
+    estimatedCost: Number(r.estimatedCost),
+    operation: r.operation,
+    userId: r.userId || undefined,
+    ticketId: r.ticketId?.toString() || undefined,
+  }));
 }

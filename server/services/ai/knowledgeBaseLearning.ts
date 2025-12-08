@@ -30,6 +30,7 @@ import {
   runKnowledgeSearchPrompt,
 } from "./bedrockIntegration";
 import { loadCostLimits, estimateTokens } from "./costMonitoring";
+import { extractJSON } from "./jsonUtils";
 
 /**
  * Structure for AI-generated knowledge articles
@@ -108,7 +109,13 @@ Comments: ${ticket.comments.map((c) => c.content).join("; ")}
     const prompt = buildResolvedTicketsPatternPrompt(ticketSummaries);
     const result = await runKnowledgePatternAnalysisPrompt(prompt);
 
-    const patterns = JSON.parse(result.response) as ResolutionPattern[];
+    // Extract JSON from response (handles markdown code blocks and explanatory text)
+    let cleanedResponse = extractJSON(result.response);
+    if (!cleanedResponse || cleanedResponse.trim().length === 0) {
+      throw new Error("Empty response after JSON extraction");
+    }
+
+    const patterns = JSON.parse(cleanedResponse) as ResolutionPattern[];
 
     // Log learning activity
     logSecurityEvent({
@@ -148,7 +155,13 @@ export const generateKnowledgeArticle = async (
     const prompt = buildKnowledgeArticlePrompt(pattern);
     const result = await runKnowledgePatternPrompt(prompt);
 
-    const articleData = JSON.parse(result.response) as KnowledgeArticle;
+    // Extract JSON from response
+    let cleanedResponse = extractJSON(result.response);
+    if (!cleanedResponse || cleanedResponse.trim().length === 0) {
+      throw new Error("Empty response after JSON extraction");
+    }
+
+    const articleData = JSON.parse(cleanedResponse) as KnowledgeArticle;
 
     const article: KnowledgeArticle = {
       ...articleData,
@@ -184,7 +197,7 @@ async function processTicketsInBatches(
   totalTicketsCount: number
 ): Promise<ResolutionPattern[]> {
   // Calculate dynamic batch size based on maxTokensPerRequest
-  const limits = loadCostLimits();
+  const limits = await loadCostLimits();
   const maxTokensPerRequest = limits.maxTokensPerRequest || 2000;
 
   // Estimate tokens for base prompt (without tickets)
@@ -583,7 +596,14 @@ Content Preview: ${article.content.substring(0, 300)}...
 
     const result = await runKnowledgeSearchPrompt(prompt);
 
-    const rankings = JSON.parse(result.response) as any[];
+    // Extract JSON from response
+    let cleanedResponse = extractJSON(result.response);
+    if (!cleanedResponse || cleanedResponse.trim().length === 0) {
+      // Fallback to basic search if JSON extraction fails
+      return await basicKnowledgeSearch(query, category, maxResults);
+    }
+
+    const rankings = JSON.parse(cleanedResponse) as any[];
 
     if (rankings.length > 0) {
       return rankings.map((ranking: any) => ({
@@ -668,7 +688,14 @@ export const improveKnowledgeArticle = async (
     const result = await runKnowledgeImproveArticlePrompt(prompt);
 
     if (result.response) {
-      const improvement = JSON.parse(result.response) as any;
+      // Extract JSON from response
+      let cleanedResponse = extractJSON(result.response);
+      if (!cleanedResponse || cleanedResponse.trim().length === 0) {
+        console.error("Empty response after JSON extraction");
+        return false;
+      }
+
+      const improvement = JSON.parse(cleanedResponse) as any;
 
       if (improvement.shouldUpdate && improvement.confidence >= 70) {
         await storage.updateKnowledgeArticle(articleId, {

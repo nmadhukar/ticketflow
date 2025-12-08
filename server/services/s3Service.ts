@@ -13,17 +13,25 @@ import { storage } from "../storage";
 /**
  * S3 Service for file upload, download, and deletion
  * Handles company logos and task attachments
+ *
+ * Configuration:
+ * - Access Key/Secret: bedrock_settings table ONLY (no env fallback)
+ * - Region: AWS_S3_REGION env variable first, then bedrockRegion from bedrock_settings, then "us-east-1" default
+ * - Bucket Name: AWS_S3_BUCKET_NAME environment variable ONLY (no bedrock_settings fallback)
  */
 class S3Service {
-  private client: S3Client;
-  private bucketName: string;
-  private region: string;
+  private client: S3Client | null = null;
+  private bucketName: string = "";
+  private settingsCache: {
+    accessKeyId: string | null;
+    secretAccessKey: string | null;
+    region: string;
+    expiresAt: number;
+  } | null = null;
+  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   constructor() {
-    const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
-    const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
-    this.region =
-      process.env.AWS_S3_REGION || process.env.AWS_REGION || "us-east-1";
+    // Bucket name is read from env variable only
     this.bucketName = process.env.AWS_S3_BUCKET_NAME || "";
 
     if (!this.bucketName) {
@@ -32,62 +40,111 @@ class S3Service {
       );
     }
 
+    // Client will be initialized when credentials are loaded from bedrock_settings
+  }
+
+  /**
+   * Get AWS credentials and region from bedrock_settings table
+   * Caches results for 5 minutes to avoid excessive DB queries
+   */
+  private async getAwsCredentials(): Promise<{
+    accessKeyId: string;
+    secretAccessKey: string;
+    region: string;
+  }> {
+    // Check cache first
+    if (
+      this.settingsCache &&
+      this.settingsCache.expiresAt > Date.now() &&
+      this.settingsCache.accessKeyId &&
+      this.settingsCache.secretAccessKey
+    ) {
+      return {
+        accessKeyId: this.settingsCache.accessKeyId,
+        secretAccessKey: this.settingsCache.secretAccessKey,
+        region: this.settingsCache.region,
+      };
+    }
+
+    // Fetch from bedrock_settings table
+    let bedrockSettings: any = null;
+    try {
+      bedrockSettings = await storage.getBedrockSettings();
+    } catch (error) {
+      console.error(
+        "Could not fetch bedrock_settings for S3 credentials:",
+        error
+      );
+      throw new Error(
+        "AWS credentials not found in bedrock_settings table. Please configure access key, secret, and region in AI Settings."
+      );
+    }
+
+    // Access Key and Secret: bedrock_settings ONLY (no env fallback)
+    const accessKeyId = bedrockSettings?.bedrockAccessKeyId || null;
+    const secretAccessKey = bedrockSettings?.bedrockSecretAccessKey || null;
+
+    if (!accessKeyId || !secretAccessKey) {
+      throw new Error(
+        "AWS credentials not configured in bedrock_settings table. Please configure access key and secret in AI Settings."
+      );
+    }
+
+    // Region: AWS_S3_REGION env variable first, then bedrockRegion, then default
+    // S3 bucket region can be different from Bedrock region
+    const region = "us-east-2";
+
+    // Update cache
+    this.settingsCache = {
+      accessKeyId,
+      secretAccessKey,
+      region,
+      expiresAt: Date.now() + this.CACHE_TTL,
+    };
+
+    // Initialize or update S3 client
     this.client = new S3Client({
-      region: this.region,
-      credentials:
-        accessKeyId && secretAccessKey
-          ? {
-              accessKeyId,
-              secretAccessKey,
-            }
-          : undefined,
+      region,
+      credentials: {
+        accessKeyId,
+        secretAccessKey,
+      },
     });
+
+    return { accessKeyId, secretAccessKey, region };
   }
 
   /**
    * Check if S3 is properly configured
-   * Checks environment variables OR bedrock_settings table for AWS credentials
-   * AWS_S3_BUCKET_NAME is required from environment variables only
+   * - Access Key/Secret: bedrock_settings table ONLY
+   * - Region: AWS_S3_REGION env variable or bedrockRegion from bedrock_settings (optional, has default)
+   * - Bucket Name: AWS_S3_BUCKET_NAME environment variable ONLY
    * @returns Object with isConfigured flag and missing configuration details
    */
   async isConfigured(): Promise<{ isConfigured: boolean; missing: string[] }> {
     const missing: string[] = [];
 
-    // Check environment variables first
-    const envAccessKeyId = process.env.AWS_ACCESS_KEY_ID;
-    const envSecretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
-
-    // Check bedrock_settings only if env vars are missing
-    let bedrockSettings: any = null;
-    if (!envAccessKeyId || !envSecretAccessKey) {
-      try {
-        bedrockSettings = await storage.getBedrockSettings();
-      } catch (error) {
-        // If bedrock_settings table doesn't exist or query fails, continue with env check only
-        console.warn(
-          "Could not check bedrock_settings for AWS credentials:",
-          error
-        );
-      }
-    }
-
-    // Check for AWS_ACCESS_KEY_ID in env OR bedrock_settings
-    const hasAccessKeyId =
-      !!envAccessKeyId || !!bedrockSettings?.bedrockAccessKeyId;
-    if (!hasAccessKeyId) {
-      missing.push("AWS_ACCESS_KEY_ID");
-    }
-
-    // Check for AWS_SECRET_ACCESS_KEY in env OR bedrock_settings
-    const hasSecretAccessKey =
-      !!envSecretAccessKey || !!bedrockSettings?.bedrockSecretAccessKey;
-    if (!hasSecretAccessKey) {
-      missing.push("AWS_SECRET_ACCESS_KEY");
-    }
-
-    // AWS_S3_BUCKET_NAME is required (only from environment variables)
+    // Check bucket name from env variable
     if (!this.bucketName) {
-      missing.push("AWS_S3_BUCKET_NAME");
+      missing.push("AWS_S3_BUCKET_NAME (environment variable)");
+    }
+
+    // Check credentials from bedrock_settings table
+    try {
+      const bedrockSettings = await storage.getBedrockSettings();
+
+      if (!bedrockSettings?.bedrockAccessKeyId) {
+        missing.push("bedrock_access_key_id (in bedrock_settings table)");
+      }
+
+      if (!bedrockSettings?.bedrockSecretAccessKey) {
+        missing.push("bedrock_secret_access_key (in bedrock_settings table)");
+      }
+
+      // Region is optional (has default), but we check if it exists
+      // No need to add to missing if it's not set, as it has a default
+    } catch (error) {
+      missing.push("bedrock_settings table (unable to access)");
     }
 
     return {
@@ -98,10 +155,6 @@ class S3Service {
 
   /**
    * Upload a file to S3
-   * @param key - S3 object key (path)
-   * @param buffer - File buffer
-   * @param contentType - MIME type
-   * @returns S3 object key
    */
   async uploadFile(
     key: string,
@@ -109,7 +162,13 @@ class S3Service {
     contentType: string
   ): Promise<string> {
     if (!this.bucketName) {
-      throw new Error("S3 bucket name not configured");
+      throw new Error("S3 bucket name not configured (AWS_S3_BUCKET_NAME)");
+    }
+
+    await this.getAwsCredentials();
+
+    if (!this.client) {
+      throw new Error("S3 client not initialized");
     }
 
     try {
@@ -134,11 +193,16 @@ class S3Service {
 
   /**
    * Delete a file from S3
-   * @param key - S3 object key
    */
   async deleteFile(key: string): Promise<void> {
     if (!this.bucketName) {
-      throw new Error("S3 bucket name not configured");
+      throw new Error("S3 bucket name not configured (AWS_S3_BUCKET_NAME)");
+    }
+
+    await this.getAwsCredentials();
+
+    if (!this.client) {
+      throw new Error("S3 client not initialized");
     }
 
     try {
@@ -171,22 +235,24 @@ class S3Service {
     } catch (error) {
       console.error("S3 delete error:", error);
       // Don't throw - allow deletion to continue even if S3 delete fails
-      // This prevents database cleanup from being blocked
     }
   }
 
   /**
    * Generate a presigned URL for secure file access
-   * @param key - S3 object key
-   * @param expiresIn - URL expiration in seconds (default: 3600 = 1 hour)
-   * @returns Presigned URL
    */
   async getPresignedUrl(
     key: string,
     expiresIn: number = 3600
   ): Promise<string> {
     if (!this.bucketName) {
-      throw new Error("S3 bucket name not configured");
+      throw new Error("S3 bucket name not configured (AWS_S3_BUCKET_NAME)");
+    }
+
+    await this.getAwsCredentials();
+
+    if (!this.client) {
+      throw new Error("S3 client not initialized");
     }
 
     try {
@@ -209,9 +275,6 @@ class S3Service {
 
   /**
    * Extract S3 key from URL
-   * Handles both full S3 URLs and stored keys
-   * @param url - S3 URL or key
-   * @returns S3 key
    */
   extractKeyFromUrl(url: string): string {
     // If it's already just a key (no http/https), return as is
@@ -220,23 +283,19 @@ class S3Service {
     }
 
     // Extract key from S3 URL
-    // Format: https://bucket.s3.region.amazonaws.com/key or https://s3.region.amazonaws.com/bucket/key
     try {
       const urlObj = new URL(url);
-      // Remove leading slash and bucket name if present
       let key = urlObj.pathname.replace(/^\/+/, "");
-      if (key.startsWith(`${this.bucketName}/`)) {
-        key = key.replace(`${this.bucketName}/`, "");
-      }
+      // Bucket name is dynamic, so we can't hardcode it here
+      // Just return the pathname after removing leading slashes
       return key;
     } catch {
-      // If URL parsing fails, assume it's already a key
       return url;
     }
   }
 
   /**
-   * Check if a URL is an S3 URL/key (not base64 data URL)
+   * Check if a URL is an S3 URL/key
    */
   isS3Url(url: string): boolean {
     return !url.startsWith("data:");
@@ -244,8 +303,6 @@ class S3Service {
 
   /**
    * Check if a file exists in S3
-   * @param key - S3 object key
-   * @returns true if file exists, false otherwise
    */
   async fileExists(key: string): Promise<boolean> {
     if (!this.bucketName) {
@@ -253,6 +310,12 @@ class S3Service {
     }
 
     try {
+      await this.getAwsCredentials();
+
+      if (!this.client) {
+        return false;
+      }
+
       await this.client.send(
         new HeadObjectCommand({
           Bucket: this.bucketName,
@@ -267,7 +330,6 @@ class S3Service {
       ) {
         return false;
       }
-      // For other errors, log and return false
       console.warn(`Error checking file existence for ${key}:`, error);
       return false;
     }
@@ -275,8 +337,6 @@ class S3Service {
 
   /**
    * Get file metadata from S3
-   * @param key - S3 object key
-   * @returns File metadata or null if not found
    */
   async getFileMetadata(key: string): Promise<{
     size: number;
@@ -285,7 +345,13 @@ class S3Service {
     etag: string;
   } | null> {
     if (!this.bucketName) {
-      throw new Error("S3 bucket name not configured");
+      throw new Error("S3 bucket name not configured (AWS_S3_BUCKET_NAME)");
+    }
+
+    await this.getAwsCredentials();
+
+    if (!this.client) {
+      throw new Error("S3 client not initialized");
     }
 
     try {
@@ -313,11 +379,7 @@ class S3Service {
   }
 
   /**
-   * List objects in S3 bucket with optional prefix filter
-   * @param prefix - Optional prefix to filter objects (e.g., "attachments/")
-   * @param maxKeys - Maximum number of keys to return (default: 1000)
-   * @param continuationToken - Token for pagination
-   * @returns List of object keys and metadata
+   * List objects in S3 bucket
    */
   async listObjects(
     prefix?: string,
@@ -333,7 +395,13 @@ class S3Service {
     nextContinuationToken?: string;
   }> {
     if (!this.bucketName) {
-      throw new Error("S3 bucket name not configured");
+      throw new Error("S3 bucket name not configured (AWS_S3_BUCKET_NAME)");
+    }
+
+    await this.getAwsCredentials();
+
+    if (!this.client) {
+      throw new Error("S3 client not initialized");
     }
 
     try {
@@ -369,17 +437,20 @@ class S3Service {
   }
 
   /**
-   * Get total storage size and file count for a prefix
-   * Useful for monitoring storage usage by folder/prefix
-   * @param prefix - Prefix to filter objects (e.g., "attachments/")
-   * @returns Total size in bytes and file count
+   * Get total storage size and file count
    */
   async getStorageStats(prefix?: string): Promise<{
     totalSize: number;
     fileCount: number;
   }> {
     if (!this.bucketName) {
-      throw new Error("S3 bucket name not configured");
+      throw new Error("S3 bucket name not configured (AWS_S3_BUCKET_NAME)");
+    }
+
+    await this.getAwsCredentials();
+
+    if (!this.client) {
+      throw new Error("S3 client not initialized");
     }
 
     let totalSize = 0;
@@ -405,21 +476,24 @@ class S3Service {
 
   /**
    * Delete multiple files from S3 in batch
-   * @param keys - Array of S3 object keys to delete
-   * @returns Array of successfully deleted keys and failed keys
    */
   async deleteFiles(keys: string[]): Promise<{
     deleted: string[];
     failed: Array<{ key: string; error: string }>;
   }> {
     if (!this.bucketName) {
-      throw new Error("S3 bucket name not configured");
+      throw new Error("S3 bucket name not configured (AWS_S3_BUCKET_NAME)");
+    }
+
+    await this.getAwsCredentials();
+
+    if (!this.client) {
+      throw new Error("S3 client not initialized");
     }
 
     const deleted: string[] = [];
     const failed: Array<{ key: string; error: string }> = [];
 
-    // Delete files in parallel (with reasonable concurrency limit)
     const batchSize = 10;
     for (let i = 0; i < keys.length; i += batchSize) {
       const batch = keys.slice(i, i + batchSize);
@@ -451,7 +525,6 @@ class S3Service {
 
   /**
    * Verify S3 connection and permissions
-   * @returns Object with connection status and any errors
    */
   async healthCheck(): Promise<{
     healthy: boolean;
@@ -468,7 +541,6 @@ class S3Service {
     }
 
     try {
-      // Try to list objects (with limit 1) to verify permissions
       await this.listObjects(undefined, 1);
       return { healthy: true, configured: true };
     } catch (error) {
@@ -484,16 +556,15 @@ class S3Service {
   }
 
   /**
-   * Get bucket region
-   * @returns AWS region string
+   * Get bucket region (from bedrock_settings)
    */
-  getRegion(): string {
-    return this.region;
+  async getRegion(): Promise<string> {
+    const credentials = await this.getAwsCredentials();
+    return credentials.region;
   }
 
   /**
-   * Get bucket name
-   * @returns Bucket name or empty string if not configured
+   * Get bucket name (from environment variable)
    */
   getBucketName(): string {
     return this.bucketName;

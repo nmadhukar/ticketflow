@@ -952,10 +952,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         // Run AI analysis for auto-response (skip when Bedrock not configured)
+        const bedrockSettings = await storage.getBedrockSettings();
         const bedrockConfigured =
-          !!process.env.AWS_ACCESS_KEY_ID &&
-          !!process.env.AWS_SECRET_ACCESS_KEY &&
-          !!process.env.AWS_REGION;
+          !!bedrockSettings?.bedrockAccessKeyId &&
+          !!bedrockSettings?.bedrockSecretAccessKey &&
+          !!bedrockSettings?.bedrockRegion;
 
         if (bedrockConfigured) {
           try {
@@ -2165,7 +2166,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...(await getAISettings()),
         ...(req.body || {}),
       });
-      const saved = await saveAISettings(next);
+      const saved = await saveAISettings(next, userId);
       res.json(saved);
     } catch (error) {
       console.error("Error updating AI settings:", error);
@@ -2750,15 +2751,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
 
           // Track usage using actual tokens from the result
-          usageData = await storage.trackBedrockUsage({
+          const { recordUsage } = await import("../services/ai/costMonitoring");
+          await recordUsage(
+            result.costEstimate.modelId,
+            result.actualTokens.input,
+            result.actualTokens.output,
+            "aiChat",
+            userId,
+            undefined // ticketId not available in chat context
+          );
+          usageData = {
             userId,
             sessionId,
             inputTokens: result.actualTokens.input,
             outputTokens: result.actualTokens.output,
             totalTokens: result.actualTokens.input + result.actualTokens.output,
             modelId: result.costEstimate.modelId,
-            cost: result.costEstimate.estimatedCost.toFixed(6),
-          });
+            cost: result.costEstimate.estimatedCost,
+          };
 
           // Cache the response if it's a straightforward Q&A (not context-dependent)
           if (!context && response.length > 50) {
@@ -2849,7 +2859,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               inputTokens: usageData.inputTokens,
               outputTokens: usageData.outputTokens,
               totalTokens: usageData.totalTokens,
-              cost: parseFloat(usageData.cost),
+              cost: usageData.cost,
             }
           : undefined,
       });
@@ -2921,12 +2931,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? new Date(req.query.endDate as string)
         : undefined;
 
-      const usage = await storage.getBedrockUsageByUser(
-        targetUserId,
+      const usage = await storage.getAIUsage({
+        userId: targetUserId,
         startDate,
-        endDate
-      );
-      res.json(usage);
+        endDate,
+      });
+      // Convert to legacy format for backward compatibility
+      const legacyUsage = usage.map((u) => ({
+        id: u.id,
+        userId: u.userId,
+        sessionId: "", // Not available in ai_usage
+        inputTokens: u.inputTokens,
+        outputTokens: u.outputTokens,
+        totalTokens: u.inputTokens + u.outputTokens,
+        modelId: u.modelId,
+        cost: Number(u.estimatedCost),
+        createdAt: u.createdAt,
+      }));
+      res.json(legacyUsage);
     } catch (error) {
       console.error("Error fetching Bedrock usage:", error);
       res.status(500).json({ message: "Failed to fetch Bedrock usage" });
@@ -2976,14 +2998,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           isFreeTierAccount,
         } = req.body;
 
-        const updatedLimits = await bedrockIntegration.updateCostLimits({
-          dailyLimitUSD,
-          monthlyLimitUSD,
-          maxTokensPerRequest,
-          maxRequestsPerDay,
-          maxRequestsPerHour,
-          isFreeTierAccount,
-        });
+        const updatedLimits = await bedrockIntegration.updateCostLimits(
+          {
+            dailyLimitUSD,
+            monthlyLimitUSD,
+            maxTokensPerRequest,
+            maxRequestsPerDay,
+            maxRequestsPerHour,
+            isFreeTierAccount,
+          },
+          userId
+        );
 
         res.json(updatedLimits);
       } catch (error) {
@@ -4316,18 +4341,117 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const taskId = parseInt(req.params.id);
       const [autoResponse] = await db
-        .select()
+        .select({
+          id: ticketAutoResponses.id,
+          ticketId: ticketAutoResponses.ticketId,
+          aiResponse: ticketAutoResponses.aiResponse,
+          confidenceScore: ticketAutoResponses.confidenceScore,
+          wasHelpful: ticketAutoResponses.wasHelpful,
+          wasApplied: ticketAutoResponses.wasApplied,
+          respondedBy: ticketAutoResponses.respondedBy,
+          createdAt: ticketAutoResponses.createdAt,
+          respondedByName: sql<string | null>`COALESCE(
+            NULLIF(TRIM(${users.firstName} || ' ' || ${users.lastName}), ''),
+            ${users.email},
+            'System'
+          )`.as("responded_by_name"),
+        })
         .from(ticketAutoResponses)
+        .leftJoin(users, eq(ticketAutoResponses.respondedBy, users.id))
         .where(eq(ticketAutoResponses.ticketId, taskId))
         .orderBy(desc(ticketAutoResponses.createdAt))
         .limit(1);
 
-      res.json(autoResponse || null);
+      if (autoResponse) {
+        // If respondedBy is null, set respondedByName to "System"
+        if (!autoResponse.respondedBy) {
+          (autoResponse as any).respondedByName = "System";
+        }
+        res.json(autoResponse);
+      } else {
+        res.json(null);
+      }
     } catch (error) {
       console.error("Error fetching auto-response:", error);
       res.status(500).json({ message: "Failed to fetch auto-response" });
     }
   });
+
+  // Generate auto-response for an existing ticket (on-demand)
+  app.post(
+    "/api/tasks/:id/auto-response/generate",
+    isAuthenticated,
+    async (req, res) => {
+      try {
+        const taskId = parseInt(req.params.id);
+        const userId = getUserId(req);
+        const task = await storage.getTask(taskId);
+
+        if (!task) {
+          return res.status(404).json({ message: "Ticket not found" });
+        }
+
+        // Check if Bedrock is configured
+        const bedrockSettings = await storage.getBedrockSettings();
+        if (
+          !bedrockSettings?.bedrockAccessKeyId ||
+          !bedrockSettings?.bedrockSecretAccessKey
+        ) {
+          return res.status(503).json({ message: "AI service not configured" });
+        }
+
+        // Check AI settings
+        const aiSettings = await getAISettings();
+        if (!aiSettings.autoResponseEnabled) {
+          return res
+            .status(400)
+            .json({ message: "Auto-response is disabled in settings" });
+        }
+
+        // Generate auto-response
+        const { aiAutoResponseService } = await import(
+          "../services/ai/aiAutoResponse"
+        );
+        const analysis = await aiAutoResponseService.analyzeTicket(task);
+
+        if (!analysis.autoResponse) {
+          return res.status(503).json({
+            message: "Could not generate auto-response",
+            confidence: analysis.confidence,
+          });
+        }
+
+        // Save auto-response (even if confidence is below threshold for manual generation)
+        await aiAutoResponseService.saveAutoResponse(
+          task.id,
+          analysis.autoResponse,
+          analysis.confidence,
+          false // Not auto-applied, user can review first
+        );
+
+        res.json({
+          autoResponse: analysis.autoResponse,
+          confidence: analysis.confidence,
+          complexity: analysis.complexity,
+          shouldEscalate: analysis.shouldEscalate,
+        });
+      } catch (error: any) {
+        console.error("Error generating auto-response:", error);
+
+        // If request was blocked due to cost limits
+        if (error.isBlocked) {
+          return res.status(429).json({
+            message: "Request blocked due to cost limits",
+            reason: error.message,
+            costEstimate: error.costEstimate,
+            isBlocked: true,
+          });
+        }
+
+        res.status(500).json({ message: "Failed to generate auto-response" });
+      }
+    }
+  );
 
   // Update auto-response effectiveness
   app.post(

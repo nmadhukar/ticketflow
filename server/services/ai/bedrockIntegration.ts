@@ -22,6 +22,7 @@ import {
 } from "../../services/ai/costMonitoring";
 import { PROMPT_TEMPLATES } from "./prompts";
 import { getAISettings } from "server/admin/aiSettings";
+import { extractJSON } from "./jsonUtils";
 
 export async function getBedrockClient(): Promise<{
   bedrockClient: BedrockRuntimeClient | null;
@@ -70,7 +71,7 @@ async function invokeBedrockModel(
   const estimatedInputTokens = estimateTokens(prompt);
 
   // Enforce per-request token budget (input + output)
-  const limits = loadCostLimits();
+  const limits = await loadCostLimits();
   const budget = Number(limits.maxTokensPerRequest || 0);
   const allowedOutputFromBudget =
     budget > 0 ? Math.max(0, budget - estimatedInputTokens) : maxTokens;
@@ -96,7 +97,7 @@ async function invokeBedrockModel(
   const estimatedOutputTokens = Math.min(effectiveMaxTokens, 1000); // Conservative estimate
 
   // Check if request should be blocked
-  const blockCheck = shouldBlockRequest(
+  const blockCheck = await shouldBlockRequest(
     modelId,
     estimatedInputTokens,
     estimatedOutputTokens,
@@ -193,20 +194,35 @@ async function invokeBedrockModel(
 
     if (modelId.startsWith("anthropic.claude")) {
       // Claude response format
-      responseText = responseBody.content[0].text;
+      responseText = responseBody.content?.[0]?.text || "";
+      if (!responseText) {
+        throw new Error(
+          "Empty response from Claude model - check model configuration and prompt"
+        );
+      }
       actualInputTokens =
         responseBody.usage?.input_tokens || estimatedInputTokens;
       actualOutputTokens =
         responseBody.usage?.output_tokens || estimateTokens(responseText);
     } else if (modelId.startsWith("amazon.titan")) {
       // Amazon Titan response format
-      responseText = responseBody.results[0].outputText;
+      responseText = responseBody.results?.[0]?.outputText || "";
+      if (!responseText) {
+        throw new Error(
+          "Empty response from Titan model - check model configuration and prompt"
+        );
+      }
       actualInputTokens = responseBody.inputTokenCount || estimatedInputTokens;
       actualOutputTokens =
         responseBody.outputTokenCount || estimateTokens(responseText);
     } else if (modelId.startsWith("ai21.j2")) {
       // AI21 Jurassic response format
-      responseText = responseBody.completions[0].data.text;
+      responseText = responseBody.completions?.[0]?.data?.text || "";
+      if (!responseText) {
+        throw new Error(
+          "Empty response from AI21 model - check model configuration and prompt"
+        );
+      }
       actualInputTokens =
         responseBody.prompt?.tokens?.length || estimatedInputTokens;
       actualOutputTokens =
@@ -214,7 +230,12 @@ async function invokeBedrockModel(
         estimateTokens(responseText);
     } else if (modelId.startsWith("meta.llama")) {
       // Meta Llama response format
-      responseText = responseBody.generation;
+      responseText = responseBody.generation || "";
+      if (!responseText) {
+        throw new Error(
+          "Empty response from Llama model - check model configuration and prompt"
+        );
+      }
       actualInputTokens =
         responseBody.prompt_token_count || estimatedInputTokens;
       actualOutputTokens =
@@ -222,9 +243,12 @@ async function invokeBedrockModel(
     } else {
       // Fallback to Claude format
       responseText =
-        responseBody.content?.[0]?.text ||
-        responseBody.generation ||
-        "No response";
+        responseBody.content?.[0]?.text || responseBody.generation || "";
+      if (!responseText) {
+        throw new Error(
+          "Empty response from model (unknown format) - check model configuration and prompt"
+        );
+      }
       actualInputTokens =
         responseBody.usage?.input_tokens || estimatedInputTokens;
       actualOutputTokens =
@@ -232,7 +256,7 @@ async function invokeBedrockModel(
     }
 
     // Record usage for billing analysis
-    recordUsage(
+    await recordUsage(
       modelId,
       actualInputTokens,
       actualOutputTokens,
@@ -296,8 +320,114 @@ export async function analyzeTicket(
       ticket.id?.toString()
     );
 
-    // Parse JSON response
-    const analysis = JSON.parse(result.response);
+    // Check if response is empty
+    if (!result.response || result.response.trim().length === 0) {
+      throw new Error("Empty response from Bedrock model");
+    }
+
+    // Parse JSON response (extract from markdown if needed)
+    let cleanedResponse = extractJSON(result.response);
+
+    // Check if cleaned response is empty
+    if (!cleanedResponse || cleanedResponse.trim().length === 0) {
+      console.error("Empty response after JSON extraction:", {
+        originalLength: result.response.length,
+        originalPreview: result.response.substring(0, 500),
+      });
+      throw new Error("Empty response after JSON extraction");
+    }
+
+    // Additional safety: if extraction didn't work, try to find JSON manually
+    if (
+      !cleanedResponse.trim().startsWith("{") &&
+      !cleanedResponse.trim().startsWith("[")
+    ) {
+      console.warn(
+        "JSON extraction may have failed, attempting manual extraction:",
+        {
+          originalPreview: result.response.substring(0, 300),
+          extractedPreview: cleanedResponse.substring(0, 300),
+        }
+      );
+
+      // Try to find JSON boundaries in the original response
+      const jsonStart = result.response.indexOf("{");
+      const jsonArrayStart = result.response.indexOf("[");
+      const startIndex =
+        jsonStart !== -1 && jsonArrayStart !== -1
+          ? Math.min(jsonStart, jsonArrayStart)
+          : jsonStart !== -1
+          ? jsonStart
+          : jsonArrayStart;
+
+      if (startIndex !== -1) {
+        // Extract from JSON start and find the matching closing brace
+        let tempCleaned = result.response.substring(startIndex);
+        let braceCount = 0;
+        let bracketCount = 0;
+        let inString = false;
+        let escapeNext = false;
+        let endIndex = -1;
+
+        for (let i = 0; i < tempCleaned.length; i++) {
+          const char = tempCleaned[i];
+          if (escapeNext) {
+            escapeNext = false;
+            continue;
+          }
+          if (char === "\\") {
+            escapeNext = true;
+            continue;
+          }
+          if (char === '"' && !escapeNext) {
+            inString = !inString;
+            continue;
+          }
+          if (inString) continue;
+          if (char === "{") braceCount++;
+          else if (char === "}") {
+            braceCount--;
+            if (braceCount === 0 && bracketCount === 0) {
+              endIndex = i + 1;
+              break;
+            }
+          } else if (char === "[") bracketCount++;
+          else if (char === "]") {
+            bracketCount--;
+            if (braceCount === 0 && bracketCount === 0) {
+              endIndex = i + 1;
+              break;
+            }
+          }
+        }
+
+        if (endIndex > 0) {
+          cleanedResponse = tempCleaned.substring(0, endIndex).trim();
+          console.log("Manual extraction successful");
+        } else {
+          throw new Error("Could not extract valid JSON from response");
+        }
+      } else {
+        throw new Error("No JSON found in response");
+      }
+    }
+
+    // Final check before parsing
+    if (!cleanedResponse || cleanedResponse.trim().length === 0) {
+      throw new Error("Empty response after all extraction attempts");
+    }
+
+    let analysis;
+    try {
+      analysis = JSON.parse(cleanedResponse);
+    } catch (parseError: any) {
+      console.error("JSON parse error:", {
+        error: parseError.message,
+        cleanedResponseLength: cleanedResponse.length,
+        cleanedResponsePreview: cleanedResponse.substring(0, 500),
+      });
+      throw new Error(`Failed to parse JSON: ${parseError.message}`);
+    }
 
     // Validate response structure
     if (!analysis.keyIssues || !analysis.complexityScore) {
@@ -416,8 +546,9 @@ export async function updateKnowledgeBase(
       ticket.id?.toString()
     );
 
-    // Parse JSON response
-    const knowledge = JSON.parse(result.response);
+    // Parse JSON response (extract from markdown if needed)
+    const cleanedResponse = extractJSON(result.response);
+    const knowledge = JSON.parse(cleanedResponse);
 
     // Validate response structure
     if (!knowledge.title || !knowledge.content) {
@@ -579,7 +710,7 @@ export async function getBedrockConfigSummary(): Promise<{
   ]);
 
   const { loadCostLimits } = await import("../../services/ai/costMonitoring");
-  const limits = loadCostLimits();
+  const limits = await loadCostLimits();
 
   return {
     currentModelId: settings?.bedrockRegion ? settings.bedrockModelId : null,
@@ -594,7 +725,7 @@ export async function getCostStatistics() {
   const { getCostStatistics } = await import(
     "../../services/ai/costMonitoring"
   );
-  const stats = getCostStatistics();
+  const stats = await getCostStatistics();
   const config = await getBedrockConfigSummary();
 
   return {
@@ -607,12 +738,13 @@ export async function getCostStatistics() {
  * Update cost limits
  */
 export async function updateCostLimits(
-  limits: Partial<import("../../services/ai/costMonitoring").CostLimits>
+  limits: Partial<import("../../services/ai/costMonitoring").CostLimits>,
+  userId: string = "system"
 ) {
   const { loadCostLimits, saveCostLimits } = await import(
     "../../services/ai/costMonitoring"
   );
-  const currentLimits = loadCostLimits();
+  const currentLimits = await loadCostLimits();
   // Free-tier enforcement: cap values even if client attempts higher
   let merged = { ...currentLimits, ...limits };
   if (merged.isFreeTierAccount) {
@@ -645,7 +777,7 @@ export async function updateCostLimits(
     );
   }
   const updatedLimits = merged;
-  saveCostLimits(updatedLimits);
+  await saveCostLimits(updatedLimits, userId);
   return updatedLimits;
 }
 

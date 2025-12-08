@@ -1,6 +1,23 @@
 import { Task } from "@shared/schema";
 
 /**
+ * Standard JSON format requirement text to append to prompts
+ * Ensures AI models return parseable JSON without markdown or explanatory text
+ */
+export const JSON_FORMAT_REQUIREMENT = `
+
+CRITICAL FORMAT REQUIREMENTS:
+- Your response must start with { or [ (no text before)
+- Return ONLY valid JSON (no markdown code blocks like \`\`\`json)
+- Do NOT include explanatory text like "Here is..." or "The result is..."
+- Your response must be directly parseable by JSON.parse()
+- End with } or ] (no text after)
+
+Example CORRECT: {"key": "value"}
+Example INCORRECT: Here is the result: \`\`\`json\n{"key": "value"}\n\`\`\`
+`;
+
+/**
  * Prompt templates for different ticket operations
  */
 export const PROMPT_TEMPLATES = {
@@ -22,7 +39,10 @@ export const PROMPT_TEMPLATES = {
   5. Required expertise areas (list technical skills needed)
   6. Estimated resolution time (in hours)
   
-  Format your response as JSON with these exact keys:
+  REQUIRED RESPONSE FORMAT:
+  Your response must be valid JSON starting with {. Do NOT include any explanatory text, markdown code blocks, or text after the JSON.
+  
+  JSON structure with exact keys:
   {
     "keyIssues": ["issue1", "issue2"],
     "suggestedCategory": "category",
@@ -31,6 +51,7 @@ export const PROMPT_TEMPLATES = {
     "requiredExpertise": ["skill1", "skill2"],
     "estimatedHours": 4
   }
+  ${JSON_FORMAT_REQUIREMENT}
   `,
 
   generateResponse: (ticket: Task, knowledgeBase: string) => `
@@ -72,7 +93,9 @@ export const PROMPT_TEMPLATES = {
   4. Prevention tips (if applicable)
   5. Related keywords for search
   
-  Format your response as JSON:
+  REQUIRED: Return ONLY valid JSON. Start with {. No markdown, no explanatory text.
+  
+  JSON structure:
   {
     "title": "Brief descriptive title",
     "summary": "One sentence problem summary",
@@ -82,8 +105,10 @@ export const PROMPT_TEMPLATES = {
     "rootCause": "Root cause if known",
     "preventionTips": ["tip1", "tip2"]
   }
+  ${JSON_FORMAT_REQUIREMENT}
   `,
-  aiChat:"You are a helpful assistant for TicketFlow, a ticketing system. Answer questions based on the provided context when available. Be concise and helpful."
+  aiChat:
+    "You are a helpful assistant for TicketFlow, a ticketing system. Answer questions based on the provided context when available. Be concise and helpful.",
 };
 
 // For AI ticket analysis (aiTicketAnalysis.ts)
@@ -102,7 +127,9 @@ Description: ${ticket.description}
 Current Category: ${ticket.category || "Not specified"}
 Current Priority: ${ticket.priority || "Not specified"}
 
-Please analyze this ticket and respond with a JSON object containing:
+CRITICAL: Respond with ONLY a JSON object. No explanatory text, no markdown, no code blocks.
+
+Required JSON structure:
 {
   "complexity": "low|medium|high|critical",
   "category": "bug|feature|support|enhancement|incident|request",
@@ -120,7 +147,7 @@ Consider these factors:
 - Similar historical patterns
 - Required expertise level
 
-Respond only with valid JSON.`;
+Your response must start with { and end with }. Nothing else.${JSON_FORMAT_REQUIREMENT}`;
 }
 
 // For AI auto-response generation (aiTicketAnalysis.ts)
@@ -157,7 +184,9 @@ Generate a response that:
 4. Includes relevant troubleshooting steps if applicable
 5. Mentions when they can expect follow-up
 
-Respond with a JSON object:
+REQUIRED: Respond with ONLY a JSON object. Start with {. No explanatory text, no markdown.
+
+JSON structure:
 {
   "response": "Your professional support response",
   "confidence": confidence_score_0_to_100,
@@ -166,7 +195,7 @@ Respond with a JSON object:
   "escalationNeeded": boolean
 }
 
-Keep the tone professional yet friendly. Be specific and actionable.`;
+Keep the tone professional yet friendly. Be specific and actionable.${JSON_FORMAT_REQUIREMENT}`;
 }
 
 // For batch resolved ticket pattern analysis
@@ -177,7 +206,9 @@ You are an expert knowledge management AI. Analyze these resolved support ticket
 Resolved Tickets:
 ${ticketSummaries}
 
-Identify resolution patterns and respond with a JSON array of patterns:
+REQUIRED: Respond with ONLY a JSON array. Start with [. No explanatory text, no markdown.
+
+JSON array structure:
 [
   {
     "problemType": "Clear description of the problem type",
@@ -196,7 +227,7 @@ Focus on:
 4. Time-saving approaches
 5. Common user mistakes
 
-Limit to the top 5 most significant patterns. Respond only with valid JSON.`;
+Limit to the top 5 most significant patterns.${JSON_FORMAT_REQUIREMENT}`;
 }
 
 // For generating a knowledge article from a pattern
@@ -217,7 +248,9 @@ Preventive Measures: ${pattern.preventiveMeasures.join(", ")}
 Average Resolution Time: ${pattern.averageResolutionTime} hours
 Success Rate: ${pattern.successRate}%
 
-Create a knowledge base article with this JSON structure:
+REQUIRED: Return ONLY valid JSON. Start with {. No markdown code blocks, no explanatory text.
+
+JSON structure:
 {
   "title": "Clear, descriptive title",
   "content": "Comprehensive article content in markdown format",
@@ -235,7 +268,7 @@ Article content should include:
 4. Common pitfalls to avoid
 5. Related information
 
-Write for non-technical users. Use clear, actionable language. Include specific steps and examples.`;
+Write for non-technical users. Use clear, actionable language. Include specific steps and examples.${JSON_FORMAT_REQUIREMENT}`;
 }
 
 // For intelligent knowledge search ranking
@@ -252,7 +285,9 @@ User Query: "${query}"
 Available Articles:
 ${articleSummaries}
 
-Respond with a JSON array of relevant articles, ranked by relevance:
+REQUIRED: Respond with ONLY a JSON array. Start with [. No explanatory text, no markdown.
+
+JSON array structure:
 [
   {
     "articleIndex": 0,
@@ -261,7 +296,7 @@ Respond with a JSON array of relevant articles, ranked by relevance:
   }
 ]
 
-Only include articles with relevance score >= 30. Limit to top ${maxResults} results.`;
+Only include articles with relevance score >= 30. Limit to top ${maxResults} results.${JSON_FORMAT_REQUIREMENT}`;
 }
 
 // For improving an existing article
@@ -288,7 +323,9 @@ Resolution: ${resolutionData.resolution}
 Time taken: ${resolutionData.resolutionTime} hours
 Success: ${resolutionData.success}
 
-Suggest improvements to make the article more helpful. Respond with JSON:
+REQUIRED: Respond with ONLY valid JSON. Start with {. No markdown, no explanatory text.
+
+JSON structure:
 {
   "shouldUpdate": true/false,
   "improvedContent": "Updated article content if improvements needed",
@@ -296,7 +333,7 @@ Suggest improvements to make the article more helpful. Respond with JSON:
   "confidence": confidence_score_0_to_100
 }
 
-Only suggest updates if the new data provides valuable insights not already covered.`;
+Only suggest updates if the new data provides valuable insights not already covered.${JSON_FORMAT_REQUIREMENT}`;
 }
 
 export function buildCreateKnowledgeArticlePrompt(resolution: {
@@ -319,12 +356,14 @@ export function buildCreateKnowledgeArticlePrompt(resolution: {
   4. Prerequisites or requirements
   5. Common variations of this issue
   
-  Format as JSON:
+  REQUIRED: Return ONLY valid JSON. Start with {. No markdown code blocks, no explanatory text.
+  
+  JSON structure:
   {
     "title": "Clear title for the knowledge article",
     "summary": "Brief summary of the issue and solution",
     "content": "Detailed article content with markdown formatting",
     "prerequisites": ["list", "of", "prerequisites"],
     "variations": ["common", "variations", "of", "this", "issue"]
-  }`;
+  }${JSON_FORMAT_REQUIREMENT}`;
 }

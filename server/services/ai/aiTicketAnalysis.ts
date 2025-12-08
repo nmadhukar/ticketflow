@@ -14,11 +14,13 @@ import { storage } from "../../storage";
 import { getAISettings } from "../../admin/aiSettings";
 import { logSecurityEvent } from "../../security";
 import { buildAutoResponsePrompt, buildTicketAnalysisPrompt } from "./prompts";
+import { getSystemUserId } from "../../utils/systemUser";
 import {
   getBedrockClient,
   runTicketAnalysisPrompt,
   runAutoResponseForTicketPrompt,
 } from "./bedrockIntegration";
+import { extractJSON } from "./jsonUtils";
 
 /**
  * Structure for AI ticket analysis results
@@ -89,7 +91,13 @@ export const analyzeTicket = async (ticketData: {
 
     const result = await runTicketAnalysisPrompt(prompt);
 
-    const analysis = JSON.parse(result.response) as TicketAnalysis;
+    // Extract JSON from response (handles markdown code blocks and explanatory text)
+    let cleanedResponse = extractJSON(result.response);
+    if (!cleanedResponse || cleanedResponse.trim().length === 0) {
+      throw new Error("Empty response after JSON extraction");
+    }
+
+    const analysis = JSON.parse(cleanedResponse) as TicketAnalysis;
 
     // Store analysis in database
     await storage.saveTicketAnalysis(ticketData.reporterId, {
@@ -164,7 +172,14 @@ export const generateAutoResponseForTicket = async (
     });
 
     const result = await runAutoResponseForTicketPrompt(prompt);
-    const autoResponse = JSON.parse(result.response) as AutoResponse;
+
+    // Extract JSON from response (handles markdown code blocks and explanatory text)
+    let cleanedResponse = extractJSON(result.response);
+    if (!cleanedResponse || cleanedResponse.trim().length === 0) {
+      throw new Error("Empty response after JSON extraction");
+    }
+
+    const autoResponse = JSON.parse(cleanedResponse) as AutoResponse;
     return autoResponse;
   } catch (error) {
     console.error("AI auto-response generation error:", error);
@@ -318,9 +333,10 @@ export const processTicketWithAI = async (ticketData: {
     ) {
       const trimmed = (autoResponse.response || "").slice(0, maxResponseLength);
       // Add auto-response as a comment
+      const systemUserId = await getSystemUserId();
       await storage.addTaskComment({
         taskId: ticketData.id,
-        userId: "ai-assistant",
+        userId: systemUserId,
         content: trimmed,
       });
 
@@ -347,6 +363,7 @@ export const processTicketWithAI = async (ticketData: {
 
       if (shouldEscalate && settings.escalationTeamId) {
         try {
+          const systemUserId = await getSystemUserId();
           await storage.updateTask(
             ticketData.id,
             {
@@ -354,7 +371,7 @@ export const processTicketWithAI = async (ticketData: {
               assigneeTeamId: settings.escalationTeamId as any,
               assigneeId: null as any,
             },
-            "ai-assistant"
+            systemUserId
           );
         } catch (e) {
           console.error("Failed to assign escalation team:", e);

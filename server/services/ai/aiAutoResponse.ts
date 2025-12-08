@@ -15,6 +15,7 @@ import type {
 } from "@shared/schema";
 import { bedrockIntegration } from "./bedrockIntegration";
 import { knowledgeBaseService } from "./knowledgeBase";
+import { getSystemUserId } from "../../utils/systemUser";
 
 interface ComplexityFactors {
   keywords: number;
@@ -64,8 +65,12 @@ export class AIAutoResponseService {
       // Calculate complexity factors
       const factors = this.calculateComplexityFactors(ticket, similarTickets);
 
-      // Store the AI response in the database
-      if (responseResult.response && confidenceResult.confidenceScore > 0) {
+      // Store the AI response in the database (only if ticket has an ID)
+      if (
+        responseResult.response &&
+        confidenceResult.confidenceScore > 0 &&
+        ticket.id
+      ) {
         await this.storeAutoResponse(ticket.id, {
           response: responseResult.response,
           confidence: confidenceResult.confidenceScore,
@@ -283,13 +288,15 @@ export class AIAutoResponseService {
     }
   ): Promise<void> {
     try {
+      const systemUserId = await getSystemUserId();
+
       const autoResponse: InsertTicketAutoResponse = {
         ticketId,
         aiResponse: response.response,
         confidenceScore: response.confidence.toString(),
         // suggestedArticles: response.suggestedArticles,
         wasApplied: response.applied,
-        respondedBy: "system",
+        respondedBy: systemUserId,
       };
 
       await db.insert(ticketAutoResponses).values(autoResponse);

@@ -71,6 +71,34 @@ export async function seedUsers() {
   try {
     console.log("Checking for default admin user...");
 
+    // First, ensure system user exists
+    const SYSTEM_USER_EMAIL = "system@ticketflow.local";
+    const SYSTEM_USER_ID = "system";
+
+    const existingSystemUser = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, SYSTEM_USER_ID))
+      .limit(1);
+
+    if (existingSystemUser.length === 0) {
+      await db.insert(users).values({
+        id: SYSTEM_USER_ID,
+        email: SYSTEM_USER_EMAIL,
+        firstName: "System",
+        lastName: "User",
+        role: "admin",
+        isActive: true,
+        isApproved: true,
+        // No password - system user cannot login
+      });
+      console.log("✓ System user created successfully!");
+      console.log("  ID: system");
+      console.log("  Email: system@ticketflow.local");
+    } else {
+      console.log("System user already exists.");
+    }
+
     let adminUserId: string | undefined;
 
     const existing = await db

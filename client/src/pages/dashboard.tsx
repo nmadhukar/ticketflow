@@ -177,7 +177,12 @@ export default function Dashboard() {
         />
         <StatsCard
           title={t("dashboard:admin.avgResolutionTime")}
-          value={(systemStats as any)?.avgResolutionTime || "N/A"}
+          value={
+            (systemStats as any)?.avgResolutionTime !== null &&
+            (systemStats as any)?.avgResolutionTime !== undefined
+              ? `${(systemStats as any).avgResolutionTime.toFixed(1)}h`
+              : "N/A"
+          }
           subtitle={t("dashboard:admin.hours")}
           icon={<Settings className="h-4 w-4" />}
           iconBg="bg-muted/10"

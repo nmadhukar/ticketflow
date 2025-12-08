@@ -1,4 +1,5 @@
 import {
+  type AIUsage,
   type AiChatMessage,
   type ApiKey,
   type BedrockSettings,
@@ -10,6 +11,7 @@ import {
   type EmailTemplate,
   type FaqCache,
   type HelpDocument,
+  type InsertAIUsage,
   type InsertAiChatMessage,
   type InsertApiKey,
   type InsertBedrockSettings,
@@ -299,6 +301,17 @@ export interface IStorage {
     userId: string
   ): Promise<BedrockSettings>;
 
+  // AI Usage operations
+  recordAIUsage(usage: InsertAIUsage): Promise<AIUsage>;
+  getAIUsage(filters?: {
+    startDate?: Date;
+    endDate?: Date;
+    operation?: string;
+    userId?: string;
+    ticketId?: number;
+  }): Promise<AIUsage[]>;
+  deleteAIUsage(olderThan?: Date): Promise<number>;
+
   // Email provider operations
   getActiveEmailProvider(): Promise<EmailProvider | undefined>;
   upsertEmailProvider(
@@ -399,22 +412,7 @@ export interface IStorage {
     config: InsertSsoConfiguration
   ): Promise<SsoConfiguration>;
 
-  // Bedrock usage tracking
-  trackBedrockUsage(usage: InsertBedrockUsage): Promise<BedrockUsage>;
-  getBedrockUsageByUser(
-    userId: string,
-    startDate?: Date,
-    endDate?: Date
-  ): Promise<BedrockUsage[]>;
-  getBedrockUsageSummary(
-    startDate?: Date,
-    endDate?: Date
-  ): Promise<{
-    totalCost: number;
-    totalTokens: number;
-    userCount: number;
-    requestCount: number;
-  }>;
+  // Legacy bedrockUsage methods removed - use aiUsage methods instead
 
   // FAQ cache operations
   getFaqCacheEntry(questionHash: string): Promise<FaqCache | undefined>;

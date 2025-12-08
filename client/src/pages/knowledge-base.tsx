@@ -624,7 +624,7 @@ export default function KnowledgeBase() {
                 filteredArticles.map((article: KnowledgeArticle) => (
                   <TableRow key={article.id}>
                     <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 w-64 line-clamp-2">
                         {getCategoryIcon(article.category || "general")}
                         <div>
                           <div className="font-medium">{article.title}</div>

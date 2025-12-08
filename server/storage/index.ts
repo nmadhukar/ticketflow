@@ -63,9 +63,6 @@ import {
   ssoConfiguration,
   type SsoConfiguration,
   type InsertSsoConfiguration,
-  bedrockUsage,
-  type BedrockUsage,
-  type InsertBedrockUsage,
   faqCache,
   type FaqCache,
   type InsertFaqCache,
@@ -84,6 +81,9 @@ import {
   bedrockSettings,
   type BedrockSettings,
   type InsertBedrockSettings,
+  aiUsage,
+  type AIUsage,
+  type InsertAIUsage,
   TeamTaskAssignment,
   InsertTeamTaskAssignment,
 } from "@shared/schema";
@@ -100,6 +100,8 @@ import {
   inArray,
   ilike,
   gt,
+  gte,
+  lte,
 } from "drizzle-orm";
 import { IStorage } from "./storage.inteface";
 
@@ -717,12 +719,41 @@ export class DatabaseStorage implements IStorage {
       throw new Error("Task not found");
     }
 
-    // Convert date if needed
-    const updateData = {
+    // Auto-set resolvedAt/closedAt based on status changes
+    const updateData: any = {
       ...updates,
       dueDate: updates.dueDate ? new Date(updates.dueDate) : undefined,
       updatedAt: new Date(),
     };
+
+    // If status is changing to resolved, set resolvedAt if not already set
+    if (updates.status === "resolved" && currentTask.status !== "resolved") {
+      if (!updates.resolvedAt && !currentTask.resolvedAt) {
+        updateData.resolvedAt = new Date();
+      }
+    }
+
+    // If status is changing to closed, set closedAt if not already set
+    if (updates.status === "closed" && currentTask.status !== "closed") {
+      if (!updates.closedAt && !currentTask.closedAt) {
+        updateData.closedAt = new Date();
+      }
+    }
+
+    // If status is changing away from resolved/closed, clear the timestamps
+    if (
+      updates.status &&
+      updates.status !== "resolved" &&
+      updates.status !== "closed" &&
+      (currentTask.status === "resolved" || currentTask.status === "closed")
+    ) {
+      if (updates.status !== "resolved" && !updates.resolvedAt) {
+        updateData.resolvedAt = null;
+      }
+      if (updates.status !== "closed" && !updates.closedAt) {
+        updateData.closedAt = null;
+      }
+    }
 
     const [updatedTask] = await db
       .update(tasks)
@@ -1140,19 +1171,36 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(tasks.status, "open"), eq(tasks.priority, "urgent")));
 
     // Calculate average resolution time (in hours)
+    // Use resolvedAt/closedAt if available, otherwise use updatedAt as fallback
     const resolvedTasks = await db
       .select({
-        resolutionTime: sql<number>`EXTRACT(EPOCH FROM (${tasks.resolvedAt} - ${tasks.createdAt})) / 3600`,
+        resolutionTime: sql<number>`EXTRACT(EPOCH FROM (
+          COALESCE(${tasks.resolvedAt}, ${tasks.closedAt}, ${tasks.updatedAt}) - ${tasks.createdAt}
+        )) / 3600`,
       })
       .from(tasks)
       .where(
-        and(isNotNull(tasks.resolvedAt), sql`${tasks.resolvedAt} IS NOT NULL`)
+        and(
+          isNotNull(tasks.createdAt),
+          or(eq(tasks.status, "resolved"), eq(tasks.status, "closed"))
+        )
+      );
+
+    // Filter out null/NaN/invalid values and calculate average
+    const validResolutionTimes = resolvedTasks
+      .map((t) => t.resolutionTime)
+      .filter(
+        (time): time is number =>
+          time !== null && !isNaN(time) && isFinite(time) && time > 0
       );
 
     const avgResolutionTime =
-      resolvedTasks.length > 0
-        ? resolvedTasks.reduce((acc, task) => acc + task.resolutionTime, 0) /
-          resolvedTasks.length
+      validResolutionTimes.length > 0
+        ? Math.round(
+            (validResolutionTimes.reduce((acc, time) => acc + time, 0) /
+              validResolutionTimes.length) *
+              10
+          ) / 10 // Round to 1 decimal place
         : null;
 
     // Count pending articles (draft status or not published)
@@ -1684,6 +1732,57 @@ export class DatabaseStorage implements IStorage {
         })
         .returning();
       return created;
+    }
+  }
+
+  // AI Usage operations
+  async recordAIUsage(usage: InsertAIUsage): Promise<AIUsage> {
+    const [recorded] = await db.insert(aiUsage).values(usage).returning();
+    return recorded;
+  }
+
+  async getAIUsage(filters?: {
+    startDate?: Date;
+    endDate?: Date;
+    operation?: string;
+    userId?: string;
+    ticketId?: number;
+  }): Promise<AIUsage[]> {
+    const conditions = [];
+    if (filters?.startDate) {
+      conditions.push(gte(aiUsage.timestamp, filters.startDate));
+    }
+    if (filters?.endDate) {
+      conditions.push(lte(aiUsage.timestamp, filters.endDate));
+    }
+    if (filters?.operation) {
+      conditions.push(eq(aiUsage.operation, filters.operation));
+    }
+    if (filters?.userId) {
+      conditions.push(eq(aiUsage.userId, filters.userId));
+    }
+    if (filters?.ticketId) {
+      conditions.push(eq(aiUsage.ticketId, filters.ticketId));
+    }
+
+    const query = db
+      .select()
+      .from(aiUsage)
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .orderBy(desc(aiUsage.timestamp));
+
+    return await query;
+  }
+
+  async deleteAIUsage(olderThan?: Date): Promise<number> {
+    if (olderThan) {
+      const result = await db
+        .delete(aiUsage)
+        .where(lte(aiUsage.timestamp, olderThan));
+      return result.rowCount || 0;
+    } else {
+      const result = await db.delete(aiUsage);
+      return result.rowCount || 0;
     }
   }
 
@@ -2220,70 +2319,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Bedrock usage tracking implementations
-  async trackBedrockUsage(usage: InsertBedrockUsage): Promise<BedrockUsage> {
-    const [result] = await db.insert(bedrockUsage).values(usage).returning();
-    return result;
-  }
-
-  async getBedrockUsageByUser(
-    userId: string,
-    startDate?: Date,
-    endDate?: Date
-  ): Promise<BedrockUsage[]> {
-    let query: any = db
-      .select()
-      .from(bedrockUsage)
-      .where(eq(bedrockUsage.userId, userId));
-
-    if (startDate) {
-      query = (query as any).where(
-        sql`${bedrockUsage.createdAt} >= ${startDate}`
-      );
-    }
-    if (endDate) {
-      query = (query as any).where(
-        sql`${bedrockUsage.createdAt} <= ${endDate}`
-      );
-    }
-
-    return await query.orderBy(desc(bedrockUsage.createdAt));
-  }
-
-  async getBedrockUsageSummary(
-    startDate?: Date,
-    endDate?: Date
-  ): Promise<{
-    totalCost: number;
-    totalTokens: number;
-    userCount: number;
-    requestCount: number;
-  }> {
-    let whereConditions = [];
-
-    if (startDate) {
-      whereConditions.push(sql`${bedrockUsage.createdAt} >= ${startDate}`);
-    }
-    if (endDate) {
-      whereConditions.push(sql`${bedrockUsage.createdAt} <= ${endDate}`);
-    }
-
-    const [result] = await db
-      .select({
-        totalCost: sql<number>`COALESCE(SUM(${bedrockUsage.cost}), 0)`,
-        totalTokens: sql<number>`COALESCE(SUM(${bedrockUsage.totalTokens}), 0)`,
-        userCount: sql<number>`COUNT(DISTINCT ${bedrockUsage.userId})`,
-        requestCount: sql<number>`COUNT(*)`,
-      })
-      .from(bedrockUsage)
-      .where(whereConditions.length > 0 ? and(...whereConditions) : undefined);
-
-    return {
-      totalCost: parseFloat(result.totalCost?.toString() || "0"),
-      totalTokens: parseInt(result.totalTokens?.toString() || "0"),
-      userCount: parseInt(result.userCount?.toString() || "0"),
-      requestCount: parseInt(result.requestCount?.toString() || "0"),
-    };
-  }
+  // Legacy bedrockUsage methods removed - use aiUsage methods instead
 
   // FAQ cache implementations
   async getFaqCacheEntry(questionHash: string): Promise<FaqCache | undefined> {
