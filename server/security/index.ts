@@ -8,13 +8,7 @@ import {
   requireAdmin,
   requireAgentOrAdmin,
 } from "./rbac";
-import {
-  generalRateLimit,
-  authRateLimit,
-  ticketCreationRateLimit,
-  knowledgeCreationRateLimit,
-  aiApiRateLimit,
-} from "./rateLimiting";
+import { generalRateLimit, authRateLimit } from "./rateLimiting";
 import {
   sanitizeInput,
   preventXSS,
@@ -293,9 +287,6 @@ export {
   // Rate Limiting
   generalRateLimit,
   authRateLimit,
-  aiApiRateLimit,
-  ticketCreationRateLimit,
-  knowledgeCreationRateLimit,
 
   // Validation
   validateSchema,

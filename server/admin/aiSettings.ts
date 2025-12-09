@@ -18,10 +18,6 @@ const DEFAULT_SETTINGS: AISettings = {
   bedrockModel: "",
   temperature: 0.3,
   maxTokens: 2000,
-
-  maxRequestsPerMinute: 20,
-  maxRequestsPerHour: 0,
-  maxRequestsPerDay: 1000,
 };
 
 export async function getAISettings(): Promise<AISettings> {
@@ -45,9 +41,6 @@ export async function getAISettings(): Promise<AISettings> {
       bedrockModel: settings.bedrockModelId || "",
       temperature: Number(settings.temperature || 0.3),
       maxTokens: settings.maxTokens || 2000,
-      maxRequestsPerMinute: settings.maxRequestsPerMinute || 20,
-      maxRequestsPerHour: settings.maxRequestsPerHour || 0,
-      maxRequestsPerDay: settings.maxRequestsPerDay || 1000,
     };
   } catch (error) {
     console.error("Error loading AI settings:", error);
@@ -76,9 +69,6 @@ export async function saveAISettings(
       escalationTeamId: merged.escalationTeamId || null,
       temperature: merged.temperature.toString(),
       maxTokens: merged.maxTokens,
-      maxRequestsPerMinute: merged.maxRequestsPerMinute,
-      maxRequestsPerHour: merged.maxRequestsPerHour,
-      maxRequestsPerDay: merged.maxRequestsPerDay,
       // Note: bedrockModel is stored in bedrockModelId, not updated here
     },
     userId
@@ -113,12 +103,5 @@ export function validateAISettings(input: AISettings): AISettings {
     bedrockModel: String(input.bedrockModel || DEFAULT_SETTINGS.bedrockModel),
     temperature: clamp(Number(input.temperature), 0, 1),
     maxTokens: clamp(Number(input.maxTokens), 100, 4000),
-
-    maxRequestsPerMinute: clamp(Number(input.maxRequestsPerMinute), 1, 100),
-    // allow 0 to disable hourly limit
-    maxRequestsPerHour: input.maxRequestsPerHour
-      ? clamp(Number(input.maxRequestsPerHour), 1, 2000)
-      : 0,
-    maxRequestsPerDay: clamp(Number(input.maxRequestsPerDay), 10, 10000),
   };
 }

@@ -63,23 +63,27 @@ export default function AIAnalyticsPage() {
       return response.json();
     },
     onSuccess: (response) => {
-      if (response.autoResponse) {
+      if (!response.autoResponse) {
         toast({
-          title: "Auto-response not allowed",
-          description:
-            "AI could not generate a response, likely due to permissions or configuration. A support agent should assist the user instead.",
-          variant: "destructive",
+          title: "Analysis Complete",
+          description: `Ticket analyzed with ${toConfidencePercent(
+            response.confidence || 0
+          ).toFixed(
+            2
+          )}% confidence. AI could not generate an auto-response, but analysis was successful.`,
+          variant: "default",
         });
       } else {
         toast({
           title: "Analysis Complete",
           description: `Ticket analyzed with ${toConfidencePercent(
-            response.confidence
-          )}% confidence`,
+            response.confidence || 0
+          ).toFixed(2)}% confidence. AI generated an auto-response.`,
         });
       }
     },
     onError: (error: Error) => {
+      console.error(error);
       toast({
         title: "Analysis Failed",
         description: error.message,
@@ -98,9 +102,9 @@ export default function AIAnalyticsPage() {
       return response.json();
     },
     onSuccess: (response) => {
-      if (response.autoResponse) {
+      if (!response.response) {
         toast({
-          title: "Auto-response not allowed",
+          title: "Response Generation Failed",
           description:
             "AI could not generate a response, likely due to permissions or configuration. A support agent should assist the user instead.",
           variant: "destructive",
@@ -108,7 +112,9 @@ export default function AIAnalyticsPage() {
       } else {
         toast({
           title: "Response Generated",
-          description: `Auto-response created with ${response.confidence}% confidence`,
+          description: `Auto-response created with ${toConfidencePercent(
+            response.confidence
+          ).toFixed(2)}% confidence`,
         });
       }
     },
@@ -507,7 +513,6 @@ export default function AIAnalyticsPage() {
                       : "Generate Response"}
                   </Button>
                 </div>
-
                 {/* Analysis Results */}
                 {analyzeTicketMutation.data && (
                   <Card className="mt-4">
@@ -527,29 +532,63 @@ export default function AIAnalyticsPage() {
                           </Badge>
                         </div>
                         <div className="flex items-center gap-2">
-                          <strong>Category:</strong>
-                          <Badge variant="outline">
-                            {analyzeTicketMutation.data.category
-                              ? analyzeTicketMutation.data.category
-                              : "N/A"}
-                          </Badge>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <strong>Priority:</strong>
-                          <Badge variant="outline">
-                            {analyzeTicketMutation.data.priority
-                              ? analyzeTicketMutation.data.priority
-                              : "N/A"}
-                          </Badge>
-                        </div>
-                        <div className="flex items-center gap-2">
                           <strong>Confidence:</strong>
-
                           <Badge variant="outline">
                             {analyzeTicketMutation.data.confidence
                               ? `${toConfidencePercent(
                                   analyzeTicketMutation.data.confidence
-                                )}%`
+                                ).toFixed(2)}%`
+                              : "N/A"}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <strong>Historical:</strong>
+                          <Badge variant="outline">
+                            {analyzeTicketMutation.data.factors.historical
+                              ? analyzeTicketMutation.data.factors.historical
+                              : "N/A"}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <strong>Keywords:</strong>
+                          <Badge variant="outline">
+                            {analyzeTicketMutation.data.factors.keywords
+                              ? analyzeTicketMutation.data.factors.keywords
+                              : "N/A"}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <strong>Sentiment:</strong>
+                          <Badge variant="outline">
+                            {analyzeTicketMutation.data.factors.sentiment
+                              ? analyzeTicketMutation.data.factors.sentiment
+                              : "N/A"}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <strong>Technical:</strong>
+                          <Badge variant="outline">
+                            {analyzeTicketMutation.data.factors.technical
+                              ? analyzeTicketMutation.data.factors.technical
+                              : "N/A"}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <strong>Urgency:</strong>
+                          <Badge variant="outline">
+                            {analyzeTicketMutation.data.factors.urgency
+                              ? analyzeTicketMutation.data.factors.urgency
+                              : "N/A"}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <strong>Should Escalate:</strong>
+                          <Badge variant="outline">
+                            {analyzeTicketMutation.data.shouldEscalate !==
+                            undefined
+                              ? analyzeTicketMutation.data.shouldEscalate
+                                ? "Yes"
+                                : "No"
                               : "N/A"}
                           </Badge>
                         </div>
@@ -565,22 +604,13 @@ export default function AIAnalyticsPage() {
                         </Badge>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <strong>Tags:</strong>
-                        <Badge variant="outline">
-                          {analyzeTicketMutation.data.tags?.length
-                            ? analyzeTicketMutation.data.tags?.join(", ")
+                      <div className="flex flex-col gap-1">
+                        <strong className="min-w-fit">AI Reasoning:</strong>
+                        <div className="rounded-md p-2 text-xs bg-muted">
+                          {analyzeTicketMutation.data.autoResponse
+                            ? analyzeTicketMutation.data.autoResponse
                             : "N/A"}
-                        </Badge>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <strong>AI Reasoning:</strong>
-                        <Badge variant="outline">
-                          {analyzeTicketMutation.data.reasoning
-                            ? analyzeTicketMutation.data.reasoning
-                            : "N/A"}
-                        </Badge>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>

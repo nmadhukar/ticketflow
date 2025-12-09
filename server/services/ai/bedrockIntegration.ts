@@ -3,7 +3,7 @@
  *
  * This module provides integration with AWS Bedrock using Claude 3 Sonnet
  * for intelligent ticket analysis, response generation, and knowledge base management.
- * Includes comprehensive cost monitoring and request blocking for free-tier accounts.
+ * Includes comprehensive cost monitoring and request blocking.
  */
 
 import {
@@ -490,13 +490,84 @@ export async function generateResponse(
       ticket.id?.toString()
     );
 
-    // Calculate confidence based on knowledge base availability
-    const confidence = knowledgeBaseArticles.length > 0 ? 0.8 : 0.5;
+    // Check if response is empty
+    if (!result.response || result.response.trim().length === 0) {
+      throw new Error("Empty response from Bedrock model");
+    }
+
+    // Extract and parse JSON response (handles markdown code blocks and explanatory text)
+    let cleanedResponse = extractJSON(result.response);
+
+    // If extraction failed, try to find JSON directly in the response
+    if (!cleanedResponse || cleanedResponse.trim().length === 0) {
+      // Try to find JSON object directly (handle cases where extractJSON fails)
+      const directJsonMatch = result.response.match(/\{[\s\S]*\}/);
+      if (directJsonMatch) {
+        cleanedResponse = directJsonMatch[0];
+      } else {
+        console.error("Empty response after JSON extraction:", {
+          originalLength: result.response.length,
+          originalPreview: result.response.substring(0, 500),
+          fullResponse: result.response,
+        });
+        throw new Error("Empty response after JSON extraction");
+      }
+    }
+
+    // Trim and validate JSON format
+    cleanedResponse = cleanedResponse.trim();
+
+    // Validate that cleaned response looks like JSON (starts with { or [)
+    if (!cleanedResponse.startsWith("{") && !cleanedResponse.startsWith("[")) {
+      console.error("Extracted response is not JSON:", {
+        cleanedResponse: cleanedResponse.substring(0, 200),
+        originalPreview: result.response.substring(0, 500),
+        fullResponse: result.response,
+      });
+      throw new Error("Extracted response is not valid JSON format");
+    }
+
+    // Parse the JSON to extract the actual response text
+    let parsedResponse;
+    try {
+      parsedResponse = JSON.parse(cleanedResponse);
+    } catch (parseError: any) {
+      console.error("JSON parse error in generateResponse:", {
+        error: parseError.message,
+        cleanedResponseLength: cleanedResponse.length,
+        cleanedResponsePreview: cleanedResponse.substring(0, 500),
+        fullCleanedResponse: cleanedResponse,
+        originalResponse: result.response,
+      });
+      throw new Error(`Failed to parse JSON: ${parseError.message}`);
+    }
+
+    // Extract the response field from the parsed JSON
+    // The AI should return a JSON object with a "response" field containing the actual text
+    const responseText =
+      parsedResponse.response ||
+      parsedResponse.autoResponse ||
+      "I'm unable to generate an automated response at this time. A support agent will assist you shortly.";
+
+    // Extract confidence from parsed response, or calculate based on knowledge base
+    const confidence =
+      typeof parsedResponse.confidence === "number"
+        ? parsedResponse.confidence
+        : knowledgeBaseArticles.length > 0
+        ? 0.8
+        : 0.5;
+
+    // Extract suggested articles from parsed response, or use knowledge base articles
+    const suggestedArticles =
+      Array.isArray(parsedResponse.knowledgeBaseArticles) &&
+      parsedResponse.knowledgeBaseArticles.length > 0
+        ? parsedResponse.knowledgeBaseArticles
+        : knowledgeBaseArticles.map((a) => a.id);
 
     return {
-      response: result.response,
+      response: responseText, // Clean response text only, no markdown or code
       confidence,
-      suggestedArticles: knowledgeBaseArticles.map((a) => a.id),
+      suggestedArticles,
       costEstimate: result.costEstimate,
     };
   } catch (error) {
@@ -698,23 +769,14 @@ export async function testBedrockConnection(): Promise<{
 /**
  * Get a lightweight Bedrock configuration snapshot for dashboards
  * - currentModelId: from bedrock_settings.bedrock_model_id (if configured)
- * - isFreeTierAccount: from cost-limits configuration
  */
 export async function getBedrockConfigSummary(): Promise<{
   currentModelId: string | null;
-  isFreeTierAccount: boolean;
 }> {
-  const [settings] = await Promise.all([
-    storage.getBedrockSettings(),
-    // Load limits to determine account type
-  ]);
-
-  const { loadCostLimits } = await import("../../services/ai/costMonitoring");
-  const limits = await loadCostLimits();
+  const [settings] = await Promise.all([storage.getBedrockSettings()]);
 
   return {
     currentModelId: settings?.bedrockRegion ? settings.bedrockModelId : null,
-    isFreeTierAccount: !!limits.isFreeTierAccount,
   };
 }
 
@@ -745,40 +807,9 @@ export async function updateCostLimits(
     "../../services/ai/costMonitoring"
   );
   const currentLimits = await loadCostLimits();
-  // Free-tier enforcement: cap values even if client attempts higher
-  let merged = { ...currentLimits, ...limits };
-  if (merged.isFreeTierAccount) {
-    const CAP = {
-      dailyUSD: 3,
-      monthlyUSD: 25,
-      tokensPerRequest: 3000,
-      requestsPerDay: 1500,
-      requestsPerHour: 300,
-    };
-    merged.dailyLimitUSD = Math.min(
-      merged.dailyLimitUSD ?? CAP.dailyUSD,
-      CAP.dailyUSD
-    );
-    merged.monthlyLimitUSD = Math.min(
-      merged.monthlyLimitUSD ?? CAP.monthlyUSD,
-      CAP.monthlyUSD
-    );
-    merged.maxTokensPerRequest = Math.min(
-      merged.maxTokensPerRequest ?? CAP.tokensPerRequest,
-      CAP.tokensPerRequest
-    );
-    merged.maxRequestsPerDay = Math.min(
-      merged.maxRequestsPerDay ?? CAP.requestsPerDay,
-      CAP.requestsPerDay
-    );
-    merged.maxRequestsPerHour = Math.min(
-      merged.maxRequestsPerHour ?? CAP.requestsPerHour,
-      CAP.requestsPerHour
-    );
-  }
-  const updatedLimits = merged;
-  await saveCostLimits(updatedLimits, userId);
-  return updatedLimits;
+  const merged = { ...currentLimits, ...limits };
+  await saveCostLimits(merged, userId);
+  return merged;
 }
 
 /**

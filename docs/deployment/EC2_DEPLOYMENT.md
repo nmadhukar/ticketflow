@@ -258,36 +258,408 @@ docker compose logs nginx
 
 ## Step 10: Configure Domain and SSL (Optional but Recommended)
 
-### Using Nginx with Let's Encrypt:
+This section provides a complete guide to adding a custom domain to your EC2 deployment with SSL/TLS encryption.
 
-1. **Install Certbot**:
+### Prerequisites
 
+- A domain name (e.g., `example.com`)
+- Access to your domain's DNS settings (via Route 53, GoDaddy, Namecheap, etc.)
+- EC2 instance with public IP address
+
+### Step 10.1: Allocate and Assign Elastic IP (Recommended)
+
+An Elastic IP ensures your domain always points to the same IP address, even if you restart your EC2 instance.
+
+1. **Allocate Elastic IP**:
+
+   - Go to AWS Console → EC2 → Elastic IPs → Allocate Elastic IP address
+   - Click "Allocate"
+   - Note the Elastic IP address
+
+2. **Associate Elastic IP with EC2 Instance**:
+
+   - Select the Elastic IP
+   - Click "Actions" → "Associate Elastic IP address"
+   - Select your EC2 instance
+   - Click "Associate"
+
+3. **Verify**:
    ```bash
-   sudo dnf install -y certbot python3-certbot-nginx
-   # Or for Ubuntu:
-   # sudo apt install -y certbot python3-certbot-nginx
+   # On your EC2 instance, check the public IP
+   curl http://169.254.169.254/latest/meta-data/public-ipv4
    ```
 
-2. **Update nginx.conf.template** to include SSL configuration
+### Step 10.2: Configure DNS Records
 
-3. **Get SSL Certificate**:
+Point your domain to your EC2 instance's Elastic IP.
 
+#### Option A: Using AWS Route 53
+
+1. **Go to Route 53** → Hosted Zones
+2. **Select your domain** (or create a hosted zone if needed)
+3. **Create A Record**:
+
+   - Record name: `@` (for root domain) or `www` (for www subdomain)
+   - Record type: `A`
+   - Value: Your Elastic IP address (e.g., `54.123.45.67`)
+   - TTL: `300` (5 minutes)
+   - Click "Create records"
+
+4. **For both root and www** (recommended):
+   - Create A record for `@` → Elastic IP
+   - Create A record for `www` → Elastic IP
+   - Or create CNAME: `www` → `your-domain.com`
+
+#### Option B: Using Other DNS Providers (GoDaddy, Namecheap, etc.)
+
+1. **Log in to your DNS provider**
+2. **Find DNS Management / DNS Settings**
+3. **Add/Edit A Record**:
+
+   - Type: `A`
+   - Host/Name: `@` (or leave blank for root domain) or `www`
+   - Points to/Value: Your Elastic IP address
+   - TTL: `600` (10 minutes) or default
+
+4. **Wait for DNS propagation** (usually 5-60 minutes):
    ```bash
-   sudo certbot --nginx -d your-domain.com
+   # Check DNS propagation
+   dig your-domain.com
+   # Or
+   nslookup your-domain.com
    ```
 
-4. **Update docker-compose.yml** to expose port 443:
+### Step 10.3: Update Security Group
+
+Ensure your EC2 Security Group allows HTTPS traffic:
+
+1. **Go to EC2** → Security Groups → Select your instance's security group
+2. **Edit Inbound Rules**:
+   - Add rule: Type `HTTPS`, Port `443`, Source `0.0.0.0/0`
+   - Ensure HTTP (port 80) is also allowed (needed for Let's Encrypt verification)
+
+### Step 10.4: Update Environment Variables
+
+Update your `.env` file on the EC2 instance:
+
+```bash
+# On EC2 instance
+nano .env
+```
+
+Update these values:
+
+```bash
+# Server Name for Nginx (replace with your actual domain)
+SERVER_NAME=your-domain.com www.your-domain.com
+
+# Cookie Security (set to true when using HTTPS)
+COOKIE_SECURE=true
+
+# CORS Origin (update to your domain)
+CORS_ORIGIN=https://your-domain.com
+
+# Microsoft SSO redirect URL (if using)
+MICROSOFT_REDIRECT_URL=https://your-domain.com/api/auth/microsoft/callback
+```
+
+### Step 10.5: Install Certbot for SSL Certificate
+
+**On your EC2 instance**, install Certbot:
+
+#### For Amazon Linux 2023:
+
+```bash
+sudo dnf install -y certbot python3-certbot-nginx
+```
+
+#### For Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install -y certbot python3-certbot-nginx
+```
+
+### Step 10.6: Update Docker Compose to Expose Port 443
+
+Edit `docker-compose.yml`:
+
+```bash
+nano docker-compose.yml
+```
+
+Uncomment the HTTPS port in the nginx service:
+
+```yaml
+nginx:
+  image: nginx:1.27-alpine
+  depends_on:
+    - app
+  ports:
+    - "80:80"
+    - "443:443" # Uncomment this line
+  # ... rest of config
+```
+
+### Step 10.7: Create SSL-Enabled Nginx Configuration
+
+Create a new nginx configuration template with SSL support:
+
+```bash
+nano nginx.conf.template
+```
+
+Replace the content with:
+
+```nginx
+# HTTP server - redirects to HTTPS
+server {
+  listen 80;
+  server_name ${SERVER_NAME};
+
+  # Let's Encrypt challenge location
+  location /.well-known/acme-challenge/ {
+    root /var/www/certbot;
+  }
+
+  # Redirect all other traffic to HTTPS
+  location / {
+    return 301 https://$host$request_uri;
+  }
+}
+
+# HTTPS server
+server {
+  listen 443 ssl http2;
+  server_name ${SERVER_NAME};
+
+  # SSL certificate paths (will be set by Certbot)
+  ssl_certificate /etc/letsencrypt/live/${SERVER_NAME}/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/${SERVER_NAME}/privkey.pem;
+
+  # SSL configuration
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_ciphers HIGH:!aNULL:!MD5;
+  ssl_prefer_server_ciphers on;
+  ssl_session_cache shared:SSL:10m;
+  ssl_session_timeout 10m;
+
+  # Security headers
+  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+  add_header X-Frame-Options "SAMEORIGIN" always;
+  add_header X-Content-Type-Options "nosniff" always;
+  add_header X-XSS-Protection "1; mode=block" always;
+
+  client_max_body_size 25m;
+
+  # WebSocket support
+  location /ws {
+    proxy_pass http://app:5000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+  }
+
+  # All other requests
+  location / {
+    proxy_pass http://app:5000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+  }
+}
+```
+
+**Note**: For initial certificate generation, you'll need a simpler config first. See Step 10.8.
+
+### Step 10.7 (Alternative): Use Standalone Certbot Method
+
+Since nginx is running in Docker, we'll use Certbot's standalone mode:
+
+1. **Stop nginx container temporarily**:
+
+   ```bash
+   docker compose stop nginx
+   ```
+
+2. **Obtain SSL certificate**:
+
+   ```bash
+   sudo certbot certonly --standalone \
+     -d your-domain.com \
+     -d www.your-domain.com \
+     --email your-email@example.com \
+     --agree-tos \
+     --non-interactive
+   ```
+
+3. **Create directory for certificates in docker-compose volume**:
+
+   ```bash
+   sudo mkdir -p /etc/letsencrypt
+   ```
+
+4. **Update docker-compose.yml to mount certificates**:
 
    ```yaml
-   ports:
-     - "80:80"
-     - "443:443"
+   nginx:
+     image: nginx:1.27-alpine
+     depends_on:
+       - app
+     ports:
+       - "80:80"
+       - "443:443"
+     environment:
+       - SERVER_NAME=${SERVER_NAME:-_}
+     volumes:
+       - ./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+       - /etc/letsencrypt:/etc/letsencrypt:ro # Mount SSL certificates
+     restart: unless-stopped
+     networks:
+       - ticketflow-network
    ```
 
-5. **Restart services**:
+5. **Update nginx.conf.template** with the SSL configuration from Step 10.7
+
+6. **Restart services**:
    ```bash
+   docker compose up -d
+   ```
+
+### Step 10.8: Set Up Automatic Certificate Renewal
+
+Let's Encrypt certificates expire every 90 days. Set up automatic renewal:
+
+1. **Test renewal**:
+
+   ```bash
+   sudo certbot renew --dry-run
+   ```
+
+2. **Add cron job for automatic renewal**:
+
+   ```bash
+   sudo crontab -e
+   ```
+
+3. **Add this line** (runs twice daily and restarts nginx if certificate is renewed):
+
+   ```bash
+   0 0,12 * * * certbot renew --quiet --deploy-hook "docker compose -f /path/to/your/docker-compose.yml restart nginx"
+   ```
+
+   **Or create a renewal script**:
+
+   ```bash
+   sudo nano /usr/local/bin/certbot-renew.sh
+   ```
+
+   Add:
+
+   ```bash
+   #!/bin/bash
+   cd /path/to/your/ticketflow/directory
+   certbot renew --quiet
    docker compose restart nginx
    ```
+
+   Make executable:
+
+   ```bash
+   sudo chmod +x /usr/local/bin/certbot-renew.sh
+   ```
+
+   Add to crontab:
+
+   ```bash
+   0 0,12 * * * /usr/local/bin/certbot-renew.sh
+   ```
+
+### Step 10.9: Verify Domain Configuration
+
+1. **Check DNS propagation**:
+
+   ```bash
+   dig your-domain.com
+   nslookup your-domain.com
+   ```
+
+2. **Test HTTP redirect**:
+
+   ```bash
+   curl -I http://your-domain.com
+   # Should return 301 redirect to HTTPS
+   ```
+
+3. **Test HTTPS**:
+
+   ```bash
+   curl -I https://your-domain.com
+   # Should return 200 OK
+   ```
+
+4. **Verify SSL certificate**:
+
+   - Visit `https://your-domain.com` in a browser
+   - Check the padlock icon in the address bar
+   - Or use: `openssl s_client -connect your-domain.com:443 -servername your-domain.com`
+
+5. **Test application**:
+   - Visit `https://your-domain.com` in your browser
+   - Verify the application loads correctly
+   - Test WebSocket connections if applicable
+
+### Step 10.10: Troubleshooting Domain Issues
+
+#### DNS Not Resolving:
+
+```bash
+# Check if DNS is propagated
+dig your-domain.com +short
+# Should return your Elastic IP
+
+# Check from different locations
+# Use online tools like: https://dnschecker.org
+```
+
+#### SSL Certificate Issues:
+
+```bash
+# Check certificate status
+sudo certbot certificates
+
+# View nginx logs
+docker compose logs nginx
+
+# Test nginx configuration
+docker compose exec nginx nginx -t
+```
+
+#### Port 443 Not Accessible:
+
+```bash
+# Check if port 443 is open
+sudo netstat -tlnp | grep 443
+
+# Check security group rules in AWS Console
+# Ensure HTTPS (443) is allowed from 0.0.0.0/0
+```
+
+#### Certificate Renewal Fails:
+
+- Ensure port 80 is open (needed for Let's Encrypt verification)
+- Check that DNS still points to your EC2 instance
+- Verify nginx is running and accessible
+- Check Certbot logs: `sudo tail -f /var/log/letsencrypt/letsencrypt.log`
 
 ## Step 11: Set Up Automatic Backups (Recommended)
 

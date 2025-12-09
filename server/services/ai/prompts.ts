@@ -55,24 +55,34 @@ export const PROMPT_TEMPLATES = {
   `,
 
   generateResponse: (ticket: Task, knowledgeBase: string) => `
-  You are a helpful IT support assistant. Generate a response for the following ticket based on available knowledge.
-  
-  Ticket Information:
-  Title: ${ticket.title}
-  Description: ${ticket.description || "No description provided"}
-  Category: ${ticket.category}
-  
-  Relevant Knowledge Base Articles:
-  ${knowledgeBase || "No relevant articles found"}
-  
-  Please generate a helpful response that:
-  1. Acknowledges the user's issue
-  2. Provides clear, actionable steps if possible
-  3. References relevant knowledge base articles if available
-  4. Maintains a professional and friendly tone
-  5. Suggests next steps or escalation if needed
-  
-  Keep the response concise but thorough. Do not exceed 500 words.
+You are a helpful IT support assistant. Generate a response for the following ticket based on available knowledge.
+
+Ticket Information:
+Title: ${ticket.title}
+Description: ${ticket.description || "No description provided"}
+Category: ${ticket.category}
+
+Relevant Knowledge Base Articles:
+${knowledgeBase || "No relevant articles found"}
+
+Please generate a helpful response that:
+1. Acknowledges the user's issue
+2. Provides clear, actionable steps if possible
+3. References relevant knowledge base articles if available
+4. Maintains a professional and friendly tone
+5. Suggests next steps or escalation if needed
+
+REQUIRED: Respond with ONLY a JSON object. Start with {. No explanatory text, no markdown.
+
+JSON structure:
+{
+  "response": "Your professional support response (keep it concise but thorough, do not exceed 500 words)",
+  "confidence": confidence_score_0_to_100,
+  "knowledgeBaseArticles": ["article_ids_referenced"],
+  "escalationNeeded": boolean
+}
+
+Keep the tone professional yet friendly. Be specific and actionable.${JSON_FORMAT_REQUIREMENT}
   `,
 
   extractKnowledge: (ticket: Task, resolution: string) => `

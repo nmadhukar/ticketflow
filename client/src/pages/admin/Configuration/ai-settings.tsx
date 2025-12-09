@@ -109,11 +109,6 @@ interface AISettings {
   bedrockModel: string;
   temperature: number;
   maxTokens: number;
-
-  // Rate Limiting
-  maxRequestsPerMinute: number;
-  maxRequestsPerHour: number; // 0 disables hourly cap
-  maxRequestsPerDay: number;
 }
 
 export default function AISettings() {
@@ -126,12 +121,9 @@ export default function AISettings() {
   // Cost limits state
   const [isEditingCostLimits, setIsEditingCostLimits] = useState(false);
   const [costLimits, setCostLimits] = useState({
-    dailyLimitUSD: 5.0,
-    monthlyLimitUSD: 50.0,
-    maxTokensPerRequest: 1000,
-    maxRequestsPerDay: 50,
-    maxRequestsPerHour: 10,
-    isFreeTierAccount: true,
+    dailyLimitUSD: 50.0,
+    monthlyLimitUSD: 100.0,
+    maxTokensPerRequest: 3000,
   });
 
   // Fetch current settings
@@ -184,9 +176,6 @@ export default function AISettings() {
     bedrockModel: "amazon.titan-text-express-v1",
     temperature: 0.3,
     maxTokens: 2000,
-    maxRequestsPerMinute: 20,
-    maxRequestsPerHour: 0,
-    maxRequestsPerDay: 1000,
   });
 
   // Bedrock settings state
@@ -385,7 +374,6 @@ export default function AISettings() {
 
   const handleChange = (key: keyof AISettings, value: any) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
-    if (isRateField(key)) setRatePreset("Custom");
     setHasChanges(true);
   };
 
@@ -568,110 +556,6 @@ export default function AISettings() {
   const handleSaveCostLimits = () => {
     updateCostLimitsMutation.mutate(costLimits);
   };
-
-  // Rate limit presets
-  type RatePreset = "Strict" | "Balanced" | "Generous" | "Custom";
-  const [ratePreset, setRatePreset] = useState<RatePreset>("Balanced");
-  const applyPreset = (preset: RatePreset) => {
-    setRatePreset(preset);
-    if (preset === "Strict") {
-      setFormData((p) => ({
-        ...p,
-        maxRequestsPerMinute: 10,
-        maxRequestsPerHour: 100,
-        maxRequestsPerDay: 500,
-      }));
-      // Apply free-tier cost limits alongside rate limits
-      setCostLimits((c) => ({
-        ...c,
-        dailyLimitUSD: 1,
-        monthlyLimitUSD: 10,
-        maxTokensPerRequest: 1000,
-      }));
-    } else if (preset === "Balanced") {
-      setFormData((p) => ({
-        ...p,
-        maxRequestsPerMinute: 20,
-        maxRequestsPerHour: 0,
-        maxRequestsPerDay: 1000,
-      }));
-      setCostLimits((c) => ({
-        ...c,
-        dailyLimitUSD: 2,
-        monthlyLimitUSD: 15,
-        maxTokensPerRequest: 2000,
-        maxRequestsPerDay: 1000,
-      }));
-    } else if (preset === "Generous") {
-      setFormData((p) => ({
-        ...p,
-        maxRequestsPerMinute: 60,
-        maxRequestsPerHour: 600,
-        maxRequestsPerDay: 5000,
-      }));
-      setCostLimits((c) => ({
-        ...c,
-        dailyLimitUSD: 3,
-        monthlyLimitUSD: 25,
-        maxTokensPerRequest: 3000,
-        maxRequestsPerDay: 5000,
-      }));
-    }
-  };
-
-  // Inline validation for rate limits
-  const [rateErrors, setRateErrors] = useState<{
-    minute?: string;
-    hour?: string;
-    day?: string;
-    relation?: string;
-  }>({});
-
-  useEffect(() => {
-    const errs: typeof rateErrors = {};
-    if (
-      formData.maxRequestsPerMinute < 1 ||
-      formData.maxRequestsPerMinute > 100
-    ) {
-      errs.minute = "Must be between 1 and 100";
-    }
-    if (
-      formData.maxRequestsPerHour !== 0 &&
-      (formData.maxRequestsPerHour < 1 || formData.maxRequestsPerHour > 2000)
-    ) {
-      errs.hour = "Must be 0 (disabled) or between 1 and 2000";
-    }
-    if (formData.maxRequestsPerDay < 10 || formData.maxRequestsPerDay > 10000) {
-      errs.day = "Must be between 10 and 10000";
-    }
-    // Relationship hints
-    if (formData.maxRequestsPerHour > 0) {
-      const minToHour = formData.maxRequestsPerMinute * 60;
-      if (formData.maxRequestsPerHour < minToHour) {
-        errs.relation =
-          "Hourly cap is lower than 60× per-minute; it may never be reached.";
-      } else if (formData.maxRequestsPerHour > formData.maxRequestsPerDay) {
-        errs.relation =
-          "Hourly cap exceeds daily cap; hourly limit may be redundant.";
-      }
-    } else if (
-      formData.maxRequestsPerMinute * 60 >
-      formData.maxRequestsPerDay
-    ) {
-      errs.relation =
-        "Per-minute × 60 exceeds daily cap; requests may be throttled before hourly/day windows.";
-    }
-    setRateErrors(errs);
-  }, [
-    formData.maxRequestsPerMinute,
-    formData.maxRequestsPerHour,
-    formData.maxRequestsPerDay,
-  ]);
-
-  const isRateField = (k: keyof AISettings) =>
-    k === "maxRequestsPerMinute" ||
-    k === "maxRequestsPerHour" ||
-    k === "maxRequestsPerDay";
 
   // Workflow (Auto-Response, Escalation, Learning) edit management
   const [isEditingWorkflow, setIsEditingWorkflow] = useState(false);
@@ -981,7 +865,7 @@ export default function AISettings() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4 gap-10">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
               <div className="space-y-2">
                 <Label htmlFor="dailyLimit">Daily Limit (USD)</Label>
                 <Input
@@ -995,15 +879,8 @@ export default function AISettings() {
                       dailyLimitUSD: parseFloat(e.target.value) || 0,
                     }))
                   }
-                  disabled={
-                    !isEditingCostLimits || costLimits.isFreeTierAccount
-                  }
+                  disabled={!isEditingCostLimits}
                 />
-                {costLimits.isFreeTierAccount && (
-                  <p className="text-xs text-muted-foreground">
-                    Managed by Safe Mode policy
-                  </p>
-                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="monthlyLimit">Monthly Limit (USD)</Label>
@@ -1018,20 +895,11 @@ export default function AISettings() {
                       monthlyLimitUSD: parseFloat(e.target.value) || 0,
                     }))
                   }
-                  disabled={
-                    !isEditingCostLimits || costLimits.isFreeTierAccount
-                  }
+                  disabled={!isEditingCostLimits}
                 />
-                {costLimits.isFreeTierAccount && (
-                  <p className="text-xs text-muted-foreground">
-                    Managed by Safe Mode policy
-                  </p>
-                )}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="maxTokens">
-                  Max Tokens per Request (budget)
-                </Label>
+                <Label htmlFor="maxTokens">Max Tokens per Request</Label>
                 <Input
                   id="maxTokens"
                   type="number"
@@ -1042,177 +910,10 @@ export default function AISettings() {
                       maxTokensPerRequest: parseInt(e.target.value) || 0,
                     }))
                   }
-                  disabled={
-                    !isEditingCostLimits || costLimits.isFreeTierAccount
-                  }
+                  disabled={!isEditingCostLimits}
                 />
-                {costLimits.isFreeTierAccount && (
-                  <p className="text-xs text-muted-foreground">
-                    Managed by Safe Mode policy
-                  </p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="freeTier">Safe Cost Mode</Label>
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="freeTier"
-                    checked={costLimits.isFreeTierAccount || false}
-                    onCheckedChange={(checked) => {
-                      setCostLimits((prev) => ({
-                        ...prev,
-                        isFreeTierAccount: checked,
-                      }));
-                      if (checked) {
-                        // Apply strict preset immediately when enabling strict controls
-                        applyPreset("Strict");
-                        setIsEditingCostLimits(false);
-                      }
-                    }}
-                    disabled={!isEditingCostLimits}
-                  />
-                  <span className="text-sm text-muted-foreground">
-                    Enable strict cost controls
-                  </span>
-                </div>
               </div>
             </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4 gap-10">
-              <div className="space-y-2">
-                <Label htmlFor="ratePreset">Policy Preset</Label>
-                <Select
-                  value={ratePreset}
-                  onValueChange={(v) => applyPreset(v as any)}
-                >
-                  <SelectTrigger id="ratePreset">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Strict">Strict</SelectItem>
-                    <SelectItem value="Balanced">Balanced</SelectItem>
-                    <SelectItem value="Generous">Generous</SelectItem>
-                    {!costLimits.isFreeTierAccount && (
-                      <SelectItem value="Custom">Custom</SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-xs text-muted-foreground">
-                    Presets fill minute/hour/day. Any manual change switches to
-                    Custom.
-                  </p>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      applyPreset("Balanced");
-                      setIsEditingCostLimits(true);
-                    }}
-                    className="text-xs"
-                  >
-                    Reset to defaults
-                  </Button>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="maxRequestsPerMinute">
-                  Max Requests per Minute
-                </Label>
-                <Input
-                  id="maxRequestsPerMinute"
-                  type="number"
-                  value={formData.maxRequestsPerMinute}
-                  onChange={(e) =>
-                    handleChange(
-                      "maxRequestsPerMinute",
-                      parseInt(e.target.value)
-                    )
-                  }
-                  min={1}
-                  max={100}
-                  disabled={costLimits.isFreeTierAccount}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Protects against short spikes.
-                </p>
-                {rateErrors.minute && (
-                  <p className="text-xs text-destructive">
-                    {rateErrors.minute}
-                  </p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="maxRequestsPerHour">
-                  Max Requests per Hour
-                </Label>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="enableHourCap"
-                    checked={!!formData.maxRequestsPerHour}
-                    onCheckedChange={(checked) =>
-                      handleChange("maxRequestsPerHour", checked ? 100 : 0)
-                    }
-                    disabled={costLimits.isFreeTierAccount}
-                  />
-                  <Input
-                    id="maxRequestsPerHour"
-                    type="number"
-                    value={formData.maxRequestsPerHour || 0}
-                    onChange={(e) =>
-                      handleChange(
-                        "maxRequestsPerHour",
-                        parseInt(e.target.value)
-                      )
-                    }
-                    min={0}
-                    max={2000}
-                    disabled={
-                      !formData.maxRequestsPerHour ||
-                      costLimits.isFreeTierAccount
-                    }
-                    className="max-w-[200px]"
-                  />
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Turn off to disable hourly cap
-                </p>
-                {rateErrors.hour && (
-                  <p className="text-xs text-destructive">{rateErrors.hour}</p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="maxRequestsPerDay">Max Requests per Day</Label>
-                <Input
-                  id="maxRequestsPerDay"
-                  type="number"
-                  value={formData.maxRequestsPerDay}
-                  onChange={(e) => {
-                    handleChange("maxRequestsPerDay", parseInt(e.target.value));
-                    setCostLimits((prev) => ({
-                      ...prev,
-                      maxRequestsPerDay: parseInt(e.target.value),
-                    }));
-                  }}
-                  min={10}
-                  max={10000}
-                  step={10}
-                  disabled={
-                    costLimits.isFreeTierAccount || !isEditingCostLimits
-                  }
-                />
-                <p className="text-xs text-muted-foreground">
-                  Budget cap for the entire request (prompt + response).
-                </p>
-                {rateErrors.day && (
-                  <p className="text-xs text-destructive">{rateErrors.day}</p>
-                )}
-              </div>
-            </div>
-            {rateErrors.relation && (
-              <div className="text-xs text-amber-600 -mt-2">
-                {rateErrors.relation}
-              </div>
-            )}
           </CardContent>
           <CardFooter className="flex items-center gap-5">
             {!isEditingCostLimits ? (

@@ -1,7 +1,7 @@
 import { Response, NextFunction } from "express";
 import { AuthenticatedRequest } from "./jwt";
 
-export type UserRole = "customer" | "agent" | "admin";
+export type UserRole = "customer" | "agent" | "admin" | "manager";
 
 export interface Permission {
   action: string;
@@ -100,11 +100,53 @@ const adminPermissions: Permission[] = [
   { action: "manage", resource: "permissions" },
 ];
 
+const managerPermissions: Permission[] = [
+  // All agent permissions (managers have agent-level access)
+  ...agentPermissions,
+
+  // Extended team/department management (scoped to managed departments)
+  {
+    action: "manage",
+    resource: "team",
+    conditions: { managedDepartmentsOnly: true },
+  },
+  {
+    action: "manage",
+    resource: "department",
+    conditions: { managedDepartmentsOnly: true },
+  },
+
+  // Extended ticket management (scoped to managed departments' teams)
+  {
+    action: "read",
+    resource: "ticket",
+    conditions: { managedDepartmentsTicketsOnly: true },
+  },
+  {
+    action: "assign",
+    resource: "ticket",
+    conditions: { managedDepartmentsScope: true },
+  },
+  {
+    action: "update",
+    resource: "ticket",
+    conditions: { managedDepartmentsScope: true },
+  },
+
+  // Team analytics for managed departments
+  {
+    action: "read",
+    resource: "analytics",
+    conditions: { managedDepartmentsMetrics: true },
+  },
+];
+
 // Role-based permissions configuration
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   customer: customerPermissions,
   agent: agentPermissions,
   admin: adminPermissions,
+  manager: managerPermissions,
 };
 
 // Check if user has permission

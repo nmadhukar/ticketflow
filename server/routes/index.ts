@@ -2989,23 +2989,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(403).json({ message: "Admin access required" });
         }
 
-        const {
-          dailyLimitUSD,
-          monthlyLimitUSD,
-          maxTokensPerRequest,
-          maxRequestsPerDay,
-          maxRequestsPerHour,
-          isFreeTierAccount,
-        } = req.body;
+        const { dailyLimitUSD, monthlyLimitUSD, maxTokensPerRequest } =
+          req.body;
 
         const updatedLimits = await bedrockIntegration.updateCostLimits(
           {
             dailyLimitUSD,
             monthlyLimitUSD,
             maxTokensPerRequest,
-            maxRequestsPerDay,
-            maxRequestsPerHour,
-            isFreeTierAccount,
           },
           userId
         );

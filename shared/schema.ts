@@ -328,9 +328,6 @@ export const bedrockSettings = pgTable("bedrock_settings", {
     scale: 2,
   }).default("100.0"),
   maxTokensPerRequest: integer("max_tokens_per_request").default(3000),
-  maxRequestsPerDay: integer("max_requests_per_day").default(5000),
-  maxRequestsPerHour: integer("max_requests_per_hour").default(200),
-  isFreeTierAccount: boolean("is_free_tier_account").default(false),
   // AI Settings - Auto-Response (from ai-settings.json)
   autoResponseEnabled: boolean("auto_response_enabled").default(true),
   confidenceThreshold: decimal("confidence_threshold", {

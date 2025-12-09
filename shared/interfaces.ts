@@ -15,8 +15,4 @@ export interface AISettings {
   bedrockModel: string;
   temperature: number; // 0..1
   maxTokens: number;
-
-  maxRequestsPerMinute: number;
-  maxRequestsPerHour: number; // 0 disables hourly cap
-  maxRequestsPerDay: number;
 }

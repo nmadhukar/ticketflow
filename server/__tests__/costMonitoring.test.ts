@@ -554,9 +554,9 @@ describe("Cost Monitoring", () => {
 
       const limits = loadCostLimits();
 
-      expect(limits.dailyLimitUSD).toBe(5.0);
-      expect(limits.monthlyLimitUSD).toBe(50.0);
-      expect(limits.isFreeTierAccount).toBe(true);
+      expect(limits.dailyLimitUSD).toBe(50.0);
+      expect(limits.monthlyLimitUSD).toBe(100.0);
+      expect(limits.maxTokensPerRequest).toBe(3000);
     });
 
     it("should load saved limits from file", () => {
@@ -564,9 +564,6 @@ describe("Cost Monitoring", () => {
         dailyLimitUSD: 10.0,
         monthlyLimitUSD: 100.0,
         maxTokensPerRequest: 2000,
-        maxRequestsPerDay: 100,
-        maxRequestsPerHour: 20,
-        isFreeTierAccount: false,
       };
 
       mockedFs.existsSync.mockReturnValue(true);
@@ -582,9 +579,6 @@ describe("Cost Monitoring", () => {
         dailyLimitUSD: 10.0,
         monthlyLimitUSD: 100.0,
         maxTokensPerRequest: 2000,
-        maxRequestsPerDay: 100,
-        maxRequestsPerHour: 20,
-        isFreeTierAccount: false,
       };
 
       saveCostLimits(customLimits);
@@ -605,8 +599,9 @@ describe("Cost Monitoring", () => {
       const limits = loadCostLimits();
 
       // Should return default limits on error
-      expect(limits.dailyLimitUSD).toBe(5.0);
-      expect(limits.isFreeTierAccount).toBe(true);
+      expect(limits.dailyLimitUSD).toBe(50.0);
+      expect(limits.monthlyLimitUSD).toBe(100.0);
+      expect(limits.maxTokensPerRequest).toBe(3000);
     });
   });
 
@@ -626,7 +621,9 @@ describe("Cost Monitoring", () => {
       const limits = loadCostLimits();
 
       // Should return default limits
-      expect(limits.dailyLimitUSD).toBe(5.0);
+      expect(limits.dailyLimitUSD).toBe(50.0);
+      expect(limits.monthlyLimitUSD).toBe(100.0);
+      expect(limits.maxTokensPerRequest).toBe(3000);
     });
 
     it("should handle very large token counts", () => {

@@ -44,9 +44,6 @@ interface CostLimits {
   dailyLimitUSD: number;
   monthlyLimitUSD: number;
   maxTokensPerRequest: number;
-  maxRequestsPerDay: number;
-  maxRequestsPerHour: number;
-  isFreeTierAccount: boolean;
 }
 
 interface DailyUsage {
@@ -76,7 +73,6 @@ interface CostStatistics {
   recentUsage: UsageRecord[];
   config?: {
     currentModelId: string | null;
-    isFreeTierAccount: boolean;
   };
 }
 
@@ -318,12 +314,9 @@ export function BedrockCostMonitoring() {
         operations: {},
       },
       limits: {
-        dailyLimitUSD: 5,
-        monthlyLimitUSD: 50,
-        maxTokensPerRequest: 1000,
-        maxRequestsPerDay: 50,
-        maxRequestsPerHour: 10,
-        isFreeTierAccount: true,
+        dailyLimitUSD: 50,
+        monthlyLimitUSD: 100,
+        maxTokensPerRequest: 3000,
       },
       recentUsage: [],
     };
@@ -438,26 +431,13 @@ export function BedrockCostMonitoring() {
           </CardHeader>
           <CardContent>
             <h5 className="text-2xl font-bold mb-2">
-              {limits.isFreeTierAccount
-                ? t("bedrock:cards.accountType.free", {
-                    defaultValue: "Free Tier",
-                  })
-                : t("bedrock:cards.accountType.paid", { defaultValue: "Paid" })}
+              {t("bedrock:cards.accountType.paid", { defaultValue: "Account" })}
             </h5>
             <div className="flex flex-col gap-1">
               <Badge variant="secondary" className="text-xs">
                 {t("bedrock:cards.accountType.model", {
                   defaultValue: "Current model: {{model}}",
                   model: currentModelId || "Not configured",
-                })}
-              </Badge>
-              <Badge
-                variant={limits.isFreeTierAccount ? "secondary" : "default"}
-                className="text-xs w-fit"
-              >
-                {t("bedrock:cards.accountType.reqPerDay", {
-                  defaultValue: "{{count}} req/day",
-                  count: limits.maxRequestsPerDay,
                 })}
               </Badge>
             </div>
