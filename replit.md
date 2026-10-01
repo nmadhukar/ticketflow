@@ -24,6 +24,7 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 
 ### Core Features & Design Patterns
 - **AI-Powered Helpdesk**: Integrated AWS Bedrock (Claude 3 Sonnet) for intelligent ticket analysis, auto-responses, and knowledge base article generation. This includes confidence scoring and automatic knowledge base learning from resolved tickets.
+- **AWS Bedrock Knowledge Bases**: **NEW** - Semantic search using vector embeddings with OpenSearch Serverless. Automatically syncs S3 documents (help docs, policies, guides) to vector database for intelligent document retrieval. Uses RetrieveAndGenerate API for context-aware AI responses with citations. Gracefully falls back to manual RAG if not configured.
 - **Role-Based Access Control (RBAC)**: Supports admin, agent, and customer roles with granular permissions enforced across the application.
 - **Comprehensive Ticketing**: Features unique ticket numbers (configurable prefix), multiple statuses, priority/severity levels, categories, time tracking, and tags.
 - **Audit Trails**: Full history tracking for all ticket changes.
@@ -51,6 +52,8 @@ UI Preferences: Table listing format strongly preferred over card-based layouts 
 - **Routing**: wouter
 - **Email Sending**: Amazon SES (Simple Email Service)
 - **AI/ML**: AWS Bedrock (with Claude 3 Sonnet model)
+- **Vector Search**: AWS Bedrock Knowledge Bases with OpenSearch Serverless (optional)
+- **File Storage**: AWS S3 for help documents, company policies, and user guides
 - **Third-party Integrations**: Microsoft Teams (webhook notifications)
 - **Password Hashing**: bcrypt
 - **Form Management**: React Hook Form, Zod (for validation)
