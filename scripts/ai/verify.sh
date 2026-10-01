@@ -56,13 +56,17 @@ for i in $(seq 1 30); do
 done
 [ "$PG_OK" -eq 1 ] && log_pass "PostgreSQL healthy" || log_fail "PostgreSQL not healthy"
 
-# Push schema using drizzle-kit (needs a running container on the network)
-# We use run --rm to push schema, with --force to skip interactive prompts
-docker run --rm --network ticketflow_default \
+# Push schema: drop public schema then push to get a clean DB
+# The app container may crash if started with missing tables, so we push BEFORE starting app
+docker compose -f docker-compose.yml exec -T postgres psql -U ticketflow -d ticketflow \
+  -c 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;' 2>/dev/null || true
+
+# Push schema using a throwaway container on the compose network
+PUSH_OUT=$(docker compose -f docker-compose.yml run --rm -T \
   -e DATABASE_URL="$DATABASE_URL" \
-  -v "$REPO_DIR":/app -w /app \
-  node:20-slim bash -c 'cd /app && npx drizzle-kit push --force 2>&1' 2>&1 | grep -q "Changes applied" \
-  && log_pass "DB schema pushed" || log_fail "DB schema push"
+  app npx drizzle-kit push --force 2>&1)
+echo "$PUSH_OUT" | grep -q "Changes applied" \
+  && log_pass "DB schema pushed" || { echo "$PUSH_OUT" | tail -5; log_fail "DB schema push"; }
 
 # Start app
 docker compose -f docker-compose.yml up -d app 2>&1 | tail -3
