@@ -268,7 +268,7 @@ JEST_OUT_FULL=$(docker compose -f docker-compose.yml exec -T app npx jest --conf
 PASSED=$(echo "$JEST_OUT_FULL" | sed -n 's/.*[^0-9]\([0-9]\+\) passed.*/\1/p' | tail -1 || echo "0")
 SKIPPED=$(echo "$JEST_OUT_FULL" | sed -n 's/.*[^0-9]\([0-9]\+\) skipped.*/\1/p' | tail -1 || echo "0")
 FAILED=$(echo "$JEST_OUT_FULL" | sed -n 's/.*[^0-9]\([0-9]\+\) failed.*/\1/p' | tail -1 || echo "0")
-TOTAL=$(echo "$JEST_OUT_FULL" | sed -n 's/.*[^0-9]\([0-9]\+\) total.*/\1/p' | tail -1 || echo "0")
+TOTAL=$(echo "$JEST_OUT_FULL" | sed -n 's/.*[^0-9]\([0-9]\+\) total$/\1/p' | tail -1 || echo "0")
 SUITES_LINE=$(echo "$JEST_OUT_FULL" | grep "Test Suites:" | tail -1 || echo "")
 
 echo "Jest summary: $SUITES_LINE"
