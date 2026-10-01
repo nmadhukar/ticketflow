@@ -7,6 +7,7 @@ REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 PROJECT="tfverify_${GATE_NONCE:-local}_$$"
 PROJECT="$(printf '%s' "$PROJECT" | tr -cd 'a-zA-Z0-9_-')"
 NETWORK="${PROJECT}_default"
+# Unique project/volumes avoid touching other sandbox validations.
 PREFIX="tfv_${GATE_NONCE:-local}_$$"
 PREFIX="$(printf '%s' "$PREFIX" | tr -cd 'a-zA-Z0-9_-')"
 NODE_IMAGE=node:20-slim
@@ -40,6 +41,7 @@ cleanup() {
   docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1 || true
   # Only uniquely named resources created by this invocation are removed.
   docker volume rm "${PREFIX}_deps" "${PREFIX}_npm" "${PREFIX}_reports" >/dev/null 2>&1 || true
+  docker network rm "$NETWORK" >/dev/null 2>&1 || true
   printf '%s\n' 'Cleanup complete.'
 }
 trap finish EXIT
@@ -63,6 +65,8 @@ else
 fi
 
 printf '%s\n' '--- STEP 1: stack ---'
+# Compose app/database expose fixed host ports. If another sandbox validation
+# owns those ports, record an environment failure rather than joining its stack.
 if docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" build app && \
    docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" up -d postgres; then
   ok 'Compose app built and PostgreSQL started'
@@ -102,6 +106,8 @@ for i in $(seq 1 30); do
   sleep 2
 done
 if [ "$HEALTH" -eq 1 ]; then ok 'Application HTTP health responds'; else bad 'Application HTTP health unavailable'; fi
+if app_curl http://localhost:5000/ >/dev/null 2>&1; then ok 'UI entry point responds'; else bad 'UI entry point unavailable'; fi
+printf 'Stack images: %s; %s\n' "$NODE_IMAGE" "$BROWSER_IMAGE"
 docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" ps || true
 
 printf '%s\n' '--- STEP 2: genuine ticket workflow ---'
@@ -129,6 +135,12 @@ workflow_probe() {
  const created=first.status===201?first:await check("POST","/api/tasks",{ticketNumber:"client-unused",title:"Gate "+nonce,description:"Entered only once",category:"bug",priority:"high"},cookie);
  assert(created.status===201,"fallback create HTTP "+created.status+" "+JSON.stringify(created.data));
  const id=created.data.id;
+ const assigned=await check("PATCH","/api/tasks/"+id,{assigneeId:login.data.id},cookie);
+ assert(assigned.status===200&&assigned.data.assigneeId===login.data.id,"assignment failed");
+ const mine=await check("GET","/api/tasks/my",undefined,cookie);
+ assert(mine.status===200&&mine.data.some(t=>t.id===id),"assignment not visible in My Tasks");
+ const commented=await check("POST","/api/tasks/"+id+"/comments",{content:"Progress on original description"},cookie);
+ assert(commented.status===201,"comment failed");
  for(const status of ["in_progress","on_hold","resolved","closed","open"]){
   const changed=await check("PATCH","/api/tasks/"+id,{status},cookie);
   assert(changed.status===200,"stage "+status+" HTTP "+changed.status);
@@ -181,6 +193,7 @@ else
 fi
 # Read only Jest's own JSON report. A missing report fails, never fabricates
 # test results. Runner-reported zero tests is honest when config never loads.
+# A config-loading failure cannot be interpreted as an empty successful suite.
 COUNTS="$(run_node node -e '
 const fs=require("fs");let r;try{r=JSON.parse(fs.readFileSync("/gate-reports/jest.json","utf8"))}catch(e){console.error(`no valid Jest JSON: ${e.message}`);process.exit(1)}
 for(const k of ["numPassedTests","numPendingTests","numFailedTests","numTotalTests"]){if(!Number.isSafeInteger(r[k])||r[k]<0)throw Error(`invalid ${k}`)}
