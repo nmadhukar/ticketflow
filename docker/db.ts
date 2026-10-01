@@ -1,6 +1,7 @@
 // Local PostgreSQL adapter — replaces server/db.ts for Dockerised runs.
 // Uses the standard pg Pool instead of @neondatabase/serverless.
-import { Pool } from "pg";
+import pg from "pg";
+const { Pool } = pg;
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "@shared/schema";
 
