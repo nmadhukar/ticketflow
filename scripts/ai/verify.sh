@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Runtime/design gate. Requires only bash, Docker CLI, and a sandbox DOCKER_HOST.
 # All tests/services execute in containers; nothing is installed on the host.
+# Validation is deliberately read-only outside this file: product defects fail the gate.
 set -uo pipefail
 REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 PROJECT="tfverify_${GATE_NONCE:-local}_$$"
@@ -15,17 +16,33 @@ FAIL=0
 TEST_PASSED=0
 TEST_SKIPPED=0
 REPORT_VALID=0
+# Print the result after EXIT cleanup so the TESTS and RESULT lines remain last.
+finish() {
+  rc=$?
+  trap - EXIT
+  cleanup
+  if [ "$rc" -ne 0 ]; then FAIL=$((FAIL+1)); fi
+  printf '%s\n' '--- RESULTS ---'
+  printf 'PASS: %s\nFAIL: %s\n' "$PASS" "$FAIL"
+  printf 'TESTS[%s]: %s passed, %s skipped\n' "${GATE_NONCE:-0}" "$TEST_PASSED" "$TEST_SKIPPED"
+  if [ "$FAIL" -eq 0 ] && [ "$REPORT_VALID" -eq 1 ]; then
+    printf '%s\n' 'RESULT: PASS'
+    exit 0
+  fi
+  printf '%s\n' 'RESULT: FAIL'
+  exit 1
+}
 
 ok() { printf 'PASS: %s\n' "$1"; PASS=$((PASS+1)); }
 bad() { printf 'FAIL: %s\n' "$1"; FAIL=$((FAIL+1)); }
 cleanup() {
   printf '%s\n' '--- CLEANUP ---'
   docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1 || true
-  # Docker volumes are created exclusively by this invocation of the gate.
+  # Only uniquely named resources created by this invocation are removed.
   docker volume rm "${PREFIX}_deps" "${PREFIX}_npm" "${PREFIX}_reports" >/dev/null 2>&1 || true
   printf '%s\n' 'Cleanup complete.'
 }
-trap cleanup EXIT
+trap finish EXIT
 
 # Prevent overlapping jobs from being joined or deleted by a different gate run.
 run_node() {
@@ -40,6 +57,7 @@ printf '%s\n' '=== TicketFlow design-conformance gate ==='
 printf 'Repository: %s\n' "$REPO_DIR"
 if ! docker info >/dev/null 2>&1; then
   bad 'Docker daemon unavailable'
+  exit 1
 else
   ok 'Docker daemon available'
 fi
@@ -88,29 +106,65 @@ docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" ps || true
 
 printf '%s\n' '--- STEP 2: genuine ticket workflow ---'
 # Use Node's built-in fetch, so no curl/python/jq are needed on the host.
-# A ticket created with the documented fields MUST succeed without supplying its server-generated number.
-if docker run --rm --network "$NETWORK" "$NODE_IMAGE" node -e '
+# Run each assertion independently: one failed create must not conceal the
+# later-stage persistence, authorisation and session-security evidence.
+workflow_probe() {
+  docker run --rm --network "$NETWORK" -e GATE_NONCE="${GATE_NONCE:-local}" \
+    "$NODE_IMAGE" node -e '
 (async()=>{
- const base="http://app:5000";
- const login=await fetch(base+"/api/auth/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({email:"admin@ticketflow.local",password:"Admin123!"})});
- if(login.status!==200)throw Error(`login HTTP ${login.status}`);
- const cookie=login.headers.get("set-cookie").split(";")[0];
- const post=await fetch(base+"/api/tasks",{method:"POST",headers:{"content-type":"application/json",cookie},body:JSON.stringify({title:"Gate workflow",description:"Entered only once",category:"bug",priority:"high"})});
- if(post.status!==201)throw Error(`documented ticket create HTTP ${post.status}: ${await post.text()}`);
- const task=await post.json();
+ const b="http://app:5000",headers={"content-type":"application/json"};
+ const check=async(method,path,body,cookie)=>{
+  const response=await fetch(b+path,{method,headers:{...headers,...(cookie?{cookie}:{})},body:body===undefined?undefined:JSON.stringify(body)});
+  const text=await response.text();let data;try{data=JSON.parse(text)}catch{data={raw:text.slice(0,90)}};
+  return {status:response.status,data,cookie:response.headers.get("set-cookie")?.split(";")[0]};
+ };
+ const assert=(condition,message)=>{if(!condition)throw Error(message)};
+ const login=await check("POST","/api/auth/login",{email:"admin@ticketflow.local",password:"Admin123!"});
+ assert(login.status===200&&login.cookie,"seeded admin login/session failed: "+JSON.stringify(login.data));
+ const cookie=login.cookie, nonce=process.env.GATE_NONCE||"local";
+ const first=await check("POST","/api/tasks",{title:"Gate "+nonce,description:"Entered only once",category:"bug",priority:"high"},cookie);
+ if(first.status!==201)console.error("Documented create without ticketNumber: HTTP "+first.status+" "+JSON.stringify(first.data));
+ // Continue the workflow without weakening the create assertion: send the
+ // otherwise-invalid client ticketNumber to expose subsequent defects.
+ const created=first.status===201?first:await check("POST","/api/tasks",{ticketNumber:"client-unused",title:"Gate "+nonce,description:"Entered only once",category:"bug",priority:"high"},cookie);
+ assert(created.status===201,"fallback create HTTP "+created.status+" "+JSON.stringify(created.data));
+ const id=created.data.id;
  for(const status of ["in_progress","on_hold","resolved","closed","open"]){
-  const r=await fetch(base+"/api/tasks/"+task.id,{method:"PATCH",headers:{"content-type":"application/json",cookie},body:JSON.stringify({status})});
-  if(r.status!==200)throw Error(`${status} HTTP ${r.status}`);
-  const got=await r.json();if(got.description!=="Entered only once"||got.status!==status)throw Error(`lost early data at ${status}`);
-  if(status==="resolved"&&!got.resolvedAt)throw Error("resolvedAt not stamped");
-  if(status==="closed"&&!got.closedAt)throw Error("closedAt not stamped");
+  const changed=await check("PATCH","/api/tasks/"+id,{status},cookie);
+  assert(changed.status===200,"stage "+status+" HTTP "+changed.status);
+  assert(changed.data.status===status&&changed.data.description==="Entered only once","early details lost at "+status);
+  if(status==="resolved")assert(changed.data.resolvedAt,"resolvedAt not stamped");
+  if(status==="closed")assert(changed.data.closedAt,"closedAt not stamped");
  }
- console.log(`ticket ${task.id}: all stages retain original input`);
+ const reread=await check("GET","/api/tasks/"+id,undefined,cookie);
+ assert(reread.status===200&&reread.data.description==="Entered only once","early details not retained on GET");
+ assert(first.status===201,"documented create rejected with HTTP "+first.status);
+ console.log("Ticket "+id+" passed all workflow stages without re-entry");
 })().catch(e=>{console.error(e.message);process.exit(1)})
-'; then
+  '
+}
+if workflow_probe; then
   ok 'Create and walk all workflow stages without re-entry'
 else
   bad 'Create and walk all workflow stages without re-entry'
+fi
+# Independent checks are required even when the workflow has failed.
+if docker run --rm --network "$NETWORK" "$NODE_IMAGE" node -e '
+(async()=>{const b="http://app:5000",h={"content-type":"application/json"};
+ const anon=await fetch(b+"/api/tasks");if(anon.status!==401)throw Error("anonymous tasks HTTP "+anon.status);
+ const bad=await fetch(b+"/api/auth/login",{method:"POST",headers:h,body:JSON.stringify({email:"admin@ticketflow.local",password:"incorrect"})});
+ if(bad.status!==401)throw Error("wrong password HTTP "+bad.status);
+ const good=await fetch(b+"/api/auth/login",{method:"POST",headers:h,body:JSON.stringify({email:"admin@ticketflow.local",password:"Admin123!"})});
+ if(good.status!==200)throw Error("login HTTP "+good.status);
+ const cookie=good.headers.get("set-cookie")?.split(";")[0];if(!cookie)throw Error("session cookie missing");
+ const who=await fetch(b+"/api/auth/user",{headers:{cookie}});if(who.status!==200)throw Error("session user HTTP "+who.status);
+ const out=await fetch(b+"/api/auth/logout",{method:"POST",headers:{cookie}});if(out.status!==200)throw Error("logout HTTP "+out.status);
+ const expired=await fetch(b+"/api/auth/user",{headers:{cookie}});if(expired.status!==401)throw Error("logout session still active");
+ console.log("anonymous / invalid login / session / logout assertions passed");
+})().catch(e=>{console.error(e.message);process.exit(1)})'; then
+  ok 'Authentication and anonymous isolation runtime probes'
+else
+  bad 'Authentication and anonymous isolation runtime probes'
 fi
 
 printf '%s\n' '--- STEP 3: frozen install, lint, typecheck, unit/integration/e2e ---'
@@ -125,17 +179,16 @@ if run_node sh -c 'npm exec --no -- jest --config jest.config.js --runInBand --j
 else
   bad 'all Jest suites (unit, integration, AI, load, e2e)'
 fi
-# Read only Jest's own JSON report. Missing or invalid report is a failure,
-# never interpreted as zero tests passing.
-if run_node node -e '
+# Read only Jest's own JSON report. A missing report fails, never fabricates
+# test results. Runner-reported zero tests is honest when config never loads.
+COUNTS="$(run_node node -e '
 const fs=require("fs");let r;try{r=JSON.parse(fs.readFileSync("/gate-reports/jest.json","utf8"))}catch(e){console.error(`no valid Jest JSON: ${e.message}`);process.exit(1)}
 for(const k of ["numPassedTests","numPendingTests","numFailedTests","numTotalTests"]){if(!Number.isSafeInteger(r[k])||r[k]<0)throw Error(`invalid ${k}`)}
 if(r.numPassedTests+r.numPendingTests+r.numFailedTests!==r.numTotalTests)throw Error("inconsistent runner counts");
-console.log(`${r.numPassedTests} ${r.numPendingTests} ${r.numFailedTests} ${r.numTotalTests}`);
-' >/dev/null; then
-  COUNTS="$(run_node node -e 'const r=require("/gate-reports/jest.json");console.log(`${r.numPassedTests} ${r.numPendingTests}`)')"
+console.log(`${r.numPassedTests} ${r.numPendingTests}`);
+')" && REPORT_VALID=1
+if [ "$REPORT_VALID" -eq 1 ]; then
   read -r TEST_PASSED TEST_SKIPPED <<< "$COUNTS"
-  REPORT_VALID=1
   ok 'Jest runner report validated'
 else
   bad 'Jest runner JSON report absent or invalid'
@@ -150,13 +203,5 @@ else
   bad 'official pinned-image browser e2e suite'
 fi
 
-printf '%s\n' '--- RESULTS ---'
-printf 'PASS: %s\nFAIL: %s\n' "$PASS" "$FAIL"
-# Exactly one runner-derived TESTS line, immediately before the RESULT line.
-printf 'TESTS[%s]: %s passed, %s skipped\n' "${GATE_NONCE:-0}" "$TEST_PASSED" "$TEST_SKIPPED"
-if [ "$FAIL" -eq 0 ] && [ "$REPORT_VALID" -eq 1 ]; then
-  printf '%s\n' 'RESULT: PASS'
-  exit 0
-fi
-printf '%s\n' 'RESULT: FAIL'
-exit 1
+# EXIT trap removes all gate-owned resources before printing final result.
+exit 0
