@@ -115,7 +115,7 @@ export function registerTicketTools(server: McpServer, user: User): void {
 
   server.registerTool(
     "close_ticket",
-    { description: "Close a ticket (staff only). Closing an already closed ticket changes nothing.", inputSchema: byId },
+    { description: "Close a ticket (staff only). Closing an already closed ticket is an INVALID_STATE error.", inputSchema: byId },
     (args) => runTool(() => closeTicket(user, args.id, mcpWriteContext(user)))
   );
 
