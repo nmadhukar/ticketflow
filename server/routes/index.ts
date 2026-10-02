@@ -44,19 +44,18 @@
 
 import type { Express, RequestHandler } from "express";
 import { createServer, type Server } from "http";
-import { attachRealtime, notifyTicket, ticketRecipients, notifyStaff } from "../realtime/ws";
+import { attachRealtime, notifyTicket, notifyStaff } from "../realtime/ws";
 import { storage, publicUserColumns } from "../storage";
 import { setupAuth, isAuthenticated, hashPassword } from "../services/auth";
 import { normalizeRole } from "../permissions/roles";
 import { setupMicrosoftAuth } from "../services/auth/microsoftAuth";
 import { teamsIntegration } from "../services/microsoftTeams";
 import { canChangeTeamMembership } from "../permissions/teams";
-import { notifyTicketWebhooks, teamsSettingsInputSchema } from "../services/teamsNotifications";
+import { teamsSettingsInputSchema } from "../services/teamsNotifications";
 import { assertPublicHost, validateWebhookUrl } from "../services/webhookGuard";
 import { sessionTrackingMiddleware } from "../middleware/sessionTracking.middleware";
 import {
-  insertTaskSchema,
-  insertTaskCommentSchema,
+  type User,
   insertTaskAttachmentSchema,
   ticketAutoResponses,
   ticketComplexityScores,
@@ -105,7 +104,7 @@ import { registerAdminRoutes } from "../admin";
 import { bedrockIntegration } from "../services/ai/bedrockIntegration";
 import { s3Service } from "../services/s3Service";
 import { DEFAULT_COMPANY, EMAIL_PROVIDERS } from "@shared/constants";
-import { getTicketMetaForUser, normalizeAssigneeUpdate } from "../permissions/tickets";
+import { getTicketMetaForUser } from "../permissions/tickets";
 import { buildTicketMeta } from "../services/tickets/meta";
 import {
   assertTaskAccess,
@@ -113,15 +112,21 @@ import {
   ticketVisibilityWhere,
 } from "../permissions/ticketAccess";
 import { HttpError, asyncHandler } from "../http/errors";
-import { createTicketSchema, STAFF_ONLY_TICKET_FIELDS } from "../services/tickets/schemas";
-import { commentBodySchema } from "../services/tickets/commentSchema";
 import {
-  createTicketRecord,
+  addComment,
+  createTicket,
+  deleteTicket,
+  getTicket,
+  prepareTicketCreate,
+  updateTicket,
+} from "../services/tickets/ticketService";
+import { TicketError, ticketErrorToHttp } from "../services/tickets/ticketError";
+import { createMcpRouter } from "../mcp/router";
+import {
   runTicketCreatedHooks,
   setTicketCreatedBroadcaster,
 } from "../services/tickets/create";
 import { registerEmailRoutes } from "./email";
-import { assertAgentMayAssign, assertAssigneesExist } from "../services/tickets/assignees";
 import { parseIdParam } from "../http/params";
 import { sanitizeRichHtml } from "../security/sanitizeHtml";
 import { containsPattern } from "../utils/like";
@@ -533,17 +538,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res) => {
+  app.get("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res, next) => {
     try {
       const taskId = parseInt(req.params.id);
-      const task = await storage.getTask(taskId);
-
-      if (!task) {
-        return res.status(404).json({ error: "not_found", message: "Ticket not found" });
-      }
-
-      res.json(task);
+      res.json(await getTicket(req.user, taskId));
     } catch (error) {
+      // A refusal the service names (404) goes to the error contract; anything else stays a 500.
+      if (error instanceof TicketError) return next(ticketErrorToHttp(error));
       console.error("Error fetching task:", error);
       res.status(500).json({ message: "Failed to fetch task" });
     }
@@ -610,30 +611,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const userId = getUserId(req);
         const files = req.files as Express.Multer.File[] | undefined;
-        const user = await storage.getUser(userId);
+        const user = req.user as User;
         const isCustomer = user?.role === "customer";
 
-        // Validate before anything is uploaded or written. Server-owned fields
-        // (status, resolvedAt, closedAt, createdBy, ticketNumber) are rejected.
-        const submitted = createTicketSchema.parse(req.body ?? {});
-        if (isCustomer) {
-          // Ruling R3: effort hours are staff-only.
-          const staffOnly = STAFF_ONLY_TICKET_FIELDS.filter((f) => submitted[f] !== undefined);
-          if (staffOnly.length > 0) {
-            throw new HttpError(400, "validation_failed", "Only staff can set estimated or actual hours", {
-              formErrors: [],
-              fieldErrors: Object.fromEntries(staffOnly.map((f) => [f, ["Staff only"]])),
-            });
-          }
-        }
-        // Assignee checks (existence, ruling R16) run before any upload. The
-        // customer flow rewrites its assignment below, so it is checked there.
-        const checkAssignment = async (fields: Record<string, unknown>) => {
-          normalizeAssigneeUpdate(fields);
-          await assertAssigneesExist(fields);
-          await assertAgentMayAssign({ id: userId, role: user?.role }, fields);
-        };
-        if (!isCustomer) await checkAssignment({ ...submitted });
+        // Validate before anything is uploaded or written (ticketService owns the rules):
+        // server-owned fields are rejected, customers cannot set hours, and assignee checks
+        // (existence, ruling R16) run. The customer flow rewrites its assignment below, so
+        // its assignment is checked on the final body.
+        await prepareTicketCreate(user, req.body ?? {}, { skipAssignment: isCustomer });
 
         // 1. Validate S3 configuration if files provided
         if (files && files.length > 0) {
@@ -788,10 +773,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // The customer routing above may have rewritten the body: validate the
         // final shape, then keep one assignee kind (the same rule as update).
-        const finalBody: Record<string, unknown> = { ...createTicketSchema.parse(req.body) };
-        if (isCustomer) await checkAssignment(finalBody);
-        else normalizeAssigneeUpdate(finalBody);
-        const task = await createTicketRecord(finalBody, userId);
+        // Hooks run after the attachments are linked, below.
+        const task = await createTicket(user, req.body, { runHooks: false });
 
         // 4. Create attachment records (if files provided)
         const attachmentErrors: string[] = [];
@@ -833,151 +816,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.status(201).json(task);
       } catch (error) {
-        // Validation failures go to the error contract (400 with details).
-        if (error instanceof z.ZodError || error instanceof HttpError) return next(error);
-        // Anything else goes to the shared error contract (500 without internals).
-        return next(error);
+        // Validation and permission failures go to the error contract (400/403 with details);
+        // anything else gets the shared 500 without internals.
+        return next(ticketErrorToHttp(error));
       }
     }
   );
 
   app.patch("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res, next) => {
     try {
-      const taskId = parseInt(req.params.id);
-      const userId = getUserId(req);
-      // Canonical role from the session ("user" reads as agent).
-      const user = req.user;
-
-      const task = await storage.getTask(taskId);
-      if (!task) {
-        return res.status(404).json({ error: "not_found", message: "Ticket not found" });
-      }
-      // Access (same rule as GET) + the role's field table.
-      const { canUpdateTicket } = await import("../permissions/tickets");
-      const auditStatusRefusal = () => {
-        if (req.body?.status === undefined) return;
-        try {
+      // Access, the role's field table, the status workflow, the write and its
+      // notifications are ticketService.updateTicket; this is the HTTP adapter.
+      const { ticket } = await updateTicket(req.user, parseInt(req.params.id), req.body, {
+        actionBaseUrl: `${req.protocol}://${req.get("host")}`,
+        onStatusRefusal: ({ from, to }) =>
           logSecurityEvent(req as any, "change_status", "ticket", false, {
-            from: (task as any).status,
-            to: req.body.status,
-            taskId,
-          });
-        } catch { /* best-effort: audit logging must not mask the refusal */ }
-      };
-      // One verdict: access, field table and status workflow (canUpdateTicket).
-      let result;
-      try {
-        result = await canUpdateTicket({
-          user,
-          ticket: task,
-          payload: req.body,
-        });
-      } catch (e) {
-        if (e instanceof HttpError && e.status === 409) auditStatusRefusal();
-        throw e;
-      }
-      if (!result.allowed) {
-        auditStatusRefusal();
-        return res
-          .status(403)
-          .json({ error: "forbidden", message: result.reason ?? "Access denied" });
-      }
-      // Same-status request was dropped: nothing left to write.
-      if (Object.keys(result.prunedPayload ?? {}).length === 0) return res.json(task);
-      const updates = insertTaskSchema.partial().parse(result.prunedPayload);
-      // A reassignment clears the other assignee column (no stale scope).
-      normalizeAssigneeUpdate(updates);
-      await assertAssigneesExist(updates);
-      // A reassignment changes who can see the ticket: whoever could see it before
-      // must hear about it too, so their view refreshes (and drops it).
-      const reassigns = ["assigneeId", "assigneeType", "assigneeTeamId"].some((k) => k in updates);
-      const recipientsBefore = reassigns
-        ? await ticketRecipients(taskId).catch(() => [] as string[])
-        : [];
-      // The write is conditional on the status the guard checked (409 if it changed meanwhile).
-      const updatedTask = await storage.updateTask(
-        taskId,
-        updates,
-        userId,
-        updates.status !== undefined ? { expectedStatus: (task as any).status } : undefined
-      );
-
-      // If task was resolved, trigger knowledge base learning (policy-aware)
-      if (updates.status === "resolved" && task.status !== "resolved") {
-        try {
-          const { knowledgeBaseService } = await import(
-            "../services/ai/knowledgeBase"
-          );
-          const { getAISettings } = await import("../admin/aiSettings");
-          const aiSettings = await getAISettings();
-          if (aiSettings.autoLearnEnabled) {
-            await knowledgeBaseService.learnFromResolvedTicket(taskId, {
-              minScore: Math.max(
-                0,
-                Math.min(1, Number(aiSettings.minResolutionScore ?? 0))
-              ),
-              requireApproval: !!aiSettings.articleApprovalRequired,
-            });
-          }
-          console.log(
-            `Knowledge base learning triggered for resolved ticket ${updatedTask.ticketNumber}`
-          );
-        } catch (error) {
-          console.error("Error in knowledge base learning:", error);
-        }
-      }
-
-      // Send Teams notification for task update
-      // Only webhooks whose owner can access this ticket (as updated) receive it.
-      try {
-        const actor = await storage.getUser(userId);
-        await notifyTicketWebhooks({
-          task: updatedTask,
-          kind: "updated",
-          assignedToUserId: updates.assigneeId,
-          actorEmail: actor?.email,
-          actionUrl: `${req.protocol}://${req.get("host")}/my-tasks`,
-        });
-      } catch (error) {
-        console.error("Error sending Teams notifications:", error instanceof Error ? error.name : "error");
-      }
-
-      // WS: everyone connected who can see the ticket as it is now
-      if (reassigns) {
-        const recipientsAfter = await ticketRecipients(taskId).catch(() => [] as string[]);
-        await notifyTicket(taskId, "updated", [...recipientsBefore, ...recipientsAfter]);
-      } else {
-        await notifyTicket(taskId, "updated");
-      }
-
-      res.json(updatedTask);
+            from,
+            to,
+            taskId: parseInt(req.params.id),
+          }),
+      });
+      res.json(ticket);
     } catch (error) {
-      if (error instanceof HttpError || error instanceof z.ZodError) return next(error);
       // Anything else goes to the shared error contract (500 without internals).
-      return next(error);
+      return next(ticketErrorToHttp(error));
     }
   });
 
   app.delete("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res, next) => {
     try {
-      const taskId = parseInt(req.params.id);
-      const user = req.user;
-      const task = await storage.getTask(taskId);
-      if (!task) return res.status(404).json({ error: "not_found", message: "Ticket not found" });
-      const { canDeleteTicket } = await import("../permissions/tickets");
-      const verdict = canDeleteTicket({ user, ticket: task });
-      if (!verdict.allowed) {
-        return res
-          .status(403)
-          .json({ error: "forbidden", message: verdict.reason ?? "Access denied" });
-      }
-      // Who could see it must be read before the row is gone.
-      const recipients = await ticketRecipients(taskId).catch(() => [] as string[]);
-      await storage.deleteTask(taskId);
-      await notifyTicket(taskId, "deleted", recipients);
+      await deleteTicket(req.user, parseInt(req.params.id), true);
       res.status(204).send();
     } catch (error) {
-      next(error);
+      next(ticketErrorToHttp(error));
     }
   });
 
@@ -1008,26 +879,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireTaskAccess(),
     async (req: any, res, next) => {
       try {
-        const taskId = parseInt(req.params.id);
-        const userId = getUserId(req);
-
-        // The body is only `content`; ticket and author come from the request,
-        // never from the client. Trimmed, 1..10000 characters.
-        const { content } = commentBodySchema.parse(req.body ?? {});
-        const commentData = insertTaskCommentSchema.parse({
-          content,
-          taskId,
-          userId,
-        });
-        const comment = await storage.addTaskComment(commentData);
-
-        // WS: everyone connected who can see the ticket
-        await notifyTicket(taskId, "comment");
-
+        // ticketService.addComment: the body is only `content` (trimmed, 1..10000
+        // characters); ticket and author come from the request, never from the client.
+        const comment = await addComment(req.user, parseInt(req.params.id), req.body?.content);
         res.status(201).json(comment);
       } catch (error) {
-        // ZodError and HttpError go to the shared error contract (400 / its status).
-        next(error);
+        // Validation failures go to the shared error contract (400 / its status).
+        next(ticketErrorToHttp(error));
       }
     }
   );
@@ -5524,6 +5382,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   } catch (error) {
     console.error("AI system initialization error:", error);
   }
+
+  // MCP (Streamable HTTP, stateless): after every REST route, before the /api 404 handler
+  // the caller installs. Bearer auth ran in setupAuth; the router requires an mcp:tickets key.
+  app.use("/api/mcp", createMcpRouter());
 
   return httpServer;
 }
