@@ -1,5 +1,5 @@
 import { TICKET_STATUSES } from "@shared/constants";
-import { STAFF_TRANSITIONS } from "@shared/workflow";
+import { STAFF_TRANSITIONS, allowedNextStatusesFor } from "@shared/workflow";
 import { HttpError } from "../http/errors";
 import { normalizeRole, type Role } from "./roles";
 
@@ -8,11 +8,9 @@ export const STATUSES = TICKET_STATUSES;
 export type Status = (typeof STATUSES)[number];
 export { STAFF_TRANSITIONS };
 
-/** Statuses a caller may move a ticket to from `from`. A customer may only reopen their own resolved/closed ticket. */
+/** Statuses a caller may move a ticket to from `from` (the rule lives in shared/workflow.ts, the client uses it too). */
 export function allowedNextStatuses(role: Role | null, from: Status, isCreator: boolean): Status[] {
-  if (role === "admin" || role === "manager" || role === "agent") return [...STAFF_TRANSITIONS[from]];
-  if (role === "customer" && isCreator && (from === "resolved" || from === "closed")) return ["open"];
-  return [];
+  return allowedNextStatusesFor(role, from, isCreator);
 }
 
 /**
@@ -30,7 +28,7 @@ export function assertTransition(role: Role | string | null, from: Status, to: S
     return;
   }
   if (!r) throw new HttpError(403, "forbidden", "Unknown role");
-  if (!STAFF_TRANSITIONS[from]?.includes(to)) {
+  if (!allowedNextStatuses(r, from, isCreator).includes(to)) {
     throw new HttpError(409, "invalid_transition", `Cannot move a ticket from ${from} to ${to}`);
   }
 }

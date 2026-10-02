@@ -101,7 +101,6 @@ import { bedrockIntegration } from "../services/ai/bedrockIntegration";
 import { s3Service } from "../services/s3Service";
 import { DEFAULT_COMPANY, EMAIL_PROVIDERS } from "@shared/constants";
 import { getTicketMetaForUser, normalizeAssigneeUpdate } from "../permissions/tickets";
-import { assertTransition, type Status } from "../permissions/workflow";
 import { buildTicketMeta } from "../services/tickets/meta";
 import {
   assertTaskAccess,
@@ -517,8 +516,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/tickets/meta", isAuthenticated, async (req: any, res, next) => {
     try {
       const user = await storage.getUser(getUserId(req));
+      if (!user) return res.status(401).json({ error: "unauthorized", message: "Unauthorized" });
       const meta = await buildTicketMeta(user);
-      if (!meta) return res.status(401).json({ error: "unauthorized", message: "Unauthorized" });
+      if (!meta) return res.status(403).json({ error: "forbidden", message: "Your role cannot use tickets" });
       return res.json(meta);
     } catch (error) {
       return next(error);
@@ -531,8 +531,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const taskId = parseInt(req.params.id);
       const user = await storage.getUser(getUserId(req));
+      if (!user) return res.status(401).json({ error: "unauthorized", message: "Unauthorized" });
       const baseMeta = await buildTicketMeta(user);
-      if (!user || !baseMeta) return res.status(401).json({ error: "unauthorized", message: "Unauthorized" });
+      if (!baseMeta) return res.status(403).json({ error: "forbidden", message: "Your role cannot use tickets" });
 
       const task = await storage.getTask(taskId);
       if (!task) return res.status(404).json({ error: "not_found", message: "Ticket not found" });
@@ -920,45 +921,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       // Access (same rule as GET) + the role's field table.
       const { canUpdateTicket } = await import("../permissions/tickets");
-      const result = await canUpdateTicket({
-        user,
-        ticket: task,
-        payload: req.body,
-      });
+      const auditStatusRefusal = () => {
+        if (req.body?.status === undefined) return;
+        try {
+          logSecurityEvent(req as any, "change_status", "ticket", false, {
+            from: (task as any).status,
+            to: req.body.status,
+            taskId,
+          });
+        } catch { /* best-effort: audit logging must not mask the refusal */ }
+      };
+      // One verdict: access, field table and status workflow (canUpdateTicket).
+      let result;
+      try {
+        result = await canUpdateTicket({
+          user,
+          ticket: task,
+          payload: req.body,
+        });
+      } catch (e) {
+        if (e instanceof HttpError && e.status === 409) auditStatusRefusal();
+        throw e;
+      }
       if (!result.allowed) {
+        auditStatusRefusal();
         return res
           .status(403)
           .json({ error: "forbidden", message: result.reason ?? "Access denied" });
       }
-
-      // Status workflow (owner decision 2026-10-01): staff follow STAFF_TRANSITIONS,
-      // a customer may only reopen their own resolved/closed ticket. Same status is a no-op.
-      const requested = result.prunedPayload as Record<string, unknown>;
-      const from = ((task as any).status || "open") as Status;
-      if (requested.status !== undefined) {
-        if (requested.status === from) {
-          delete requested.status;
-        } else {
-          try {
-            assertTransition(user?.role, from, requested.status as Status, (task as any).createdBy === userId);
-          } catch (e) {
-            try {
-              logSecurityEvent(req as any, "change_status", "ticket", false, {
-                from,
-                to: requested.status,
-                taskId,
-              });
-            } catch { /* best-effort: audit logging must not mask the refusal */ }
-            throw e;
-          }
-        }
-        if (Object.keys(requested).length === 0) return res.json(task);
-      }
+      // Same-status request was dropped: nothing left to write.
+      if (Object.keys(result.prunedPayload ?? {}).length === 0) return res.json(task);
       const updates = insertTaskSchema.partial().parse(result.prunedPayload);
       // A reassignment clears the other assignee column (no stale scope).
       normalizeAssigneeUpdate(updates);
       await assertAssigneesExist(updates);
-      const updatedTask = await storage.updateTask(taskId, updates, userId);
+      // The write is conditional on the status the guard checked (409 if it changed meanwhile).
+      const updatedTask = await storage.updateTask(
+        taskId,
+        updates,
+        userId,
+        updates.status !== undefined ? { expectedStatus: (task as any).status } : undefined
+      );
 
       // If task was resolved, trigger knowledge base learning (policy-aware)
       if (updates.status === "resolved" && task.status !== "resolved") {
@@ -1024,8 +1027,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(updatedTask);
     } catch (error) {
       if (error instanceof HttpError || error instanceof z.ZodError) return next(error);
-      console.error("Error updating task:", error);
-      res.status(500).json({ message: "Failed to update task" });
+      // Anything else goes to the shared error contract (500 without internals).
+      return next(error);
     }
   });
 

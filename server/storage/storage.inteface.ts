@@ -176,7 +176,8 @@ export interface IStorage {
   updateTask(
     id: number,
     updates: Partial<InsertTask>,
-    userId: string
+    userId: string,
+    opts?: { expectedStatus?: string }
   ): Promise<Task>;
   deleteTask(id: number): Promise<void>;
 

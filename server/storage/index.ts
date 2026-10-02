@@ -1,4 +1,5 @@
 import { randomBytes } from "crypto";
+import { HttpError } from "../http/errors";
 import {
   users,
   tasks,
@@ -452,16 +453,29 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Next ticket number, TKT-YYYY-NNNN (at least 4 digits, grows past 9999).
-  // One transaction: seed the (prefix, year) counter row from the NUMERIC max when
-  // it is absent (so it is right even where migration 0012 never ran), then
-  // increment with UPDATE ... RETURNING, whose row lock serialises concurrent creates.
+  // Hot path: one UPDATE ... RETURNING on the (prefix, year) counter row, whose row
+  // lock serialises concurrent creates. Only when no row exists is it seeded from
+  // the NUMERIC max of existing tickets (so it is right even where migration 0012
+  // never ran), then the UPDATE is repeated. All inside one transaction.
   async getNextTicketNumber(): Promise<string> {
     const settings = await this.getCompanySettings();
     const prefix = settings?.ticketPrefix || "TKT";
     const year = new Date().getFullYear();
     const head = `${prefix}-${year}-`;
 
+    const bump = async (tx: any): Promise<number | null> => {
+      const res: any = await tx.execute(sql`
+        UPDATE ticket_number_counters
+        SET last_number = last_number + 1
+        WHERE prefix = ${prefix} AND year = ${year}
+        RETURNING last_number`);
+      const rows = res.rows ?? res;
+      return rows.length ? Number(rows[0].last_number) : null;
+    };
+
     const next = await db.transaction(async (tx) => {
+      const first = await bump(tx);
+      if (first !== null) return first;
       await tx.execute(sql`
         INSERT INTO ticket_number_counters (prefix, year, last_number)
         SELECT ${prefix}, ${year}, COALESCE(MAX(CAST(substr(ticket_number, ${head.length + 1}) AS integer)), 0)
@@ -469,30 +483,58 @@ export class DatabaseStorage implements IStorage {
         WHERE left(ticket_number, ${head.length}) = ${head}
           AND substr(ticket_number, ${head.length + 1}) ~ '^[0-9]{1,9}$'
         ON CONFLICT (prefix, year) DO NOTHING`);
-      const res: any = await tx.execute(sql`
-        UPDATE ticket_number_counters
-        SET last_number = last_number + 1
-        WHERE prefix = ${prefix} AND year = ${year}
-        RETURNING last_number`);
-      const rows = res.rows ?? res;
-      return Number(rows[0].last_number);
+      const second = await bump(tx);
+      if (second === null) throw new Error("ticket number counter could not be seeded");
+      return second;
     });
 
     return `${head}${next.toString().padStart(4, "0")}`;
   }
 
+  // Raise the counter to at least the numeric max of existing tickets for this
+  // prefix and year (recovery after a ticket was written outside the counter).
+  private async resyncTicketCounter(): Promise<void> {
+    const settings = await this.getCompanySettings();
+    const prefix = settings?.ticketPrefix || "TKT";
+    const year = new Date().getFullYear();
+    const head = `${prefix}-${year}-`;
+    await db.execute(sql`
+      INSERT INTO ticket_number_counters (prefix, year, last_number)
+      SELECT ${prefix}, ${year}, COALESCE(MAX(CAST(substr(ticket_number, ${head.length + 1}) AS integer)), 0)
+      FROM tasks
+      WHERE left(ticket_number, ${head.length}) = ${head}
+        AND substr(ticket_number, ${head.length + 1}) ~ '^[0-9]{1,9}$'
+      ON CONFLICT (prefix, year) DO UPDATE
+      SET last_number = GREATEST(ticket_number_counters.last_number, EXCLUDED.last_number)`);
+  }
+
   // Task operations
   async createTask(task: InsertTask): Promise<Task> {
     // Generate ticket number
-    const ticketNumber = await this.getNextTicketNumber();
-
-    // Convert string date to Date object if needed
-    const taskData = {
-      ...task,
-      ticketNumber,
-      dueDate: task.dueDate ? new Date(task.dueDate) : null,
+    const insertOnce = async () => {
+      const ticketNumber = await this.getNextTicketNumber();
+      // Convert string date to Date object if needed
+      const taskData = {
+        ...task,
+        ticketNumber,
+        dueDate: task.dueDate ? new Date(task.dueDate) : null,
+      };
+      const [row] = await db.insert(tasks).values(taskData).returning();
+      return row;
     };
-    const [createdTask] = await db.insert(tasks).values(taskData).returning();
+    let createdTask: Task;
+    try {
+      createdTask = await insertOnce();
+    } catch (e: any) {
+      // A ticket number taken outside the counter (unique violation on ticket_number
+      // only): re-sync the counter once and retry once. A second failure propagates.
+      const cause = e?.cause ?? e;
+      const isNumberClash =
+        cause?.code === "23505" && /ticket_number/.test(String(cause?.constraint ?? cause?.detail ?? ""));
+      if (!isNumberClash) throw e;
+      await this.resyncTicketCounter();
+      createdTask = await insertOnce();
+    }
 
     // Add history entry
     await db.insert(taskHistory).values({
@@ -850,7 +892,10 @@ export class DatabaseStorage implements IStorage {
   async updateTask(
     id: number,
     updates: Partial<InsertTask>,
-    userId: string
+    userId: string,
+    // When given, the write only lands if the ticket still has this status (the
+    // status the workflow guard checked); otherwise 409 invalid_transition.
+    opts: { expectedStatus?: string } = {}
   ): Promise<Task> {
     const currentTask = await this.getTask(id);
     if (!currentTask) {
@@ -897,8 +942,15 @@ export class DatabaseStorage implements IStorage {
     const [updatedTask] = await db
       .update(tasks)
       .set(updateData)
-      .where(eq(tasks.id, id))
+      .where(
+        opts.expectedStatus === undefined
+          ? eq(tasks.id, id)
+          : and(eq(tasks.id, id), eq(tasks.status, opts.expectedStatus))
+      )
       .returning();
+    if (!updatedTask) {
+      throw new HttpError(409, "invalid_transition", "The ticket changed while you were editing it; reload and try again");
+    }
 
     // Add history entries for changes
     for (const [field, newValue] of Object.entries(updates)) {

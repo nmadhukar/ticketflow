@@ -198,16 +198,38 @@ describe("canUpdateTicket = access + role field table", () => {
     expect(v.allowed).toBe(true);
   });
 
-  it("a customer's status passes the field table; the workflow (assertTransition) then allows only a reopen", async () => {
+  it("a customer may not close their own ticket, and a combined body is refused whole", async () => {
     mockResults.push([{ one: 1 }]);
     const v = await canUpdateTicket({
       user: { id: ME, role: "customer" },
       ticket: { ...ticket, createdBy: ME },
       payload: { status: "closed" },
     });
-    // The refusal of customer -> closed is pinned in unit/workflow.test.ts and integration/tickets.workflow.test.ts.
-    expect(v.allowed).toBe(true);
-    expect(v.prunedPayload).toEqual({ status: "closed" });
+    expect(v.allowed).toBe(false);
+    mockResults.push([{ one: 1 }]);
+    const combined = await canUpdateTicket({
+      user: { id: ME, role: "customer" },
+      ticket: { ...ticket, createdBy: ME },
+      payload: { status: "closed", title: "x" },
+    });
+    expect(combined.allowed).toBe(false);
+  });
+
+  it("a customer may reopen their own closed ticket; same status is dropped as a no-op", async () => {
+    mockResults.push([{ one: 1 }]);
+    const reopen = await canUpdateTicket({
+      user: { id: ME, role: "customer" },
+      ticket: { ...ticket, createdBy: ME, status: "closed" },
+      payload: { status: "open" },
+    });
+    expect(reopen).toEqual({ allowed: true, prunedPayload: { status: "open" } });
+    mockResults.push([{ one: 1 }]);
+    const same = await canUpdateTicket({
+      user: { id: ME, role: "customer" },
+      ticket: { ...ticket, createdBy: ME, status: "closed" },
+      payload: { status: "closed" },
+    });
+    expect(same).toEqual({ allowed: true, prunedPayload: {} });
   });
 
   it("an unknown role is refused without consulting the database", async () => {

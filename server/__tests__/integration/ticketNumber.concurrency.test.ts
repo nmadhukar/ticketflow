@@ -42,6 +42,24 @@ describe("ticket numbers", () => {
     expect(await storage.getNextTicketNumber()).toBe(`TKT-${year}-10001`);
   });
 
+  it("a ticket written outside the counter that takes the next number does not break the create (re-sync and retry)", async () => {
+    const admin = await createUser({ role: "admin" });
+    const a = await loginAs(ctx.app, admin);
+    const first = await createTicketAs(a, { title: "first" });
+    expect(first.status).toBe(201); // the counter row now exists
+    await db.insert(tasks).values({
+      ticketNumber: `TKT-${year}-0002`,
+      title: "out of band",
+      category: "support",
+      createdBy: admin.id,
+    });
+    const next = await createTicketAs(a, { title: "after" });
+    expect(next.status).toBe(201);
+    expect(next.body.ticketNumber).toBe(`TKT-${year}-0003`);
+    const again = await createTicketAs(a, { title: "again" });
+    expect(again.body.ticketNumber).toBe(`TKT-${year}-0004`);
+  });
+
   it("seeds a missing counter row from existing tickets", async () => {
     const admin = await createUser({ role: "admin" });
     await db.insert(tasks).values({

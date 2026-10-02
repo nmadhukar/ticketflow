@@ -1,6 +1,5 @@
 import MainWrapper from "@/components/main-wrapper";
-import { STAFF_TRANSITIONS } from "@shared/workflow";
-import type { TicketStatus } from "@shared/constants";
+import { allowedNextStatusesFor } from "@shared/workflow";
 import TaskModal from "@/components/task-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -338,13 +337,15 @@ export default function Tasks() {
     refetchOnMount: "always",
   });
 
-  const canUpdateStatus = (task: any) => {
-    if (role === "admin" || role === "manager") return true;
-    if (role === "agent") {
-      return task.assigneeType === "user" && task.assigneeId === currentUserId;
-    }
-    return false;
-  };
+  // The statuses the server will accept for this caller on this ticket: the same
+  // rule PATCH enforces (shared/workflow.ts), so the menu never offers a refused move.
+  const nextStatuses = (task: any): string[] =>
+    allowedNextStatusesFor(
+      role === "user" ? "agent" : role,
+      task.status || "open",
+      !!currentUserId && task.createdBy === currentUserId
+    );
+  const canUpdateStatus = (task: any) => nextStatuses(task).length > 0;
 
   // Drag and drop handlers (admin/manager only)
   const handleDragStart = (e: any, task: any) => {
@@ -968,14 +969,26 @@ export default function Tasks() {
                                         </DropdownMenuSubContent>
                                       </DropdownMenuSub>
                                     )}
-                                    {canUpdateStatus(task) && (
+                                    {role === "customer" && canUpdateStatus(task) && (
+                                      <DropdownMenuItem
+                                        onClick={() => {
+                                          updateTaskMutation.mutate({
+                                            id: task.id,
+                                            updates: { status: "open" },
+                                          });
+                                        }}
+                                      >
+                                        Reopen ticket
+                                      </DropdownMenuItem>
+                                    )}
+                                    {role !== "customer" && canUpdateStatus(task) && (
                                       <DropdownMenuSub>
                                         <DropdownMenuSubTrigger>
                                           Update Status
                                         </DropdownMenuSubTrigger>
                                         <DropdownMenuSubContent>
-                                          {/* Only the moves the server accepts (shared STAFF_TRANSITIONS). */}
-                                          {[...(STAFF_TRANSITIONS[task.status as TicketStatus] ?? [])]
+                                          {/* Only the moves the server accepts (shared rule). */}
+                                          {nextStatuses(task)
                                             .map((s) => (
                                               <DropdownMenuItem
                                                 key={s}

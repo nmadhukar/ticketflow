@@ -3,7 +3,7 @@ import { normalizeRole, type Role } from "./roles";
 import { canAccessTask } from "./ticketAccess";
 import { HttpError } from "../http/errors";
 import { STAFF_ONLY_TICKET_FIELDS, updateTicketSchema, type UpdateTicketInput } from "../services/tickets/schemas";
-import { allowedNextStatuses, type Status } from "./workflow";
+import { allowedNextStatuses, assertTransition, type Status } from "./workflow";
 
 // Fields allowed to be updated in principle (subset will be applied per role)
 export const updatableFields = [
@@ -122,10 +122,28 @@ export async function canUpdateTicket({
       return { allowed: false, reason: "No allowed fields to update" };
     }
 
+    // Status workflow (owner decision 2026-10-01), part of the same verdict: staff follow
+    // STAFF_TRANSITIONS (409 invalid_transition, thrown), a customer may only reopen their own
+    // resolved/closed ticket (refusal). A same-status request is a no-op and is dropped.
+    if (prunedPayload.status !== undefined) {
+      const from = (ticket.status || "open") as Status;
+      if (prunedPayload.status === from) {
+        delete prunedPayload.status;
+      } else {
+        try {
+          assertTransition(role, from, prunedPayload.status as Status, ticket.createdBy === userId);
+        } catch (e) {
+          if (e instanceof HttpError && e.status === 403) return { allowed: false, reason: e.message };
+          throw e;
+        }
+      }
+    }
+
     return { allowed: true, prunedPayload };
   } catch (e: any) {
-    // Bad values are a 400 with field details (the route hands ZodError to the error contract).
-    if (e instanceof ZodError) throw e;
+    // Bad values are a 400 with field details (the route hands ZodError to the error contract);
+    // an illegal staff transition is a 409 HttpError.
+    if (e instanceof ZodError || e instanceof HttpError) throw e;
     return { allowed: false, reason: e?.message || "Invalid payload" };
   }
 }

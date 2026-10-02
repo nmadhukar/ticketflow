@@ -1,30 +1,7 @@
 import { db } from "../storage/db";
+import { storage } from "../storage";
 import { tasks, users, departments } from "@shared/schema";
 import { eq, inArray, desc } from "drizzle-orm";
-
-function nextTicketNumber(last?: string): string {
-  // Format TKT-YYYY-NNNN
-  const year = new Date().getFullYear();
-  if (!last) return `TKT-${year}-0001`;
-  const parts = last.split("-");
-  const seq = parseInt(parts[2] || "0", 10) + 1;
-  return `TKT-${year}-${seq.toString().padStart(4, "0")}`;
-}
-
-async function nextUniqueTicketNumber(currentLast?: string): Promise<string> {
-  // Ensure uniqueness by checking existence and incrementing until free
-  let candidate = nextTicketNumber(currentLast);
-   
-  while (true) {
-    const existing = await db
-      .select({ ticketNumber: tasks.ticketNumber })
-      .from(tasks)
-      .where(eq(tasks.ticketNumber, candidate))
-      .limit(1);
-    if (!existing?.length) return candidate;
-    candidate = nextTicketNumber(candidate);
-  }
-}
 
 export async function seedTickets() {
   try {
@@ -104,7 +81,7 @@ export async function seedTickets() {
         customers[Math.floor(Math.random() * customers.length)]?.id ||
         admin?.id;
 
-      lastTicketNo = await nextUniqueTicketNumber(lastTicketNo);
+      lastTicketNo = await storage.getNextTicketNumber(); // the one counter (never "last by id + 1")
       await db.insert(tasks).values({
         ticketNumber: lastTicketNo,
         title: `Department ticket #${i + 1}`,

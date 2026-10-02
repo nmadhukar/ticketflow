@@ -44,6 +44,14 @@ describe("ticket workflow", () => {
     expect(outcome(() => assertTransition("customer", "resolved", "closed", true))).toBe("403 forbidden");
   });
 
+  it("a stored status outside the vocabulary: staff move it anywhere valid, a customer gets nothing, nothing throws", () => {
+    const legacy = "pending" as any;
+    for (const to of STATUSES) expect(outcome(() => assertTransition("agent", legacy, to, false))).toBe("ok");
+    expect(allowedNextStatuses("admin", legacy, false)).toEqual([...STATUSES]);
+    expect(outcome(() => assertTransition("customer", legacy, "open", true))).toBe("403 forbidden");
+    expect(allowedNextStatuses("customer", legacy, true)).toEqual([]);
+  });
+
   it("an unknown role is refused, never treated as staff", () => {
     expect(outcome(() => assertTransition("superuser", "open", "closed", true))).toBe("403 forbidden");
     expect(allowedNextStatuses(null, "open", true)).toEqual([]);

@@ -1,30 +1,8 @@
 // server/seed/seed-knowledge-learning.ts
 import { db } from "../storage/db";
+import { storage } from "../storage";
 import { tasks, taskComments, taskHistory, users } from "@shared/schema";
 import { eq, desc, inArray } from "drizzle-orm";
-
-function nextTicketNumber(last?: string): string {
-  // Format TKT-YYYY-NNNN
-  const year = new Date().getFullYear();
-  if (!last) return `TKT-${year}-0001`;
-  const parts = last.split("-");
-  const seq = parseInt(parts[2] || "0", 10) + 1;
-  return `TKT-${year}-${seq.toString().padStart(4, "0")}`;
-}
-
-async function nextUniqueTicketNumber(currentLast?: string): Promise<string> {
-  let candidate = nextTicketNumber(currentLast);
-   
-  while (true) {
-    const existing = await db
-      .select({ ticketNumber: tasks.ticketNumber })
-      .from(tasks)
-      .where(eq(tasks.ticketNumber, candidate))
-      .limit(1);
-    if (!existing?.length) return candidate;
-    candidate = nextTicketNumber(candidate);
-  }
-}
 
 export async function seedKnowledgeLearning() {
   try {
@@ -160,7 +138,7 @@ export async function seedKnowledgeLearning() {
     // Insert tasks with proper ticket numbers and createdBy
     const insertedTasks = [];
     for (const ticket of allTickets) {
-      lastTicketNo = await nextUniqueTicketNumber(lastTicketNo);
+      lastTicketNo = await storage.getNextTicketNumber(); // the one counter (never "last by id + 1")
       const [inserted] = await db
         .insert(tasks)
         .values({
