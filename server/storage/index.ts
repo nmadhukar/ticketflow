@@ -861,7 +861,8 @@ export class DatabaseStorage implements IStorage {
     // Auto-set resolvedAt/closedAt based on status changes
     const updateData: any = {
       ...updates,
-      dueDate: updates.dueDate ? new Date(updates.dueDate) : undefined,
+      // An explicit null clears the date; an absent key leaves it alone.
+      dueDate: updates.dueDate ? new Date(updates.dueDate) : updates.dueDate === null ? null : undefined,
       updatedAt: new Date(),
     };
 

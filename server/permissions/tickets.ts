@@ -2,7 +2,7 @@ import { ZodError } from "zod";
 import { normalizeRole, type Role } from "./roles";
 import { canAccessTask } from "./ticketAccess";
 import { HttpError } from "../http/errors";
-import { STAFF_ONLY_TICKET_FIELDS, updateTicketSchema } from "../services/tickets/schemas";
+import { STAFF_ONLY_TICKET_FIELDS, updateTicketSchema, type UpdateTicketInput } from "../services/tickets/schemas";
 
 // Fields allowed to be updated in principle (subset will be applied per role)
 export const updatableFields = [
@@ -23,9 +23,8 @@ export const updatableFields = [
   "actualHours",
 ] as const;
 
-export const updateTaskSchema = updateTicketSchema;
 
-type UpdatePayload = ReturnType<typeof updateTaskSchema.parse>;
+type UpdatePayload = UpdateTicketInput;
 
 interface CanUpdateArgs {
   user: any;
@@ -117,7 +116,7 @@ export async function canUpdateTicket({
   }
 
   try {
-    const prunedPayload = updateTaskSchema.partial().parse(base);
+    const prunedPayload = updateTicketSchema.partial().parse(base);
     if (Object.keys(prunedPayload).length === 0) {
       return { allowed: false, reason: "No allowed fields to update" };
     }

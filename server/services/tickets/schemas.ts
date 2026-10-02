@@ -32,7 +32,22 @@ const dueDate = z.preprocess(
     .optional()
 );
 
-const tags = z.array(z.string().trim().min(1).max(50)).max(20).optional();
+/** Multipart sends arrays as a JSON string (the client does JSON.stringify); a bare comma string is ambiguous and stays invalid. */
+const tags = z.preprocess(
+  (v) => {
+    if (typeof v !== "string") return v;
+    try {
+      const parsed = JSON.parse(v);
+      return Array.isArray(parsed) ? parsed : v;
+    } catch {
+      return v;
+    }
+  },
+  z.array(z.string().trim().min(1).max(50)).max(20).optional()
+);
+
+/** A blank assignee id is no assignee (never reaches the FK). */
+const assigneeUserId = z.preprocess((v) => (v === "" ? undefined : v), z.string().nullable().optional());
 
 const idLikeLoose = z.union([z.string(), z.number()]).nullable().optional();
 
@@ -49,7 +64,7 @@ export const createTicketSchema = z
     priority: z.enum(TICKET_PRIORITIES).optional(),
     severity: z.enum(TICKET_SEVERITIES).optional(),
     notes: z.string().nullable().optional(),
-    assigneeId: z.string().nullable().optional(),
+    assigneeId: assigneeUserId,
     assigneeType: z.enum(["user", "team"]).optional(),
     assigneeTeamId: numericId,
     departmentId: numericId,
@@ -73,7 +88,7 @@ export const updateTicketSchema = z
     severity: z.enum(TICKET_SEVERITIES).optional(),
     status: z.enum(TICKET_STATUSES).optional(),
     notes: z.string().nullable().optional(),
-    assigneeId: z.string().nullable().optional(),
+    assigneeId: assigneeUserId,
     assigneeType: z.enum(["user", "team"]).optional(),
     assigneeTeamId: numericId,
     dueDate,

@@ -451,7 +451,10 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
           ) {
             if (value instanceof Date) {
               formData.append(key, value.toISOString());
-            } else if (typeof value === "object" && !Array.isArray(value)) {
+            } else if (Array.isArray(value)) {
+              // Arrays travel as a JSON string; the server parses it.
+              formData.append(key, JSON.stringify(value));
+            } else if (typeof value === "object") {
               formData.append(key, JSON.stringify(value));
             } else if (
               typeof value === "number" ||

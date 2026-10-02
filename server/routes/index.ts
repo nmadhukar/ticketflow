@@ -108,6 +108,7 @@ import {
 } from "../permissions/ticketAccess";
 import { HttpError } from "../http/errors";
 import { createTicketSchema, STAFF_ONLY_TICKET_FIELDS } from "../services/tickets/schemas";
+import { assertAgentMayAssign, assertAssigneesExist } from "../services/tickets/assignees";
 import { parseIdParam } from "../http/params";
 import { registerTeamsRoutes } from "./teams";
 import { registerIdParams } from "../http/install";
@@ -784,6 +785,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             });
           }
         }
+        // Assignee checks (existence, ruling R16) run before any upload. The
+        // customer flow rewrites its assignment below, so it is checked there.
+        const checkAssignment = async (fields: Record<string, unknown>) => {
+          normalizeAssigneeUpdate(fields);
+          await assertAssigneesExist(fields);
+          await assertAgentMayAssign({ id: userId, role: user?.role }, fields);
+        };
+        if (!isCustomer) await checkAssignment({ ...submitted });
 
         // 1. Validate S3 configuration if files provided
         if (files && files.length > 0) {
@@ -939,7 +948,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // The customer routing above may have rewritten the body: validate the
         // final shape, then keep one assignee kind (the same rule as update).
         const finalBody: Record<string, unknown> = { ...createTicketSchema.parse(req.body) };
-        normalizeAssigneeUpdate(finalBody);
+        if (isCustomer) await checkAssignment(finalBody);
+        else normalizeAssigneeUpdate(finalBody);
         const taskData = insertTaskSchema.parse({
           ...finalBody,
           createdBy: userId,
@@ -1088,8 +1098,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error) {
         // Validation failures go to the error contract (400 with details).
         if (error instanceof z.ZodError || error instanceof HttpError) return next(error);
-        console.error("Error creating task:", error);
-        res.status(500).json({ message: "Failed to create task" });
+        // Anything else goes to the shared error contract (500 without internals).
+        return next(error);
       }
     }
   );
@@ -1146,6 +1156,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updates = insertTaskSchema.partial().parse(result.prunedPayload);
       // A reassignment clears the other assignee column (no stale scope).
       normalizeAssigneeUpdate(updates);
+      await assertAssigneesExist(updates);
       const updatedTask = await storage.updateTask(taskId, updates, userId);
 
       // If task was resolved, trigger knowledge base learning (policy-aware)

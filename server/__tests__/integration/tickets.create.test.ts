@@ -22,6 +22,9 @@ describe("ticket create and update validation", () => {
   beforeEach(async () => {
     await resetDb();
   });
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
 
   async function actors() {
     const admin = await createUser({ role: "admin" });
@@ -239,5 +242,93 @@ describe("ticket create and update validation", () => {
     expect(t.assignedToName).toBe("agent Tester");
     const [raw] = await db.select().from(tasks).where(eq(tasks.id, row.id));
     expect(raw.assigneeType).toBeNull();
+  });
+
+  it("a nonexistent assignee user or team is 400 naming the field, and writes nothing", async () => {
+    const admin = await createUser({ role: "admin" });
+    const a = await loginAs(ctx.app, admin);
+    const u = await createTicketAs(a, { assigneeId: "no-such-user" });
+    expect(u.status).toBe(400);
+    expect(u.body.error).toBe("validation_failed");
+    expect(u.body.details.fieldErrors.assigneeId).toBeDefined();
+    const t = await createTicketAs(a, { assigneeTeamId: 999999 });
+    expect(t.status).toBe(400);
+    expect(t.body.details.fieldErrors.assigneeTeamId).toBeDefined();
+    expect(await ticketCount()).toBe(0);
+
+    // PATCH has the same check.
+    const ok = await createTicketAs(a);
+    const p = await a.patch(`/api/tasks/${ok.body.id}`).send({ assigneeId: "no-such-user" });
+    expect(p.status).toBe(400);
+    expect(p.body.details.fieldErrors.assigneeId).toBeDefined();
+    const p2 = await a.patch(`/api/tasks/${ok.body.id}`).send({ assigneeTeamId: 999999 });
+    expect(p2.status).toBe(400);
+  });
+
+  it("a blank assigneeId is no assignee", async () => {
+    const a = await loginAs(ctx.app, await createUser({ role: "admin" }));
+    const res = await createTicketAs(a, { assigneeId: "" });
+    expect(res.status).toBe(201);
+    expect(res.body.assigneeId).toBeNull();
+  });
+
+  it("R16: an agent may assign a new ticket only to themself or to a team they belong to", async () => {
+    const admin = await createUser({ role: "admin" });
+    const agent = await createUser({ role: "agent" });
+    const other = await createUser({ role: "agent" });
+    const mine = await createTeam(admin);
+    const notMine = await createTeam(admin);
+    await db.insert(teamMembers).values({ teamId: mine.id, userId: agent.id } as any);
+    const a = await loginAs(ctx.app, agent);
+
+    const self = await createTicketAs(a, { assigneeType: "user", assigneeId: agent.id });
+    expect(self.status).toBe(201);
+    const own = await createTicketAs(a, { assigneeTeamId: mine.id });
+    expect(own.status).toBe(201);
+    expect(own.body.assigneeType).toBe("team");
+    const before = await ticketCount();
+    for (const body of [{ assigneeId: other.id }, { assigneeTeamId: notMine.id }]) {
+      const res = await createTicketAs(a, body);
+      expect([JSON.stringify(body), res.status]).toEqual([JSON.stringify(body), 403]);
+      expect(res.body.error).toBe("forbidden");
+    }
+    expect(await ticketCount()).toBe(before);
+
+    // Admin is unrestricted.
+    const adminA = await loginAs(ctx.app, admin);
+    expect((await createTicketAs(adminA, { assigneeId: other.id })).status).toBe(201);
+  });
+
+  it("PATCH dueDate null clears it; an absent dueDate leaves it", async () => {
+    const a = await loginAs(ctx.app, await createUser({ role: "admin" }));
+    const t = await createTicketAs(a, { dueDate: "2030-01-15T00:00:00.000Z" });
+    expect((await a.get(`/api/tasks/${t.body.id}`)).body.dueDate).not.toBeNull();
+    expect((await a.patch(`/api/tasks/${t.body.id}`).send({ notes: "x" })).status).toBe(200);
+    expect((await a.get(`/api/tasks/${t.body.id}`)).body.dueDate).not.toBeNull();
+    const cleared = await a.patch(`/api/tasks/${t.body.id}`).send({ dueDate: null });
+    expect(cleared.status).toBe(200);
+    expect((await a.get(`/api/tasks/${t.body.id}`)).body.dueDate).toBeNull();
+  });
+
+  it("multipart create with tags (JSON string) and a file is 201 and tags read back", async () => {
+    const { s3Service } = await import("../../services/s3Service");
+    jest.spyOn(s3Service, "isConfigured").mockResolvedValue({ isConfigured: true, missing: [] } as any);
+    jest.spyOn(s3Service, "uploadFile").mockResolvedValue(undefined as any);
+    const a = await loginAs(ctx.app, await createUser({ role: "admin" }));
+    const res = await a
+      .post("/api/tasks")
+      .field("title", "With file")
+      .field("category", "support")
+      .field("tags", JSON.stringify(["a", "b"]))
+      .attach("files", Buffer.from("hello"), "note.txt");
+    expect(res.status).toBe(201);
+    expect((await a.get(`/api/tasks/${res.body.id}`)).body.tags).toEqual(["a", "b"]);
+    // A bare comma string is ambiguous and refused.
+    const bad = await a
+      .post("/api/tasks")
+      .field("title", "Bad tags")
+      .field("category", "support")
+      .field("tags", "a,b");
+    expect(bad.status).toBe(400);
   });
 });

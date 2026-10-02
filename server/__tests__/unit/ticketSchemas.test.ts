@@ -68,3 +68,17 @@ describe("insertTaskSchema assignee_type", () => {
     expect(insertTaskSchema.safeParse(row).success).toBe(true);
   });
 });
+
+describe("array and blank-id preprocessing", () => {
+  it("tags accept an array or a JSON array string, and refuse a bare comma string", () => {
+    expect(createTicketSchema.parse({ ...base, tags: ["a", "b"] }).tags).toEqual(["a", "b"]);
+    expect(createTicketSchema.parse({ ...base, tags: '["a","b"]' }).tags).toEqual(["a", "b"]);
+    expect(createTicketSchema.safeParse({ ...base, tags: "a,b" }).success).toBe(false);
+    expect(createTicketSchema.safeParse({ ...base, tags: '{"a":1}' }).success).toBe(false);
+    expect(createTicketSchema.safeParse({ ...base, tags: "[1,2]" }).success).toBe(false);
+  });
+  it("a blank assigneeId reads as absent", () => {
+    expect(createTicketSchema.parse({ ...base, assigneeId: "" }).assigneeId).toBeUndefined();
+    expect(updateTicketSchema.parse({ assigneeId: "" }).assigneeId).toBeUndefined();
+  });
+});
