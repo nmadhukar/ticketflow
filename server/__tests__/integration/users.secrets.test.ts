@@ -9,6 +9,9 @@ import {
 } from "./helpers/fixtures";
 import { findSecrets } from "./helpers/noSecrets";
 import { storage } from "../../storage";
+import { db } from "../../storage/db";
+import { tasks } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 describe("users: staff only, and no secrets in any response", () => {
   let ctx: Awaited<ReturnType<typeof createTestApp>>;
@@ -60,6 +63,16 @@ describe("users: staff only, and no secrets in any response", () => {
       userId: target.id,
       content: "hello",
     });
+    await db
+      .update(tasks)
+      .set({ assigneeType: "team", assigneeTeamId: team.id })
+      .where(eq(tasks.id, ticket.body.id));
+    await storage.createTaskAssignment({
+      taskId: ticket.body.id,
+      teamId: team.id,
+      assignedUserId: target.id,
+      assignedBy: admin.id,
+    });
 
     const responses: Array<[string, request.Response]> = [
       ["users", await agent.get("/api/users")],
@@ -79,6 +92,12 @@ describe("users: staff only, and no secrets in any response", () => {
       ["members", await agent.get(`/api/teams/${team.id}/members`)],
       ["admins", await agent.get(`/api/teams/${team.id}/admins`)],
       ["comments", await agent.get(`/api/tasks/${ticket.body.id}/comments`)],
+      [
+        "assignments",
+        await agent.get(
+          `/api/teams/${team.id}/tasks/${ticket.body.id}/assignments`
+        ),
+      ],
     ];
     for (const [name, res] of responses) {
       expect({ name, status: res.status }).toEqual({ name, status: 200 });

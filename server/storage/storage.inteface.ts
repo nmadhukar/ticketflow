@@ -195,7 +195,10 @@ export interface IStorage {
     teamId: number
   ): Promise<
     Array<
-      TeamTaskAssignment & { assignedUser: User | null; assignedByUser: User }
+      TeamTaskAssignment & {
+        assignedUser: PublicUser | null;
+        assignedByUser: PublicUser;
+      }
     >
   >;
   createTaskAssignment(

@@ -1000,7 +1000,10 @@ export class DatabaseStorage implements IStorage {
     teamId: number
   ): Promise<
     Array<
-      TeamTaskAssignment & { assignedUser: User | null; assignedByUser: User }
+      TeamTaskAssignment & {
+        assignedUser: PublicUser | null;
+        assignedByUser: PublicUser;
+      }
     >
   > {
     const assignments = await db
@@ -1027,11 +1030,11 @@ export class DatabaseStorage implements IStorage {
     // Fetch assigned users and assigned by users separately
     const result = [];
     for (const assignment of assignments) {
-      let assignedUser: User | null = null;
+      let assignedUser: PublicUser | null = null;
 
       if (assignment.assignedUserId) {
         const [user] = await db
-          .select()
+          .select(publicUserColumns)
           .from(users)
           .where(eq(users.id, assignment.assignedUserId))
           .limit(1);
@@ -1039,11 +1042,11 @@ export class DatabaseStorage implements IStorage {
       }
 
       const [byUser] = await db
-        .select()
+        .select(publicUserColumns)
         .from(users)
         .where(eq(users.id, assignment.assignedBy))
         .limit(1);
-      const assignedByUser: User = byUser || ({} as User);
+      const assignedByUser: PublicUser = byUser || ({} as PublicUser);
 
       result.push({
         ...assignment,
