@@ -12,18 +12,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
 import {
   Loader2,
   AlertCircle,
@@ -67,7 +58,7 @@ export default function TeamsIntegration() {
     queryKey: ["/api/teams-integration/settings"],
   });
 
-  const { data: teams, isLoading: teamsLoading } = useQuery({
+  const { data: _teams, isLoading: _teamsLoading } = useQuery({
     queryKey: ["/api/teams-integration/teams"],
     enabled: false, // Only fetch when user wants to connect via Microsoft Graph
   });

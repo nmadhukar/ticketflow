@@ -40,13 +40,6 @@ import { Client } from "@microsoft/microsoft-graph-client";
 import { ConfidentialClientApplication } from "@azure/msal-node";
 import { Task } from "@shared/schema";
 
-interface TeamsNotificationSettings {
-  enabled: boolean;
-  channelId?: string;
-  teamId?: string;
-  webhookUrl?: string;
-}
-
 export class MicrosoftTeamsIntegration {
   private msalClient: ConfidentialClientApplication | null = null;
   private graphClient: Client | null = null;
@@ -249,7 +242,7 @@ export class MicrosoftTeamsIntegration {
     userAccessToken: string
   ): Promise<string | null> {
     try {
-      const client = Client.init({
+      const _client = Client.init({
         authProvider: (done) => {
           done(null, userAccessToken);
         },

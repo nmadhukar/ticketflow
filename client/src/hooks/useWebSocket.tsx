@@ -173,7 +173,9 @@ export function useWebSocket() {
         return; // drop duplicate within 1s window
       }
       lastMsgRef.current = { key, ts: now };
-    } catch {}
+    } catch {
+      // Dedupe is best-effort: if the key cannot be built, process the message.
+    }
 
     switch (message.type) {
       case "connected":
@@ -218,7 +220,7 @@ export function useWebSocket() {
         }
         break;
 
-      case "ticket:updated":
+      case "ticket:updated": {
         // Invalidate specific ticket and list queries
         queryClient.invalidateQueries({
           queryKey: [`/api/tasks/${message.data.id}`],
@@ -265,6 +267,7 @@ export function useWebSocket() {
           });
         }
         break;
+      }
 
       case "ticket:comment":
         // Invalidate comment queries

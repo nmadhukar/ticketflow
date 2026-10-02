@@ -86,7 +86,6 @@ import {
   XIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Progress } from "@/components/ui/progress";
 
 interface AISettings {
   // AI Response Settings
@@ -115,7 +114,7 @@ export default function AISettings() {
   const { toast } = useToast();
   const { user } = useAuth();
   const { handleApiError } = useBedrockCostNotifications();
-  const [hasChanges, setHasChanges] = useState(false);
+  const [_hasChanges, setHasChanges] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
 
   // Cost limits state
@@ -505,7 +504,7 @@ export default function AISettings() {
 
   const handleSave = async () => {
     // Create a copy of formData to modify
-    let dataToSave = { ...formData };
+    const dataToSave = { ...formData };
 
     // Reset values for disabled features that are marked for reset
     if (featuresToReset.autoResponse && !dataToSave.autoResponseEnabled) {

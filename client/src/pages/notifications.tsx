@@ -54,7 +54,7 @@ function getNotificationIcon(type: NotificationDTO["type"]) {
   }
 }
 
-function getNotificationColor(type: NotificationDTO["type"]) {
+function _getNotificationColor(type: NotificationDTO["type"]) {
   switch (type) {
     case "task_assigned":
     case "task_updated":
@@ -73,7 +73,7 @@ function getNotificationColor(type: NotificationDTO["type"]) {
 }
 
 export default function Notifications() {
-  const { user } = useAuth();
+  const { user: _user } = useAuth();
   const [, navigate] = useLocation();
   const [notificationList, setNotificationList] = useState<NotificationDTO[]>(
     []

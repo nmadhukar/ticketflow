@@ -5,7 +5,7 @@ import {
   teamAdmins,
   teamMembers,
 } from "@shared/schema";
-import { and, desc, eq, or, not, inArray } from "drizzle-orm";
+import { and, desc, eq, not, inArray } from "drizzle-orm";
 import type { Express } from "express";
 import { isAuthenticated } from "server/services/auth";
 import { db } from "server/storage/db";
@@ -328,7 +328,7 @@ export function registerTeamsRoutes(app: Express): void {
       // Add isAdmin flag to each member (remove role field from response)
       const membersWithAdminFlag = await Promise.all(
         filteredMembers.map(async (member) => {
-          const { role, ...memberWithoutRole } = member;
+          const { role: _role, ...memberWithoutRole } = member;
           const isAdmin = await storage.isTeamAdmin(member.userId, teamId);
           return {
             ...memberWithoutRole,

@@ -47,12 +47,6 @@ interface ChatMessage {
   createdAt: string;
 }
 
-interface ChatSession {
-  sessionId: string;
-  lastMessage: string;
-  createdAt: string;
-}
-
 export function AiChatBot() {
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
@@ -130,7 +124,7 @@ export function AiChatBot() {
     setSessionId(id);
     try {
       localStorage.setItem("aiChatSessionId", id);
-    } catch {}
+    } catch { /* localStorage unavailable (private mode): session id is not persisted */ }
     queryClient.removeQueries({ queryKey: ["/api/chat", sessionId] });
     setError(null);
   };

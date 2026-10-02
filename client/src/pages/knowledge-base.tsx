@@ -4,19 +4,11 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { isUnauthorizedError } from "@/lib/authUtils";
-import Header from "@/components/header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -24,7 +16,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -43,7 +34,6 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -66,7 +56,6 @@ import {
   Brain,
   FileText,
   HelpCircle,
-  Lightbulb,
   AlertCircle,
   CheckCircle,
   Clock,
@@ -174,7 +163,7 @@ export default function KnowledgeBase() {
   const {
     data: articles = [],
     isLoading: articlesLoading,
-    refetch: refetchArticles,
+    refetch: _refetchArticles,
   } = useQuery<KnowledgeArticle[]>({
     queryKey: [
       "/api/admin/knowledge",

@@ -275,7 +275,7 @@ export async function shouldBlockRequest(
   modelId: string,
   estimatedInputTokens: number,
   estimatedOutputTokens: number,
-  operation: string
+  _operation: string
 ): Promise<{ blocked: boolean; reason?: string; estimatedCost: number }> {
   const limits = await loadCostLimits();
   const estimatedCost = estimateCost(

@@ -41,7 +41,7 @@ import {
   Ticket,
   FileCheck,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 export default function Dashboard() {
@@ -85,7 +85,7 @@ export default function Dashboard() {
     enabled: isAuthenticated && (user as any)?.role === "admin",
   });
 
-  const { data: recentTasks, isLoading: tasksLoading } = useQuery<any[]>({
+  const { data: _recentTasks, isLoading: _tasksLoading } = useQuery<any[]>({
     queryKey: ["/api/tasks"],
     retry: false,
     enabled: isAuthenticated && !hasCustomerRole,

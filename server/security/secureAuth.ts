@@ -19,7 +19,7 @@ const logAuthEvent = (event: {
   };
   console.log("AUTH_AUDIT:", JSON.stringify(logEntry));
 };
-import { Request, Response } from "express";
+import { Request } from "express";
 
 const SALT_ROUNDS = 12;
 const MAX_LOGIN_ATTEMPTS = 5;

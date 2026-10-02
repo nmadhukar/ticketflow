@@ -59,7 +59,7 @@ export function TeamAdminsSection({
   const { user } = useAuth();
 
   const { data: admins, isLoading: adminsLoading } = useTeamAdmins(teamId);
-  const { data: permissions } = useTeamPermissions(teamId);
+  const { data: _permissions } = useTeamPermissions(teamId);
   const grantAdminMutation = useGrantTeamAdmin(teamId);
   const revokeAdminMutation = useRevokeTeamAdmin(teamId);
 

@@ -86,13 +86,13 @@ export const analyzeTicket = async (ticketData: {
     const timeoutMs =
       Math.max(5, Math.min(120, Number(settings.responseTimeout || 30))) * 1000;
     const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+    const _timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
     const prompt = buildTicketAnalysisPrompt(ticketData);
 
     const result = await runTicketAnalysisPrompt(prompt);
 
     // Extract JSON from response (handles markdown code blocks and explanatory text)
-    let cleanedResponse = extractJSON(result.response);
+    const cleanedResponse = extractJSON(result.response);
     if (!cleanedResponse || cleanedResponse.trim().length === 0) {
       throw new Error("Empty response after JSON extraction");
     }
@@ -155,7 +155,7 @@ export const generateAutoResponseForTicket = async (
     const timeoutMs =
       Math.max(5, Math.min(120, Number(settings.responseTimeout || 30))) * 1000;
     const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+    const _timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
 
     const knowledgeContext =
       knowledgeBaseContext && knowledgeBaseContext.length > 0
@@ -174,7 +174,7 @@ export const generateAutoResponseForTicket = async (
     const result = await runAutoResponseForTicketPrompt(prompt);
 
     // Extract JSON from response (handles markdown code blocks and explanatory text)
-    let cleanedResponse = extractJSON(result.response);
+    const cleanedResponse = extractJSON(result.response);
     if (!cleanedResponse || cleanedResponse.trim().length === 0) {
       throw new Error("Empty response after JSON extraction");
     }

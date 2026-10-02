@@ -1,4 +1,3 @@
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -147,7 +146,8 @@ const BrandingTab = () => {
       const base64Promise = new Promise<string>((resolve, reject) => {
         reader.onloadend = () => {
           const b64 = reader.result?.toString().split(",")[1];
-          b64 ? resolve(b64) : reject(new Error("Failed to read file"));
+          if (b64) resolve(b64);
+          else reject(new Error("Failed to read file"));
         };
         reader.onerror = reject;
       });

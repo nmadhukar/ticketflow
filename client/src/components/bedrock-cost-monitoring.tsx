@@ -80,7 +80,7 @@ export function BedrockCostMonitoring() {
   const { toast } = useToast();
   const { t } = useTranslation(["common", "bedrock"]);
   const {
-    showCostLimitUpdatedNotification,
+    showCostLimitUpdatedNotification: _showCostLimitUpdatedNotification,
     showConnectionTestNotification,
     showUsageResetNotification,
     showUsageExportNotification,
@@ -171,7 +171,7 @@ export function BedrockCostMonitoring() {
   });
 
   // Test connection mutation
-  const testConnectionMutation = useMutation({
+  const _testConnectionMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("GET", "/api/bedrock/test-connection");
       return response.json();
@@ -186,7 +186,7 @@ export function BedrockCostMonitoring() {
     },
   });
 
-  const handleResetUsage = () => {
+  const _handleResetUsage = () => {
     if (
       window.confirm(
         t("bedrock:confirm.reset", {
@@ -199,7 +199,7 @@ export function BedrockCostMonitoring() {
     }
   };
 
-  const handleExportUsage = () => {
+  const _handleExportUsage = () => {
     const startDate = prompt(
       t("bedrock:prompt.startDate", {
         defaultValue:

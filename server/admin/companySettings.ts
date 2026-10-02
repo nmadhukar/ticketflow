@@ -210,7 +210,7 @@ export function registerCompanySettingsRoutes(app: Express): void {
     isAdmin,
     async (req: any, res) => {
       try {
-        const { fileName, fileType, fileData } = req.body;
+        const { fileName: _fileName, fileType, fileData } = req.body;
 
         if (!fileData || typeof fileData !== "string") {
           return res.status(400).json({ message: "File data is required" });

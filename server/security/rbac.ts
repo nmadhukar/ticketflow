@@ -186,7 +186,7 @@ export const hasPermission = (
 const checkConditions = (
   conditions: Record<string, any>,
   context: Record<string, any>,
-  userRole: UserRole
+  _userRole: UserRole
 ): boolean => {
   // Own tickets only
   if (conditions.ownTicketsOnly) {
@@ -363,7 +363,7 @@ export const requireOwnership = (resourceIdParam: string = "id") => {
       return next();
     }
 
-    const resourceId = req.params[resourceIdParam];
+    const _resourceId = req.params[resourceIdParam];
 
     // For customers, additional ownership checks would be implemented here
     // This would typically involve database queries to verify ownership

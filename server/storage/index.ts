@@ -33,8 +33,6 @@ import {
   type TeamMember,
   type InsertTeamMember,
   type TeamAdmin,
-  type InsertTeamAdmin,
-  type TaskHistory,
   type TaskAttachment,
   type InsertTaskAttachment,
   type CompanySettings,
@@ -1018,7 +1016,6 @@ export class DatabaseStorage implements IStorage {
     const result = [];
     for (const assignment of assignments) {
       let assignedUser: User | null = null;
-      let assignedByUser: User | null = null;
 
       if (assignment.assignedUserId) {
         const [user] = await db
@@ -1034,7 +1031,7 @@ export class DatabaseStorage implements IStorage {
         .from(users)
         .where(eq(users.id, assignment.assignedBy))
         .limit(1);
-      assignedByUser = byUser || ({} as User);
+      const assignedByUser: User = byUser || ({} as User);
 
       result.push({
         ...assignment,
@@ -1448,7 +1445,7 @@ export class DatabaseStorage implements IStorage {
     return history;
   }
 
-  async resetUserPassword(userId: string): Promise<{ tempPassword: string }> {
+  async resetUserPassword(_userId: string): Promise<{ tempPassword: string }> {
     // Generate a temporary password (8 characters)
     const tempPassword = Math.random().toString(36).slice(-8);
 
@@ -3033,7 +3030,7 @@ export class DatabaseStorage implements IStorage {
       avgResolutionTime: number;
     }> = [];
 
-    let allDepartmentTaskIds: number[] = [];
+    const allDepartmentTaskIds: number[] = [];
 
     for (const dept of managerDepartments) {
       // Get teams in this department

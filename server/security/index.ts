@@ -110,7 +110,7 @@ export const applySecurity = (app: Express) => {
 };
 
 // Apply route-specific security (simplified for integration)
-export const applyRouteSpecificSecurity = (app: Express) => {
+export const applyRouteSpecificSecurity = (_app: Express) => {
   // Temporarily disable rate limiting to fix IPv6 compatibility issues
   // TODO: Re-enable with proper IPv6 support
   // app.use('/api/auth/login', authRateLimit);

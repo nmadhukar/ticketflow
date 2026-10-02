@@ -15,7 +15,7 @@ import { logSecurityEvent } from "../../security";
 import type { Task } from "@shared/schema";
 import { db } from "../../storage/db";
 import { learningQueue } from "@shared/schema";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import {
   buildImproveKnowledgeArticlePrompt,
   buildKnowledgeArticlePrompt,
@@ -110,7 +110,7 @@ Comments: ${ticket.comments.map((c) => c.content).join("; ")}
     const result = await runKnowledgePatternAnalysisPrompt(prompt);
 
     // Extract JSON from response (handles markdown code blocks and explanatory text)
-    let cleanedResponse = extractJSON(result.response);
+    const cleanedResponse = extractJSON(result.response);
     if (!cleanedResponse || cleanedResponse.trim().length === 0) {
       throw new Error("Empty response after JSON extraction");
     }
@@ -156,7 +156,7 @@ export const generateKnowledgeArticle = async (
     const result = await runKnowledgePatternPrompt(prompt);
 
     // Extract JSON from response
-    let cleanedResponse = extractJSON(result.response);
+    const cleanedResponse = extractJSON(result.response);
     if (!cleanedResponse || cleanedResponse.trim().length === 0) {
       throw new Error("Empty response after JSON extraction");
     }
@@ -597,7 +597,7 @@ Content Preview: ${article.content.substring(0, 300)}...
     const result = await runKnowledgeSearchPrompt(prompt);
 
     // Extract JSON from response
-    let cleanedResponse = extractJSON(result.response);
+    const cleanedResponse = extractJSON(result.response);
     if (!cleanedResponse || cleanedResponse.trim().length === 0) {
       // Fallback to basic search if JSON extraction fails
       return await basicKnowledgeSearch(query, category, maxResults);
@@ -689,7 +689,7 @@ export const improveKnowledgeArticle = async (
 
     if (result.response) {
       // Extract JSON from response
-      let cleanedResponse = extractJSON(result.response);
+      const cleanedResponse = extractJSON(result.response);
       if (!cleanedResponse || cleanedResponse.trim().length === 0) {
         console.error("Empty response after JSON extraction");
         return false;

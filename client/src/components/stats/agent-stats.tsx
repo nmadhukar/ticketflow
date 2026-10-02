@@ -1,6 +1,6 @@
 import { useAgentStats } from "@/hooks/useStats";
 import { StatCard } from "./stat-card";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { UserCheck, PlusCircle, Target, Clock } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import {

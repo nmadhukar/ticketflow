@@ -7,7 +7,7 @@
 
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 import {
@@ -17,7 +17,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Table,
@@ -96,7 +95,7 @@ const formatFileSize = (bytes: number): string => {
 };
 
 export function S3UsageMonitoring() {
-  const { toast } = useToast();
+  const { toast: _toast } = useToast();
   const [, setLocation] = useLocation();
 
   // Fetch S3 usage statistics

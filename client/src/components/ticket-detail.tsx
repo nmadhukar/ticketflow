@@ -16,7 +16,6 @@ import {
   Clock,
   CheckCircle,
   XCircle,
-  User,
   Tag,
   Send,
   Sparkles,
@@ -68,7 +67,7 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
     data: attachments,
     isLoading: attachmentsLoading,
     error: attachmentsError,
-    refetch: refetchAttachments,
+    refetch: _refetchAttachments,
   } = useQuery<any[]>({
     queryKey: [`/api/tasks/${ticketId}/attachments`],
     retry: false,
@@ -104,7 +103,7 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
   });
 
   // Update AI response effectiveness
-  const updateAIEffectiveness = useMutation({
+  const _updateAIEffectiveness = useMutation({
     mutationFn: async (wasHelpful: boolean) => {
       const res = await apiRequest(
         "POST",

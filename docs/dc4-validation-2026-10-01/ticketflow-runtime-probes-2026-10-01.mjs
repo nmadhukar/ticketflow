@@ -2,7 +2,7 @@
 const base = 'http://app:5000';
 const headers = { 'content-type': 'application/json' };
 const rows = [];
-let admin, customer, staff, second, task, team, article, guideCategory, guide;
+let admin, customer, staff, second, task, _team, _article, _guideCategory, _guide;
 async function call(method, path, body, actor) {
   try {
     const r = await fetch(base + path, { method, headers: { ...headers, ...(actor?.cookie ? {cookie:actor.cookie} : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });

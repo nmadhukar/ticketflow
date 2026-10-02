@@ -4,7 +4,7 @@
 // tsconfig.json (bundler/ESNext, for Vite and tsx) sets. isolatedModules makes
 // ts-jest transpile only: type errors are the job of `npm run check`.
 const tsJest = (extra = {}) => ({
-  '^.+\.tsx?$': [
+  '^.+.tsx?$': [
     'ts-jest',
     {
       tsconfig: {

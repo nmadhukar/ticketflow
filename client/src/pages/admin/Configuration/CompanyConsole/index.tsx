@@ -12,8 +12,8 @@ type CompanyConsoleProps = {
   defaultTab?: "branding" | "tickets" | "preferences" | "email";
 };
 
-const CompanyConsole = ({}: CompanyConsoleProps) => {
-  const [companySettingsLocal, setCompanySettingsLocal] = useState<{
+const CompanyConsole = (_props: CompanyConsoleProps) => {
+  const [_companySettingsLocal, setCompanySettingsLocal] = useState<{
     companyName?: string;
     ticketPrefix?: string;
     defaultTicketPriority?: string;

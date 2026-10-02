@@ -67,7 +67,7 @@ class S3Service {
     }
 
     // Fetch from bedrock_settings table
-    let bedrockSettings: any = null;
+    let bedrockSettings: any;
     try {
       bedrockSettings = await storage.getBedrockSettings();
     } catch (error) {
@@ -285,7 +285,7 @@ class S3Service {
     // Extract key from S3 URL
     try {
       const urlObj = new URL(url);
-      let key = urlObj.pathname.replace(/^\/+/, "");
+      const key = urlObj.pathname.replace(/^\/+/, "");
       // Bucket name is dynamic, so we can't hardcode it here
       // Just return the pathname after removing leading slashes
       return key;

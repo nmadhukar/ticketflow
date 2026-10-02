@@ -25,13 +25,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { UserSelectItem } from "@/components/ui/user-select-item";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import MainWrapper from "@/components/main-wrapper";

@@ -1,5 +1,5 @@
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
-import { Request, Response } from "express";
+import { Request } from "express";
 import { AuthenticatedRequest } from "./jwt";
 
 // General API rate limiting

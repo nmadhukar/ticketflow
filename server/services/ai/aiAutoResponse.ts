@@ -5,7 +5,6 @@ import {
   knowledgeArticles,
   ticketComplexityScores,
   taskComments,
-  learningQueue,
 } from "@shared/schema";
 import { eq, desc, sql, and, or, ilike } from "drizzle-orm";
 import type {

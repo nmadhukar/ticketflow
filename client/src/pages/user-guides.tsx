@@ -2,8 +2,6 @@ import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { isUnauthorizedError } from "@/lib/authUtils";
-import Header from "@/components/header";
 import { Input } from "@/components/ui/input";
 import {
   Card,
@@ -14,8 +12,6 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Search,
   BookOpen,
@@ -52,7 +48,7 @@ export default function UserGuides() {
   }, [isAuthenticated, isLoading, toast]);
 
   // Fetch guides
-  const { data: guides = [], isLoading: guidesLoading } = useQuery({
+  const { data: guides = [], isLoading: _guidesLoading } = useQuery({
     queryKey: ["/api/guides", { published: "true" }],
     queryFn: async () => {
       const response = await fetch("/api/guides?published=true", {
@@ -66,7 +62,7 @@ export default function UserGuides() {
   });
 
   // Fetch categories
-  const { data: categories = [], isLoading: categoriesLoading } = useQuery<
+  const { data: categories = [], isLoading: _categoriesLoading } = useQuery<
     UserGuideCategory[]
   >({
     queryKey: ["/api/guide-categories"],

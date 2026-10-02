@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import {
@@ -50,7 +50,7 @@ const EmailTab = () => {
 
   const [selectedTemplate, setSelectedTemplate] = useState<any>(null);
   const [isEditTemplateOpen, setIsEditTemplateOpen] = useState(false);
-  const emailTemplates = [
+  const _emailTemplates = [
     {
       name: "user_invitation",
       subject: "Welcome to TicketFlow",
@@ -100,7 +100,7 @@ const EmailTab = () => {
 
   const saveEmailSettingsMutation = useMutation({
     mutationFn: async () => {
-      let payload: any = {
+      const payload: any = {
         provider,
         fromEmail: emailSettings.fromEmail,
         fromName: emailSettings.fromName,

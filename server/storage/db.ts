@@ -22,7 +22,7 @@ const connectionString = process.env.DATABASE_URL;
 let hostname = "";
 try {
   hostname = new URL(connectionString).hostname || "";
-} catch {}
+} catch { /* unparseable URL: hostname stays empty */ }
 
 let pool: NeonPool | PgPool;
 export let db: ReturnType<typeof drizzleNeon> | ReturnType<typeof drizzlePg>;

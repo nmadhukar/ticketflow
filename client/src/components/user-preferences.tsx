@@ -51,7 +51,7 @@ export default function UserPreferencesComponent({
   const { data: preferencesData, isLoading: preferencesLoading } =
     useUserPreferences();
   const updatePreferences = useUpdateUserPreferences();
-  const [mounted, setMounted] = useState(false);
+  const [_mounted, setMounted] = useState(false);
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
   const [originalPreferences, setOriginalPreferences] =
     useState<UserPreferences | null>(null);

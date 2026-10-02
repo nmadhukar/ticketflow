@@ -9,14 +9,7 @@ import {
 } from "@/components/ui/card";
 import { Building2 } from "lucide-react";
 import { useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export default function LoginPage() {
   const [showForgotDialog, setShowForgotDialog] = useState(false);

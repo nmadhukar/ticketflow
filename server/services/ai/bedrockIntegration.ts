@@ -362,7 +362,7 @@ export async function analyzeTicket(
 
       if (startIndex !== -1) {
         // Extract from JSON start and find the matching closing brace
-        let tempCleaned = result.response.substring(startIndex);
+        const tempCleaned = result.response.substring(startIndex);
         let braceCount = 0;
         let bracketCount = 0;
         let inString = false;

@@ -14,7 +14,7 @@ function nextTicketNumber(last?: string): string {
 async function nextUniqueTicketNumber(currentLast?: string): Promise<string> {
   // Ensure uniqueness by checking existence and incrementing until free
   let candidate = nextTicketNumber(currentLast);
-  // eslint-disable-next-line no-constant-condition
+   
   while (true) {
     const existing = await db
       .select({ ticketNumber: tasks.ticketNumber })
@@ -37,7 +37,7 @@ export async function seedTickets() {
       .where(eq(users.email, "admin@ticketflow.local"))
       .limit(1);
 
-    const agents = await db
+    const _agents = await db
       .select({ id: users.id })
       .from(users)
       .where(

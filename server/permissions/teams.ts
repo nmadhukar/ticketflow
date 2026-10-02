@@ -1,6 +1,6 @@
 import { IStorage } from "../storage/storage.inteface";
 import { db } from "../storage/db";
-import { teamAdmins, teams, departments } from "@shared/schema";
+import { teamAdmins, departments } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 
 /**

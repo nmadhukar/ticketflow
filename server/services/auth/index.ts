@@ -27,7 +27,9 @@ import * as client from "openid-client";
 import { EMAIL_PROVIDERS } from "@shared/constants";
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- Express type augmentation requires a namespace
   namespace Express {
+    // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- augmentation: User extends SelectUser with nothing added
     interface User extends SelectUser {}
   }
 }
@@ -322,7 +324,7 @@ export function setupAuth(app: Express) {
   // Login endpoint
   app.post("/api/auth/login", async (req, res, next) => {
     try {
-      const validatedData = loginSchema.parse(req.body);
+      const _validatedData = loginSchema.parse(req.body);
 
       passport.authenticate("local", (err: any, user: any, info: any) => {
         if (err) {
@@ -642,7 +644,7 @@ export function getSession() {
   });
 }
 
-function updateUserSession(
+function _updateUserSession(
   user: any,
   tokens: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers
 ) {
@@ -652,7 +654,7 @@ function updateUserSession(
   user.expires_at = user.claims?.exp;
 }
 
-async function upsertUser(claims: any) {
+async function _upsertUser(claims: any) {
   await storage.upsertUser({
     id: claims["sub"],
     email: claims["email"],

@@ -712,7 +712,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let baseMeta: any = {};
       try {
         baseMeta = await baseMetaRes.json();
-      } catch {}
+      } catch { /* non-JSON body: keep the empty default meta */ }
 
       const ticketMeta = await getTicketMetaForUser(user, task);
 
@@ -991,7 +991,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     analysis.confidence * 100
                   ).toFixed(0)}%): ${analysis.autoResponse}`,
                 } as any);
-              } catch {}
+              } catch { /* best-effort: the auto-response comment must not fail the request */ }
             }
 
             // If should escalate, update assignment based on complexity
@@ -1121,7 +1121,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               to: next,
               taskId,
             });
-          } catch {}
+          } catch { /* best-effort: audit logging must not mask the 400 below */ }
           return res.status(400).json({
             message: `Invalid status transition from ${current} to ${next}`,
           });
@@ -1858,7 +1858,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Check permissions (uploader or admin/manager can delete)
-      const task = await storage.getTask(attachment.taskId);
+      const _task = await storage.getTask(attachment.taskId);
       if (user?.role === "customer" && attachment.userId !== userId) {
         return res.status(403).json({ message: "Access denied" });
       }
@@ -2622,10 +2622,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   // Helper function to calculate token costs for Bedrock
-  function calculateBedrockCost(
+  function _calculateBedrockCost(
     inputTokens: number,
     outputTokens: number,
-    modelId: string
+    _modelId: string
   ): number {
     // Claude 3 Sonnet pricing per 1M tokens (as of 2024)
     const pricePerMillionInputTokens = 3.0; // $3 per 1M input tokens
@@ -2638,7 +2638,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   // Helper function to estimate token count (rough approximation)
-  function estimateTokenCount(text: string): number {
+  function _estimateTokenCount(text: string): number {
     // Rough estimation: 1 token ≈ 4 characters for English text
     return Math.ceil(text.length / 4);
   }
@@ -4375,7 +4375,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     async (req, res) => {
       try {
         const taskId = parseInt(req.params.id);
-        const userId = getUserId(req);
+        const _userId = getUserId(req);
         const task = await storage.getTask(taskId);
 
         if (!task) {
@@ -5311,7 +5311,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
 
-  wss.on("connection", (ws, req) => {
+  wss.on("connection", (ws, _req) => {
     console.log("WebSocket client connected");
 
     // Extract user ID from the session or authentication
@@ -5542,14 +5542,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       // 2) Check stored SMTP (SES) and Bedrock settings
-      let smtp = undefined as any;
+      const smtp = undefined as any;
       let bedrock = undefined as any;
       try {
         //smtp = await storage.getSmtpSettings();
-      } catch {}
+      } catch { /* SMTP settings are no longer read (see commented line above) */ }
       try {
         bedrock = await storage.getBedrockSettings();
-      } catch {}
+      } catch { /* no stored Bedrock settings: treat as not configured */ }
 
       const sesConfigured = !!(
         smtp?.awsAccessKeyId &&

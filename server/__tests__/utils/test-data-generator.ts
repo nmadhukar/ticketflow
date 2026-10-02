@@ -220,7 +220,7 @@ export class TestDataGenerator {
   static generateLoadTestData(ticketCount: number, concurrentUsers: number): any {
     return {
       tickets: this.generateTickets(ticketCount),
-      users: Array.from({ length: concurrentUsers }, (_, i) => ({
+      users: Array.from({ length: concurrentUsers }, (_, _i) => ({
         id: faker.string.uuid(),
         username: faker.internet.userName(),
         email: faker.internet.email(),

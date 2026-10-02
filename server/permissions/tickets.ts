@@ -139,14 +139,14 @@ export function canDeleteTicket({ user }: CanDeleteArgs): Verdict<void> {
   return { allowed: false, reason: "Only administrators can delete tickets" };
 }
 
-import { storage } from "../storage";
+import "../storage";
 
 type User = {
   id: string;
   role: string;
 };
 
-const IMMUTABLE_FIELDS = new Set([
+const _IMMUTABLE_FIELDS = new Set([
   "id",
   "ticketNumber",
   "createdBy",

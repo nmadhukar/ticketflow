@@ -6,7 +6,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { CheckCircle, Users, Clock, BarChart3, Building2 } from "lucide-react";
+import { CheckCircle, Users, Clock, BarChart3 } from "lucide-react";
 
 export default function Landing() {
   const features = [

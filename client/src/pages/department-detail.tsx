@@ -51,7 +51,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import MainWrapper from "@/components/main-wrapper";
-import { useDepartment, useDepartmentTeams } from "@/hooks/useDepartments";
+import { useDepartment } from "@/hooks/useDepartments";
 import { DepartmentTeamsSection } from "@/components/departments/department-teams-section";
 import { DepartmentStatsSection } from "@/components/departments/department-stats-section";
 import { useForm } from "react-hook-form";
@@ -143,7 +143,7 @@ export default function DepartmentDetail() {
   const canEdit = (user as any)?.role === "admin";
 
   // Check if user can view this department
-  const canView =
+  const _canView =
     (user as any)?.role === "admin" ||
     ((user as any)?.role === "manager" &&
       department?.managerId === (user as any)?.id);

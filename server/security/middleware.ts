@@ -1,9 +1,9 @@
 // Security middleware integrations for existing routes
 import { Request, Response, NextFunction } from "express";
 import { authenticateJWT, AuthenticatedRequest, JWTPayload } from "./jwt";
-import { requirePermission, requireRole, hasPermission } from "./rbac";
+import "./rbac";
 import { validateSchema, validationSchemas } from "./validation";
-import { createRoleBasedRateLimit } from "./rateLimiting";
+import "./rateLimiting";
 
 // Enhanced authentication middleware that works with existing session system
 export const enhancedAuth = (
@@ -50,7 +50,7 @@ export const ticketAccessControl = async (
     return next();
   }
 
-  const ticketId = req.params.id;
+  const _ticketId = req.params.id;
   const method = req.method;
 
   try {

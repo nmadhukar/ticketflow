@@ -202,7 +202,7 @@ export class KnowledgeBaseService {
       const result = await runKnowledgeArticleGenerationPrompt(prompt);
 
       // Extract JSON from response (handles markdown code blocks and explanatory text)
-      let cleanedResponse = extractJSON(result.response);
+      const cleanedResponse = extractJSON(result.response);
       if (!cleanedResponse || cleanedResponse.trim().length === 0) {
         console.error("Empty response after JSON extraction");
         return;

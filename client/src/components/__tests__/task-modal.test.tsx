@@ -20,6 +20,7 @@ jest.mock("react-i18next", () => ({
 // Radix Select needs pointer-event APIs jsdom lacks; a native select keeps the
 // modal's own logic (value, onValueChange) under test.
 jest.mock("@/components/ui/select", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, no-useless-assignment -- jest.mock factories are hoisted above imports; React is needed by the JSX below
   const React = require("react");
   return {
     Select: ({ value, onValueChange, children }: any) => (

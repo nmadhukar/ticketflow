@@ -28,7 +28,7 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 
-const PreferencesTab = ({}) => {
+const PreferencesTab = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [validationErrors, setValidationErrors] = useState<

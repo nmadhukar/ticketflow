@@ -14,7 +14,7 @@ function nextTicketNumber(last?: string): string {
 
 async function nextUniqueTicketNumber(currentLast?: string): Promise<string> {
   let candidate = nextTicketNumber(currentLast);
-  // eslint-disable-next-line no-constant-condition
+   
   while (true) {
     const existing = await db
       .select({ ticketNumber: tasks.ticketNumber })
@@ -179,7 +179,7 @@ export async function seedKnowledgeLearning() {
       const commentUserId1 = commentUserIds[0] || seedUserId;
       const commentUserId2 =
         commentUserIds.length > 1 ? commentUserIds[1] : commentUserId1;
-      const commentUserId3 =
+      const _commentUserId3 =
         commentUserIds.length > 2 ? commentUserIds[2] : commentUserId1;
 
       // Resolution comments (last ones are considered resolution)

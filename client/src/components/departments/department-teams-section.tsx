@@ -6,11 +6,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Users, ExternalLink, ChevronDown, ChevronUp } from "lucide-react";
+import { Users, ChevronDown, ChevronUp } from "lucide-react";
 import { useDepartmentTeams } from "@/hooks/useDepartments";
-import { Spinner } from "@/components/ui/spinner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLocation } from "wouter";
 import { useTranslation } from "react-i18next";
