@@ -90,6 +90,11 @@ import {
   getTableColumns,
 } from "drizzle-orm";
 import { teams, departments, users } from "@shared/schema";
+import { excludeAiSystemUser } from "../utils/aiSystemUser";
+import { runCreateTimeAutoResponse } from "../services/ai/createTimeAutoResponse";
+import { describeAIError, isQuotaBlocked, sendQuotaExceeded } from "../services/ai/aiErrors";
+import { requireStaff } from "../permissions/staff";
+import { loadAiTicket } from "../services/ai/aiTicketGate";
 import { logSecurityEvent } from "../security/rbac";
 import {
   getAISettings,
@@ -113,7 +118,10 @@ import { assertAgentMayAssign, assertAssigneesExist } from "../services/tickets/
 import { parseIdParam } from "../http/params";
 import { registerTeamsRoutes } from "./teams";
 import { registerIdParams } from "../http/install";
-import { generateAutoResponseForTicket } from "server/services/ai/aiTicketAnalysis";
+import {
+  generateAutoResponseForTicket,
+  analyzeTicket as analyzeTicketWithAI,
+} from "server/services/ai/aiTicketAnalysis";
 import { PROMPT_TEMPLATES } from "server/services/ai/prompts";
 
 // Helper function to sanitize company name for S3 key
@@ -217,16 +225,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (isRequesterAdmin) {
           // Admins can see agents, managers, and other admins
           query = query.where(
-            or(
-              eq(users.role, "agent"),
-              eq(users.role, "manager"),
-              eq(users.role, "admin")
+            and(
+              excludeAiSystemUser(),
+              or(
+                eq(users.role, "agent"),
+                eq(users.role, "manager"),
+                eq(users.role, "admin")
+              )
             )
           ) as any;
         } else {
           // Non-admins can only see agents and managers
           query = query.where(
-            or(eq(users.role, "agent"), eq(users.role, "manager"))
+            and(
+              excludeAiSystemUser(),
+              or(eq(users.role, "agent"), eq(users.role, "manager"))
+            )
           ) as any;
         }
 
@@ -787,61 +801,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
 
-        // Run AI analysis for auto-response (skip when Bedrock not configured)
-        const bedrockSettings = await storage.getBedrockSettings();
-        const bedrockConfigured =
-          !!bedrockSettings?.bedrockAccessKeyId &&
-          !!bedrockSettings?.bedrockSecretAccessKey &&
-          !!bedrockSettings?.bedrockRegion;
-
-        if (bedrockConfigured) {
-          try {
-            const { aiAutoResponseService } = await import(
-              "../services/ai/aiAutoResponse"
-            );
-            const analysis = await aiAutoResponseService.analyzeTicket(task);
-
-            // Save complexity score
-            await aiAutoResponseService.saveComplexityScore(
-              task.id,
-              analysis.complexity,
-              analysis.factors,
-              `Complexity: ${analysis.complexity}/100. Should escalate: ${analysis.shouldEscalate}`
-            );
-
-            // If confidence is high enough, save and apply auto-response
-            if (analysis.autoResponse && analysis.confidence >= 0.7) {
-              await aiAutoResponseService.saveAutoResponse(
-                task.id,
-                analysis.autoResponse,
-                analysis.confidence,
-                true // Applied automatically
-              );
-
-              // Add the auto-response as a comment (use storage layer if available)
-              try {
-                await storage.addTaskComment({
-                  taskId: task.id,
-                  userId: userId,
-                  content: `AI Auto-Response (confidence ${(
-                    analysis.confidence * 100
-                  ).toFixed(0)}%): ${analysis.autoResponse}`,
-                } as any);
-              } catch { /* best-effort: the auto-response comment must not fail the request */ }
-            }
-
-            // If should escalate, update assignment based on complexity
-            if (analysis.shouldEscalate && analysis.complexity > 70) {
-              // TODO: Implement escalation rules
-              console.log(
-                `Ticket ${task.ticketNumber} should be escalated (complexity: ${analysis.complexity})`
-              );
-            }
-          } catch (error) {
-            console.error("Error in AI analysis:", error);
-            // Continue without AI features if there's an error
-          }
-        }
+        // AI auto-response: reads the settings now, authored by the AI system
+        // user, never fails the create (logs type/status only).
+        await runCreateTimeAutoResponse(task);
 
         // WS: notify creator and, if team routed, team members (placeholder selection)
         try {
@@ -4172,13 +4134,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     "/api/tasks/:id/auto-response/generate",
     isAuthenticated,
     requireTaskAccess(),
+    // After the access check, so a missing ticket is 404 and an outside one 403 for everyone.
+    requireStaff,
     async (req, res) => {
       try {
         const taskId = parseInt(req.params.id);
         const task = await storage.getTask(taskId);
 
         if (!task) {
-          return res.status(404).json({ message: "Ticket not found" });
+          return res.status(404).json({ error: "not_found", message: "Ticket not found" });
         }
 
         // Check if Bedrock is configured
@@ -4187,7 +4151,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           !bedrockSettings?.bedrockAccessKeyId ||
           !bedrockSettings?.bedrockSecretAccessKey
         ) {
-          return res.status(503).json({ message: "AI service not configured" });
+          return res
+            .status(503)
+            .json({ error: "ai_not_configured", message: "AI service not configured" });
         }
 
         // Check AI settings
@@ -4195,7 +4161,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!aiSettings.autoResponseEnabled) {
           return res
             .status(400)
-            .json({ message: "Auto-response is disabled in settings" });
+            .json({ error: "ai_disabled", message: "Auto-response is disabled in settings" });
         }
 
         // Generate auto-response
@@ -4226,19 +4192,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           shouldEscalate: analysis.shouldEscalate,
         });
       } catch (error: any) {
-        console.error("Error generating auto-response:", error);
+        console.error("Error generating auto-response:", describeAIError(error));
 
         // If request was blocked due to cost limits
-        if (error.isBlocked) {
-          return res.status(429).json({
-            message: "Request blocked due to cost limits",
-            reason: error.message,
-            costEstimate: error.costEstimate,
-            isBlocked: true,
-          });
-        }
+        if (isQuotaBlocked(error)) return sendQuotaExceeded(res, error);
 
-        res.status(500).json({ message: "Failed to generate auto-response" });
+        res
+          .status(500)
+          .json({ error: "ai_failed", message: "Failed to generate auto-response" });
       }
     }
   );
@@ -5256,82 +5217,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
   (app as any).broadcastToUser = broadcastToUser;
   (app as any).broadcastToAll = broadcastToAll;
 
-  /* Admin-only endpoint used by AI Analytics page to test ticket analysis.
-   * Runs Bedrock-powered analysis on ad-hoc ticket data and returns a TicketAnalysis
-   * (complexity, category, priority, tags, confidence, reasoning) without mutating any tickets.
+  /* Staff tool on the AI Analytics page: runs Bedrock-powered analysis on a TICKET
+   * the caller may see and returns (complexity, confidence, auto-response, ...).
+   * Body is { ticketId }; the ticket text is loaded here, never taken from the client.
+   * Order: 400 bad body, 404 missing, 403 outside scope or customer, 503 AI not configured, 429 over quota.
    */
-  app.post("/api/ai/analyze-ticket", isAuthenticated, async (req: any, res) => {
-    try {
-      const { title, description, category, priority } = req.body;
-      const userId = getUserId(req);
+  app.post(
+    "/api/ai/analyze-ticket",
+    isAuthenticated,
+    loadAiTicket,
+    async (req: any, res) => {
+      try {
+        const task = req.aiTicket;
+        const { aiAutoResponseService } = await import(
+          "../services/ai/aiAutoResponse"
+        );
+        // Without an id the analysis stores nothing about the ticket (it is a read-only tool).
+        const analysis = await aiAutoResponseService.analyzeTicket({
+          ...task,
+          id: undefined,
+        } as any);
 
-      if (!title || !description) {
-        return res
-          .status(400)
-          .json({ message: "Title and description are required" });
+        if (!analysis) {
+          return res.status(503).json({
+            error: "ai_unavailable",
+            message: "AI analysis service unavailable",
+          });
+        }
+
+        res.json(analysis);
+      } catch (error) {
+        console.error("AI analysis error:", describeAIError(error));
+        if (isQuotaBlocked(error)) return sendQuotaExceeded(res, error);
+        res
+          .status(500)
+          .json({ error: "ai_failed", message: "Failed to analyze ticket" });
       }
-
-      const { aiAutoResponseService } = await import(
-        "../services/ai/aiAutoResponse"
-      );
-      const analysis = await aiAutoResponseService.analyzeTicket(
-        {
-          title,
-          description,
-          category: category || "support",
-          priority: priority || "medium",
-          reporterId: userId || "system",
-        } as any
-        //userId
-      );
-
-      if (!analysis) {
-        return res
-          .status(503)
-          .json({ message: "AI analysis service unavailable" });
-      }
-
-      res.json(analysis);
-    } catch (error) {
-      console.error("AI analysis error:", error);
-
-      // Check if request was blocked due to cost limits
-      if ((error as any).isBlocked) {
-        return res.status(429).json({
-          message: "Request blocked due to cost limits",
-          reason: (error as any).message,
-          costEstimate: (error as any).costEstimate,
-          isBlocked: true,
-        });
-      }
-
-      res.status(500).json({ message: "Failed to analyze ticket" });
     }
-  });
+  );
 
   app.post(
     "/api/ai/generate-response",
     isAuthenticated,
+    loadAiTicket,
     async (req: any, res) => {
       try {
-        const userId = getUserId(req);
-        const { title, description, category, priority, analysis } = req.body;
+        const task = req.aiTicket;
 
-        // Basic validation
-        if (!title || !description || !analysis) {
-          return res.status(400).json({
-            message: "Title, description, and analysis are required",
-          });
+        // Same switch as the on-demand auto-response: an admin who turned it off turned it off.
+        const aiSettings = await getAISettings();
+        if (!aiSettings.autoResponseEnabled) {
+          return res
+            .status(400)
+            .json({ error: "ai_disabled", message: "Auto-response is disabled in settings" });
         }
 
-        // Normalize ticket data shape expected by aiTicketAnalysis
+        // The ticket text is the stored one; so is the analysis (computed here, not sent by the client).
         const ticketData = {
-          title,
-          description,
-          category: category || "support",
-          priority: priority || "medium",
-          reporterId: userId || "system",
+          title: task.title,
+          description: task.description || "",
+          category: task.category || "support",
+          priority: task.priority || "medium",
+          reporterId: req.user.id,
         };
+
+        const analysis = await analyzeTicketWithAI(ticketData);
+        if (!analysis) {
+          return res.status(503).json({
+            error: "ai_unavailable",
+            message: "AI analysis service unavailable",
+          });
+        }
 
         const autoResponse = await generateAutoResponseForTicket(
           ticketData,
@@ -5340,25 +5296,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         if (!autoResponse) {
           return res.status(503).json({
+            error: "ai_unavailable",
             message: "AI response generation service unavailable",
           });
         }
 
         return res.json(autoResponse);
       } catch (error: any) {
-        console.error("AI response generation error:", error);
+        console.error("AI response generation error:", describeAIError(error));
 
         // If Bedrock/cost limits blocked the request, surface that clearly
-        if ((error as any).isBlocked) {
-          return res.status(429).json({
-            message: "Request blocked due to cost limits",
-            reason: (error as any).message,
-            costEstimate: (error as any).costEstimate,
-            isBlocked: true,
-          });
-        }
+        if (isQuotaBlocked(error)) return sendQuotaExceeded(res, error);
 
-        return res.status(500).json({ message: "Failed to generate response" });
+        return res
+          .status(500)
+          .json({ error: "ai_failed", message: "Failed to generate response" });
       }
     }
   );
@@ -5417,7 +5369,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   );
 
   // AI System Status Route
-  app.get("/api/ai/status", isAuthenticated, async (req: any, res) => {
+  app.get("/api/ai/status", isAuthenticated, requireStaff, async (req: any, res) => {
     try {
       // 1) Check env credentials
       const envAwsConfigured = !!(

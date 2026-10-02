@@ -27,6 +27,7 @@ import { randomUUID } from "crypto";
 import * as client from "openid-client";
 import { EMAIL_PROVIDERS } from "@shared/constants";
 import { requireSecret } from "../../security/secrets";
+import { isAiSystemUserId } from "../../utils/aiSystemUserId";
 import { authRateLimit, authRequestRateLimit } from "../../security/rateLimiting";
 
 declare global {
@@ -229,12 +230,10 @@ export function setupAuth(app: Express) {
       async (email, password, done) => {
         try {
           const user = await storage.getUserByEmail(email);
-          if (!user) {
+          // No such user, the AI system user, and a password-less (SSO) account all
+          // get the answer an unknown email gets: the response never says which.
+          if (!user || isAiSystemUserId(user.id) || !user.password) {
             return done(null, false, { message: "Invalid email or password" });
-          }
-
-          if (!user.password) {
-            return done(null, false, { message: "Password not set" });
           }
 
           // Claim the attempt atomically BEFORE comparing: at most five
@@ -281,7 +280,7 @@ export function setupAuth(app: Express) {
     try {
       const user = await storage.getUser(id);
       // A deactivated or un-approved user's existing sessions stop working.
-      if (!user || !user.isActive || !user.isApproved) {
+      if (!user || !user.isActive || !user.isApproved || isAiSystemUserId(user.id)) {
         return done(null, false);
       }
       // One canonical role per request ("user" reads as agent); an unknown role fails closed.
@@ -518,7 +517,7 @@ export function setupAuth(app: Express) {
       const user = await storage.getUserByEmail(validatedData.email);
       // A password-less (SSO) account has nothing to reset: same answer as an
       // unknown email, nothing stored, nothing sent.
-      if (!user || !user.password) {
+      if (!user || !user.password || isAiSystemUserId(user.id)) {
         // Don't reveal if email exists for security
         return res.json({
           message: "If the email exists, a reset link has been sent",

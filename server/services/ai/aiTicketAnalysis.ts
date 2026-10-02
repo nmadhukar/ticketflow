@@ -15,12 +15,14 @@ import { getAISettings } from "../../admin/aiSettings";
 import { logSecurityEvent } from "../../security";
 import { buildAutoResponsePrompt, buildTicketAnalysisPrompt } from "./prompts";
 import { getSystemUserId } from "../../utils/systemUser";
+import { ensureAiSystemUser } from "../../utils/aiSystemUser";
 import {
   getBedrockClient,
   runTicketAnalysisPrompt,
   runAutoResponseForTicketPrompt,
 } from "./bedrockIntegration";
 import { extractJSON } from "./jsonUtils";
+import { describeAIError, isQuotaBlocked } from "./aiErrors";
 
 /**
  * Structure for AI ticket analysis results
@@ -119,16 +121,18 @@ export const analyzeTicket = async (ticketData: {
 
     return analysis;
   } catch (error) {
-    console.error("AI ticket analysis error:", error);
+    console.error("AI ticket analysis error:", describeAIError(error));
     logSecurityEvent({
       userId: ticketData.reporterId,
       action: "ai_analysis",
       resource: "ticket",
       success: false,
       details: {
-        error: error instanceof Error ? error.message : String(error),
+        error: describeAIError(error),
       },
     });
+    // A cost-limit block is not "no answer": the route turns it into 429.
+    if (isQuotaBlocked(error)) throw error;
     return null;
   }
 };
@@ -182,7 +186,8 @@ export const generateAutoResponseForTicket = async (
     const autoResponse = JSON.parse(cleanedResponse) as AutoResponse;
     return autoResponse;
   } catch (error) {
-    console.error("AI auto-response generation error:", error);
+    console.error("AI auto-response generation error:", describeAIError(error));
+    if (isQuotaBlocked(error)) throw error;
     return null;
   }
 };
@@ -333,10 +338,10 @@ export const processTicketWithAI = async (ticketData: {
     ) {
       const trimmed = (autoResponse.response || "").slice(0, maxResponseLength);
       // Add auto-response as a comment
-      const systemUserId = await getSystemUserId();
+      const aiUserId = await ensureAiSystemUser();
       await storage.addTaskComment({
         taskId: ticketData.id,
-        userId: systemUserId,
+        userId: aiUserId,
         content: trimmed,
       });
 

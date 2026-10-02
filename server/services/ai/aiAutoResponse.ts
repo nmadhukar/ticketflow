@@ -15,6 +15,7 @@ import type {
 import { bedrockIntegration } from "./bedrockIntegration";
 import { knowledgeBaseService } from "./knowledgeBase";
 import { getSystemUserId } from "../../utils/systemUser";
+import { describeAIError, isQuotaBlocked } from "./aiErrors";
 
 interface ComplexityFactors {
   keywords: number;
@@ -86,7 +87,9 @@ export class AIAutoResponseService {
         shouldEscalate: !confidenceResult.shouldAutoRespond,
       };
     } catch (error) {
-      console.error("Error analyzing ticket:", error);
+      console.error("Error analyzing ticket:", describeAIError(error));
+      // A cost-limit block is not "no answer": callers turn it into 429.
+      if (isQuotaBlocked(error)) throw error;
       return {
         autoResponse: null,
         confidence: 0,

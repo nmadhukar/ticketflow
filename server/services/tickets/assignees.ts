@@ -3,6 +3,7 @@ import { teamMembers, teams, users } from "@shared/schema";
 import { db } from "../../storage/db";
 import { HttpError } from "../../http/errors";
 import { normalizeRole } from "../../permissions/roles";
+import { isAiSystemUserId } from "../../utils/aiSystemUserId";
 
 interface AssigneeFields {
   assigneeId?: unknown;
@@ -20,7 +21,7 @@ function invalid(field: string, message: string): HttpError {
 export async function assertAssigneesExist(fields: AssigneeFields): Promise<void> {
   if (typeof fields.assigneeId === "string" && fields.assigneeId !== "") {
     const [u] = await db.select({ id: users.id }).from(users).where(eq(users.id, fields.assigneeId)).limit(1);
-    if (!u) throw invalid("assigneeId", "Assignee user not found");
+    if (!u || isAiSystemUserId(u.id)) throw invalid("assigneeId", "Assignee user not found");
   }
   if (typeof fields.assigneeTeamId === "number") {
     const [t] = await db.select({ id: teams.id }).from(teams).where(eq(teams.id, fields.assigneeTeamId)).limit(1);

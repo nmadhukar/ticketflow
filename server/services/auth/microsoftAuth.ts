@@ -9,6 +9,7 @@ import {
 import { storage } from "../../storage";
 import { getSession } from ".";
 import { loginBlockReason } from "./accountStatus";
+import { AI_SYSTEM_USER_EMAIL } from "../../utils/aiSystemUserId";
 import { randomBytes } from "crypto";
 
 interface MicrosoftProfile {
@@ -221,6 +222,11 @@ export async function setupMicrosoftAuth(app: Express) {
       if (!email) {
         console.error("No email in ID token");
         return res.redirect("/auth?error=microsoft_no_email");
+      }
+
+      // SSO can never be linked to the AI system user, whatever email it presents.
+      if (email.toLowerCase() === AI_SYSTEM_USER_EMAIL) {
+        return res.redirect("/auth?error=account_inactive");
       }
 
       // Create or update user

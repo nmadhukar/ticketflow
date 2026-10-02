@@ -5,6 +5,7 @@ import { departments, teams, users } from "@shared/schema";
 import { TICKET_CATEGORIES, TICKET_PRIORITIES, TICKET_STATUSES } from "@shared/constants";
 import { normalizeRole } from "../../permissions/roles";
 import { deriveAllowedFields } from "../../permissions/tickets";
+import { excludeAiSystemUser } from "../../utils/aiSystemUser";
 
 /**
  * The create/edit modal meta: enumerations, role-scoped department/team/user
@@ -54,9 +55,12 @@ export async function buildTicketMeta(user: { id: string; role: unknown } | unde
       })
       .from(users)
       .where(
-        or(
-          eq(users.role, "admin"),
-          or(eq(users.role, "manager"), eq(users.role, "agent"))
+        and(
+          excludeAiSystemUser(),
+          or(
+            eq(users.role, "admin"),
+            or(eq(users.role, "manager"), eq(users.role, "agent"))
+          )
         )
       );
     basePermissions.canAssign = true;
@@ -91,7 +95,7 @@ export async function buildTicketMeta(user: { id: string; role: unknown } | unde
         role: users.role,
       })
       .from(users)
-      .where(or(eq(users.role, "manager"), eq(users.role, "agent")));
+      .where(and(excludeAiSystemUser(), or(eq(users.role, "manager"), eq(users.role, "agent"))));
     basePermissions.canAssign = true;
     basePermissions.canChangeStatus = true;
     basePermissions.allowedAssigneeTypes = ["user", "team"];
@@ -129,7 +133,7 @@ export async function buildTicketMeta(user: { id: string; role: unknown } | unde
         role: users.role,
       })
       .from(users)
-      .where(or(eq(users.role, "manager"), eq(users.role, "agent")));
+      .where(and(excludeAiSystemUser(), or(eq(users.role, "manager"), eq(users.role, "agent"))));
     basePermissions.canAssign = true;
     basePermissions.canChangeStatus = false;
     basePermissions.allowedAssigneeTypes = ["user", "team"];

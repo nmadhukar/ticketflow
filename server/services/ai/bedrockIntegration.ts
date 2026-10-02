@@ -23,6 +23,7 @@ import {
 import { PROMPT_TEMPLATES } from "./prompts";
 import { getAISettings } from "server/admin/aiSettings";
 import { extractJSON } from "./jsonUtils";
+import { describeAIError } from "./aiErrors";
 
 export async function getBedrockClient(): Promise<{
   bedrockClient: BedrockRuntimeClient | null;
@@ -286,7 +287,7 @@ async function invokeBedrockModel(
       },
     };
   } catch (error) {
-    console.error("Error invoking Claude model:", error);
+    console.error("Error invoking Claude model:", describeAIError(error));
     throw error;
   }
 }
@@ -439,7 +440,7 @@ export async function analyzeTicket(
       costEstimate: result.costEstimate,
     };
   } catch (error) {
-    console.error("Error analyzing ticket:", error);
+    console.error("Error analyzing ticket:", describeAIError(error));
 
     // If request was blocked, re-throw with cost information
     if ((error as any).isBlocked) {
@@ -571,7 +572,7 @@ export async function generateResponse(
       costEstimate: result.costEstimate,
     };
   } catch (error) {
-    console.error("Error generating response:", error);
+    console.error("Error generating response:", describeAIError(error));
 
     // If request was blocked, re-throw with cost information
     if ((error as any).isBlocked) {
@@ -690,8 +691,11 @@ export async function calculateConfidence(
   // Ensure confidence is between 0 and 1
   confidence = Math.max(0, Math.min(1, confidence));
 
-  // Determine if should auto-respond (threshold: 0.7)
-  const shouldAutoRespond = confidence >= 0.7;
+  // Auto-respond only when the admin has it on and the score reaches the configured threshold
+  // (read now, so a settings change applies to the next ticket).
+  const settings = await getAISettings();
+  const threshold = Math.max(0, Math.min(1, Number(settings.confidenceThreshold)));
+  const shouldAutoRespond = settings.autoResponseEnabled && confidence >= threshold;
 
   // Generate reasoning
   let reasoning = `Confidence: ${(confidence * 100).toFixed(1)}%. `;

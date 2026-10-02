@@ -118,6 +118,7 @@ import {
 } from "../permissions/ticketAccess";
 import { LOCKOUT_MINUTES, MAX_FAILED_LOGINS } from "../services/auth/lockout";
 import { hashResetToken } from "../utils/resetToken";
+import { excludeAiSystemUser, isAiSystemUserId } from "../utils/aiSystemUser";
 import { s3Service } from "../services/s3Service";
 import { PUBLIC_USER_FIELDS, type PublicUser } from "../utils/publicUser";
 
@@ -185,7 +186,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllUsers(): Promise<PublicUser[]> {
-    return await db.select(publicUserColumns).from(users);
+    return await db.select(publicUserColumns).from(users).where(excludeAiSystemUser());
   }
 
   async createUser(user: InsertUser): Promise<User> {
@@ -1123,6 +1124,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async addTeamMember(teamMember: InsertTeamMember): Promise<TeamMember> {
+    if (isAiSystemUserId(teamMember.userId)) {
+      throw new HttpError(404, "not_found", "User not found");
+    }
     const [member] = await db
       .insert(teamMembers)
       .values(teamMember)
@@ -1152,7 +1156,7 @@ export class DatabaseStorage implements IStorage {
       })
       .from(teamMembers)
       .innerJoin(users, eq(teamMembers.userId, users.id))
-      .where(eq(teamMembers.teamId, teamId));
+      .where(and(eq(teamMembers.teamId, teamId), excludeAiSystemUser()));
 
     return members;
   }
@@ -1453,11 +1457,14 @@ export class DatabaseStorage implements IStorage {
     avgResolutionTime: number | null;
     pendingArticles: number;
   }> {
-    const [userCount] = await db.select({ count: count() }).from(users);
+    const [userCount] = await db
+      .select({ count: count() })
+      .from(users)
+      .where(excludeAiSystemUser());
     const [activeUserCount] = await db
       .select({ count: count() })
       .from(users)
-      .where(eq(users.isActive, true));
+      .where(and(eq(users.isActive, true), excludeAiSystemUser()));
 
     const [departmentCount] = await db
       .select({ count: count() })

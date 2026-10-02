@@ -9,7 +9,6 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -39,12 +38,7 @@ export default function AIAnalyticsPage() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [searchCategory, setSearchCategory] = useState("");
-  const [testTicket, setTestTicket] = useState({
-    title: "",
-    description: "",
-    category: "support",
-    priority: "medium",
-  });
+  const [ticketIdInput, setTicketIdInput] = useState("");
 
   // Get AI system status
   const { data: aiStatus, isLoading: statusLoading } = useQuery<any>({
@@ -94,10 +88,9 @@ export default function AIAnalyticsPage() {
 
   // Generate response mutation
   const generateResponseMutation = useMutation({
-    mutationFn: async ({ ticketData, analysis }: any) => {
+    mutationFn: async ({ ticketId }: { ticketId: number }) => {
       const response = await apiRequest("POST", "/api/ai/generate-response", {
-        ...ticketData,
-        analysis,
+        ticketId,
       });
       return response.json();
     },
@@ -187,33 +180,24 @@ export default function AIAnalyticsPage() {
     },
   });
 
+  // The server loads the ticket itself; only its id is sent.
+  const parseTicketId = (): number | null => {
+    const trimmed = ticketIdInput.trim();
+    if (!/^\d{1,10}$/.test(trimmed) || Number(trimmed) <= 0) {
+      toast({
+        title: "Ticket ID required",
+        description: "Enter the numeric id of a ticket you can access.",
+        variant: "destructive",
+      });
+      return null;
+    }
+    return Number(trimmed);
+  };
+
   const handleTestAnalysis = () => {
-    const trimmedTitle = testTicket.title.trim();
-    const trimmedDescription = testTicket.description.trim();
-
-    if (!trimmedTitle) {
-      toast({
-        title: "Ticket title required",
-        description: "Please enter a meaningful title for the test ticket.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!trimmedDescription) {
-      toast({
-        title: "Missing Information",
-        description: "Please provide both title and description",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    analyzeTicketMutation.mutate({
-      ...testTicket,
-      title: trimmedTitle,
-      description: trimmedDescription,
-    });
+    const ticketId = parseTicketId();
+    if (ticketId === null) return;
+    analyzeTicketMutation.mutate({ ticketId });
   };
 
   const handleGenerateResponse = () => {
@@ -225,36 +209,9 @@ export default function AIAnalyticsPage() {
       });
       return;
     }
-
-    const trimmedTitle = testTicket.title.trim();
-    const trimmedDescription = testTicket.description.trim();
-
-    if (!trimmedTitle) {
-      toast({
-        title: "Ticket title required",
-        description: "Please enter a meaningful title for the test ticket.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!trimmedDescription) {
-      toast({
-        title: "Missing Information",
-        description: "Please provide both title and description",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    generateResponseMutation.mutate({
-      ticketData: {
-        ...testTicket,
-        title: trimmedTitle,
-        description: trimmedDescription,
-      },
-      analysis: analyzeTicketMutation.data,
-    });
+    const ticketId = parseTicketId();
+    if (ticketId === null) return;
+    generateResponseMutation.mutate({ ticketId });
   };
 
   if (statusLoading) {
@@ -395,92 +352,18 @@ export default function AIAnalyticsPage() {
                   Test Ticket Analysis
                 </CardTitle>
                 <CardDescription>
-                  Test the AI analysis system with sample ticket data
+                  Run the AI analysis on an existing ticket you can access
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
-                <div className="flex flex-col gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="title">Ticket Title</Label>
-                    <Input
-                      id="title"
-                      placeholder="e.g., Unable to login to account"
-                      value={testTicket.title}
-                      onChange={(e) =>
-                        setTestTicket((prev) => ({
-                          ...prev,
-                          title: e.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-5">
-                    <div className="space-y-2">
-                      <Label htmlFor="priority">Priority</Label>
-                      <Select
-                        value={testTicket.priority}
-                        onValueChange={(value) =>
-                          setTestTicket((prev) => ({
-                            ...prev,
-                            priority: value,
-                          }))
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="low">Low</SelectItem>
-                          <SelectItem value="medium">Medium</SelectItem>
-                          <SelectItem value="high">High</SelectItem>
-                          <SelectItem value="urgent">Urgent</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="category">Category</Label>
-                      <Select
-                        value={testTicket.category}
-                        onValueChange={(value) =>
-                          setTestTicket((prev) => ({
-                            ...prev,
-                            category: value,
-                          }))
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="bug">Bug</SelectItem>
-                          <SelectItem value="feature">
-                            Feature Request
-                          </SelectItem>
-                          <SelectItem value="support">Support</SelectItem>
-                          <SelectItem value="enhancement">
-                            Enhancement
-                          </SelectItem>
-                          <SelectItem value="incident">Incident</SelectItem>
-                          <SelectItem value="request">Request</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-
                 <div className="space-y-2">
-                  <Label htmlFor="description">Description</Label>
-                  <Textarea
-                    id="description"
-                    placeholder="Describe the issue in detail..."
-                    value={testTicket.description}
-                    onChange={(e) =>
-                      setTestTicket((prev) => ({
-                        ...prev,
-                        description: e.target.value,
-                      }))
-                    }
-                    rows={4}
+                  <Label htmlFor="ticketId">Ticket ID</Label>
+                  <Input
+                    id="ticketId"
+                    inputMode="numeric"
+                    placeholder="e.g., 42 (the number in the ticket's URL)"
+                    value={ticketIdInput}
+                    onChange={(e) => setTicketIdInput(e.target.value)}
                   />
                 </div>
 

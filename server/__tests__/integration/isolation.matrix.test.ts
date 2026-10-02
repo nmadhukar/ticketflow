@@ -112,6 +112,21 @@ const ROUTES: RouteSpec[] = [
     name: "POST /api/tasks/:id/auto-response/generate",
     call: (a, id) => a.post(`/api/tasks/${id}/auto-response/generate`),
     allowed: [400, 503],
+    // AI generation is a staff tool: a customer is refused on their own ticket too (after the 404/403 access check).
+    refusedRoles: ["C1", "C2"],
+  },
+  {
+    // Takes the ticket in the body. AI is not configured here: the gate passes, then 503.
+    name: "POST /api/ai/analyze-ticket",
+    call: (a, id) => a.post("/api/ai/analyze-ticket").send({ ticketId: id }),
+    allowed: [503],
+    refusedRoles: ["C1", "C2"],
+  },
+  {
+    name: "POST /api/ai/generate-response",
+    call: (a, id) => a.post("/api/ai/generate-response").send({ ticketId: id }),
+    allowed: [503],
+    refusedRoles: ["C1", "C2"],
   },
   {
     name: "POST /api/tasks/:id/auto-response/feedback",

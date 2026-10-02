@@ -151,6 +151,15 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+/** Postgres 23503, whether the driver error arrives bare or wrapped with a `cause`. */
+function isForeignKeyViolation(error: unknown): boolean {
+  let e: any = error;
+  for (let depth = 0; e && depth < 3; depth++, e = e.cause) {
+    if (e.code === "23503") return true;
+  }
+  return false;
+}
+
 /**
  * Record usage for billing analysis
  */
@@ -170,7 +179,7 @@ export async function recordUsage(
     const validUserId =
       userId && userId !== "system" && userId.trim() !== "" ? userId : null;
 
-    await storage.recordAIUsage({
+    const row = {
       timestamp: new Date(),
       modelId,
       inputTokens,
@@ -179,7 +188,18 @@ export async function recordUsage(
       operation,
       userId: validUserId,
       ticketId: ticketId ? parseInt(ticketId) : null,
-    });
+    };
+    try {
+      await storage.recordAIUsage(row);
+    } catch (insertError) {
+      // The ticket was deleted while the AI job ran. The money was still spent:
+      // keep the cost row, just without the ticket link.
+      if (row.ticketId !== null && isForeignKeyViolation(insertError)) {
+        await storage.recordAIUsage({ ...row, ticketId: null });
+      } else {
+        throw insertError;
+      }
+    }
 
     // Log usage for monitoring
     console.log(
