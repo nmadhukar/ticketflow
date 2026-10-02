@@ -116,6 +116,7 @@ import {
 } from "../permissions/ticketAccess";
 import { HttpError, asyncHandler, fail, logRouteError } from "../http/errors";
 import { projectUserForViewer } from "../utils/publicUser";
+import { displayNameSql } from "../utils/displayName";
 import { createTicketSchema, ticketListQuerySchema, STAFF_ONLY_TICKET_FIELDS } from "../services/tickets/schemas";
 import { assertAgentMayAssign, assertAssigneesExist } from "../services/tickets/assignees";
 import { parseIdParam } from "../http/params";
@@ -3964,11 +3965,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           wasApplied: ticketAutoResponses.wasApplied,
           respondedBy: ticketAutoResponses.respondedBy,
           createdAt: ticketAutoResponses.createdAt,
-          respondedByName: sql<string | null>`COALESCE(
-            NULLIF(TRIM(${users.firstName} || ' ' || ${users.lastName}), ''),
-            ${users.email},
-            'System'
-          )`.as("responded_by_name"),
+          // Never an email (customers read applied rows); 'System' when nobody responded.
+          respondedByName: sql<string | null>`CASE WHEN ${users.id} IS NULL THEN 'System' ELSE ${displayNameSql(
+            sql`${users.firstName}`,
+            sql`${users.lastName}`,
+            sql`${users.role}`
+          )} END`.as("responded_by_name"),
         })
         .from(ticketAutoResponses)
         .leftJoin(users, eq(ticketAutoResponses.respondedBy, users.id))

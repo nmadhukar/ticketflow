@@ -479,6 +479,40 @@ describe("remaining API contract items", () => {
     });
   });
 
+  describe("R19 auto-response responder name", () => {
+    it("a customer reading an applied auto-response never gets the responder's email", async () => {
+      const { a: cust } = await as("customer");
+      const staff = await createUser({ role: "agent", email: "responder.staff@example.test" });
+      await db.update(users).set({ lastName: null }).where(eq(users.id, staff.id));
+      const t = await createTicketAs(cust);
+      await db.insert(ticketAutoResponses).values({
+        ticketId: t.body.id,
+        aiResponse: "Applied answer",
+        confidenceScore: "0.90",
+        wasApplied: true,
+        respondedBy: staff.id,
+      });
+      const res = await cust.get(`/api/tasks/${t.body.id}/auto-response`);
+      expect(res.status).toBe(200);
+      expect(res.body.respondedByName).toBe("agent");
+      expect(res.text).not.toContain("@");
+      expect(res.text).not.toContain("responder.staff");
+    });
+
+    it("keeps 'System' when nobody responded", async () => {
+      const { a: cust } = await as("customer");
+      const t = await createTicketAs(cust);
+      await db.insert(ticketAutoResponses).values({
+        ticketId: t.body.id,
+        aiResponse: "Auto",
+        confidenceScore: "0.90",
+        wasApplied: true,
+      });
+      const res = await cust.get(`/api/tasks/${t.body.id}/auto-response`);
+      expect(res.body.respondedByName).toBe("System");
+    });
+  });
+
   describe("last admin and self-demotion guards", () => {
     it("the only active admin cannot be demoted or deactivated (409 last_admin)", async () => {
       const { u, a } = await as("admin");
