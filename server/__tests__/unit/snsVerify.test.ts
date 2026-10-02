@@ -36,6 +36,9 @@ describe("isValidCertUrl", () => {
     "https://user:pw@sns.us-east-1.amazonaws.com/x.pem",
     "https://sns.us-east-1.amazonaws.com:8443/x.pem",
     "https://sns.us-east-1.amazonaws.com/x.crt",
+    "https://sns.us-east-1.amazonaws.com/x.pem?redirect=https://evil.example.test/y.pem",
+    "https://sns.us-east-1.amazonaws.com/x.pem?",
+    "https://sns.us-east-1.amazonaws.com/x.pem#frag",
     "https://amazonaws.com/x.pem",
     "not a url",
     "",
@@ -58,6 +61,60 @@ describe("buildStringToSign", () => {
         `Timestamp\n2026-10-01T12:00:00.000Z\nTopicArn\narn:aws:sns:us-east-1:111122223333:unit-topic\nType\nNotification\n`
     );
     expect(buildStringToSign(noSubject)).not.toContain("Subject\n");
+  });
+
+  // Expected strings written out by hand from the SNS documentation, not built by the code under test.
+  it("matches the documented string for a Notification without a Subject", () => {
+    const { Subject: _subject, ...noSubject } = notification;
+    expect(buildStringToSign(noSubject)).toBe(
+      [
+        "Message",
+        '{"notificationType":"Received"}',
+        "MessageId",
+        "unit-message-1",
+        "Timestamp",
+        "2026-10-01T12:00:00.000Z",
+        "TopicArn",
+        "arn:aws:sns:us-east-1:111122223333:unit-topic",
+        "Type",
+        "Notification",
+        "",
+      ].join("\n")
+    );
+  });
+
+  it("matches the documented string for a SubscriptionConfirmation", () => {
+    const confirmation: SnsMessage = {
+      Type: "SubscriptionConfirmation",
+      MessageId: "confirm-1",
+      Token: "token-1",
+      TopicArn: "arn:aws:sns:us-east-1:111122223333:unit-topic",
+      Message: "You have chosen to subscribe",
+      SubscribeURL: "https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription&Token=token-1",
+      Timestamp: "2026-10-01T12:00:00.000Z",
+      SignatureVersion: "1",
+      Signature: "ignored",
+      SigningCertURL: CERT_URL,
+    };
+    expect(buildStringToSign(confirmation)).toBe(
+      [
+        "Message",
+        "You have chosen to subscribe",
+        "MessageId",
+        "confirm-1",
+        "SubscribeURL",
+        "https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription&Token=token-1",
+        "Timestamp",
+        "2026-10-01T12:00:00.000Z",
+        "Token",
+        "token-1",
+        "TopicArn",
+        "arn:aws:sns:us-east-1:111122223333:unit-topic",
+        "Type",
+        "SubscriptionConfirmation",
+        "",
+      ].join("\n")
+    );
   });
 
   it("is null for an unknown type or a missing required field", () => {

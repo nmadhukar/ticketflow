@@ -1,6 +1,6 @@
 import express, { type Express, type Request, type Response } from "express";
 import https from "https";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { snsMessageDedupe } from "@shared/schema";
 import { db } from "../storage/db";
 import {
@@ -12,6 +12,7 @@ import {
   type SnsMessage,
 } from "../services/email/snsVerify";
 import { processSesNotification } from "../services/email/inbound";
+import { inboundEmailRateLimit } from "../security/rateLimiting";
 
 /**
  * POST /api/email/inbound: the SNS HTTPS subscription endpoint for SES inbound mail.
@@ -20,10 +21,13 @@ import { processSesNotification } from "../services/email/inbound";
  *
  * Environment (names only):
  *  - SNS_INBOUND_TOPIC_ARN  the one topic accepted (required; unset refuses everything)
- *  - INBOUND_EMAIL_CATEGORY, INBOUND_EMAIL_ALLOW_UNVERIFIED_SENDER  see services/email/inbound.ts
+ *  - INBOUND_EMAIL_CATEGORY, APP_BASE_URL  see services/email/inbound.ts
  * The signing-certificate and confirmation-URL host must be sns.<region>.amazonaws.com
  * with <region> taken from the topic ARN.
  */
+
+/** A 'processing' claim older than this is a crashed attempt and may be taken again. */
+const CLAIM_STALE_MINUTES = 10;
 
 /** Visits a SubscribeURL to confirm the subscription. Never follows redirects. */
 async function confirmOverHttps(url: string): Promise<void> {
@@ -66,33 +70,49 @@ function readBody(req: Request): SnsMessage | null {
   }
 }
 
+/**
+ * Takes the claim on an SNS MessageId. True when this delivery owns it: a new id, or a
+ * 'processing' claim older than CLAIM_STALE_MINUTES (its process died). A 'done' claim, or a
+ * fresh 'processing' one, belongs to another delivery.
+ */
+async function claimMessage(messageId: string): Promise<boolean> {
+  const rows = await db
+    .insert(snsMessageDedupe)
+    .values({ messageId, status: "processing" })
+    .onConflictDoUpdate({
+      target: snsMessageDedupe.messageId,
+      set: { status: "processing", receivedAt: sql`now()` },
+      setWhere: sql`${snsMessageDedupe.status} = 'processing' AND ${snsMessageDedupe.receivedAt} < now() - make_interval(mins => ${CLAIM_STALE_MINUTES})`,
+    })
+    .returning({ id: snsMessageDedupe.messageId });
+  return rows.length > 0;
+}
+
 async function handleInbound(req: Request, res: Response) {
   const msg = readBody(req);
   if (!msg) return json(res, 400, "invalid_message", "Body is not an SNS message");
 
   const topicArn = process.env.SNS_INBOUND_TOPIC_ARN?.trim();
   const region = topicArn ? regionOfTopic(topicArn) : null;
-
-  // 1. Authenticate. Nothing below runs for a message that did not verify.
-  try {
-    await verifySnsMessage(msg, {
-      fetchCert: emailInboundDeps.fetchCert,
-      region: region ?? undefined,
-    });
-  } catch (error) {
-    const code = error instanceof SnsVerificationError ? error.code : "verify_failed";
-    console.warn(`inbound email refused: ${code}`);
-    return json(res, 403, "forbidden", "Message signature could not be verified");
-  }
-
-  // 2. Only the configured topic.
   if (!topicArn || !region) {
     console.warn("inbound email refused: SNS_INBOUND_TOPIC_ARN is not configured");
     return json(res, 503, "inbound_email_not_configured", "Inbound email is not configured");
   }
+
+  // 1. Only the configured topic. TopicArn is a signed field, so a forged value still fails
+  // step 2; checking it first just keeps other topics from costing a certificate fetch.
   if (msg.TopicArn !== topicArn) {
     console.warn("inbound email refused: topic not allowed");
     return json(res, 403, "forbidden", "Topic not allowed");
+  }
+
+  // 2. Authenticate. Nothing below runs for a message that did not verify.
+  try {
+    await verifySnsMessage(msg, { fetchCert: emailInboundDeps.fetchCert, region });
+  } catch (error) {
+    const code = error instanceof SnsVerificationError ? error.code : "verify_failed";
+    console.warn(`inbound email refused: ${code}`);
+    return json(res, 403, "forbidden", "Message signature could not be verified");
   }
 
   // 3. Subscription handshake.
@@ -115,13 +135,9 @@ async function handleInbound(req: Request, res: Response) {
   // 4. A notification: claim its MessageId, then process. A repeat delivery finds the claim.
   const messageId = typeof msg.MessageId === "string" ? msg.MessageId.slice(0, 200) : "";
   if (!messageId) return json(res, 400, "invalid_message", "MessageId is missing");
-  const claimed = await db
-    .insert(snsMessageDedupe)
-    .values({ messageId })
-    .onConflictDoNothing()
-    .returning({ id: snsMessageDedupe.messageId });
-  if (claimed.length === 0) return res.status(200).json({ status: "duplicate" });
+  if (!(await claimMessage(messageId))) return res.status(200).json({ status: "duplicate" });
 
+  let result: Awaited<ReturnType<typeof processSesNotification>>;
   try {
     let inner: unknown;
     try {
@@ -129,26 +145,46 @@ async function handleInbound(req: Request, res: Response) {
     } catch {
       inner = null;
     }
-    const outcome = await processSesNotification(inner);
-    if (outcome.status === "ignored") console.warn(`inbound email ignored: ${outcome.reason}`);
-    return res.status(200).json(outcome);
+    result = await processSesNotification(inner);
   } catch (error) {
-    // Release the claim so SNS's retry processes the message again, then let the shared
-    // error handler answer 500 (no message content is logged here).
+    // Nothing was committed to the caller as done: release the claim so SNS's retry processes
+    // the message again, and answer 500 (the error type is logged, never message content).
     await db
       .delete(snsMessageDedupe)
-      .where(sql`${snsMessageDedupe.messageId} = ${messageId}`)
+      .where(eq(snsMessageDedupe.messageId, messageId))
       .catch(() => undefined);
     console.error(`inbound email failed: ${error instanceof Error ? error.name : "error"}`);
     return json(res, 500, "internal_error", "Internal server error");
   }
+
+  // The ticket or comment is committed: make the claim final, answer SNS, and only then run the
+  // non-essential effects (AI auto-response, realtime, Teams). None of them can change the answer.
+  try {
+    await db.update(snsMessageDedupe).set({ status: "done" }).where(eq(snsMessageDedupe.messageId, messageId));
+  } catch (error) {
+    // The claim stays 'processing' and turns stale; SNS must still be told the message was handled.
+    console.error(`inbound email: could not mark message done: ${error instanceof Error ? error.name : "error"}`);
+  }
+  if (result.outcome.status === "ignored") console.warn(`inbound email ignored: ${result.outcome.reason}`);
+  res.status(200).json(result.outcome);
+  try {
+    await result.after?.();
+  } catch (error) {
+    console.error(`inbound email: after-effects failed: ${error instanceof Error ? error.name : "error"}`);
+  }
 }
 
 export function registerEmailRoutes(app: Express): void {
+  if (process.env.SNS_INBOUND_TOPIC_ARN?.trim() && !process.env.APP_BASE_URL?.trim()) {
+    console.warn(
+      "Inbound email is configured but APP_BASE_URL is not set: Teams cards for emailed tickets will have no link."
+    );
+  }
   // SNS sends Content-Type text/plain, which the app's JSON parser skips; read it as text.
   // (A client that sent application/json is already parsed and passes through.)
   app.post(
     "/api/email/inbound",
+    inboundEmailRateLimit,
     express.text({ type: () => true, limit: "512kb" }),
     (req, res, next) => {
       handleInbound(req, res).catch(next);

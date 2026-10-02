@@ -3,7 +3,7 @@ import { Express } from "express";
 import helmet from "helmet";
 import { authenticateJWT, optionalJWT } from "./jwt";
 import { requireRole, requireAdmin, requireAgentOrAdmin } from "./rbac";
-import { generalRateLimit, authRateLimit } from "./rateLimiting";
+import { generalRateLimit, authRateLimit, exceptInboundEmail } from "./rateLimiting";
 import {
   sanitizeInput,
   preventXSS,
@@ -95,7 +95,9 @@ export const applySecurity = (app: Express) => {
 
   // General rate limiting (API routes only)
   if (securityConfig.rateLimiting.enabled) {
-    app.use("/api", generalRateLimit);
+    // POST /api/email/inbound has its own limiter (inboundEmailRateLimit): SNS's shared AWS
+    // addresses would exhaust the general 100 per 15 minutes and drop real mail.
+    app.use("/api", exceptInboundEmail(generalRateLimit));
   }
 
   console.log("Security middleware applied successfully");

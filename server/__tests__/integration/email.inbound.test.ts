@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { snsMessageDedupe, taskComments, tasks, users } from "@shared/schema";
 import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
-import { createTeam, createTicketAs, createUser, loginAs } from "./helpers/fixtures";
+import { createTicketAs, createUser, loginAs } from "./helpers/fixtures";
 import * as createTimeAutoResponse from "../../services/ai/createTimeAutoResponse";
 import { setTicketCreatedBroadcaster } from "../../services/tickets/create";
 import { teamsIntegration } from "../../services/microsoftTeams";
@@ -43,16 +43,56 @@ describe("POST /api/email/inbound", () => {
     emailInboundDeps.confirmSubscription = confirmSubscription;
     process.env.SNS_INBOUND_TOPIC_ARN = TOPIC;
     delete process.env.INBOUND_EMAIL_CATEGORY;
-    delete process.env.INBOUND_EMAIL_ALLOW_UNVERIFIED_SENDER;
+    delete process.env.APP_BASE_URL;
   });
 
   /** The SES notification fixture with the made-up sender, subject and body filled in. */
-  function sesBody(opts: { from: string; subject: string; body: string; receipt?: Record<string, unknown>; headers?: string }) {
+  function sesBody(opts: {
+    from: string;
+    subject: string;
+    body: string;
+    receipt?: Record<string, unknown>;
+    headers?: string;
+    /** Replaces the whole From header line in the MIME (value only). */
+    fromHeader?: string;
+    /** Replaces SES's parsed commonHeaders.from. */
+    sesFrom?: string[];
+  }) {
     const fill = (s: string) =>
-      s.replace(/\{\{FROM\}\}/g, opts.from).replace(/\{\{SUBJECT\}\}/g, opts.subject).replace(/\{\{BODY\}\}/g, opts.body);
-    const filled = JSON.parse(fill(JSON.stringify(sesReceived))) as typeof sesReceived;
-    const content = opts.headers ? `${opts.headers}\r\n${filled.content}` : filled.content;
-    return { ...filled, content, receipt: { ...filled.receipt, ...opts.receipt } };
+      s
+        .split("{{FROM}}").join(opts.from)
+        .split("{{SUBJECT}}").join(opts.subject)
+        .split("{{BODY}}").join(opts.body);
+    // Filled per string value (not through JSON text), so a NUL or a quote in a value is safe.
+    const walk = (v: unknown): unknown =>
+      typeof v === "string"
+        ? fill(v)
+        : Array.isArray(v)
+          ? v.map(walk)
+          : v && typeof v === "object"
+            ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)]))
+            : v;
+    const filled = walk(sesReceived) as typeof sesReceived;
+    let content = filled.content;
+    if (opts.fromHeader !== undefined) content = content.replace(/^From: .*$/m, () => `From: ${opts.fromHeader}`);
+    if (opts.headers) content = `${opts.headers}\r\n${content}`;
+    const mail = opts.sesFrom
+      ? { ...filled.mail, commonHeaders: { ...filled.mail.commonHeaders, from: opts.sesFrom } }
+      : filled.mail;
+    return { ...filled, mail, content, receipt: { ...filled.receipt, ...opts.receipt } };
+  }
+
+  /** Hooks run after SNS is answered; wait for them. */
+  async function eventually(check: () => void, timeoutMs = 3000) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      try {
+        return check();
+      } catch (error) {
+        if (Date.now() > deadline) throw error;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    }
   }
 
   function notification(inner: unknown, overrides: Partial<SnsMessage> = {}): SnsMessage {
@@ -149,29 +189,26 @@ describe("POST /api/email/inbound", () => {
     expect(await countTickets()).toBe(1);
   });
 
-  it("a staff member comments on a ticket their team can see, through the same access rule", async () => {
+  it("staff are never inbound senders, even with DMARC PASS and a ticket they could open", async () => {
     const owner = await customer("owner@example.test");
-    const admin = await createUser({ role: "admin" });
-    const agent = await createUser({ role: "agent", email: "agent.sam@example.test" });
-    const team = await createTeam(admin);
-    await storage.addTeamMember({ teamId: team.id, userId: agent.id } as never);
-    const queued = await storage.createTask({
-      title: "Team queue",
-      category: "support",
-      createdBy: owner.id,
-      assigneeType: "team",
-      assigneeTeamId: team.id,
-    } as never);
-    const unseen = await storage.createTask({ title: "Not theirs", category: "support", createdBy: owner.id } as never);
-    const ok = await post(
-      notification(sesBody({ from: "agent.sam@example.test", subject: `Re: [${queued.ticketNumber}]`, body: "On it." }))
-    );
-    const refused = await post(
-      notification(sesBody({ from: "agent.sam@example.test", subject: `Re: [${unseen.ticketNumber}]`, body: "Me too." }))
-    );
-    expect(ok.body.status).toBe("commented");
-    expect(refused.body).toEqual({ status: "ignored", reason: "no_access_to_ticket" });
-    expect(await countComments()).toBe(1);
+    const ticket = await storage.createTask({ title: "Theirs to see", category: "support", createdBy: owner.id } as never);
+    const staff = [
+      await createUser({ role: "admin", email: "admin.amy@example.test" }),
+      await createUser({ role: "manager", email: "manager.max@example.test" }),
+      await createUser({ role: "agent", email: "agent.sam@example.test" }),
+    ];
+    const legacy = await createUser({ role: "agent", email: "legacy.lou@example.test" });
+    await db.update(users).set({ role: "user" }).where(eq(users.id, legacy.id));
+    for (const email of [...staff.map((s) => s.email as string), "legacy.lou@example.test"]) {
+      const newTicket = await post(notification(sesBody({ from: email, subject: "New", body: "x" })));
+      const reply = await post(
+        notification(sesBody({ from: email, subject: `Re: [${ticket.ticketNumber}]`, body: "x" }))
+      );
+      expect([email, newTicket.body]).toEqual([email, { status: "ignored", reason: "sender_not_customer" }]);
+      expect([email, reply.body]).toEqual([email, { status: "ignored", reason: "sender_not_customer" }]);
+    }
+    expect(await countTickets()).toBe(1);
+    expect(await countComments()).toBe(0);
   });
 
   it("a ticket tag that matches no ticket creates nothing", async () => {
@@ -233,19 +270,154 @@ describe("POST /api/email/inbound", () => {
       expect(await countTickets()).toBe(1);
     });
 
-    it("refuses a sender SES did not authenticate, unless the operator allows it", async () => {
+    it("requires DMARC PASS: DKIM PASS with DMARC FAIL (or no DMARC verdict) is refused", async () => {
       await customer("ann.customer@example.test");
-      const unverified = {
-        dkimVerdict: { status: "FAIL" },
+      const send = (receipt: Record<string, unknown>) =>
+        post(notification(sesBody({ from: "ann.customer@example.test", subject: "Spoof?", body: "x", receipt })));
+      const dkimOnly = await send({
+        dkimVerdict: { status: "PASS" },
         dmarcVerdict: { status: "FAIL" },
         spfVerdict: { status: "PASS" },
-      };
-      const body = (receipt: Record<string, unknown>) =>
-        notification(sesBody({ from: "ann.customer@example.test", subject: "Spoof?", body: "x", receipt }));
-      expect((await post(body(unverified))).body).toEqual({ status: "ignored", reason: "sender_not_verified" });
+      });
+      expect(dkimOnly.body).toEqual({ status: "ignored", reason: "sender_not_verified" });
+      expect((await send({ dmarcVerdict: { status: "GRAY" } })).body.reason).toBe("sender_not_verified");
+      expect((await send({ dmarcVerdict: { status: "PROCESSING_FAILED" } })).body.reason).toBe("sender_not_verified");
+      expect((await send({ dmarcVerdict: undefined })).body.reason).toBe("sender_not_verified");
       expect(await countTickets()).toBe(0);
+      expect((await send({ dmarcVerdict: { status: "PASS" } })).body.status).toBe("created");
+    });
+
+    it("there is no switch that lifts the DMARC requirement", async () => {
+      await customer("ann.customer@example.test");
       process.env.INBOUND_EMAIL_ALLOW_UNVERIFIED_SENDER = "true";
-      expect((await post(body(unverified))).body.status).toBe("created");
+      const res = await post(
+        notification(
+          sesBody({ from: "ann.customer@example.test", subject: "x", body: "x", receipt: { dmarcVerdict: { status: "FAIL" } } })
+        )
+      );
+      expect(res.body.reason).toBe("sender_not_verified");
+      expect(await countTickets()).toBe(0);
+    });
+
+    it("a From header that hides another address in its display name writes nothing", async () => {
+      const victim = await customer("victim.customer@company.test");
+      const owned = await storage.createTask({ title: "Victim's", category: "support", createdBy: victim.id } as never);
+      const encoded = `=?UTF-8?B?${Buffer.from("<victim.customer@company.test>").toString("base64")}?=`;
+      const spoofs = [
+        '"<victim.customer@company.test>" <mallory@attacker.test>',
+        '"victim.customer@company.test" <mallory@attacker.test>',
+        `${encoded} <mallory@attacker.test>`,
+        "mallory@attacker.test (<victim.customer@company.test>)",
+      ];
+      for (const fromHeader of spoofs) {
+        // SES's DMARC verdict covers attacker.test, which passes; the sender is still mallory.
+        const newTicket = await post(
+          notification(sesBody({ from: "mallory@attacker.test", fromHeader, subject: "Spoofed", body: "x" }))
+        );
+        const reply = await post(
+          notification(
+            sesBody({ from: "mallory@attacker.test", fromHeader, subject: `Re: [${owned.ticketNumber}]`, body: "x" })
+          )
+        );
+        expect([fromHeader, newTicket.body.status]).toEqual([fromHeader, "ignored"]);
+        expect([fromHeader, reply.body.status]).toEqual([fromHeader, "ignored"]);
+      }
+      expect(await countTickets()).toBe(1);
+      expect(await countComments()).toBe(0);
+    });
+
+    it("refuses a From header with two mailboxes or two From headers", async () => {
+      await customer("ann.customer@example.test");
+      const two = await post(
+        notification(
+          sesBody({
+            from: "ann.customer@example.test",
+            fromHeader: "ann.customer@example.test, mallory@attacker.test",
+            subject: "x",
+            body: "x",
+          })
+        )
+      );
+      const dup = await post(
+        notification(
+          sesBody({
+            from: "ann.customer@example.test",
+            subject: "x",
+            body: "x",
+            headers: "From: mallory@attacker.test",
+          })
+        )
+      );
+      expect(two.body.status).toBe("ignored");
+      expect(dup.body).toEqual({ status: "ignored", reason: "ambiguous_sender" });
+      expect(await countTickets()).toBe(0);
+    });
+
+    it("refuses mail whose SES-parsed From names someone else than the MIME From", async () => {
+      await customer("ann.customer@example.test");
+      const res = await post(
+        notification(
+          sesBody({
+            from: "ann.customer@example.test",
+            sesFrom: ["mallory@attacker.test"],
+            subject: "x",
+            body: "x",
+          })
+        )
+      );
+      expect(res.body).toEqual({ status: "ignored", reason: "ambiguous_sender" });
+      expect(await countTickets()).toBe(0);
+    });
+
+    it("a customer with DMARC PASS and a display name works", async () => {
+      await customer("ann.customer@example.test");
+      const res = await post(
+        notification(
+          sesBody({
+            from: "ann.customer@example.test",
+            fromHeader: '"Customer, Ann (home)" <ann.customer@example.test>',
+            subject: "Works",
+            body: "x",
+          })
+        )
+      );
+      expect(res.body.status).toBe("created");
+    });
+
+    it("strips NUL bytes from the subject and body instead of failing", async () => {
+      await customer("ann.customer@example.test");
+      const res = await post(
+        notification(sesBody({ from: "ann.customer@example.test", subject: "Nu\u0000ll", body: "bo\u0000dy" }))
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("created");
+      const [ticket] = await db.select().from(tasks);
+      expect(ticket).toMatchObject({ title: "Null", description: "body" });
+    });
+
+    it("answers 200 for a refused 150 KB hostile message quickly", async () => {
+      await customer("ann.customer@example.test");
+      const start = Date.now();
+      const res = await post(
+        notification(
+          sesBody({
+            from: "ann.customer@example.test",
+            fromHeader: "<".repeat(150 * 1024),
+            subject: "x",
+            body: "x",
+          })
+        )
+      );
+      expect(res.body.status).toBe("ignored");
+      expect(Date.now() - start).toBeLessThan(3000);
+    });
+
+    it("runs the cheap receipt checks before parsing the message", async () => {
+      await customer("ann.customer@example.test");
+      // Unparseable-on-purpose MIME with a failing verdict: refused by verdict, not by parsing.
+      const body = sesBody({ from: "ann.customer@example.test", subject: "x", body: "x", receipt: { spamVerdict: { status: "FAIL" } } });
+      const res = await post(notification(body));
+      expect(res.body.reason).toBe("spam_verdict_fail");
     });
 
     it("ignores automatic replies and virus-flagged mail", async () => {
@@ -382,6 +554,37 @@ describe("POST /api/email/inbound", () => {
       expect(await countTickets()).toBe(1);
     });
 
+    it("a finished message is recorded as done and can never be claimed again", async () => {
+      await customer("ann.customer@example.test");
+      const msg = notification(sesBody({ from: "ann.customer@example.test", subject: "Done", body: "x" }));
+      await post(msg);
+      const [row] = await db.select().from(snsMessageDedupe);
+      expect(row.status).toBe("done");
+      // Even an old 'done' row is final.
+      await db.update(snsMessageDedupe).set({ receivedAt: new Date(Date.now() - 24 * 3600 * 1000) });
+      expect((await post(msg)).body).toEqual({ status: "duplicate" });
+      expect(await countTickets()).toBe(1);
+    });
+
+    it("a 'processing' claim is honoured while fresh and re-claimed once stale (crashed attempt)", async () => {
+      await customer("ann.customer@example.test");
+      const msg = notification(sesBody({ from: "ann.customer@example.test", subject: "Crash", body: "x" }));
+      await db.insert(snsMessageDedupe).values({ messageId: msg.MessageId as string, status: "processing" });
+      // Fresh: another delivery is working on it.
+      expect((await post(msg)).body).toEqual({ status: "duplicate" });
+      expect(await countTickets()).toBe(0);
+      // Stale (older than 10 minutes): the process that held it died, so this delivery takes over.
+      await db
+        .update(snsMessageDedupe)
+        .set({ receivedAt: new Date(Date.now() - 11 * 60 * 1000) })
+        .where(eq(snsMessageDedupe.messageId, msg.MessageId as string));
+      expect((await post(msg)).body.status).toBe("created");
+      expect(await countTickets()).toBe(1);
+      const [row] = await db.select().from(snsMessageDedupe);
+      expect(row.status).toBe("done");
+      expect((await post(msg)).body).toEqual({ status: "duplicate" });
+    });
+
     it("a failed attempt releases the MessageId so the retry is processed", async () => {
       await customer("ann.customer@example.test");
       const msg = notification(sesBody({ from: "ann.customer@example.test", subject: "Retry me", body: "x" }));
@@ -424,11 +627,38 @@ describe("POST /api/email/inbound", () => {
       const hooks = spyOnHooks();
       const res = await post(notification(sesBody({ from: "ann.customer@example.test", subject: "Hooks", body: "x" })));
       expect(res.body.status).toBe("created");
-      expect(hooks.autoResponse).toHaveBeenCalledTimes(1);
-      expect(hooks.autoResponse.mock.calls[0][0]).toMatchObject({ id: res.body.ticketId, title: "Hooks" });
-      expect(hooks.broadcast).toHaveBeenCalledTimes(1);
-      expect(hooks.broadcast.mock.calls[0][1]).toBe(sender.id);
-      expect(hooks.teams).toHaveBeenCalled();
+      await eventually(() => {
+        expect(hooks.autoResponse).toHaveBeenCalledTimes(1);
+        expect(hooks.autoResponse.mock.calls[0][0]).toMatchObject({ id: res.body.ticketId, title: "Hooks" });
+        expect(hooks.broadcast).toHaveBeenCalledTimes(1);
+        expect(hooks.broadcast.mock.calls[0][1]).toBe(sender.id);
+        expect(hooks.teams).toHaveBeenCalled();
+      });
+    });
+
+    it("SNS is answered before the hooks finish, and a hook that hangs does not delay it", async () => {
+      await customer("ann.customer@example.test");
+      const hooks = spyOnHooks();
+      let release!: () => void;
+      hooks.autoResponse.mockImplementation(() => new Promise<void>((resolve) => (release = resolve)));
+      const res = await post(notification(sesBody({ from: "ann.customer@example.test", subject: "Slow hook", body: "x" })));
+      expect(res.body.status).toBe("created");
+      await eventually(() => expect(hooks.autoResponse).toHaveBeenCalledTimes(1));
+      expect(hooks.teams).not.toHaveBeenCalled(); // still waiting behind the hung auto-response
+      release();
+      await eventually(() => expect(hooks.teams).toHaveBeenCalled());
+    });
+
+    it("the Teams card links to APP_BASE_URL, and has no link when it is unset", async () => {
+      await customer("ann.customer@example.test");
+      const hooks = spyOnHooks();
+      await post(notification(sesBody({ from: "ann.customer@example.test", subject: "No base", body: "x" })));
+      await eventually(() => expect(hooks.teams).toHaveBeenCalledTimes(1));
+      expect(hooks.teams.mock.calls[0][3]).toBeNull();
+      process.env.APP_BASE_URL = "https://tickets.example.test/";
+      await post(notification(sesBody({ from: "ann.customer@example.test", subject: "With base", body: "x" })));
+      await eventually(() => expect(hooks.teams).toHaveBeenCalledTimes(2));
+      expect(hooks.teams.mock.calls[1][3]).toBe("https://tickets.example.test/my-tasks");
     });
 
     it("POST /api/tasks runs the same three hooks", async () => {
@@ -437,6 +667,7 @@ describe("POST /api/email/inbound", () => {
       const hooks = spyOnHooks();
       const res = await createTicketAs(agent);
       expect(res.status).toBe(201);
+      await eventually(() => expect(hooks.teams).toHaveBeenCalled());
       expect(hooks.autoResponse).toHaveBeenCalledTimes(1);
       expect(hooks.broadcast).toHaveBeenCalledTimes(1);
       expect(hooks.teams).toHaveBeenCalled();
@@ -450,10 +681,18 @@ describe("POST /api/email/inbound", () => {
         throw new Error("socket");
       });
       hooks.teams.mockRejectedValue(new Error("teams down"));
-      jest.spyOn(console, "error").mockImplementation(() => undefined);
+      const errorLog = jest.spyOn(console, "error").mockImplementation(() => undefined);
       const res = await post(notification(sesBody({ from: "ann.customer@example.test", subject: "Resilient", body: "x" })));
+      expect(res.status).toBe(200);
       expect(res.body.status).toBe("created");
       expect(await countTickets()).toBe(1);
+      await eventually(() => expect(hooks.teams).toHaveBeenCalled());
+      // Failures are logged by error type only, never the error object or its message.
+      await eventually(() => expect(errorLog.mock.calls.length).toBeGreaterThanOrEqual(2));
+      const logged = JSON.stringify(errorLog.mock.calls);
+      expect(logged).toContain("create-time auto-response failed: Error");
+      expect(logged).toContain("WS notify ticket:created failed: Error");
+      for (const message of ["bedrock down", "socket", "teams down"]) expect(logged).not.toContain(message);
     });
   });
 

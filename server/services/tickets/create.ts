@@ -26,6 +26,11 @@ export function setTicketCreatedBroadcaster(fn: TicketCreatedBroadcaster | null)
   broadcaster = fn;
 }
 
+/** True once registerRoutes has wired the realtime broadcast (a guard against a merge dropping it). */
+export function hasTicketCreatedBroadcaster(): boolean {
+  return broadcaster !== null;
+}
+
 /**
  * Everything that follows a created ticket, shared by POST /api/tasks and inbound email:
  * the AI create-time auto-response (follows settings), the realtime broadcast to the
@@ -35,18 +40,21 @@ export function setTicketCreatedBroadcaster(fn: TicketCreatedBroadcaster | null)
 export async function runTicketCreatedHooks(
   task: Task,
   creatorId: string,
-  actionBaseUrl: string
+  actionBaseUrl: string | null
 ): Promise<void> {
+  // Log the error type only: error objects can carry request or model text.
+  const errorType = (e: unknown) => (e instanceof Error ? e.name : "error");
+
   try {
     await runCreateTimeAutoResponse(task);
   } catch (e) {
-    console.error(`create-time auto-response failed: ${e instanceof Error ? e.name : "error"}`);
+    console.error(`create-time auto-response failed: ${errorType(e)}`);
   }
 
   try {
     broadcaster?.(task, creatorId);
   } catch (e) {
-    console.error("WS notify ticket:created error:", e);
+    console.error(`WS notify ticket:created failed: ${errorType(e)}`);
   }
 
   try {
@@ -55,7 +63,7 @@ export async function runTicketCreatedHooks(
     const notifications = allUsers.map(async (notifyUser) => {
       const settings = await storage.getTeamsIntegrationSettings(notifyUser.id);
       if (settings?.enabled && settings.notificationTypes?.includes("ticket_created")) {
-        const actionUrl = `${actionBaseUrl}/my-tasks`;
+        const actionUrl = actionBaseUrl === null ? null : `${actionBaseUrl}/my-tasks`;
         const message = `New ticket created by ${user?.email || "a user"}`;
         if (settings.webhookUrl) {
           await teamsIntegration.sendWebhookNotification(settings.webhookUrl, task, message, actionUrl);
@@ -63,7 +71,7 @@ export async function runTicketCreatedHooks(
       }
     });
     await Promise.allSettled(notifications);
-  } catch (error) {
-    console.error("Error sending Teams notifications:", error);
+  } catch (e) {
+    console.error(`Teams notifications failed: ${errorType(e)}`);
   }
 }

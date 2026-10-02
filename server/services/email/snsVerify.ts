@@ -58,7 +58,17 @@ export function isValidSnsHost(raw: unknown, region?: string): raw is string {
 
 export function isValidCertUrl(raw: unknown, region?: string): raw is string {
   if (!isValidSnsHost(raw, region)) return false;
-  return new URL(raw as string).pathname.toLowerCase().endsWith(".pem");
+  const url = new URL(raw as string);
+  // A certificate is a plain file: a query string or fragment has no place in its URL.
+  // (url.search is "" for a bare trailing "?", so the raw string is checked too.)
+  const raw0 = raw as string;
+  return (
+    url.search === "" &&
+    url.hash === "" &&
+    !raw0.includes("?") &&
+    !raw0.includes("#") &&
+    url.pathname.toLowerCase().endsWith(".pem")
+  );
 }
 
 const NOTIFICATION_KEYS = ["Message", "MessageId", "Subject", "Timestamp", "TopicArn", "Type"];

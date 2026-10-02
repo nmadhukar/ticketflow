@@ -223,6 +223,9 @@ export const ticketNumberCounters = pgTable(
 // delivery finds the row and does nothing. See migrations/0018_sns_message_dedupe.sql.
 export const snsMessageDedupe = pgTable("sns_message_dedupe", {
   messageId: varchar("message_id", { length: 200 }).primaryKey(),
+  // 'processing' (claimed, may be re-claimed after 10 minutes) or 'done' (final). Migration 0019.
+  status: varchar("status", { length: 20 }).notNull().default("done"),
+  // When the current claim was taken.
   receivedAt: timestamp("received_at").defaultNow().notNull(),
 });
 

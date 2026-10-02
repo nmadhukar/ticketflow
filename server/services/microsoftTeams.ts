@@ -131,7 +131,7 @@ export class MicrosoftTeamsIntegration {
     webhookUrl: string,
     task: Task,
     message: string,
-    actionUrl: string
+    actionUrl: string | null
   ): Promise<boolean> {
     try {
       const card = {
@@ -161,18 +161,23 @@ export class MicrosoftTeamsIntegration {
             "markdown": true,
           },
         ],
-        "potentialAction": [
-          {
-            "@type": "OpenUri",
-            "name": "View Ticket",
-            "targets": [
-              {
-                "os": "default",
-                "uri": actionUrl,
-              },
-            ],
-          },
-        ],
+        // No link when the site origin is unknown (a ticket created from email without APP_BASE_URL).
+        ...(actionUrl === null
+          ? {}
+          : {
+              "potentialAction": [
+                {
+                  "@type": "OpenUri",
+                  "name": "View Ticket",
+                  "targets": [
+                    {
+                      "os": "default",
+                      "uri": actionUrl,
+                    },
+                  ],
+                },
+              ],
+            }),
       };
 
       const response = await fetch(webhookUrl, {
