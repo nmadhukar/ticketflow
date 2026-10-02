@@ -101,8 +101,10 @@ import {
   gt,
   gte,
   lte,
+  type SQL,
 } from "drizzle-orm";
 import { IStorage } from "./storage.inteface";
+import { ticketVisibilityWhere, type AccessUser } from "../permissions/ticketAccess";
 import { LOCKOUT_MINUTES, MAX_FAILED_LOGINS } from "../services/auth/lockout";
 import { hashResetToken } from "../utils/resetToken";
 import { PUBLIC_USER_FIELDS, type PublicUser } from "../utils/publicUser";
@@ -548,12 +550,23 @@ export class DatabaseStorage implements IStorage {
     return task;
   }
 
+  /**
+   * Tickets the user may see (ticketVisibilityWhere, the same rule GET
+   * /api/tasks/:id enforces), narrowed by optional filters. Filters only ever
+   * narrow: no filter can widen what the rule allows.
+   * - assigneeId: assigned to that user.
+   * - teamId / departmentId: queued to that team / a team of that department,
+   *   or assigned to a member of it.
+   * - includeOwn=false: leave out tickets assigned to or created by the user
+   *   (the "my groups" view).
+   */
   async getVisibleTasksForUser(options: {
     userId: string;
-    role: string;
+    role: unknown;
     status?: string;
     category?: string;
     search?: string;
+    assigneeId?: string;
     teamId?: number;
     departmentId?: number;
     includeOwn?: boolean;
@@ -566,6 +579,7 @@ export class DatabaseStorage implements IStorage {
       status,
       category,
       search,
+      assigneeId,
       teamId,
       departmentId,
       includeOwn = true,
@@ -573,7 +587,7 @@ export class DatabaseStorage implements IStorage {
       offset,
     } = options;
 
-    const filters: any[] = [];
+    const filters: SQL[] = [ticketVisibilityWhere({ id: userId, role })];
     if (status) filters.push(eq(tasks.status, status));
     if (category) filters.push(eq(tasks.category, category));
     if (search)
@@ -581,80 +595,33 @@ export class DatabaseStorage implements IStorage {
         or(
           like(tasks.title, `%${search}%`),
           like(tasks.description, `%${search}%`)
-        )
+        )!
       );
-
-    let visibility: any;
-    if (role === "admin") {
-      visibility = sql`TRUE`;
-    } else if (role === "customer") {
-      visibility = eq(tasks.createdBy, userId);
-    } else if (role === "manager") {
-      const own = includeOwn
-        ? sql`${tasks.assigneeId} = ${userId}`
-        : sql`FALSE`;
-      const teamScope = sql`EXISTS (
-        SELECT 1 FROM ${teams} t
-        JOIN ${departments} d ON d.id = t.department_id
-        WHERE t.id = ${tasks.assigneeTeamId}
-          AND d.manager_id = ${userId}
-          ${teamId ? sql` AND t.id = ${teamId}` : sql``}
-          ${departmentId ? sql` AND d.id = ${departmentId}` : sql``}
-      )`;
-      const teammateScope = sql`EXISTS (
-        SELECT 1 FROM ${teamMembers} tm
-        JOIN ${teams} t ON t.id = tm.team_id
-        JOIN ${departments} d ON d.id = t.department_id
-        WHERE tm.user_id = ${tasks.assigneeId}
-          AND d.manager_id = ${userId}
-          ${teamId ? sql` AND t.id = ${teamId}` : sql``}
-          ${departmentId ? sql` AND d.id = ${departmentId}` : sql``}
-      )`;
-      visibility = or(own, teamScope, teammateScope);
-    } else {
-      const own = includeOwn
-        ? sql`${tasks.assigneeId} = ${userId}`
-        : sql`FALSE`;
-      const teamScope = sql`EXISTS (
-        SELECT 1 FROM ${teamMembers} tm
-        WHERE tm.team_id = ${tasks.assigneeTeamId}
-          AND tm.user_id = ${userId}
-      )`;
-      const teammateScope = sql`EXISTS (
-        SELECT 1 FROM ${teamMembers} tm1
-        WHERE tm1.user_id = ${tasks.assigneeId}
-          AND tm1.team_id IN (
-            SELECT tm2.team_id FROM ${teamMembers} tm2 WHERE tm2.user_id = ${userId}
-          )
-      )`;
-      visibility = or(own, teamScope, teammateScope);
-      if (teamId) {
-        visibility = and(
-          visibility,
-          sql`(
-            ${tasks.assigneeTeamId} = ${teamId}
-            OR EXISTS (
-              SELECT 1 FROM ${teamMembers} tm3 WHERE tm3.user_id = ${tasks.assigneeId} AND tm3.team_id = ${teamId}
-            )
-          )`
-        );
-      }
-      if (departmentId) {
-        visibility = and(
-          visibility,
-          sql`(
-            EXISTS (SELECT 1 FROM ${teams} tt WHERE tt.id = ${tasks.assigneeTeamId} AND tt.department_id = ${departmentId})
-            OR EXISTS (
-              SELECT 1 FROM ${teamMembers} tm4 JOIN ${teams} t4 ON t4.id = tm4.team_id
-              WHERE tm4.user_id = ${tasks.assigneeId} AND t4.department_id = ${departmentId}
-            )
-          )`
-        );
-      }
+    if (assigneeId) filters.push(eq(tasks.assigneeId, assigneeId));
+    if (teamId) {
+      filters.push(sql`(
+        ${tasks.assigneeTeamId} = ${teamId}
+        OR EXISTS (
+          SELECT 1 FROM ${teamMembers} tm3 WHERE tm3.user_id = ${tasks.assigneeId} AND tm3.team_id = ${teamId}
+        )
+      )`);
+    }
+    if (departmentId) {
+      filters.push(sql`(
+        EXISTS (SELECT 1 FROM ${teams} tt WHERE tt.id = ${tasks.assigneeTeamId} AND tt.department_id = ${departmentId})
+        OR EXISTS (
+          SELECT 1 FROM ${teamMembers} tm4 JOIN ${teams} t4 ON t4.id = tm4.team_id
+          WHERE tm4.user_id = ${tasks.assigneeId} AND t4.department_id = ${departmentId}
+        )
+      )`);
+    }
+    if (!includeOwn) {
+      filters.push(
+        sql`${tasks.assigneeId} IS DISTINCT FROM ${userId} AND ${tasks.createdBy} <> ${userId}`
+      );
     }
 
-    const whereAll =
-      filters.length > 0 ? and(...filters, visibility) : visibility;
+    const whereAll = and(...filters);
 
     let idQuery: any = db
       .select({ id: tasks.id })
@@ -1579,7 +1546,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Activity
-  async getRecentActivity(limit = 10): Promise<any[]> {
+  /** Recent ticket history the user may see: events of tickets inside ticketVisibilityWhere(user). */
+  async getRecentActivity(user: AccessUser, limit = 10): Promise<any[]> {
     const history = await db
       .select({
         id: taskHistory.id,
@@ -1596,6 +1564,7 @@ export class DatabaseStorage implements IStorage {
       .from(taskHistory)
       .leftJoin(tasks, eq(taskHistory.taskId, tasks.id))
       .leftJoin(users, eq(taskHistory.userId, users.id))
+      .where(ticketVisibilityWhere(user))
       .orderBy(desc(taskHistory.createdAt))
       .limit(limit);
 

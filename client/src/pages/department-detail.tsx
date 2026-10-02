@@ -139,14 +139,10 @@ export default function DepartmentDetail() {
     }
   }, [departmentError, toast, setLocation, t]);
 
-  // Only admins can edit departments
+  // Only admins can edit departments. Viewing is enforced by GET
+  // /api/departments/:id (403 for anyone but an admin or the department's
+  // manager), which the 403 handler above turns into a redirect.
   const canEdit = (user as any)?.role === "admin";
-
-  // Check if user can view this department
-  const _canView =
-    (user as any)?.role === "admin" ||
-    ((user as any)?.role === "manager" &&
-      department?.managerId === (user as any)?.id);
 
   const updateMutation = useMutation({
     mutationFn: async (data: DepartmentFormData) => {

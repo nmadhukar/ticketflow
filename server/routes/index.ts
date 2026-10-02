@@ -100,6 +100,9 @@ import { bedrockIntegration } from "../services/ai/bedrockIntegration";
 import { s3Service } from "../services/s3Service";
 import { DEFAULT_COMPANY, EMAIL_PROVIDERS } from "@shared/constants";
 import { getTicketMetaForUser } from "../permissions/tickets";
+import { assertTaskAccess, requireTaskAccess } from "../permissions/ticketAccess";
+import { HttpError } from "../http/errors";
+import { parseIdParam } from "../http/params";
 import { registerTeamsRoutes } from "./teams";
 import { registerIdParams } from "../http/install";
 import { generateAutoResponseForTicket } from "server/services/ai/aiTicketAnalysis";
@@ -406,7 +409,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/tasks", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
-      const user = await storage.getUser(userId);
 
       const {
         status,
@@ -420,30 +422,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         offset,
       } = req.query as any;
 
-      // If explicitly filtering by assigneeId (non-customer), use simple filter
-      if (assigneeId && user?.role !== "customer") {
-        const tasks = await storage.getTasks({
-          status,
-          category,
-          search,
-          assigneeId,
-          limit: limit ? parseInt(limit) : undefined,
-          offset: offset ? parseInt(offset) : undefined,
-        });
-        return res.json(tasks);
-      }
-
-      // Join-based visibility: includes own, team queues, and teammates' direct tickets as applicable
-      const includeOwn = mine !== "false" && !assigneeId;
-      const tasks = await (storage as any).getVisibleTasksForUser({
+      // One visibility rule (ticketVisibilityWhere) for every role; assigneeId,
+      // teamId and departmentId only narrow it, they never bypass it.
+      const tasks = await storage.getVisibleTasksForUser({
         userId,
-        role: user?.role,
+        role: req.user?.role,
         status,
         category,
         search,
+        assigneeId: typeof assigneeId === "string" && assigneeId ? assigneeId : undefined,
         teamId: teamId ? parseInt(teamId) : undefined,
         departmentId: departmentId ? parseInt(departmentId) : undefined,
-        includeOwn,
+        includeOwn: mine !== "false",
         limit: limit ? parseInt(limit) : undefined,
         offset: offset ? parseInt(offset) : undefined,
       });
@@ -458,7 +448,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = getUserId(req);
       const { status, category, search, limit, offset } = req.query;
-      const tasks = await storage.getTasks({
+      const tasks = await storage.getVisibleTasksForUser({
+        userId,
+        role: req.user?.role,
         assigneeId: userId,
         status,
         category,
@@ -477,12 +469,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/tasks/my-groups", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
-      const user = await storage.getUser(userId);
       const { status, category, search, limit, offset } = req.query as any;
-      // Show team queues and teammates' direct tickets; exclude own-only constraint
-      const tasks = await (storage as any).getVisibleTasksForUser({
+      // Team queues and teammates' tickets: visible tickets that are not mine
+      const tasks = await storage.getVisibleTasksForUser({
         userId,
-        role: user?.role,
+        role: req.user?.role,
         status,
         category,
         search,
@@ -497,24 +488,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/tasks/:id", isAuthenticated, async (req: any, res) => {
+  app.get("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res) => {
     try {
       const taskId = parseInt(req.params.id);
-      if (isNaN(taskId)) {
-        return res.status(400).json({ message: "Invalid task ID" });
-      }
-
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
       const task = await storage.getTask(taskId);
 
       if (!task) {
-        return res.status(404).json({ message: "Task not found" });
-      }
-
-      // If user is a customer, they can only view their own tickets
-      if (user?.role === "customer" && task.createdBy !== userId) {
-        return res.status(403).json({ message: "Access denied" });
+        return res.status(404).json({ error: "not_found", message: "Ticket not found" });
       }
 
       res.json(task);
@@ -705,7 +685,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/tickets/:id/meta", isAuthenticated, async (req: any, res) => {
+  app.get("/api/tickets/:id/meta", isAuthenticated, requireTaskAccess(), async (req: any, res) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
@@ -1093,17 +1073,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
-  app.patch("/api/tasks/:id", isAuthenticated, async (req: any, res) => {
+  app.patch("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res) => {
     try {
       const taskId = parseInt(req.params.id);
       const userId = getUserId(req);
-      const user = await storage.getUser(userId);
+      // Canonical role from the session ("user" reads as agent).
+      const user = req.user;
 
-      // Get the task to check ownership
       const task = await storage.getTask(taskId);
       if (!task) {
-        return res.status(404).json({ message: "Task not found" });
+        return res.status(404).json({ error: "not_found", message: "Ticket not found" });
       }
+      // Access (same rule as GET) + the role's field table.
       const { canUpdateTicket } = await import("../permissions/tickets");
       const result = await canUpdateTicket({
         user,
@@ -1113,7 +1094,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!result.allowed) {
         return res
           .status(403)
-          .json({ message: "Access denied", reason: result.reason });
+          .json({ error: "forbidden", message: result.reason ?? "Access denied" });
       }
 
       // Optional: enforce simple status transitions, except for admin
@@ -1217,19 +1198,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/tasks/:id", isAuthenticated, async (req: any, res) => {
+  app.delete("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res) => {
     try {
       const taskId = parseInt(req.params.id);
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
+      const user = req.user;
       const task = await storage.getTask(taskId);
-      if (!task) return res.status(404).json({ message: "Task not found" });
+      if (!task) return res.status(404).json({ error: "not_found", message: "Ticket not found" });
       const { canDeleteTicket } = await import("../permissions/tickets");
       const verdict = canDeleteTicket({ user, ticket: task });
       if (!verdict.allowed) {
         return res
           .status(403)
-          .json({ message: "Access denied", reason: verdict.reason });
+          .json({ error: "forbidden", message: verdict.reason ?? "Access denied" });
       }
       await storage.deleteTask(taskId);
       res.status(204).send();
@@ -1240,20 +1220,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Task comments
-  app.get("/api/tasks/:id/comments", isAuthenticated, async (req: any, res) => {
+  app.get("/api/tasks/:id/comments", isAuthenticated, requireTaskAccess(), async (req: any, res) => {
     try {
       const taskId = parseInt(req.params.id);
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-
-      // Check if customer has access to this task
-      if (user?.role === "customer") {
-        const task = await storage.getTask(taskId);
-        if (!task || task.createdBy !== userId) {
-          return res.status(403).json({ message: "Access denied" });
-        }
-      }
-
       const comments = await storage.getTaskComments(taskId);
       res.json(comments);
     } catch (error) {
@@ -1265,19 +1234,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/tasks/:id/comments",
     isAuthenticated,
+    requireTaskAccess(),
     async (req: any, res) => {
       try {
         const taskId = parseInt(req.params.id);
         const userId = getUserId(req);
-        const user = await storage.getUser(userId);
-
-        // Check if customer has access to this task
-        if (user?.role === "customer") {
-          const task = await storage.getTask(taskId);
-          if (!task || task.createdBy !== userId) {
-            return res.status(403).json({ message: "Access denied" });
-          }
-        }
 
         const commentData = insertTaskCommentSchema.parse({
           ...req.body,
@@ -1576,8 +1537,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Counts over every ticket: admin only (everyone else has scoped stats).
   app.get("/api/stats/global", isAuthenticated, async (req, res) => {
     try {
+      if (normalizeRole(req.user?.role) !== "admin") {
+        return res
+          .status(403)
+          .json({ error: "forbidden", message: "Only administrators can read global statistics" });
+      }
       const stats = await storage.getTaskStats();
       res.json(stats);
     } catch (error) {
@@ -1586,11 +1553,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Activity
+  // Activity: history of the tickets the user may see (same rule as GET /api/tasks/:id)
   app.get("/api/activity", isAuthenticated, async (req, res) => {
     try {
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
-      const activity = await storage.getRecentActivity(limit);
+      const requested = Number.parseInt(String(req.query.limit ?? ""), 10);
+      const limit =
+        Number.isFinite(requested) && requested > 0 ? Math.min(requested, 1000) : 10;
+      const activity = await storage.getRecentActivity(
+        { id: getUserId(req), role: req.user?.role },
+        limit
+      );
       res.json(activity);
     } catch (error) {
       console.error("Error fetching activity:", error);
@@ -1598,66 +1570,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get task comments
-  app.get("/api/tasks/:id/comments", isAuthenticated, async (req, res) => {
-    try {
-      const taskId = parseInt(req.params.id);
-      const comments = await storage.getTaskComments(taskId);
-      res.json(comments);
-    } catch (error) {
-      console.error("Error fetching task comments:", error);
-      res.status(500).json({ message: "Failed to fetch comments" });
-    }
-  });
-
-  // Add task comment
-  app.post(
-    "/api/tasks/:id/comments",
-    isAuthenticated,
-    async (req: any, res) => {
-      try {
-        const taskId = parseInt(req.params.id);
-        const userId = getUserId(req);
-        const { content } = req.body;
-
-        if (!content || !content.trim()) {
-          return res
-            .status(400)
-            .json({ message: "Comment content is required" });
-        }
-
-        const comment = await storage.addTaskComment({
-          taskId,
-          userId,
-          content: content.trim(),
-        });
-
-        res.status(201).json(comment);
-      } catch (error) {
-        console.error("Error creating task comment:", error);
-        res.status(500).json({ message: "Failed to create comment" });
-      }
-    }
-  );
-
   // Attachment routes
   app.get(
     "/api/tasks/:id/attachments",
     isAuthenticated,
+    requireTaskAccess(),
     async (req: any, res) => {
       try {
         const taskId = parseInt(req.params.id);
-        const userId = getUserId(req);
-        const user = await storage.getUser(userId);
-
-        // Check if customer has access to this task
-        if (user?.role === "customer") {
-          const task = await storage.getTask(taskId);
-          if (!task || task.createdBy !== userId) {
-            return res.status(403).json({ message: "Access denied" });
-          }
-        }
-
         const attachments = await storage.getTaskAttachments(taskId);
 
         // Generate presigned URLs for each attachment
@@ -1692,20 +1612,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/tasks/:id/attachments",
     isAuthenticated,
+    requireTaskAccess(), // before multer: no upload is parsed for a ticket outside scope
     upload.single("file"),
     async (req: any, res) => {
       try {
         const taskId = parseInt(req.params.id);
         const userId = getUserId(req);
-        const user = await storage.getUser(userId);
-
-        // Check if customer has access to this task
-        if (user?.role === "customer") {
-          const task = await storage.getTask(taskId);
-          if (!task || task.createdBy !== userId) {
-            return res.status(403).json({ message: "Access denied" });
-          }
-        }
+        const user = req.user;
 
         // Check if S3 is configured
         const s3Config = await s3Service.isConfigured();
@@ -1814,11 +1727,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(
     "/api/attachments/:id/download",
     isAuthenticated,
-    async (req: any, res) => {
+    async (req: any, res, next) => {
       try {
         const attachmentId = parseInt(req.params.id);
-        const userId = getUserId(req);
-        const user = await storage.getUser(userId);
 
         // Get attachment from database by ID
         const [attachment] = await db
@@ -1828,16 +1739,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .limit(1);
 
         if (!attachment) {
-          return res.status(404).json({ message: "Attachment not found" });
+          return res.status(404).json({ error: "not_found", message: "Attachment not found" });
         }
 
-        // Check access permissions
-        const task = await storage.getTask(attachment.taskId);
-        if (user?.role === "customer") {
-          if (!task || task.createdBy !== userId) {
-            return res.status(403).json({ message: "Access denied" });
-          }
-        }
+        // The attachment's ticket must be inside the user's scope
+        await assertTaskAccess(req.user, attachment.taskId);
 
         // Generate presigned URL for S3 object
         const s3Key = s3Service.extractKeyFromUrl(attachment.fileUrl);
@@ -1867,6 +1773,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const buffer = await s3Response.arrayBuffer();
         res.send(Buffer.from(buffer));
       } catch (error) {
+        if (error instanceof HttpError) return next(error);
         console.error("Error generating download URL:", error);
         res.status(500).json({
           message: "Failed to generate download URL",
@@ -1876,11 +1783,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
-  app.delete("/api/attachments/:id", isAuthenticated, async (req: any, res) => {
+  app.delete("/api/attachments/:id", isAuthenticated, async (req: any, res, next) => {
     try {
       const attachmentId = parseInt(req.params.id);
       const userId = getUserId(req);
-      const user = await storage.getUser(userId);
+      const role = normalizeRole(req.user?.role);
 
       // Get attachment to check permissions and get S3 key
       const [attachment] = await db
@@ -1890,13 +1797,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .limit(1);
 
       if (!attachment) {
-        return res.status(404).json({ message: "Attachment not found" });
+        return res.status(404).json({ error: "not_found", message: "Attachment not found" });
       }
 
-      // Check permissions (uploader or admin/manager can delete)
-      const _task = await storage.getTask(attachment.taskId);
-      if (user?.role === "customer" && attachment.userId !== userId) {
-        return res.status(403).json({ message: "Access denied" });
+      // The ticket must be inside the user's scope; then only the uploader,
+      // an admin or a manager may delete.
+      await assertTaskAccess(req.user, attachment.taskId);
+      if (attachment.userId !== userId && role !== "admin" && role !== "manager") {
+        return res.status(403).json({
+          error: "forbidden",
+          message: "Only the uploader, a manager or an administrator can delete this attachment",
+        });
       }
 
       // Delete from S3 if it's an S3 URL
@@ -1914,6 +1825,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteTaskAttachment(attachmentId);
       res.status(204).send();
     } catch (error) {
+      if (error instanceof HttpError) return next(error);
       console.error("Error deleting attachment:", error);
       res.status(500).json({
         message: "Failed to delete attachment",
@@ -4465,7 +4377,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Smart Helpdesk API Routes
 
   // Get AI auto-response for a ticket
-  app.get("/api/tasks/:id/auto-response", isAuthenticated, async (req, res) => {
+  app.get("/api/tasks/:id/auto-response", isAuthenticated, requireTaskAccess(), async (req, res) => {
     try {
       const taskId = parseInt(req.params.id);
       const [autoResponse] = await db
@@ -4509,10 +4421,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/tasks/:id/auto-response/generate",
     isAuthenticated,
+    requireTaskAccess(),
     async (req, res) => {
       try {
         const taskId = parseInt(req.params.id);
-        const _userId = getUserId(req);
         const task = await storage.getTask(taskId);
 
         if (!task) {
@@ -4585,6 +4497,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/tasks/:id/auto-response/feedback",
     isAuthenticated,
+    requireTaskAccess(),
     async (req, res) => {
       try {
         const taskId = parseInt(req.params.id);
@@ -4947,10 +4860,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Self-Learning Knowledge Base Endpoints
 
   // Submit feedback on AI response
-  app.post("/api/ai-feedback", isAuthenticated, async (req: any, res) => {
+  app.post("/api/ai-feedback", isAuthenticated, async (req: any, res, next) => {
     try {
       const userId = getUserId(req);
       const { feedbackType, referenceId, rating, comment, ticketId } = req.body;
+
+      // Feedback attached to a ticket needs access to that ticket.
+      if (ticketId !== undefined && ticketId !== null) {
+        await assertTaskAccess(req.user, parseIdParam(String(ticketId), "ticketId"));
+      }
 
       // Validate rating
       if (![1, 5].includes(rating)) {
@@ -4985,6 +4903,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(feedback[0]);
     } catch (error) {
+      if (error instanceof HttpError) return next(error);
       console.error("Error submitting AI feedback:", error);
       res.status(500).json({ message: "Failed to submit feedback" });
     }
@@ -5047,6 +4966,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/tasks/:id/add-to-learning",
     isAuthenticated,
+    requireTaskAccess(),
     async (req: any, res) => {
       try {
         const taskId = parseInt(req.params.id);

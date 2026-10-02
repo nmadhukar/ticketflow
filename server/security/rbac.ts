@@ -176,7 +176,7 @@ export const hasPermission = (
 
   // Check conditions if present
   if (permission.conditions && context) {
-    return checkConditions(permission.conditions, context, userRole);
+    return checkConditions(permission.conditions, context);
   }
 
   return true;
@@ -185,8 +185,7 @@ export const hasPermission = (
 // Check permission conditions
 const checkConditions = (
   conditions: Record<string, any>,
-  context: Record<string, any>,
-  _userRole: UserRole
+  context: Record<string, any>
 ): boolean => {
   // Own tickets only
   if (conditions.ownTicketsOnly) {
@@ -343,33 +342,6 @@ export const requireAuthenticated = (
     });
   }
   next();
-};
-
-// Resource ownership check
-export const requireOwnership = (resourceIdParam: string = "id") => {
-  return async (
-    req: AuthenticatedRequest,
-    res: Response,
-    next: NextFunction
-  ) => {
-    if (!req.user) {
-      return res.status(401).json({
-        error: "Authentication required",
-      });
-    }
-
-    // Admins can access everything
-    if (req.user.role === "admin") {
-      return next();
-    }
-
-    const _resourceId = req.params[resourceIdParam];
-
-    // For customers, additional ownership checks would be implemented here
-    // This would typically involve database queries to verify ownership
-
-    next();
-  };
 };
 
 // Dynamic permission check with database context

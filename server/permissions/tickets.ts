@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { normalizeRole, type Role } from "./roles";
+import { canAccessTask } from "./ticketAccess";
 
 // Fields allowed to be updated in principle (subset will be applied per role)
 export const updatableFields = [
@@ -49,7 +51,7 @@ interface Verdict<T = any> {
   prunedPayload?: T;
 }
 
-function deriveAllowedFields(role?: string): ReadonlyArray<string> {
+function deriveAllowedFields(role: Role): ReadonlyArray<string> {
   if (role === "admin") return [...updatableFields];
   if (role === "manager")
     return [
@@ -71,22 +73,24 @@ function deriveAllowedFields(role?: string): ReadonlyArray<string> {
   return ["title", "description", "notes"];
 }
 
+/**
+ * Access + role field table. The ticket must be inside the user's scope
+ * (ticketVisibilityWhere: an agent only on tickets they can see, a manager only
+ * on tickets of the departments they manage or their own); then the payload is
+ * pruned to the fields the role may change.
+ */
 export async function canUpdateTicket({
   user,
   ticket,
   payload,
 }: CanUpdateArgs): Promise<Verdict<UpdatePayload>> {
-  const role = user?.role;
-
-  // Basic ownership rule for customers
-  if (
-    role === "customer" &&
-    ticket?.createdBy !== (user?.id || user?.claims?.sub)
-  ) {
-    return {
-      allowed: false,
-      reason: "Customers may only edit their own tickets",
-    };
+  const role = normalizeRole(user?.role);
+  const userId: unknown = user?.id;
+  if (!role || typeof userId !== "string") {
+    return { allowed: false, reason: "Unknown role" };
+  }
+  if (typeof ticket?.id !== "number" || !(await canAccessTask({ id: userId, role }, ticket.id))) {
+    return { allowed: false, reason: "This ticket is outside your scope" };
   }
 
   // Remove immutable/unknown fields and validate shape
@@ -130,7 +134,7 @@ interface CanDeleteArgs {
 }
 
 export function canDeleteTicket({ user }: CanDeleteArgs): Verdict<void> {
-  const role = user?.role;
+  const role = normalizeRole(user?.role);
   if (role === "admin") return { allowed: true };
   const allowManager =
     String(process.env.ALLOW_MANAGER_DELETE || "false").toLowerCase() ===

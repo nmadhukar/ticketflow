@@ -57,6 +57,7 @@ import {
   type UserPreferences,
 } from "@shared/schema";
 import type { PublicUser } from "../utils/publicUser";
+import type { AccessUser } from "../permissions/ticketAccess";
 
 /**
  * Database Storage Layer for TicketFlow
@@ -237,7 +238,7 @@ export interface IStorage {
   }>;
 
   // Activity
-  getRecentActivity(limit?: number): Promise<TaskHistory[]>;
+  getRecentActivity(user: AccessUser, limit?: number): Promise<TaskHistory[]>;
 
   // Admin operations
   getAdminStats(): Promise<{
