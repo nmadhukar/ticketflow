@@ -42,7 +42,7 @@ export async function setupMicrosoftAuth(app: Express) {
     ssoConfig = undefined;
     loadFailed = true;
     console.error(
-      "SSO configuration could not be loaded; Microsoft SSO stays disabled until it can."
+      "SSO configuration could not be loaded; Microsoft SSO stays disabled until the server is restarted."
     );
   }
 

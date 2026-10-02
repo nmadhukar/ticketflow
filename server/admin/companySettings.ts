@@ -354,6 +354,33 @@ export function registerCompanySettingsRoutes(app: Express): void {
             ? active.metadata || {}
             : {};
 
+        // A stored secret is only kept while the identifier it belongs to is
+        // unchanged. Changing the identifier with a blank secret is refused
+        // rather than silently pairing the old secret with a new identity.
+        const blank = (v: unknown) => typeof v !== "string" || v.trim() === "";
+        const secretRequired = (field: string) =>
+          res.status(400).json({
+            error: "validation_failed",
+            message: `${field} is required when the account identifier changes`,
+            details: { required: [field] },
+          });
+        if (
+          data.provider === EMAIL_PROVIDERS.AWS &&
+          blank(data.awsSecretAccessKey) &&
+          prev.awsSecretAccessKey &&
+          prev.awsAccessKeyId !== data.awsAccessKeyId
+        ) {
+          return secretRequired("awsSecretAccessKey");
+        }
+        if (
+          data.provider === EMAIL_PROVIDERS.SMTP &&
+          blank(data.password) &&
+          prev.password &&
+          (prev.host !== data.host || prev.username !== data.username)
+        ) {
+          return secretRequired("password");
+        }
+
         const saved = await storage.upsertEmailProvider(
           {
             provider: data.provider,

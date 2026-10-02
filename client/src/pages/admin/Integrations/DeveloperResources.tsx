@@ -214,7 +214,14 @@ const DeveloperResources = () => {
                   className="flex items-center justify-between p-3 border rounded-lg"
                 >
                   <div className="flex-1">
-                    <p className="font-medium">{apiKey.name}</p>
+                    <p className="font-medium">
+                      {apiKey.name}
+                      {apiKey.expired && (
+                        <span className="ml-2 rounded bg-destructive/10 px-2 py-0.5 text-xs text-destructive">
+                          Expired
+                        </span>
+                      )}
+                    </p>
                     <p className="text-xs text-muted-foreground">
                       For:{" "}
                       {ownerById.get(apiKey.userId)

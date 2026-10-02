@@ -79,6 +79,7 @@ export function toPublicApiKey(key: ApiKey) {
     lastUsedAt: key.lastUsedAt,
     expiresAt: key.expiresAt,
     isActive: key.isActive,
+    expired: !!key.expiresAt && key.expiresAt.getTime() <= Date.now(),
     createdAt: key.createdAt,
   };
 }
@@ -126,6 +127,11 @@ export async function findActiveKey(
   const user = await storage.getUser(row.userId);
   if (!user || keyOwnerBlockReason(user)) return null;
 
-  await storage.updateApiKeyLastUsed(row.id);
+  // Bookkeeping only: a failed write must not turn a valid key into an error.
+  try {
+    await storage.updateApiKeyLastUsed(row.id);
+  } catch {
+    console.error("API key lastUsedAt update failed; key still accepted.");
+  }
   return { keyId: row.id, user, permissions: row.permissions ?? [] };
 }

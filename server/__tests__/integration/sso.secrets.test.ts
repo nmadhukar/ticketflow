@@ -159,22 +159,34 @@ describe("settings secrets are masked and never returned", () => {
       const again = await admin.post("/api/company-settings/email").send({
         ...base,
         provider: "aws-ses",
-        awsAccessKeyId: "AKIATESTKEY2",
+        awsAccessKeyId: "AKIATESTKEY",
         awsSecretAccessKey: "",
         awsRegion: "eu-west-1",
       });
       expect(again.status).toBe(200);
       const active = await storage.getActiveEmailProvider();
       expect((active as any).metadata.awsSecretAccessKey).toBe(S);
-      expect((active as any).metadata.awsAccessKeyId).toBe("AKIATESTKEY2");
+      expect((active as any).metadata.awsRegion).toBe("eu-west-1");
+
+      // A new access key id with a blank secret is refused, not paired with the old secret.
+      const swap = await admin.post("/api/company-settings/email").send({
+        ...base,
+        provider: "aws-ses",
+        awsAccessKeyId: "AKIATESTKEY2",
+        awsSecretAccessKey: "",
+      });
+      expect(swap.status).toBe(400);
+      expect(swap.body.error).toBe("validation_failed");
+      expect(((await storage.getActiveEmailProvider()) as any).metadata.awsAccessKeyId).toBe("AKIATESTKEY");
 
       const S2 = secret();
-      await admin.post("/api/company-settings/email").send({
+      const ok = await admin.post("/api/company-settings/email").send({
         ...base,
         provider: "aws-ses",
         awsAccessKeyId: "AKIATESTKEY2",
         awsSecretAccessKey: S2,
       });
+      expect(ok.status).toBe(200);
       expect(((await storage.getActiveEmailProvider()) as any).metadata.awsSecretAccessKey).toBe(S2);
     });
 
@@ -199,10 +211,19 @@ describe("settings secrets are masked and never returned", () => {
       const read = await admin.get("/api/company-settings/email");
       expect(JSON.stringify(read.body)).not.toContain(P);
       expect(read.body.hasSmtpPassword).toBe(true);
-      await admin.post("/api/company-settings/email").send({ ...smtp, host: "smtp2.example.test" });
+      const same = await admin.post("/api/company-settings/email").send({ ...smtp, port: 2525 });
+      expect(same.status).toBe(200);
       const active: any = await storage.getActiveEmailProvider();
-      expect(active.metadata.host).toBe("smtp2.example.test");
+      expect(active.metadata.port).toBe(2525);
       expect(active.metadata.password).toBe(P);
+
+      // A changed host or username with a blank password is refused.
+      for (const change of [{ host: "smtp2.example.test" }, { username: "other" }]) {
+        const res = await admin.post("/api/company-settings/email").send({ ...smtp, ...change });
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe("validation_failed");
+      }
+      expect(((await storage.getActiveEmailProvider()) as any).metadata.host).toBe("smtp.example.test");
     });
 
     it("a secret from another provider is not carried across a provider switch", async () => {

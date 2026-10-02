@@ -333,6 +333,7 @@ export const apiKeys = pgTable(
     createdAt: timestamp("created_at").defaultNow(),
   },
   (table) => [
+    // drizzle-kit push ignores a changed `where`: changing the predicate needs a NEW index name.
     // Partial on purpose: `drizzle-kit push` applies this to databases that still
     // hold legacy rows (key_hash = plaintext, possibly duplicated), and a full
     // unique index would fail on them. Legacy values never start with "sha256:".

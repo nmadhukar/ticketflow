@@ -6,6 +6,7 @@ import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
 import { createUser, loginAs } from "./helpers/fixtures";
 import { db } from "../../storage/db";
+import { storage } from "../../storage";
 import { ensureAiSystemUser } from "../../utils/aiSystemUser";
 import { AI_SYSTEM_USER_ID } from "../../utils/aiSystemUserId";
 import { SYSTEM_USER_ID, SYSTEM_USER_EMAIL } from "../../utils/systemUser";
@@ -162,8 +163,33 @@ describe("API keys: admin-issued and hashed", () => {
     expect((await post({ userId: "no-such-user", name: "x" })).status).toBe(404);
     expect((await post({ userId: inactive.id, name: "x" })).status).toBe(400);
     expect((await post({ userId: pending.id, name: "x" })).status).toBe(400);
-    expect((await post({ userId: AI_SYSTEM_USER_ID, name: "x" })).status).toBe(400);
+    const ai = await post({ userId: AI_SYSTEM_USER_ID, name: "x" });
+    expect(ai.status).toBe(400);
+    expect(ai.body.error).toBe("system_account");
+
+    // The legacy "system" user, made active and approved so only the system-account rule can refuse it.
+    await db.insert(users).values({
+      id: SYSTEM_USER_ID,
+      email: SYSTEM_USER_EMAIL,
+      role: "admin",
+      isActive: true,
+      isApproved: true,
+    });
+    const sys = await post({ userId: SYSTEM_USER_ID, name: "x" });
+    expect(sys.status).toBe(400);
+    expect(sys.body.error).toBe("system_account");
     expect(await db.select().from(apiKeys)).toHaveLength(0);
+  });
+
+  it("marks expired keys in the listing", async () => {
+    const admin = await createUser({ role: "admin" });
+    const c1 = await createUser({ role: "customer" });
+    await seedKey(c1.id, { name: "old", expiresAt: new Date(Date.now() - DAY) });
+    await seedKey(c1.id, { name: "fresh" });
+    await seedKey(c1.id, { name: "never", expiresAt: null });
+    const res = await (await loginAs(ctx.app, admin)).get("/api/api-keys");
+    const by = Object.fromEntries(res.body.map((k: { name: string; expired: boolean }) => [k.name, k.expired]));
+    expect(by).toEqual({ old: true, fresh: false, never: false });
   });
 
   it("lists keys without plaintext or hash, and revokes one", async () => {
@@ -217,6 +243,24 @@ describe("findActiveKey", () => {
     expect(typeof found?.keyId).toBe("number");
     const [row] = await db.select().from(apiKeys).where(eq(apiKeys.id, found!.keyId));
     expect(row.lastUsedAt).toBeInstanceOf(Date);
+  });
+
+  it("still accepts a valid key when the lastUsedAt write fails, logging one fixed line", async () => {
+    const owner = await createUser({ role: "customer" });
+    const plaintext = await seedKey(owner.id);
+    const spy = jest
+      .spyOn(storage, "updateApiKeyLastUsed")
+      .mockRejectedValue(new Error(`boom ${plaintext}`));
+    try {
+      const found = await findActiveKey(plaintext);
+      expect(found?.user.id).toBe(owner.id);
+      expect(spy).toHaveBeenCalled();
+      const logs = loggedText();
+      expect(logs).toContain("lastUsedAt update failed");
+      expect(logs).not.toContain(plaintext);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("returns null for junk, an unknown key, and a never-hashed key", async () => {
