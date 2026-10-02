@@ -1,7 +1,8 @@
-import { z } from "zod";
+import { ZodError } from "zod";
 import { normalizeRole, type Role } from "./roles";
 import { canAccessTask } from "./ticketAccess";
 import { HttpError } from "../http/errors";
+import { STAFF_ONLY_TICKET_FIELDS, updateTicketSchema } from "../services/tickets/schemas";
 
 // Fields allowed to be updated in principle (subset will be applied per role)
 export const updatableFields = [
@@ -17,28 +18,14 @@ export const updatableFields = [
   "dueDate",
   "departmentId",
   "teamId",
+  "tags",
+  "estimatedHours",
+  "actualHours",
 ] as const;
 
-export const updateTaskSchema = z
-  .object({
-    title: z.string().min(1).optional(),
-    description: z.string().optional(),
-    category: z.string().optional(),
-    priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
-    status: z
-      .enum(["open", "in_progress", "resolved", "closed", "on_hold"])
-      .optional(),
-    notes: z.string().optional(),
-    assigneeId: z.union([z.string(), z.number()]).nullable().optional(),
-    assigneeType: z.enum(["user", "team"]).optional(),
-    assigneeTeamId: z.union([z.string(), z.number()]).nullable().optional(),
-    dueDate: z.string().optional(),
-    departmentId: z.union([z.string(), z.number()]).optional(),
-    teamId: z.union([z.string(), z.number()]).optional(),
-  })
-  .strict();
+export const updateTaskSchema = updateTicketSchema;
 
-type UpdatePayload = z.infer<typeof updateTaskSchema>;
+type UpdatePayload = ReturnType<typeof updateTaskSchema.parse>;
 
 interface CanUpdateArgs {
   user: any;
@@ -68,8 +55,11 @@ function deriveAllowedFields(role: Role): ReadonlyArray<string> {
       "dueDate",
       "departmentId",
       "teamId",
+      "tags",
+      "estimatedHours",
+      "actualHours",
     ];
-  if (role === "agent") return ["priority", "status", "notes"];
+  if (role === "agent") return ["priority", "status", "notes", "estimatedHours", "actualHours"];
   // customer: keep small surface
   return ["title", "description", "notes"];
 }
@@ -92,6 +82,15 @@ export async function canUpdateTicket({
   }
   if (typeof ticket?.id !== "number" || !(await canAccessTask({ id: userId, role }, ticket.id))) {
     return { allowed: false, reason: "This ticket is outside your scope" };
+  }
+
+  // Ruling R3: effort hours are staff-only. A customer naming them is refused,
+  // not silently pruned.
+  if (
+    role === "customer" &&
+    STAFF_ONLY_TICKET_FIELDS.some((f) => payload && (payload as any)[f] !== undefined)
+  ) {
+    return { allowed: false, reason: "Only staff can set estimated or actual hours" };
   }
 
   // Remove immutable/unknown fields and validate shape
@@ -125,6 +124,8 @@ export async function canUpdateTicket({
 
     return { allowed: true, prunedPayload };
   } catch (e: any) {
+    // Bad values are a 400 with field details (the route hands ZodError to the error contract).
+    if (e instanceof ZodError) throw e;
     return { allowed: false, reason: e?.message || "Invalid payload" };
   }
 }

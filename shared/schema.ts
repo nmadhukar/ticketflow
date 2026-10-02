@@ -563,6 +563,9 @@ export const insertTaskSchema = createInsertSchema(tasks)
   .extend({
     assigneeId: z.string().nullable().optional(),
     assigneeTeamId: z.number().nullable().optional(),
+    // Enforced here and by the startup fixup, not by a column constraint:
+    // production applies the schema before the fixup runs.
+    assigneeType: z.enum(["user", "team"]).optional(),
     dueDate: z
       .string()
       .datetime()

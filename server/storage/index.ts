@@ -557,7 +557,7 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(sql`${users} as creator`, sql`creator.id = ${tasks.createdBy}`)
       .leftJoin(
         sql`${users} as assignee`,
-        sql`assignee.id = ${tasks.assigneeId} AND ${tasks.assigneeType} = 'user'`
+        sql`assignee.id = ${tasks.assigneeId} AND ${assignedToUserSql}`
       )
       .leftJoin(teams, eq(teams.id, tasks.assigneeTeamId))
       .where(eq(tasks.id, id));
@@ -637,7 +637,9 @@ export class DatabaseStorage implements IStorage {
     }
     if (!includeOwn) {
       filters.push(
-        sql`${tasks.assigneeId} IS DISTINCT FROM ${userId} AND ${tasks.createdBy} <> ${userId}`
+        // assignee_id is the caller's only on a user ticket; a stale id on a
+        // team-queued row is not "own".
+        sql`NOT (${assignedToUserSql} AND ${tasks.assigneeId} IS NOT DISTINCT FROM ${userId}) AND ${tasks.createdBy} <> ${userId}`
       );
     }
 

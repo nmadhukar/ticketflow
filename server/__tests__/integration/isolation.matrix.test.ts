@@ -166,8 +166,8 @@ describe("ticket isolation matrix", () => {
       });
       return t.id;
     };
-    const toUser = (w: Who) => ({ assigneeType: "user", assigneeId: users[w].id, assigneeTeamId: null });
-    const toTeam = (team: number) => ({ assigneeType: "team", assigneeId: null, assigneeTeamId: team });
+    const toUser = (w: Who) => ({ assigneeType: "user" as const, assigneeId: users[w].id, assigneeTeamId: null });
+    const toTeam = (team: number) => ({ assigneeType: "team" as const, assigneeId: null, assigneeTeamId: team });
     ids.t1 = await ticket("C1", toTeam(T1));
     ids.t2 = await ticket("C2", toUser("A3"));
     ids.t3 = await ticket("C1", toUser("A2"));

@@ -107,6 +107,7 @@ import {
   ticketVisibilityWhere,
 } from "../permissions/ticketAccess";
 import { HttpError } from "../http/errors";
+import { createTicketSchema, STAFF_ONLY_TICKET_FIELDS } from "../services/tickets/schemas";
 import { parseIdParam } from "../http/params";
 import { registerTeamsRoutes } from "./teams";
 import { registerIdParams } from "../http/install";
@@ -763,12 +764,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     "/api/tasks",
     isAuthenticated,
     upload.array("files", maxFilesPerRequest),
-    async (req: any, res) => {
+    async (req: any, res, next) => {
       try {
         const userId = getUserId(req);
         const files = req.files as Express.Multer.File[] | undefined;
         const user = await storage.getUser(userId);
         const isCustomer = user?.role === "customer";
+
+        // Validate before anything is uploaded or written. Server-owned fields
+        // (status, resolvedAt, closedAt, createdBy, ticketNumber) are rejected.
+        const submitted = createTicketSchema.parse(req.body ?? {});
+        if (isCustomer) {
+          // Ruling R3: effort hours are staff-only.
+          const staffOnly = STAFF_ONLY_TICKET_FIELDS.filter((f) => submitted[f] !== undefined);
+          if (staffOnly.length > 0) {
+            throw new HttpError(400, "validation_failed", "Only staff can set estimated or actual hours", {
+              formErrors: [],
+              fieldErrors: Object.fromEntries(staffOnly.map((f) => [f, ["Staff only"]])),
+            });
+          }
+        }
 
         // 1. Validate S3 configuration if files provided
         if (files && files.length > 0) {
@@ -921,8 +936,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
 
+        // The customer routing above may have rewritten the body: validate the
+        // final shape, then keep one assignee kind (the same rule as update).
+        const finalBody: Record<string, unknown> = { ...createTicketSchema.parse(req.body) };
+        normalizeAssigneeUpdate(finalBody);
         const taskData = insertTaskSchema.parse({
-          ...req.body,
+          ...finalBody,
           createdBy: userId,
         });
         const task = await storage.createTask(taskData);
@@ -1067,11 +1086,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.status(201).json(task);
       } catch (error) {
-        if (error instanceof z.ZodError) {
-          return res
-            .status(400)
-            .json({ message: "Invalid task data", errors: error.errors });
-        }
+        // Validation failures go to the error contract (400 with details).
+        if (error instanceof z.ZodError || error instanceof HttpError) return next(error);
         console.error("Error creating task:", error);
         res.status(500).json({ message: "Failed to create task" });
       }
@@ -1195,12 +1211,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(updatedTask);
     } catch (error) {
-      if (error instanceof HttpError) return next(error);
-      if (error instanceof z.ZodError) {
-        return res
-          .status(400)
-          .json({ message: "Invalid update data", errors: error.errors });
-      }
+      if (error instanceof HttpError || error instanceof z.ZodError) return next(error);
       console.error("Error updating task:", error);
       res.status(500).json({ message: "Failed to update task" });
     }

@@ -12,6 +12,8 @@
 export interface SeederSet {
   /** Startup data fix-up: legacy role "user" becomes "agent". Runs first. */
   migrateLegacyRoles?(): Promise<unknown>;
+  /** Startup data fix-up: consistent assignee columns on tickets. Runs right after the role fix-up. */
+  migrateAssigneeTypes?(): Promise<unknown>;
   systemUser(): Promise<void>;
   deactivateDemoAccounts(env: NodeJS.ProcessEnv): Promise<unknown>;
   bootstrapAdmin(env: NodeJS.ProcessEnv): Promise<void>;
@@ -31,8 +33,10 @@ async function defaultSeeders(): Promise<SeederSet> {
   const { seedBootstrapAdmin } = await import("./bootstrapAdmin");
   const { deactivateDemoAccounts } = await import("./deactivateDemoAccounts");
   const { migrateLegacyRoles } = await import("./legacyRoleFixup");
+  const { migrateAssigneeTypes } = await import("./assigneeTypeFixup");
   return {
     migrateLegacyRoles,
+    migrateAssigneeTypes,
     systemUser: seedSystemUser,
     deactivateDemoAccounts,
     bootstrapAdmin: seedBootstrapAdmin,
@@ -56,6 +60,7 @@ export async function runSeeders(
   // Required for the app to work: a failure here stops startup.
   // Role data fix-up first, before anything reads roles.
   await s.migrateLegacyRoles?.();
+  await s.migrateAssigneeTypes?.();
   await s.systemUser();
   await s.emailTemplates();
   // Old demo logins must be off before the "is there an admin?" check.

@@ -858,6 +858,10 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
       }
     } else {
       pruneToAllowed(taskData, allowedFieldsForCreate);
+      // The server owns a new ticket's status (always open) and rejects it in
+      // a create body; attachments travel as multipart files, not a field.
+      delete taskData.status;
+      delete taskData.attachments;
       if (!taskData.title) {
         toast({
           title: t("messages.error"),
