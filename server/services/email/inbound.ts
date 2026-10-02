@@ -28,8 +28,8 @@ import { parseEmail, parseSingleMailbox } from "./mime";
  * Who the sender is (ruling R26): SES must report DMARC PASS for the message. The sender
  * address is the single mailbox of the From header, tokenised (see mime.ts parseSingleMailbox),
  * not searched for; DMARC aligns with the From header's domain, so this is the address SES
- * evaluated. When SES also supplies its own parsed `mail.commonHeaders.from`, it must name
- * the same single mailbox, otherwise the message is refused. The envelope sender
+ * evaluated. SES's own parsed `mail.commonHeaders.from` is required (one element) and must
+ * name the same single mailbox, otherwise the message is refused. The envelope sender
  * (`mail.source`) is not used: it is not what DMARC covers.
  */
 
@@ -120,15 +120,18 @@ export async function processSesNotification(input: unknown): Promise<InboundRes
     return ignored("automatic_message");
   }
 
+  if (mail.refusal) return ignored(mail.refusal);
   if (mail.duplicateFrom) return ignored("ambiguous_sender");
   if (!mail.fromAddress) return ignored("no_single_sender");
+
+  // SES's own parse of the From header is required and must name the same single mailbox.
+  // Only the addresses are compared (never the display names), each tokenised the same way.
   const sesFrom = notification.mail?.commonHeaders?.from;
-  if (sesFrom !== undefined) {
-    const named = Array.isArray(sesFrom) && sesFrom.length === 1 && typeof sesFrom[0] === "string"
-      ? parseSingleMailbox(sesFrom[0])
-      : null;
-    if (!named || named.toLowerCase() !== mail.fromAddress.toLowerCase()) return ignored("ambiguous_sender");
+  if (!Array.isArray(sesFrom) || sesFrom.length !== 1 || typeof sesFrom[0] !== "string") {
+    return ignored("ses_from_missing");
   }
+  const named = parseSingleMailbox(sesFrom[0]);
+  if (!named || named.toLowerCase() !== mail.fromAddress.toLowerCase()) return ignored("ambiguous_sender");
 
   const found = await findSender(mail.fromAddress);
   if (!found.ok) return ignored(found.reason);

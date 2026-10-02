@@ -17,12 +17,14 @@ export interface ParsedEmail {
   /** More than one From header was present. */
   duplicateFrom: boolean;
   text: string;
+  /** Why the message must not be read at all (oversize or malformed header block), or null. */
+  refusal: "header_too_large" | "header_malformed" | null;
 }
 
 const MAX_DEPTH = 6;
 /** From and Subject are cut off or refused beyond this many characters. */
 export const MAX_HEADER_VALUE = 2048;
-/** The whole header block is read up to this many characters. */
+/** The top-level header block may be this long; a longer one is refused, never truncated. */
 export const MAX_HEADER_BLOCK = 64 * 1024;
 
 function splitHeadBody(raw: string): { head: string; body: string } {
@@ -35,6 +37,9 @@ function splitHeadBody(raw: string): { head: string; body: string } {
 
 /** Header names are lower-cased; the first occurrence wins; folded lines are joined. */
 function readHeaders(head: string): { headers: Record<string, string>; duplicates: Set<string> } {
+  // Callers that need the whole block (the top-level message) refuse an oversize one first;
+  // for a nested part the cap only bounds the work. A header is never silently dropped to
+  // make a message fit.
   const unfolded = head.slice(0, MAX_HEADER_BLOCK).replace(/\n[ \t]+/g, " ");
   const headers: Record<string, string> = {};
   const duplicates = new Set<string>();
@@ -79,20 +84,27 @@ function decodeQuotedPrintable(input: string, headerMode = false): Buffer {
       .replace(/=\n/g, "");
   }
   const bytes: number[] = [];
+  let nonAscii = ""; // a run of non-ASCII characters, encoded in one call
+  const flush = () => {
+    if (nonAscii === "") return;
+    for (const b of Array.from(Buffer.from(nonAscii, "utf8"))) bytes.push(b);
+    nonAscii = "";
+  };
   for (let i = 0; i < s.length; i++) {
     const code = s.charCodeAt(i);
+    if (code >= 0x80) {
+      nonAscii += s[i]; // a non-ASCII character in the source keeps its UTF-8 bytes
+      continue;
+    }
+    flush();
     if (code === 0x3d /* = */ && /^[0-9A-Fa-f]{2}$/.test(s.slice(i + 1, i + 3))) {
       bytes.push(parseInt(s.slice(i + 1, i + 3), 16));
       i += 2;
-    } else if (code < 0x80) {
-      bytes.push(code);
     } else {
-      // A non-ASCII character in the source: keep its UTF-8 bytes (surrogate pairs included).
-      const cp = s.codePointAt(i) as number;
-      if (cp > 0xffff) i++;
-      for (const b of Array.from(Buffer.from(String.fromCodePoint(cp), "utf8"))) bytes.push(b);
+      bytes.push(code);
     }
   }
+  flush();
   return Buffer.from(bytes);
 }
 
@@ -210,13 +222,17 @@ function extractText(raw: string, depth: number): { plain?: string; html?: strin
 
 // addr-spec characters (RFC 5322 atext, dot, one @). One linear pass: no nested quantifier.
 const ADDR_SPEC = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+$/;
+// One ASCII character allowed in unquoted text outside <...>.
+const DISPLAY_CHAR = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.@\s-]$/;
 
 /**
  * The one mailbox of a From-style header, or null. The header is tokenised, not searched:
  * quoted strings and (comments) are skipped whole, the display name is never decoded and never
  * read for an address, and only the text inside <...> (or a bare addr-spec) counts. Anything
  * ambiguous returns null: more than one mailbox, group syntax, an unterminated quote, comment
- * or angle bracket, a quoted local part, an "@" in the display name, an invalid address.
+ * or angle bracket, any quoted string when there is no <...> (the text is then the address),
+ * a backslash or other non-atext character outside a quoted string or comment, an "@" in the
+ * display name, an invalid address.
  * So `"<admin@x.test>" <mallory@y.test>` is mallory@y.test, and an encoded-word display name
  * that decodes to an address changes nothing.
  */
@@ -227,6 +243,7 @@ export function parseSingleMailbox(value: string | undefined): string | null {
   let angle = ""; // text inside the current <...>
   let inAngle = false;
   let hasAngle = false;
+  let quoted = false; // a quoted string appeared in the current mailbox
 
   const finish = (): boolean => {
     let address: string;
@@ -234,8 +251,12 @@ export function parseSingleMailbox(value: string | undefined): string | null {
       if (display.includes("@")) return false; // "x@y <a@b>": which one is the sender?
       address = angle.trim();
     } else {
+      // No <...>: the text IS the address, so a quoted string anywhere in it (a quoted local
+      // part, or one spliced in to hide characters) leaves the address undecidable.
+      if (quoted) return false;
       address = display.trim();
     }
+    quoted = false;
     if (address === "" || address.length > 254 || !ADDR_SPEC.test(address)) return false;
     if (address.indexOf("@") !== address.lastIndexOf("@")) return false;
     addresses.push(address);
@@ -249,6 +270,7 @@ export function parseSingleMailbox(value: string | undefined): string | null {
     const ch = value[i];
     if (ch === '"') {
       if (inAngle || hasAngle) return null; // nothing quoted inside or after the address
+      quoted = true;
       i++;
       while (i < value.length && value[i] !== '"') i += value[i] === "\\" ? 2 : 1;
       if (i >= value.length) return null; // unterminated quote
@@ -281,6 +303,9 @@ export function parseSingleMailbox(value: string | undefined): string | null {
     } else if (hasAngle) {
       if (ch !== " " && ch !== "\t") return null; // only whitespace and comments may follow <...>
     } else {
+      // Unquoted display-name (or bare address) characters: atext, "@", ".", whitespace and
+      // non-ASCII. A backslash outside a quoted string or comment is never legitimate here.
+      if (ch.charCodeAt(0) < 0x80 && !DISPLAY_CHAR.test(ch)) return null;
       display += ch;
     }
   }
@@ -293,6 +318,21 @@ export function parseSingleMailbox(value: string | undefined): string | null {
 
 export function parseEmail(raw: string): ParsedEmail {
   const { head } = splitHeadBody(raw);
+
+  // The top-level header block must be read whole or not at all: a From header hidden past a
+  // cut-off, or behind a lone CR that another reader treats as a line break, would let the
+  // sender seen here differ from the one SES evaluated.
+  const refusal =
+    head.length > MAX_HEADER_BLOCK
+      ? "header_too_large"
+      : head.includes("\r") || head.includes("\u0000") // a CR left after CRLF -> LF is a bare CR
+        ? "header_malformed"
+        : null;
+  if (refusal) {
+    return { headers: {}, subject: "", fromAddress: null, duplicateFrom: false, text: "", refusal };
+  }
+
+  // Duplicates are counted over the whole block by a linear scan of the (unfolded) lines.
   const { headers, duplicates } = readHeaders(head);
   const { plain, html } = extractText(raw, 0);
   const text = (plain ?? (html !== undefined ? htmlToText(html) : "")).replace(/\r\n/g, "\n");
@@ -302,5 +342,6 @@ export function parseEmail(raw: string): ParsedEmail {
     fromAddress: parseSingleMailbox(headers.from),
     duplicateFrom: duplicates.has("from"),
     text: text.trim(),
+    refusal: null,
   };
 }

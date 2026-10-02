@@ -52,8 +52,23 @@ describe("parseSingleMailbox", () => {
     "<a b@c.test>",
     "<a@b@c.test>",
     "=?UTF-8?B?YWRtaW5AY29tcGFueS50ZXN0?=",
+    // A quoted string anywhere in a bare address, and a backslash outside quotes and comments.
+    '"x"admin@company.test',
+    'admin"@attacker.test"@company.test',
+    'admin@company.test"@attacker.test"',
+    '\\"<mallory@attacker.test>" <admin@company.test>',
+    "Ann\\ <ann@example.test>",
+    "Ann [x] <ann@example.test>",
   ])("refuses an ambiguous or malformed header: %s", (value) => {
     expect(parseSingleMailbox(value)).toBeNull();
+  });
+
+  it("accepts quoted and encoded display names that contain a comma or non-ASCII text", () => {
+    expect(parseSingleMailbox('"Müller, Hans" <h@example.test>')).toBe("h@example.test");
+    expect(parseSingleMailbox("=?iso-8859-1?Q?M=FCller=2C_Hans?= <h@example.test>")).toBe("h@example.test");
+    expect(parseSingleMailbox("Müller Hans <h@example.test>")).toBe("h@example.test");
+    // Unquoted with a literal comma it reads as two mailboxes: refused (fail closed).
+    expect(parseSingleMailbox("Müller, Hans <h@example.test>")).toBeNull();
   });
 
   it("refuses a header over 2 KB and an undefined one", () => {
@@ -76,9 +91,67 @@ describe("parseEmail sender handling", () => {
   });
 });
 
+describe("parseEmail header block limits", () => {
+  const padding = (n: number) => Array.from({ length: n }, (_, i) => `X-Pad-${i}: padding value`);
+
+  it("refuses a header block over the cap instead of cutting it off (a second From hidden past 64 KB)", () => {
+    const raw = crlf([
+      "From: <admin@company.test>",
+      ...padding(7000),
+      "From: <mallory@attacker.test>",
+      "Subject: x",
+      "",
+      "body",
+    ]);
+    expect(raw.length).toBeGreaterThan(130 * 1024);
+    const mail = parseEmail(raw);
+    expect(mail.refusal).toBe("header_too_large");
+    expect(mail.fromAddress).toBeNull();
+    expect(mail.text).toBe("");
+  });
+
+  it("reads a header block just under the cap and still sees a late second From", () => {
+    const raw = crlf(["From: <a@b.test>", ...padding(2000), "From: <c@d.test>", "Subject: x", "", "body"]);
+    expect(raw.length).toBeLessThan(64 * 1024);
+    const mail = parseEmail(raw);
+    expect(mail.refusal).toBeNull();
+    expect(mail.duplicateFrom).toBe(true);
+  });
+
+  it("refuses a bare CR (a line break some readers honour and this one does not)", () => {
+    const raw = "X-A: y\rFrom: <mallory@attacker.test>\r\nFrom: <admin@company.test>\r\nSubject: x\r\n\r\nbody";
+    const mail = parseEmail(raw);
+    expect(mail.refusal).toBe("header_malformed");
+    expect(mail.fromAddress).toBeNull();
+    // A CRLF pair is still an ordinary line break.
+    expect(parseEmail("From: <a@b.test>\r\nSubject: x\r\n\r\nbody").refusal).toBeNull();
+  });
+
+  it("refuses a NUL in the header block", () => {
+    const mail = parseEmail(crlf(["From: <a@b.test>", "X-A: y\u0000z", "", "body"]));
+    expect(mail.refusal).toBe("header_malformed");
+  });
+
+  it("counts From lines over the whole block, case-insensitively and with a space before the colon", () => {
+    expect(parseEmail(crlf(["From: <a@b.test>", "FROM: <c@d.test>", "", "x"])).duplicateFrom).toBe(true);
+    expect(parseEmail(crlf(["From: <a@b.test>", "from : <c@d.test>", "", "x"])).duplicateFrom).toBe(true);
+    // A folded continuation line is part of the previous header, not a second From.
+    expect(parseEmail(crlf(["From: <a@b.test>", "X-A: y", " From: <c@d.test>", "", "x"])).duplicateFrom).toBe(false);
+  });
+});
+
+describe("parseSingleMailbox on adversarial input just under the 2 KB cap", () => {
+  it.each(["a", "<", '"', "(", "\\", "a ", "<a", '"a', "(a", ",", "a@"])("is fast for repeats of %j", (unit) => {
+    const value = unit.repeat(Math.floor(2000 / unit.length));
+    const start = Date.now();
+    expect(parseSingleMailbox(value)).toBeNull();
+    expect(Date.now() - start).toBeLessThan(250);
+  });
+});
+
 describe("parseEmail on adversarial input (linear time)", () => {
   const SIZE = 150 * 1024;
-  const BOUND_MS = 1000; // the real cost is a few ms; loose enough for a busy CI box
+  const BOUND_MS = 250; // the real cost is a few ms
   const timed = (raw: string) => {
     const start = Date.now();
     const mail = parseEmail(raw);

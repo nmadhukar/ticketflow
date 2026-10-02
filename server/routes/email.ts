@@ -26,8 +26,14 @@ import { inboundEmailRateLimit } from "../security/rateLimiting";
  * with <region> taken from the topic ARN.
  */
 
-/** A 'processing' claim older than this is a crashed attempt and may be taken again. */
-const CLAIM_STALE_MINUTES = 10;
+/**
+ * A 'processing' claim older than this many seconds is a crashed attempt and may be taken again.
+ * It is shorter than SNS's default HTTP/S delivery policy (3 retries, 20 s apart, so about 60 s
+ * of retrying): the last retry then finds the claim stale and takes it over. A fresh claim
+ * answers 503 so SNS retries instead of treating the message as handled. If the topic's
+ * delivery policy is changed to retry over a shorter span, this window must shrink with it.
+ */
+const CLAIM_STALE_SECONDS = 45;
 
 /** Visits a SubscribeURL to confirm the subscription. Never follows redirects. */
 async function confirmOverHttps(url: string): Promise<void> {
@@ -71,21 +77,29 @@ function readBody(req: Request): SnsMessage | null {
 }
 
 /**
- * Takes the claim on an SNS MessageId. True when this delivery owns it: a new id, or a
- * 'processing' claim older than CLAIM_STALE_MINUTES (its process died). A 'done' claim, or a
- * fresh 'processing' one, belongs to another delivery.
+ * Takes the claim on an SNS MessageId.
+ *  - "claimed": this delivery owns it (a new id, or a 'processing' claim older than
+ *    CLAIM_STALE_SECONDS whose process died);
+ *  - "done": the message was fully handled, nothing to do;
+ *  - "busy": another delivery is working on it right now (a fresh 'processing' claim).
  */
-async function claimMessage(messageId: string): Promise<boolean> {
+async function claimMessage(messageId: string): Promise<"claimed" | "done" | "busy"> {
   const rows = await db
     .insert(snsMessageDedupe)
     .values({ messageId, status: "processing" })
     .onConflictDoUpdate({
       target: snsMessageDedupe.messageId,
       set: { status: "processing", receivedAt: sql`now()` },
-      setWhere: sql`${snsMessageDedupe.status} = 'processing' AND ${snsMessageDedupe.receivedAt} < now() - make_interval(mins => ${CLAIM_STALE_MINUTES})`,
+      setWhere: sql`${snsMessageDedupe.status} = 'processing' AND ${snsMessageDedupe.receivedAt} < now() - make_interval(secs => ${CLAIM_STALE_SECONDS})`,
     })
     .returning({ id: snsMessageDedupe.messageId });
-  return rows.length > 0;
+  if (rows.length > 0) return "claimed";
+  const [row] = await db
+    .select({ status: snsMessageDedupe.status })
+    .from(snsMessageDedupe)
+    .where(eq(snsMessageDedupe.messageId, messageId))
+    .limit(1);
+  return row?.status === "done" ? "done" : "busy";
 }
 
 async function handleInbound(req: Request, res: Response) {
@@ -135,7 +149,14 @@ async function handleInbound(req: Request, res: Response) {
   // 4. A notification: claim its MessageId, then process. A repeat delivery finds the claim.
   const messageId = typeof msg.MessageId === "string" ? msg.MessageId.slice(0, 200) : "";
   if (!messageId) return json(res, 400, "invalid_message", "MessageId is missing");
-  if (!(await claimMessage(messageId))) return res.status(200).json({ status: "duplicate" });
+  const claim = await claimMessage(messageId);
+  if (claim === "done") return res.status(200).json({ status: "duplicate" });
+  if (claim === "busy") {
+    // Not finished by whoever holds it: do not report it handled. SNS retries, and the retry
+    // finds it done, or stale and takes it over.
+    res.setHeader("Retry-After", "20");
+    return json(res, 503, "in_progress", "This message is being processed");
+  }
 
   let result: Awaited<ReturnType<typeof processSesNotification>>;
   try {
@@ -157,6 +178,10 @@ async function handleInbound(req: Request, res: Response) {
     return json(res, 500, "internal_error", "Internal server error");
   }
 
+  // (The 'done' mark is a separate statement, not part of the ticket/comment transaction:
+  // storage.createTask and addTaskComment use the shared connection and take no transaction,
+  // so sharing one would mean threading it through the create path. A crash between the two
+  // leaves a stale 'processing' claim, which the next delivery takes over.)
   // The ticket or comment is committed: make the claim final, answer SNS, and only then run the
   // non-essential effects (AI auto-response, realtime, Teams). None of them can change the answer.
   try {

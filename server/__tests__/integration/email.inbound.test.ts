@@ -16,6 +16,8 @@ import { AI_SYSTEM_USER_ID, ensureAiSystemUser } from "../../utils/aiSystemUser"
 import { createSnsTestSigner, generateKeyPairSync } from "../utils/snsTestSigner";
 import sesReceived from "../fixtures/ses/ses-received.json";
 import snsConfirmation from "../fixtures/ses/sns-subscription-confirmation.json";
+import sesQuotedName from "../fixtures/ses/ses-received-quoted-name.json";
+import * as mime from "../../services/email/mime";
 
 const TOPIC = "arn:aws:sns:us-east-1:111122223333:ticketflow-inbound-test";
 const CERT_URL = "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-integration.pem";
@@ -33,6 +35,10 @@ describe("POST /api/email/inbound", () => {
   afterAll(async () => {
     process.env = savedEnv;
     await ctx.close();
+  });
+  afterEach(() => {
+    delete process.env.INBOUND_EMAIL_ALLOW_UNVERIFIED_SENDER;
+    jest.restoreAllMocks();
   });
   beforeEach(async () => {
     await resetDb();
@@ -384,18 +390,24 @@ describe("POST /api/email/inbound", () => {
       expect(res.body.status).toBe("created");
     });
 
-    it("strips NUL bytes from the subject and body instead of failing", async () => {
+    it("strips NUL bytes from the body instead of failing, and refuses one in the headers", async () => {
       await customer("ann.customer@example.test");
       const res = await post(
-        notification(sesBody({ from: "ann.customer@example.test", subject: "Nu\u0000ll", body: "bo\u0000dy" }))
+        notification(sesBody({ from: "ann.customer@example.test", subject: "Null body", body: "bo\u0000dy" }))
       );
       expect(res.status).toBe(200);
       expect(res.body.status).toBe("created");
       const [ticket] = await db.select().from(tasks);
-      expect(ticket).toMatchObject({ title: "Null", description: "body" });
+      expect(ticket).toMatchObject({ title: "Null body", description: "body" });
+      // A NUL in a header (the subject) makes the header block untrustworthy: refused.
+      const inHeader = await post(
+        notification(sesBody({ from: "ann.customer@example.test", subject: "Nu\u0000ll", body: "x" }))
+      );
+      expect(inHeader.body).toEqual({ status: "ignored", reason: "header_malformed" });
+      expect(await countTickets()).toBe(1);
     });
 
-    it("answers 200 for a refused 150 KB hostile message quickly", async () => {
+    it("refuses a 150 KB hostile header block quickly and without reading a sender", async () => {
       await customer("ann.customer@example.test");
       const start = Date.now();
       const res = await post(
@@ -408,16 +420,90 @@ describe("POST /api/email/inbound", () => {
           })
         )
       );
-      expect(res.body.status).toBe("ignored");
+      expect(res.body).toEqual({ status: "ignored", reason: "header_too_large" });
       expect(Date.now() - start).toBeLessThan(3000);
     });
 
-    it("runs the cheap receipt checks before parsing the message", async () => {
+    it("refuses a second From hidden after 64 KB of padding headers, and one behind a lone CR", async () => {
       await customer("ann.customer@example.test");
-      // Unparseable-on-purpose MIME with a failing verdict: refused by verdict, not by parsing.
-      const body = sesBody({ from: "ann.customer@example.test", subject: "x", body: "x", receipt: { spamVerdict: { status: "FAIL" } } });
-      const res = await post(notification(body));
-      expect(res.body.reason).toBe("spam_verdict_fail");
+      const padding = Array.from({ length: 7000 }, (_, i) => `X-Pad-${i}: padding value`).join("\r\n");
+      const hidden = await post(
+        notification(
+          sesBody({
+            from: "ann.customer@example.test",
+            subject: "x",
+            body: "x",
+            headers: `From: <ann.customer@example.test>\r\n${padding}\r\nFrom: <mallory@attacker.test>`,
+          })
+        )
+      );
+      const loneCr = await post(
+        notification(
+          sesBody({
+            from: "ann.customer@example.test",
+            subject: "x",
+            body: "x",
+            headers: "X-A: y\rFrom: <mallory@attacker.test>",
+          })
+        )
+      );
+      expect(hidden.body).toEqual({ status: "ignored", reason: "header_too_large" });
+      expect(loneCr.body).toEqual({ status: "ignored", reason: "header_malformed" });
+      expect(await countTickets()).toBe(0);
+    });
+
+    it("does not parse the message at all when DMARC did not pass, or a verdict fails", async () => {
+      await customer("ann.customer@example.test");
+      const parse = jest.spyOn(mime, "parseEmail");
+      try {
+        const dmarcFail = sesBody({
+          from: "ann.customer@example.test",
+          subject: "x",
+          body: "x",
+          receipt: { dmarcVerdict: { status: "FAIL" } },
+        });
+        const spam = sesBody({ from: "ann.customer@example.test", subject: "x", body: "x", receipt: { spamVerdict: { status: "FAIL" } } });
+        expect((await post(notification(dmarcFail))).body.reason).toBe("sender_not_verified");
+        expect((await post(notification(spam))).body.reason).toBe("spam_verdict_fail");
+        expect(parse).not.toHaveBeenCalled();
+        // The same message with a passing receipt does reach the parser.
+        await post(notification(sesBody({ from: "ann.customer@example.test", subject: "x", body: "x" })));
+        expect(parse).toHaveBeenCalledTimes(1);
+      } finally {
+        parse.mockRestore();
+      }
+    });
+
+    it("requires SES's parsed From: absent or not a one-element array is refused", async () => {
+      await customer("ann.customer@example.test");
+      const base = sesBody({ from: "ann.customer@example.test", subject: "x", body: "x" });
+      const withoutFrom = { ...base, mail: { ...base.mail, commonHeaders: { subject: "x" } } };
+      const noCommonHeaders = { ...base, mail: { source: "ann.customer@example.test" } };
+      const two = sesBody({
+        from: "ann.customer@example.test",
+        subject: "x",
+        body: "x",
+        sesFrom: ["ann.customer@example.test", "mallory@attacker.test"],
+      });
+      const notArray = { ...base, mail: { ...base.mail, commonHeaders: { from: "ann.customer@example.test" } } };
+      for (const inner of [withoutFrom, noCommonHeaders, two, notArray]) {
+        expect((await post(notification(inner))).body).toEqual({ status: "ignored", reason: "ses_from_missing" });
+      }
+      expect(await countTickets()).toBe(0);
+    });
+
+    it("accepts a display name with a comma, quoted by SES and encoded in the MIME, when the addresses match", async () => {
+      const sender = await customer("hans.mueller@example.test");
+      const res = await post(notification(sesQuotedName));
+      expect(res.body.status).toBe("created");
+      const [ticket] = await db.select().from(tasks);
+      expect(ticket).toMatchObject({ title: "Drucker defekt", createdBy: sender.id });
+      // SES delivering the same name unquoted reads as two mailboxes and is refused (fail closed).
+      const unquoted = {
+        ...sesQuotedName,
+        mail: { ...sesQuotedName.mail, commonHeaders: { ...sesQuotedName.mail.commonHeaders, from: ["Müller, Hans <hans.mueller@example.test>"] } },
+      };
+      expect((await post(notification(unquoted))).body).toEqual({ status: "ignored", reason: "ambiguous_sender" });
     });
 
     it("ignores automatic replies and virus-flagged mail", async () => {
@@ -566,17 +652,19 @@ describe("POST /api/email/inbound", () => {
       expect(await countTickets()).toBe(1);
     });
 
-    it("a 'processing' claim is honoured while fresh and re-claimed once stale (crashed attempt)", async () => {
+    it("a fresh 'processing' claim answers 503 (SNS retries); a stale one is re-claimed (crashed attempt)", async () => {
       await customer("ann.customer@example.test");
       const msg = notification(sesBody({ from: "ann.customer@example.test", subject: "Crash", body: "x" }));
       await db.insert(snsMessageDedupe).values({ messageId: msg.MessageId as string, status: "processing" });
-      // Fresh: another delivery is working on it.
-      expect((await post(msg)).body).toEqual({ status: "duplicate" });
+      // Fresh: another delivery is working on it. Not "duplicate": it is not handled yet.
+      const busy = await post(msg);
+      expect(busy.status).toBe(503);
+      expect(busy.body.error).toBe("in_progress");
       expect(await countTickets()).toBe(0);
-      // Stale (older than 10 minutes): the process that held it died, so this delivery takes over.
+      // Stale (older than 45 s, inside SNS's ~60 s retry span): its process died, so this delivery takes over.
       await db
         .update(snsMessageDedupe)
-        .set({ receivedAt: new Date(Date.now() - 11 * 60 * 1000) })
+        .set({ receivedAt: new Date(Date.now() - 50 * 1000) })
         .where(eq(snsMessageDedupe.messageId, msg.MessageId as string));
       expect((await post(msg)).body.status).toBe("created");
       expect(await countTickets()).toBe(1);
