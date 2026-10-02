@@ -42,7 +42,7 @@
  * @module routes
  */
 
-import type { Express } from "express";
+import type { Express, RequestHandler } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage, publicUserColumns } from "../storage";
@@ -50,7 +50,9 @@ import { setupAuth, isAuthenticated, hashPassword } from "../services/auth";
 import { normalizeRole } from "../permissions/roles";
 import { setupMicrosoftAuth } from "../services/auth/microsoftAuth";
 import { teamsIntegration } from "../services/microsoftTeams";
-import { canManageTeam } from "../permissions/teams";
+import { canChangeTeamMembership } from "../permissions/teams";
+import { notifyTicketWebhooks, teamsSettingsInputSchema } from "../services/teamsNotifications";
+import { assertPublicHost, validateWebhookUrl } from "../services/webhookGuard";
 import { sessionTrackingMiddleware } from "../middleware/sessionTracking.middleware";
 import {
   insertTaskSchema,
@@ -830,35 +832,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         // Send Teams notification for new task
+        // Only webhooks whose owner can access this ticket receive it.
         try {
           const user = await storage.getUser(userId);
-          const allUsers = await storage.getAllUsers();
-          const notificationPromises = allUsers.map(async (notifyUser) => {
-            const settings = await storage.getTeamsIntegrationSettings(
-              notifyUser.id
-            );
-            if (
-              settings?.enabled &&
-              settings.notificationTypes?.includes("ticket_created")
-            ) {
-              const actionUrl = `${req.protocol}://${req.get("host")}/my-tasks`;
-              const message = `New ticket created by ${
-                user?.email || "a user"
-              }`;
-
-              if (settings.webhookUrl) {
-                await teamsIntegration.sendWebhookNotification(
-                  settings.webhookUrl,
-                  task,
-                  message,
-                  actionUrl
-                );
-              }
-            }
+          await notifyTicketWebhooks({
+            task,
+            kind: "created",
+            actorEmail: user?.email,
+            actionUrl: `${req.protocol}://${req.get("host")}/my-tasks`,
           });
-          await Promise.allSettled(notificationPromises);
         } catch (error) {
-          console.error("Error sending Teams notifications:", error);
+          console.error("Error sending Teams notifications:", error instanceof Error ? error.name : "error");
         }
 
         // Return task with warning if some attachments failed
@@ -962,39 +946,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Send Teams notification for task update
+      // Only webhooks whose owner can access this ticket (as updated) receive it.
       try {
-        const user = await storage.getUser(userId);
-        const allUsers = await storage.getAllUsers();
-        const notificationPromises = allUsers.map(async (notifyUser) => {
-          const settings = await storage.getTeamsIntegrationSettings(
-            notifyUser.id
-          );
-          if (
-            settings?.enabled &&
-            (settings.notificationTypes?.includes("ticket_updated") ||
-              (updates.assigneeId &&
-                settings.notificationTypes?.includes("ticket_assigned")))
-          ) {
-            const actionUrl = `${req.protocol}://${req.get("host")}/my-tasks`;
-            let message = `Ticket updated by ${user?.email || "a user"}`;
-
-            if (updates.assigneeId && updates.assigneeId === notifyUser.id) {
-              message = `Ticket assigned to you by ${user?.email || "a user"}`;
-            }
-
-            if (settings.webhookUrl) {
-              await teamsIntegration.sendWebhookNotification(
-                settings.webhookUrl,
-                updatedTask,
-                message,
-                actionUrl
-              );
-            }
-          }
+        const actor = await storage.getUser(userId);
+        await notifyTicketWebhooks({
+          task: updatedTask,
+          kind: "updated",
+          assignedToUserId: updates.assigneeId,
+          actorEmail: actor?.email,
+          actionUrl: `${req.protocol}://${req.get("host")}/my-tasks`,
         });
-        await Promise.allSettled(notificationPromises);
       } catch (error) {
-        console.error("Error sending Teams notifications:", error);
+        console.error("Error sending Teams notifications:", error instanceof Error ? error.name : "error");
       }
 
       res.json(updatedTask);
@@ -1201,7 +1164,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/admin/users/:userId/assign-team",
     isAuthenticated,
-    async (req: any, res) => {
+    async (req: any, res, next) => {
       try {
         const { userId } = req.params;
         const { teamId } = req.body;
@@ -1212,17 +1175,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const currentUserId = getUserId(req);
         const teamIdNum = parseInt(teamId);
+        if (!Number.isInteger(teamIdNum) || teamIdNum <= 0) {
+          return res.status(400).json({ error: "invalid_id", message: "teamId must be a positive integer" });
+        }
 
-        // Check if user can manage the team
-        const canManage = await canManageTeam(
+        // R12: only an admin or the manager of the team's department may add
+        // members (membership widens ticket visibility).
+        const canChange = await canChangeTeamMembership(
           storage,
           currentUserId,
           teamIdNum
         );
-        if (!canManage) {
+        if (!canChange) {
           return res.status(403).json({
+            error: "forbidden",
             message: "You don't have permission to assign users to this team",
           });
+        }
+        if (!(await storage.getUser(userId))) {
+          return res.status(404).json({ error: "user_not_found", message: "User not found" });
         }
 
         // Role field removed - use team admins endpoints instead
@@ -1233,6 +1204,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
         res.json(teamMember);
       } catch (error) {
+        if (error instanceof HttpError) return next(error);
         console.error("Error assigning user to team:", error);
         res.status(500).json({ message: "Failed to assign user to team" });
       }
@@ -1253,14 +1225,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const currentUserId = getUserId(req);
 
-        // Check if user can manage the team
-        const canManage = await canManageTeam(
+        // R12: same rule as adding a member.
+        const canChange = await canChangeTeamMembership(
           storage,
           currentUserId,
           teamIdNum
         );
-        if (!canManage) {
+        if (!canChange) {
           return res.status(403).json({
+            error: "forbidden",
             message: "You don't have permission to remove users from this team",
           });
         }
@@ -3957,10 +3930,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }, 24 * 60 * 60 * 1000); // Run once per day
 
-  // Teams Integration routes
+  // Teams Integration routes. A webhook is an outbound call to a URL we are
+  // given, and it receives ticket content: only an admin may configure one
+  // (read, save, remove, test). Delivery is scoped in services/teamsNotifications.
+  const teamsWebhookAdminOnly: RequestHandler = (req, _res, next) => {
+    if (normalizeRole((req.user as any)?.role) !== "admin") {
+      return next(new HttpError(403, "forbidden", "Admin access required"));
+    }
+    next();
+  };
+
   app.get(
     "/api/teams-integration/settings",
     isAuthenticated,
+    teamsWebhookAdminOnly,
     async (req: any, res) => {
       try {
         const userId = getUserId(req);
@@ -3976,15 +3959,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/teams-integration/settings",
     isAuthenticated,
-    async (req: any, res) => {
+    teamsWebhookAdminOnly,
+    async (req: any, res, next) => {
       try {
         const userId = getUserId(req);
+        const input = teamsSettingsInputSchema.parse(req.body ?? {});
         const settings = await storage.upsertTeamsIntegrationSettings({
-          ...req.body,
+          ...input,
           userId,
         });
         res.json(settings);
       } catch (error) {
+        if (error instanceof z.ZodError || error instanceof HttpError) return next(error);
         console.error("Error updating Teams settings:", error);
         res.status(500).json({ message: "Failed to update Teams settings" });
       }
@@ -3994,6 +3980,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete(
     "/api/teams-integration/settings",
     isAuthenticated,
+    teamsWebhookAdminOnly,
     async (req: any, res) => {
       try {
         const userId = getUserId(req);
@@ -4012,6 +3999,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(
     "/api/teams-integration/teams",
     isAuthenticated,
+    teamsWebhookAdminOnly,
     async (req: any, res) => {
       try {
         if (!req.user.access_token) {
@@ -4035,7 +4023,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/teams-integration/test",
     isAuthenticated,
-    async (req: any, res) => {
+    teamsWebhookAdminOnly,
+    async (req: any, res, next) => {
       try {
         const userId = getUserId(req);
         const settings = await storage.getTeamsIntegrationSettings(userId);
@@ -4044,6 +4033,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res
             .status(400)
             .json({ message: "Teams integration not configured" });
+        }
+
+        // A stored URL that is not allow-listed (or resolves to a private
+        // address) is refused with 400 before any request is made.
+        if (settings.webhookUrl) {
+          validateWebhookUrl(settings.webhookUrl);
+          await assertPublicHost(new URL(settings.webhookUrl).hostname);
         }
 
         const testTask = {
@@ -4085,6 +4081,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           res.status(500).json({ message: "Failed to send test notification" });
         }
       } catch (error) {
+        if (error instanceof HttpError) return next(error);
         console.error("Error sending test notification:", error);
         res.status(500).json({ message: "Failed to send test notification" });
       }

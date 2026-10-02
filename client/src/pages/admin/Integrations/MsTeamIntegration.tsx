@@ -192,7 +192,7 @@ const MsTeamIntegration = () => {
                   <Input
                     id="webhook-url"
                     type="url"
-                    placeholder="https://outlook.office.com/webhook/..."
+                    placeholder="https://<tenant>.webhook.office.com/webhookb2/..."
                     value={currentWebhookUrl}
                     onChange={(e) => setTeamsWebhookUrl(e.target.value)}
                   />

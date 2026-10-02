@@ -11,6 +11,7 @@ import { isAuthenticated } from "server/services/auth";
 import { db } from "server/storage/db";
 import { getUserId } from "server/middleware/admin.middleware";
 import {
+  canAdministerDepartment,
   canGrantTeamAdmin,
   canManageTeam,
   isTeamAdmin,
@@ -166,10 +167,9 @@ export function registerTeamsRoutes(app: Express): void {
     }
   });
 
-  app.post("/api/teams", isAuthenticated, async (req: any, res) => {
+  app.post("/api/teams", isAuthenticated, async (req: any, res, next) => {
     try {
       const userId = getUserId(req);
-      const user = await storage.getUser(userId);
 
       // Parse and validate team data (departmentId is now required by schema)
       const teamData = insertTeamSchema.parse({
@@ -192,17 +192,14 @@ export function registerTeamsRoutes(app: Express): void {
         return res.status(400).json({ message: "Department is not active" });
       }
 
-      // Permission check: Verify user can assign teams to the selected department
-      if (user?.role === "manager") {
-        // Managers can only assign to departments they manage
-        if (department.managerId !== userId) {
-          return res.status(403).json({
-            message:
-              "You don't have permission to create teams in this department",
-          });
-        }
+      // R12: only an admin, or the manager of this department, may create a team in it.
+      if (!(await canAdministerDepartment(storage, userId, department.id))) {
+        throw new HttpError(
+          403,
+          "forbidden",
+          "You don't have permission to create teams in this department"
+        );
       }
-      // Admins can assign to any department (no additional check needed)
 
       const team = await storage.createTeam(teamData);
       res.status(201).json(team);
@@ -212,6 +209,7 @@ export function registerTeamsRoutes(app: Express): void {
           .status(400)
           .json({ message: "Invalid team data", errors: error.errors });
       }
+      if (error instanceof HttpError) return next(error);
       console.error("Error creating team:", error);
       res.status(500).json({ message: "Failed to create team" });
     }

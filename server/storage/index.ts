@@ -1615,6 +1615,9 @@ export class DatabaseStorage implements IStorage {
     teamId: number,
     role: string = "member"
   ): Promise<TeamMember> {
+    if (isAiSystemUserId(userId)) {
+      throw new HttpError(404, "not_found", "User not found");
+    }
     // Check if the user is already a team member
     const existingMember = await db
       .select()
