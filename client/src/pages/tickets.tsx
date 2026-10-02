@@ -1,4 +1,6 @@
 import MainWrapper from "@/components/main-wrapper";
+import { STAFF_TRANSITIONS } from "@shared/workflow";
+import type { TicketStatus } from "@shared/constants";
 import TaskModal from "@/components/task-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -972,14 +974,8 @@ export default function Tasks() {
                                           Update Status
                                         </DropdownMenuSubTrigger>
                                         <DropdownMenuSubContent>
-                                          {[
-                                            "open",
-                                            "in_progress",
-                                            "resolved",
-                                            "closed",
-                                            "on_hold",
-                                          ]
-                                            .filter((s) => s !== task.status)
+                                          {/* Only the moves the server accepts (shared STAFF_TRANSITIONS). */}
+                                          {[...(STAFF_TRANSITIONS[task.status as TicketStatus] ?? [])]
                                             .map((s) => (
                                               <DropdownMenuItem
                                                 key={s}

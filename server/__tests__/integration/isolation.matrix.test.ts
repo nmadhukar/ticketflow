@@ -69,6 +69,8 @@ interface RouteSpec {
   call(agent: Agent, id: number): Promise<Res>;
   /** Statuses that mean the access gate let the request through. */
   allowed: number[];
+  /** Runs before each call on an existing ticket (puts shared state back so the call tests access, not state). */
+  prepare?(id: number): Promise<unknown>;
   /** Roles the route's own role rule refuses (403) even on a ticket they can see. */
   refusedRoles?: Who[];
 }
@@ -80,7 +82,10 @@ const ROUTES: RouteSpec[] = [
     name: "PATCH /api/tasks/:id (status)",
     call: (a, id) => a.patch(`/api/tasks/${id}`).send({ status: "in_progress" }),
     allowed: [200],
-    refusedRoles: ["C1", "C2"], // customers may not change status, even on their own tickets
+    // open -> in_progress is a legal staff move; a customer may only reopen, so C1/C2 are refused on their own tickets.
+    // Reset to open first: earlier roles in the loop move the shared tickets, and in_progress -> in_progress is a no-op 200.
+    prepare: (id) => db.update(tasks).set({ status: "open", resolvedAt: null, closedAt: null }).where(eq(tasks.id, id)),
+    refusedRoles: ["C1", "C2"],
   },
   {
     name: "PATCH /api/tasks/:id (notes)",
@@ -193,6 +198,7 @@ describe("ticket isolation matrix", () => {
         const refused = route.refusedRoles?.includes(who) ?? false;
         expected[t] = visible && !refused ? "allowed" : "403 forbidden";
 
+        await route.prepare?.(ids[t]);
         const res = await route.call(agents[who], ids[t]);
         if (route.allowed.includes(res.status)) actual[t] = "allowed";
         else if (res.status === 403 && res.body?.error === "forbidden") actual[t] = "403 forbidden";

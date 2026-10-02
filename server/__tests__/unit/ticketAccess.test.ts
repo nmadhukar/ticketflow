@@ -198,14 +198,16 @@ describe("canUpdateTicket = access + role field table", () => {
     expect(v.allowed).toBe(true);
   });
 
-  it("a customer may not change status even on their own ticket", async () => {
+  it("a customer's status passes the field table; the workflow (assertTransition) then allows only a reopen", async () => {
     mockResults.push([{ one: 1 }]);
     const v = await canUpdateTicket({
       user: { id: ME, role: "customer" },
       ticket: { ...ticket, createdBy: ME },
       payload: { status: "closed" },
     });
-    expect(v.allowed).toBe(false);
+    // The refusal of customer -> closed is pinned in unit/workflow.test.ts and integration/tickets.workflow.test.ts.
+    expect(v.allowed).toBe(true);
+    expect(v.prunedPayload).toEqual({ status: "closed" });
   });
 
   it("an unknown role is refused without consulting the database", async () => {

@@ -451,35 +451,34 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  // Helper function to generate the next ticket number
+  // Next ticket number, TKT-YYYY-NNNN (at least 4 digits, grows past 9999).
+  // One transaction: seed the (prefix, year) counter row from the NUMERIC max when
+  // it is absent (so it is right even where migration 0012 never ran), then
+  // increment with UPDATE ... RETURNING, whose row lock serialises concurrent creates.
   async getNextTicketNumber(): Promise<string> {
-    // Get company settings for the prefix
     const settings = await this.getCompanySettings();
     const prefix = settings?.ticketPrefix || "TKT";
-
-    // Get the current year
     const year = new Date().getFullYear();
+    const head = `${prefix}-${year}-`;
 
-    // Find the highest ticket number for this year
-    const pattern = `${prefix}-${year}-%`;
-    const [highestTicket] = await db
-      .select({ ticketNumber: tasks.ticketNumber })
-      .from(tasks)
-      .where(sql`${tasks.ticketNumber} LIKE ${pattern}`)
-      .orderBy(desc(tasks.ticketNumber))
-      .limit(1);
+    const next = await db.transaction(async (tx) => {
+      await tx.execute(sql`
+        INSERT INTO ticket_number_counters (prefix, year, last_number)
+        SELECT ${prefix}, ${year}, COALESCE(MAX(CAST(substr(ticket_number, ${head.length + 1}) AS integer)), 0)
+        FROM tasks
+        WHERE left(ticket_number, ${head.length}) = ${head}
+          AND substr(ticket_number, ${head.length + 1}) ~ '^[0-9]{1,9}$'
+        ON CONFLICT (prefix, year) DO NOTHING`);
+      const res: any = await tx.execute(sql`
+        UPDATE ticket_number_counters
+        SET last_number = last_number + 1
+        WHERE prefix = ${prefix} AND year = ${year}
+        RETURNING last_number`);
+      const rows = res.rows ?? res;
+      return Number(rows[0].last_number);
+    });
 
-    let nextNumber = 1;
-    if (highestTicket) {
-      // Extract the number part from the ticket number
-      const parts = highestTicket.ticketNumber.split("-");
-      if (parts.length === 3) {
-        nextNumber = parseInt(parts[2]) + 1;
-      }
-    }
-
-    // Format the ticket number with zero padding
-    return `${prefix}-${year}-${nextNumber.toString().padStart(4, "0")}`;
+    return `${head}${next.toString().padStart(4, "0")}`;
   }
 
   // Task operations
@@ -607,8 +606,8 @@ export class DatabaseStorage implements IStorage {
     if (search)
       filters.push(
         or(
-          like(tasks.title, `%${search}%`),
-          like(tasks.description, `%${search}%`)
+          ilike(tasks.title, `%${search}%`),
+          ilike(tasks.description, `%${search}%`)
         )!
       );
     // Like the rule, assignee_id counts only on user tickets and
@@ -754,8 +753,8 @@ export class DatabaseStorage implements IStorage {
     if (filters.search) {
       conditions.push(
         or(
-          like(tasks.title, `%${filters.search}%`),
-          like(tasks.description, `%${filters.search}%`)
+          ilike(tasks.title, `%${filters.search}%`),
+          ilike(tasks.description, `%${filters.search}%`)
         )
       );
     }

@@ -41,6 +41,7 @@ import {
   boolean,
   decimal,
   unique,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -202,6 +203,19 @@ export const teamTaskAssignments = pgTable(
       table.assignedUserId
     ),
   ]
+);
+
+// Per-prefix, per-year ticket number counter. getNextTicketNumber increments the
+// row under a row lock (and seeds it from the numeric max when absent), so two
+// concurrent creates never get the same number.
+export const ticketNumberCounters = pgTable(
+  "ticket_number_counters",
+  {
+    prefix: varchar("prefix", { length: 20 }).notNull(),
+    year: integer("year").notNull(),
+    lastNumber: integer("last_number").notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.prefix, table.year] })]
 );
 
 // Tasks table

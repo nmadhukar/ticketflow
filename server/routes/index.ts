@@ -101,6 +101,8 @@ import { bedrockIntegration } from "../services/ai/bedrockIntegration";
 import { s3Service } from "../services/s3Service";
 import { DEFAULT_COMPANY, EMAIL_PROVIDERS } from "@shared/constants";
 import { getTicketMetaForUser, normalizeAssigneeUpdate } from "../permissions/tickets";
+import { assertTransition, type Status } from "../permissions/workflow";
+import { buildTicketMeta } from "../services/tickets/meta";
 import {
   assertTaskAccess,
   requireTaskAccess,
@@ -512,236 +514,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Ticket meta endpoints for create/edit modals
-  app.get("/api/tickets/meta", isAuthenticated, async (req: any, res) => {
+  app.get("/api/tickets/meta", isAuthenticated, async (req: any, res, next) => {
     try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-
-      if (!user) return res.status(401).json({ message: "Unauthorized" });
-
-      // Static enumerations
-      const categories = [
-        "bug",
-        "feature",
-        "support",
-        "enhancement",
-        "incident",
-        "request",
-      ];
-      const priorities = ["low", "medium", "high", "urgent"];
-      const statuses = ["open", "in_progress", "resolved", "closed", "on_hold"];
-
-      let departmentsRows: any[] = [];
-      let teamsRows: any[] = [];
-      let assignableUsers: any[] = [];
-      let myTeams: any[] = [];
-      const basePermissions: any = {
-        canAssign: false,
-        canChangeStatus: false,
-        allowedAssigneeTypes: [] as string[],
-        allowedFields: [] as string[],
-      };
-
-      if (user.role === "admin") {
-        departmentsRows = await db
-          .select({ id: departments.id, name: departments.name })
-          .from(departments)
-          .where(eq(departments.isActive, true));
-        teamsRows = await db
-          .select({
-            id: teams.id,
-            name: teams.name,
-            departmentId: teams.departmentId,
-          })
-          .from(teams);
-        assignableUsers = await db
-          .select({
-            id: users.id,
-            firstName: users.firstName,
-            lastName: users.lastName,
-            email: users.email,
-            role: users.role,
-          })
-          .from(users)
-          .where(
-            or(
-              eq(users.role, "admin"),
-              or(eq(users.role, "manager"), eq(users.role, "agent"))
-            )
-          );
-        basePermissions.canAssign = true;
-        basePermissions.canChangeStatus = true;
-        basePermissions.allowedAssigneeTypes = ["user", "team"];
-        basePermissions.allowedFields = [
-          "title",
-          "description",
-          "category",
-          "priority",
-          "status",
-          "notes",
-          "assigneeId",
-          "assigneeType",
-          "assigneeTeamId",
-          "dueDate",
-        ];
-      } else if (user.role === "manager") {
-        // Departments managed by this manager
-        departmentsRows = await db
-          .select({ id: departments.id, name: departments.name })
-          .from(departments)
-          .where(
-            and(
-              eq(departments.isActive, true),
-              eq(departments.managerId as any, userId) as any
-            )
-          );
-        teamsRows = await db
-          .select({
-            id: teams.id,
-            name: teams.name,
-            departmentId: teams.departmentId,
-          })
-          .from(teams)
-          .innerJoin(departments, eq(teams.departmentId, departments.id))
-          .where(eq(departments.managerId as any, userId) as any);
-        assignableUsers = await db
-          .select({
-            id: users.id,
-            firstName: users.firstName,
-            lastName: users.lastName,
-            email: users.email,
-            role: users.role,
-          })
-          .from(users)
-          .where(or(eq(users.role, "manager"), eq(users.role, "agent")));
-        basePermissions.canAssign = true;
-        basePermissions.canChangeStatus = true;
-        basePermissions.allowedAssigneeTypes = ["user", "team"];
-        basePermissions.allowedFields = [
-          "title",
-          "description",
-          "category",
-          "priority",
-          "status",
-          "notes",
-          "assigneeId",
-          "assigneeType",
-          "assigneeTeamId",
-          "dueDate",
-        ];
-      } else if (user.role === "agent") {
-        // Agents/users: no assignment lists; but provide my teams for convenience
-        const mine = await storage.getUserTeams(userId);
-        myTeams = mine.map((t) => ({
-          id: t.id,
-          name: (t as any).name,
-          departmentId: (t as any).departmentId,
-        }));
-        basePermissions.canAssign = false;
-        basePermissions.canChangeStatus = "directlyAssignedOnly";
-        basePermissions.allowedAssigneeTypes = [];
-        basePermissions.allowedFields = [
-          "priority",
-          "status",
-          "dueDate",
-          "notes",
-        ]; // effective on edit when permitted
-      } else if (user.role === "customer") {
-        // Customers: can select department/team or assign to a user
-        departmentsRows = await db
-          .select({ id: departments.id, name: departments.name })
-          .from(departments)
-          .where(eq(departments.isActive, true));
-        teamsRows = await db
-          .select({
-            id: teams.id,
-            name: teams.name,
-            departmentId: teams.departmentId,
-          })
-          .from(teams);
-        // Provide assignable users (exclude customers)
-        assignableUsers = await db
-          .select({
-            id: users.id,
-            firstName: users.firstName,
-            lastName: users.lastName,
-            email: users.email,
-            role: users.role,
-          })
-          .from(users)
-          .where(or(eq(users.role, "manager"), eq(users.role, "agent")));
-        basePermissions.canAssign = true;
-        basePermissions.canChangeStatus = false;
-        basePermissions.allowedAssigneeTypes = ["user", "team"];
-        basePermissions.allowedFields = ["title", "description"]; // only on edit of own tickets
-      }
-
-      return res.json({
-        categories,
-        priorities,
-        statuses,
-        departments: departmentsRows,
-        teams: teamsRows,
-        assignableUsers,
-        myTeams,
-        permissions: basePermissions,
-      });
+      const user = await storage.getUser(getUserId(req));
+      const meta = await buildTicketMeta(user);
+      if (!meta) return res.status(401).json({ error: "unauthorized", message: "Unauthorized" });
+      return res.json(meta);
     } catch (error) {
-      console.error("Error fetching ticket meta:", error);
-      res.status(500).json({ message: "Failed to fetch ticket meta" });
+      return next(error);
     }
   });
 
-  app.get("/api/tickets/:id/meta", isAuthenticated, requireTaskAccess(), async (req: any, res) => {
+  // Per-ticket meta: the base meta plus what THIS caller may do on THIS ticket,
+  // from the same field table and workflow PATCH enforces. No HTTP self-fetch.
+  app.get("/api/tickets/:id/meta", isAuthenticated, requireTaskAccess(), async (req: any, res, next) => {
     try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
       const taskId = parseInt(req.params.id);
-      if (!user || isNaN(taskId))
-        return res.status(400).json({ message: "Bad request" });
+      const user = await storage.getUser(getUserId(req));
+      const baseMeta = await buildTicketMeta(user);
+      if (!user || !baseMeta) return res.status(401).json({ error: "unauthorized", message: "Unauthorized" });
 
       const task = await storage.getTask(taskId);
-      if (!task) return res.status(404).json({ message: "Task not found" });
+      if (!task) return res.status(404).json({ error: "not_found", message: "Ticket not found" });
 
-      // Reuse meta data
-      const baseMetaRes = await fetch(
-        `${req.protocol}://${req.get("host")}/api/tickets/meta`,
-        {
-          headers: { cookie: req.headers.cookie as string },
-        } as any
-      );
-      let baseMeta: any = {};
-      try {
-        baseMeta = await baseMetaRes.json();
-      } catch { /* non-JSON body: keep the empty default meta */ }
-
-      const ticketMeta = await getTicketMetaForUser(user, task);
-
-      // Compute additional permission flags based on the ticket meta
-      let canChangeStatus = false;
-      let canAssign = false;
-
-      if (user.role === "admin") {
-        canChangeStatus = true;
-        canAssign = true;
-      } else if (user.role === "manager") {
-        canChangeStatus = true;
-        canAssign = true;
-      } else if (user.role === "agent") {
-        canChangeStatus =
-          task.assigneeType === "user" && task.assigneeId === userId;
-        canAssign = false;
-      } else if (user.role === "customer") {
-        canChangeStatus = false;
-        canAssign = false;
-      }
-
+      const ticketMeta = getTicketMetaForUser(user, task);
+      const role = normalizeRole(user.role);
       const permissions = {
         ...baseMeta.permissions,
-        canAssign,
-        canChangeStatus,
+        canAssign: role === "admin" || role === "manager",
+        canChangeStatus: ticketMeta.allowedStatuses.length > 0,
         allowedAssigneeTypes: ticketMeta.allowedAssigneeTypes,
         allowedFields: ticketMeta.allowedFields,
+        allowedStatuses: ticketMeta.allowedStatuses,
       };
 
       return res.json({
@@ -756,8 +560,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         permissions,
       });
     } catch (error) {
-      console.error("Error fetching ticket meta (by id):", error);
-      res.status(500).json({ message: "Failed to fetch ticket meta" });
+      return next(error);
     }
   });
 
@@ -1128,30 +931,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .json({ error: "forbidden", message: result.reason ?? "Access denied" });
       }
 
-      // Optional: enforce simple status transitions, except for admin
-      if (user?.role !== "admin" && "status" in result) {
-        const transitionMap: Record<string, string[]> = {
-          open: ["in_progress", "on_hold"],
-          in_progress: ["resolved", "on_hold"],
-          on_hold: ["in_progress", "open"],
-          resolved: ["closed", "in_progress"],
-          closed: [],
-        };
-        const current = (task as any).status || "open";
-        const next = (result as any).status || "open";
-        const allowedNext = transitionMap[current] || [];
-        if (!allowedNext.includes(next)) {
+      // Status workflow (owner decision 2026-10-01): staff follow STAFF_TRANSITIONS,
+      // a customer may only reopen their own resolved/closed ticket. Same status is a no-op.
+      const requested = result.prunedPayload as Record<string, unknown>;
+      const from = ((task as any).status || "open") as Status;
+      if (requested.status !== undefined) {
+        if (requested.status === from) {
+          delete requested.status;
+        } else {
           try {
-            logSecurityEvent(req as any, "change_status", "ticket", false, {
-              from: current,
-              to: next,
-              taskId,
-            });
-          } catch { /* best-effort: audit logging must not mask the 400 below */ }
-          return res.status(400).json({
-            message: `Invalid status transition from ${current} to ${next}`,
-          });
+            assertTransition(user?.role, from, requested.status as Status, (task as any).createdBy === userId);
+          } catch (e) {
+            try {
+              logSecurityEvent(req as any, "change_status", "ticket", false, {
+                from,
+                to: requested.status,
+                taskId,
+              });
+            } catch { /* best-effort: audit logging must not mask the refusal */ }
+            throw e;
+          }
         }
+        if (Object.keys(requested).length === 0) return res.json(task);
       }
       const updates = insertTaskSchema.partial().parse(result.prunedPayload);
       // A reassignment clears the other assignee column (no stale scope).

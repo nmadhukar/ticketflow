@@ -3,6 +3,7 @@ import { normalizeRole, type Role } from "./roles";
 import { canAccessTask } from "./ticketAccess";
 import { HttpError } from "../http/errors";
 import { STAFF_ONLY_TICKET_FIELDS, updateTicketSchema, type UpdateTicketInput } from "../services/tickets/schemas";
+import { allowedNextStatuses, type Status } from "./workflow";
 
 // Fields allowed to be updated in principle (subset will be applied per role)
 export const updatableFields = [
@@ -38,7 +39,8 @@ interface Verdict<T = any> {
   prunedPayload?: T;
 }
 
-function deriveAllowedFields(role: Role): ReadonlyArray<string> {
+/** The one list of fields PATCH accepts per role; the meta route reports it too. */
+export function deriveAllowedFields(role: Role): ReadonlyArray<string> {
   if (role === "admin") return [...updatableFields];
   if (role === "manager")
     return [
@@ -59,8 +61,8 @@ function deriveAllowedFields(role: Role): ReadonlyArray<string> {
       "actualHours",
     ];
   if (role === "agent") return ["priority", "status", "notes", "estimatedHours", "actualHours"];
-  // customer: keep small surface
-  return ["title", "description", "notes"];
+  // customer: small surface. status is the reopen move only (assertTransition refuses the rest).
+  return ["title", "description", "notes", "status"];
 }
 
 /**
@@ -109,8 +111,7 @@ export async function canUpdateTicket({
     delete base.category; // ensure routing/category not hijacked by customer edits
     delete base.departmentId;
     delete base.teamId;
-    // Restrict status changes for customers
-    delete base.status;
+    // status stays: assertTransition lets a customer reopen their own ticket and nothing else
     delete base.priority; // optional stricter policy
     delete base.dueDate;
   }
@@ -172,72 +173,26 @@ export function canDeleteTicket({ user }: CanDeleteArgs): Verdict<void> {
   return { allowed: false, reason: "Only administrators can delete tickets" };
 }
 
-import "../storage";
-
-type User = {
-  id: string;
-  role: string;
-};
-
-const _IMMUTABLE_FIELDS = new Set([
-  "id",
-  "ticketNumber",
-  "createdBy",
-  "createdAt",
-  "updatedAt",
-]);
-
-export async function getTicketMetaForUser(user: User, task: any | null) {
-  // Compute simple permissions similar to /api/tickets/meta
-  const base = {
+/**
+ * What this caller may do on this ticket, derived from the same rules PATCH
+ * enforces: the field table (deriveAllowedFields) and the status workflow
+ * (allowedNextStatuses). No second list.
+ */
+export function getTicketMetaForUser(user: { id: string; role: unknown }, task: any | null) {
+  const role = normalizeRole(user?.role);
+  const out = {
     allowedFields: [] as string[],
     allowedAssigneeTypes: [] as string[],
+    allowedStatuses: [] as string[],
   };
+  if (!role) return out;
 
-  if (user.role === "admin") {
-    base.allowedAssigneeTypes = ["user", "team"];
-    base.allowedFields = [
-      "title",
-      "description",
-      "category",
-      "priority",
-      "status",
-      "notes",
-      "assigneeId",
-      "assigneeType",
-      "assigneeTeamId",
-      "dueDate",
-    ];
-  } else if (user.role === "manager") {
-    base.allowedAssigneeTypes = ["user", "team"];
-    base.allowedFields = [
-      "title",
-      "description",
-      "priority",
-      "status",
-      "notes",
-      "dueDate",
-      "assigneeType",
-      "assigneeId",
-      "assigneeTeamId",
-    ];
-  } else if (user.role === "agent") {
-    base.allowedAssigneeTypes = [];
-    base.allowedFields = [];
-    if (task) {
-      const isAssigneeUser =
-        task.assigneeType === "user" && task.assigneeId === user.id;
-
-      if (isAssigneeUser) {
-        base.allowedFields = ["status", "priority", "notes"];
-      }
-    }
-  } else if (user.role === "customer") {
-    base.allowedAssigneeTypes = [];
-    base.allowedFields = ["title", "description"];
-  }
-
-  return base;
+  out.allowedStatuses = task
+    ? allowedNextStatuses(role, (task.status || "open") as Status, task.createdBy === user.id)
+    : [];
+  out.allowedFields = deriveAllowedFields(role).filter(
+    (f) => f !== "status" || out.allowedStatuses.length > 0
+  );
+  if (role === "admin" || role === "manager") out.allowedAssigneeTypes = ["user", "team"];
+  return out;
 }
-
-// Note: legacy alt implementations removed to avoid duplicate exports
