@@ -108,7 +108,7 @@ import {
   lte,
   type SQL,
 } from "drizzle-orm";
-import { IStorage, type TaskAssignmentBinding } from "./storage.inteface";
+import { IStorage, type TaskAssignmentBinding, type TaskHistoryEntry } from "./storage.inteface";
 import {
   assignedToUserSql,
   queuedToTeamSql,
@@ -993,6 +993,14 @@ export class DatabaseStorage implements IStorage {
    */
   async deleteTask(id: number): Promise<void> {
     const s3Keys: string[] = await db.transaction(async (tx) => {
+      // Lock the ticket row first. A concurrent insert of a child row (comment,
+      // attachment, history) takes a FOR KEY SHARE lock on it through the FK, so
+      // it waits for this transaction and then fails cleanly on the missing
+      // parent instead of racing the child deletes below.
+      const locked = await tx.execute(sql`SELECT id FROM tasks WHERE id = ${id} FOR UPDATE`);
+      if (locked.rows.length === 0) {
+        throw new HttpError(404, "not_found", "Ticket not found");
+      }
       const attachments = await tx
         .select({ fileUrl: taskAttachments.fileUrl })
         .from(taskAttachments)
@@ -1017,32 +1025,26 @@ export class DatabaseStorage implements IStorage {
         .map((u) => s3Service.extractKeyFromUrl(u));
     });
 
-    for (const key of s3Keys) {
-      try {
-        await s3Service.deleteFile(key);
-      } catch (error) {
+    if (s3Keys.length === 0) return;
+    // After the commit; deleteFiles settles every key. Log key + message only.
+    try {
+      const { failed } = await s3Service.deleteFiles(s3Keys);
+      for (const f of failed) {
         console.error(
-          `Failed to delete S3 object "${key}" after ticket ${id} was deleted:`,
-          error instanceof Error ? error.message : "unknown error"
+          `Failed to delete S3 object "${f.key}" after ticket ${id} was deleted: ${f.error}`
         );
       }
+    } catch (error) {
+      console.error(
+        `Failed to delete S3 objects after ticket ${id} was deleted: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`
+      );
     }
   }
 
   /** A ticket's history, oldest first, each entry with the actor as a public user. */
-  async getTaskHistory(taskId: number): Promise<
-    Array<{
-      id: number;
-      taskId: number;
-      userId: string;
-      action: string;
-      field: string | null;
-      oldValue: string | null;
-      newValue: string | null;
-      createdAt: Date | null;
-      user?: PublicUser;
-    }>
-  > {
+  async getTaskHistory(taskId: number): Promise<TaskHistoryEntry[]> {
     const rows = await db
       .select({
         id: taskHistory.id,

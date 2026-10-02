@@ -14,7 +14,8 @@ import {
 import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
 import { createTeam, createTicketAs, createUser, loginAs } from "./helpers/fixtures";
-import { db } from "../../storage/db";
+import { db, pool } from "../../storage/db";
+import { storage } from "../../storage";
 import { s3Service } from "../../services/s3Service";
 
 describe("DELETE /api/tasks/:id", () => {
@@ -95,7 +96,9 @@ describe("DELETE /api/tasks/:id", () => {
     const { id, usageId, feedbackId } = await ticketWithEverything(admin, adminA);
     const before = await childCounts(id);
     expect(Object.values(before).every((c) => c >= 1)).toBe(true);
-    const deleteFile = jest.spyOn(s3Service, "deleteFile").mockResolvedValue(undefined as any);
+    const deleteFiles = jest
+      .spyOn(s3Service, "deleteFiles")
+      .mockResolvedValue({ deleted: [], failed: [] });
 
     const res = await adminA.delete(`/api/tasks/${id}`);
     expect(res.status).toBe(204);
@@ -112,30 +115,84 @@ describe("DELETE /api/tasks/:id", () => {
     expect(feedback.ticketId).toBeNull();
 
     // The S3 objects go after the commit.
-    expect(deleteFile.mock.calls.map((c) => c[0]).sort()).toEqual([
+    expect(deleteFiles).toHaveBeenCalledTimes(1);
+    expect([...deleteFiles.mock.calls[0][0]].sort()).toEqual([
       "Acme/sep-10-2025/a.txt",
       "Acme/sep-10-2025/b.txt",
     ]);
   });
 
-  it("a failing S3 delete is logged and does not undo the delete", async () => {
+  it("a failing S3 delete is logged (key and message, no Error object) and does not undo the delete", async () => {
     const admin = await createUser({ role: "admin" });
     const adminA = await loginAs(ctx.app, admin);
     const { id } = await ticketWithEverything(admin, adminA);
-    jest.spyOn(s3Service, "deleteFile").mockRejectedValue(new Error("s3 down"));
+    jest.spyOn(s3Service, "deleteFiles").mockResolvedValue({
+      deleted: ["Acme/sep-10-2025/b.txt"],
+      failed: [{ key: "Acme/sep-10-2025/a.txt", error: "s3 down" }],
+    });
     const logged = jest.spyOn(console, "error").mockImplementation(() => undefined);
 
     const res = await adminA.delete(`/api/tasks/${id}`);
     expect(res.status).toBe(204);
     expect(await db.select().from(tasks).where(eq(tasks.id, id))).toHaveLength(0);
-    expect(logged).toHaveBeenCalled();
+
+    const lines = logged.mock.calls.filter((c) => String(c[0]).includes("Acme/sep-10-2025/a.txt"));
+    expect(lines).toHaveLength(1);
+    expect(String(lines[0][0])).toContain("s3 down");
+    // One string argument per call: no Error object or stack reaches the logger.
+    for (const call of logged.mock.calls) {
+      expect(call.every((arg) => typeof arg === "string")).toBe(true);
+      expect(call.some((arg) => /\n\s+at /.test(String(arg)))).toBe(false);
+    }
+  });
+
+  it("a whole-batch S3 failure (deleteFiles throws) is logged by message and does not undo the delete", async () => {
+    const admin = await createUser({ role: "admin" });
+    const adminA = await loginAs(ctx.app, admin);
+    const { id } = await ticketWithEverything(admin, adminA);
+    jest.spyOn(s3Service, "deleteFiles").mockRejectedValue(new Error("bucket not configured"));
+    const logged = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    expect((await adminA.delete(`/api/tasks/${id}`)).status).toBe(204);
+    expect(await db.select().from(tasks).where(eq(tasks.id, id))).toHaveLength(0);
+    expect(logged.mock.calls.some((c) => String(c[0]).includes("bucket not configured"))).toBe(true);
+    expect(logged.mock.calls.every((c) => c.every((a) => typeof a === "string"))).toBe(true);
+  });
+
+  it("the ticket row is locked first: a child insert racing the delete fails cleanly and leaves no orphan", async () => {
+    const admin = await createUser({ role: "admin" });
+    const adminA = await loginAs(ctx.app, admin);
+    const t = await createTicketAs(adminA);
+    const id: number = t.body.id;
+    jest.spyOn(s3Service, "deleteFiles").mockResolvedValue({ deleted: [], failed: [] });
+
+    // Another session holds the row lock; the delete must queue behind it.
+    const holder = await pool.connect();
+    await holder.query("BEGIN");
+    await holder.query("SELECT id FROM tasks WHERE id = $1 FOR UPDATE", [id]);
+    let deleteDone = false;
+    const deleting = storage.deleteTask(id).then(() => {
+      deleteDone = true;
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(deleteDone).toBe(false);
+    // A comment insert now also waits (FK key-share lock) behind the same row.
+    const inserting = db
+      .insert(taskComments)
+      .values({ taskId: id, userId: admin.id, content: "late" })
+      .then(() => "inserted", () => "rejected");
+    await holder.query("COMMIT");
+    holder.release();
+    await deleting;
+    expect(await inserting).toBe("rejected");
+    expect(await db.select().from(tasks).where(eq(tasks.id, id))).toHaveLength(0);
+    expect(await db.select().from(taskComments).where(eq(taskComments.taskId, id))).toHaveLength(0);
   });
 
   it("a failure inside the transaction rolls everything back and deletes no S3 object", async () => {
     const admin = await createUser({ role: "admin" });
     const adminA = await loginAs(ctx.app, admin);
     const { id, usageId } = await ticketWithEverything(admin, adminA);
-    const deleteFile = jest.spyOn(s3Service, "deleteFile").mockResolvedValue(undefined as any);
+    const deleteFiles = jest.spyOn(s3Service, "deleteFiles").mockResolvedValue({ deleted: [], failed: [] });
     const before = await childCounts(id);
     jest.spyOn(console, "error").mockImplementation(() => undefined);
     // An extra FK the code does not know about makes the final ticket delete fail.
@@ -148,7 +205,7 @@ describe("DELETE /api/tasks/:id", () => {
       expect(await childCounts(id)).toEqual(before);
       const [usage] = await db.select().from(aiUsage).where(eq(aiUsage.id, usageId));
       expect(usage.ticketId).toBe(id);
-      expect(deleteFile).not.toHaveBeenCalled();
+      expect(deleteFiles).not.toHaveBeenCalled();
     } finally {
       await db.execute(sql.raw(`DROP TABLE zz_blocker`));
     }

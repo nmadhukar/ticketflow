@@ -57,6 +57,19 @@ import {
   type UserPreferences,
 } from "@shared/schema";
 import type { PublicUser } from "../utils/publicUser";
+
+/** One row of GET /api/tasks/:id/history; the actor is a public user projection. */
+export type TaskHistoryEntry = {
+  id: number;
+  taskId: number;
+  userId: string;
+  action: string;
+  field: string | null;
+  oldValue: string | null;
+  newValue: string | null;
+  createdAt: Date | null;
+  user?: PublicUser;
+};
 import type { AccessUser } from "../permissions/ticketAccess";
 
 /** An assignment addressed through its ticket and team (route :id/:taskId/:assignmentId). */
@@ -180,19 +193,7 @@ export interface IStorage {
     opts?: { expectedStatus?: string }
   ): Promise<Task>;
   deleteTask(id: number): Promise<void>;
-  getTaskHistory(taskId: number): Promise<
-    Array<{
-      id: number;
-      taskId: number;
-      userId: string;
-      action: string;
-      field: string | null;
-      oldValue: string | null;
-      newValue: string | null;
-      createdAt: Date | null;
-      user?: PublicUser;
-    }>
-  >;
+  getTaskHistory(taskId: number): Promise<TaskHistoryEntry[]>;
 
   // Team operations
   createTeam(team: InsertTeam): Promise<Team>;

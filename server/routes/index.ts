@@ -163,16 +163,16 @@ const upload = multer({
   },
 });
 
+const commentBodySchema = z.object({
+  content: z.string().trim().min(1).max(10000),
+});
+
 /**
  * Registers all application routes and returns HTTP server instance
  *
  * @param app - Express application instance
  * @returns HTTP server with WebSocket support
  */
-const commentBodySchema = z.object({
-  content: z.string().trim().min(1).max(10000),
-});
-
 export async function registerRoutes(app: Express): Promise<Server> {
   registerIdParams(app);
 
@@ -4333,7 +4333,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create knowledge article (admin)
-  app.post("/api/admin/knowledge", isAuthenticated, async (req: any, res) => {
+  app.post("/api/admin/knowledge", isAuthenticated, async (req: any, res, next) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
@@ -4343,12 +4343,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Ported from the removed shadowed copy: required fields and a field
-      // whitelist instead of spreading the whole body into the insert.
-      const { title, summary, content, category, tags, isPublished } = req.body;
+      // whitelist (other body fields are ignored) instead of spreading the
+      // whole body into the insert.
+      const { title, summary, content, category, tags, isPublished } = req.body ?? {};
       if (!title || !content) {
-        return res
-          .status(400)
-          .json({ message: "Title and content are required" });
+        throw new HttpError(400, "validation_failed", "Title and content are required", {
+          fieldErrors: {
+            ...(title ? {} : { title: ["Required"] }),
+            ...(content ? {} : { content: ["Required"] }),
+          },
+        });
       }
 
       const article = await storage.createKnowledgeArticle({
@@ -4363,8 +4367,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       res.status(201).json(article);
     } catch (error) {
-      console.error("Error creating knowledge article:", error);
-      res.status(500).json({ message: "Failed to create knowledge article" });
+      // HttpError keeps its status; anything else becomes the contract's 500.
+      next(error);
     }
   });
 

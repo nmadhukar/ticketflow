@@ -28,6 +28,7 @@ import { AiResponseFeedback } from "@/components/ai-response-feedback";
 import { useAuth } from "@/hooks/useAuth";
 import { Spinner } from "@/components/ui/spinner";
 import { CommentItem } from "@/components/comments/comment-item";
+import { describeHistoryItem, type TicketHistoryItem } from "@/lib/ticketHistory";
 
 interface TicketDetailProps {
   ticketId: number;
@@ -58,7 +59,7 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
   });
 
   // Fetch ticket history
-  const { data: history } = useQuery<any[]>({
+  const { data: history } = useQuery<TicketHistoryItem[]>({
     queryKey: [`/api/tasks/${ticketId}/history`],
   });
 
@@ -696,7 +697,7 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {history.map((item: any) => (
+              {history.map((item) => (
                 <div key={item.id} className="flex items-start gap-2 text-sm">
                   <div className="w-2 h-2 rounded-full bg-primary mt-1.5" />
                   <div className="flex-1">
@@ -705,14 +706,8 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
                     </span>
                     <span className="text-muted-foreground">
                       {" "}
-                      {item.action}
+                      {describeHistoryItem(item)}
                     </span>
-                    {item.details && (
-                      <span className="text-muted-foreground">
-                        {" "}
-                        - {item.details}
-                      </span>
-                    )}
                     <div className="text-xs text-muted-foreground">
                       {format(new Date(item.createdAt), "MMM d, yyyy h:mm a")}
                     </div>

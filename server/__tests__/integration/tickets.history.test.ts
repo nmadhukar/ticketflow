@@ -31,6 +31,8 @@ describe("ticket history", () => {
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body.length).toBeGreaterThanOrEqual(3);
 
+    expect(res.body[0].action).toBe("created");
+
     const times = res.body.map((h: any) => new Date(h.createdAt).getTime());
     expect([...times].sort((a, b) => a - b)).toEqual(times);
     const ids = res.body.map((h: any) => h.id);

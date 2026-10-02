@@ -2,15 +2,9 @@
  * Express serves the FIRST handler registered for a method + path. A second
  * registration is dead code that silently drifts from the served copy (it once
  * hid a fix), so the real application may never register the same method + path
- * twice. Builds the real app with the production registerRoutes.
+ * twice. Walks the router stack of the real app built by createTestApp().
  */
-process.env.DATABASE_URL =
-  process.env.TEST_DATABASE_URL ??
-  process.env.DATABASE_URL ??
-  "postgres://test:test@localhost:55433/ticketflow_test";
-process.env.SESSION_SECRET = process.env.SESSION_SECRET ?? "unit-duplicate-route-secret";
-
-import express from "express";
+import { createTestApp } from "./helpers/testApp";
 
 type Layer = {
   route?: { path: string | string[]; methods: Record<string, boolean> };
@@ -34,35 +28,25 @@ function collect(stack: Layer[], out: string[]): void {
 }
 
 describe("route table", () => {
-  it("registers no method + path twice", async () => {
-    const { registerRoutes } = await import("../../routes/index");
-    const { closeAuth } = await import("../../services/auth");
-    const { pool } = await import("../../storage/db");
+  let ctx: Awaited<ReturnType<typeof createTestApp>>;
+  beforeAll(async () => {
+    ctx = await createTestApp();
+  });
+  afterAll(async () => {
+    await ctx.close();
+  });
 
-    const app = express();
-    const realSetInterval = global.setInterval;
-    global.setInterval = ((...args: Parameters<typeof setInterval>) => {
-      const timer = realSetInterval(...args);
-      timer.unref?.();
-      return timer;
-    }) as typeof setInterval;
-    let server;
-    try {
-      server = await registerRoutes(app);
-    } finally {
-      global.setInterval = realSetInterval;
-    }
-
+  it("registers no method + path twice", () => {
     const registered: string[] = [];
-    collect((app as any)._router.stack, registered);
-    server.close();
-    await closeAuth();
-    await pool.end();
+    collect((ctx.app as any)._router.stack, registered);
 
+    // Guard against an empty walk passing vacuously.
     expect(registered.length).toBeGreaterThan(100);
     const seen = new Map<string, number>();
     for (const r of registered) seen.set(r, (seen.get(r) ?? 0) + 1);
-    const duplicates = Array.from(seen).filter(([, n]) => n > 1).map(([r, n]) => `${r} x${n}`);
+    const duplicates = Array.from(seen)
+      .filter(([, n]) => n > 1)
+      .map(([r, n]) => `${r} x${n}`);
     expect(duplicates).toEqual([]);
   });
 });
