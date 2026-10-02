@@ -90,6 +90,7 @@ describe("assignee type fix-up", () => {
       migrateLegacyRoles: async () => void order.push("roles"),
       migrateAssigneeTypes: async () => void order.push("assignees"),
       systemUser: async () => void order.push("systemUser"),
+      aiSystemUser: noop,
       emailTemplates: noop,
       deactivateDemoAccounts: noop,
       bootstrapAdmin: noop,

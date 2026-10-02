@@ -5,8 +5,12 @@ import { assertTaskAccess, type AccessUser } from "../../permissions/ticketAcces
 import { isStaffRole } from "../../permissions/staff";
 import { storage } from "../../storage";
 
+/** Same id rules as parseIdParam (positive integer, digits only) and the int4 column: no booleans, arrays or floats. */
+const INT4_MAX = 2147483647;
 const aiTicketBody = z.object({
-  ticketId: z.coerce.number().int().positive(),
+  ticketId: z
+    .union([z.number(), z.string().regex(/^\d{1,10}$/).transform(Number)])
+    .pipe(z.number().int().positive().max(INT4_MAX)),
 });
 
 /**

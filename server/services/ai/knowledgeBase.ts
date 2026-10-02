@@ -17,6 +17,7 @@ import {
   runKnowledgeArticleGenerationPrompt,
 } from "./bedrockIntegration";
 import { extractJSON } from "./jsonUtils";
+import { describeAIError } from "./aiErrors";
 
 export class KnowledgeBaseService {
   async learnFromResolvedTicket(
@@ -74,7 +75,7 @@ export class KnowledgeBaseService {
         );
       }
     } catch (error) {
-      console.error("Error learning from resolved ticket:", error);
+      console.error("Error learning from resolved ticket:", describeAIError(error));
     }
   }
 
@@ -218,7 +219,7 @@ export class KnowledgeBaseService {
         requireApproval
       );
     } catch (error) {
-      console.error("Error generating AI knowledge article:", error);
+      console.error("Error generating AI knowledge article:", describeAIError(error));
       // Fallback to saving without AI enhancement
       await this.saveKnowledgeArticle(
         ticket,
@@ -268,7 +269,7 @@ ${aiEnhancement?.variations?.join("\n") || ""}
         `Knowledge article created from ticket ${ticket.ticketNumber}`
       );
     } catch (error) {
-      console.error("Error saving knowledge article:", error);
+      console.error("Error saving knowledge article:", describeAIError(error));
     }
   }
 
@@ -298,7 +299,7 @@ ${aiEnhancement?.variations?.join("\n") || ""}
         })
         .where(eq(knowledgeArticles.id, articleId));
     } catch (error) {
-      console.error("Error updating article effectiveness:", error);
+      console.error("Error updating article effectiveness:", describeAIError(error));
     }
   }
 

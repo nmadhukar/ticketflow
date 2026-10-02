@@ -24,16 +24,19 @@ export function describeAIError(error: unknown): string {
 
 /**
  * The 429 for a call the cost monitor refused (daily/monthly limit or the
- * per-request token budget). Keeps the fields the cost-notification hook reads.
+ * per-request token budget), in the API error contract:
+ * `{ error, message, details: { reason, costEstimate, isBlocked } }`.
  */
 export function sendQuotaExceeded(res: Response, error: unknown): void {
   const e = error as { message?: unknown; costEstimate?: unknown };
   res.status(429).json({
     error: "quota_exceeded",
     message: "AI usage limit reached",
-    reason: typeof e.message === "string" ? e.message : undefined,
-    costEstimate: e.costEstimate,
-    isBlocked: true,
+    details: {
+      reason: typeof e.message === "string" ? e.message : undefined,
+      costEstimate: e.costEstimate,
+      isBlocked: true,
+    },
   });
 }
 

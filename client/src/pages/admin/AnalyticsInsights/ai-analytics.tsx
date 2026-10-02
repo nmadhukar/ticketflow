@@ -183,7 +183,7 @@ export default function AIAnalyticsPage() {
   // The server loads the ticket itself; only its id is sent.
   const parseTicketId = (): number | null => {
     const trimmed = ticketIdInput.trim();
-    if (!/^\d{1,10}$/.test(trimmed) || Number(trimmed) <= 0) {
+    if (!/^\d{1,10}$/.test(trimmed) || Number(trimmed) <= 0 || Number(trimmed) > 2147483647) {
       toast({
         title: "Ticket ID required",
         description: "Enter the numeric id of a ticket you can access.",

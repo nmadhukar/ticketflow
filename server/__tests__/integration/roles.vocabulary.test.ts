@@ -59,6 +59,7 @@ describe("role vocabulary: user means agent", () => {
       systemUser: async () => {
         roleSeenBySystemUser = await roleOf(legacy.id);
       },
+      aiSystemUser: noop,
       emailTemplates: noop,
       deactivateDemoAccounts: noop,
       bootstrapAdmin: noop,

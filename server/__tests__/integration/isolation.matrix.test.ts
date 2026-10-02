@@ -106,7 +106,15 @@ const ROUTES: RouteSpec[] = [
     call: (a, id) => a.post(`/api/tasks/${id}/attachments`),
     allowed: [400, 503],
   },
-  { name: "GET /api/tasks/:id/auto-response", call: (a, id) => a.get(`/api/tasks/${id}/auto-response`), allowed: [200] },
+  // Fixture tickets have no AI row: staff get 200 null, a customer 404 (customers see only applied drafts). Outside scope stays 403.
+  { name: "GET /api/tasks/:id/auto-response", call: (a, id) => a.get(`/api/tasks/${id}/auto-response`), allowed: [200, 404] },
+  {
+    // No draft exists for the fixture tickets: the gate passes, then 404 for staff.
+    name: "POST /api/tasks/:id/auto-response/apply",
+    call: (a, id) => a.post(`/api/tasks/${id}/auto-response/apply`),
+    allowed: [404],
+    refusedRoles: ["C1", "C2"],
+  },
   {
     // AI is not configured in the test env: the gate passes, then 503 / 400.
     name: "POST /api/tasks/:id/auto-response/generate",

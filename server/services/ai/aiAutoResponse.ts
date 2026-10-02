@@ -14,7 +14,7 @@ import type {
 } from "@shared/schema";
 import { bedrockIntegration } from "./bedrockIntegration";
 import { knowledgeBaseService } from "./knowledgeBase";
-import { getSystemUserId } from "../../utils/systemUser";
+import { ensureAiSystemUser } from "../../utils/aiSystemUser";
 import { describeAIError, isQuotaBlocked } from "./aiErrors";
 
 interface ComplexityFactors {
@@ -26,13 +26,28 @@ interface ComplexityFactors {
 }
 
 export class AIAutoResponseService {
-  async analyzeTicket(ticket: Task): Promise<{
+  /**
+   * Analyses a ticket and, when it has an id, stores ONE auto-response row for
+   * the analysis (this method owns the write; callers must not store another).
+   *
+   * `shouldAutoRespond` is the one decision, made by calculateConfidence from the
+   * admin settings (enabled flag and confidence threshold). The row's wasApplied is
+   * that decision AND `autoApply`: pass autoApply false for an on-demand draft that
+   * a person applies later, so no row claims to be applied when no comment exists.
+   */
+  async analyzeTicket(
+    ticket: Task,
+    opts: { autoApply?: boolean } = {}
+  ): Promise<{
     autoResponse: string | null;
     confidence: number;
     complexity: number;
     factors: ComplexityFactors;
     shouldEscalate: boolean;
+    shouldAutoRespond: boolean;
+    autoResponseRowId?: number;
   }> {
+    const autoApply = opts.autoApply ?? true;
     try {
       // Search for similar resolved tickets
       const similarTickets = await this.findSimilarResolvedTickets(
@@ -66,16 +81,17 @@ export class AIAutoResponseService {
       const factors = this.calculateComplexityFactors(ticket, similarTickets);
 
       // Store the AI response in the database (only if ticket has an ID)
+      let autoResponseRowId: number | undefined;
       if (
         responseResult.response &&
         confidenceResult.confidenceScore > 0 &&
         ticket.id
       ) {
-        await this.storeAutoResponse(ticket.id, {
+        autoResponseRowId = await this.storeAutoResponse(ticket.id, {
           response: responseResult.response,
           confidence: confidenceResult.confidenceScore,
           suggestedArticles: responseResult.suggestedArticles,
-          applied: confidenceResult.shouldAutoRespond,
+          applied: autoApply && confidenceResult.shouldAutoRespond,
         });
       }
 
@@ -85,6 +101,8 @@ export class AIAutoResponseService {
         complexity: analysis.complexityScore,
         factors,
         shouldEscalate: !confidenceResult.shouldAutoRespond,
+        shouldAutoRespond: confidenceResult.shouldAutoRespond,
+        autoResponseRowId,
       };
     } catch (error) {
       console.error("Error analyzing ticket:", describeAIError(error));
@@ -102,6 +120,7 @@ export class AIAutoResponseService {
           sentiment: 0,
         },
         shouldEscalate: true,
+        shouldAutoRespond: false,
       };
     }
   }
@@ -153,7 +172,7 @@ export class AIAutoResponseService {
 
       return similarTickets;
     } catch (error) {
-      console.error("Error finding similar tickets:", error);
+      console.error("Error finding similar tickets:", describeAIError(error));
       return [];
     }
   }
@@ -217,7 +236,7 @@ export class AIAutoResponseService {
 
       return articles;
     } catch (error) {
-      console.error("Error searching knowledge base:", error);
+      console.error("Error searching knowledge base:", describeAIError(error));
       return [];
     }
   }
@@ -288,9 +307,9 @@ export class AIAutoResponseService {
       suggestedArticles: number[];
       applied: boolean;
     }
-  ): Promise<void> {
+  ): Promise<number | undefined> {
     try {
-      const systemUserId = await getSystemUserId();
+      const aiUserId = await ensureAiSystemUser(); // null when its email is taken: row stored unattributed
 
       const autoResponse: InsertTicketAutoResponse = {
         ticketId,
@@ -298,13 +317,26 @@ export class AIAutoResponseService {
         confidenceScore: response.confidence.toString(),
         // suggestedArticles: response.suggestedArticles,
         wasApplied: response.applied,
-        respondedBy: systemUserId,
+        respondedBy: aiUserId ?? null,
       };
 
-      await db.insert(ticketAutoResponses).values(autoResponse);
+      const [row] = await db
+        .insert(ticketAutoResponses)
+        .values(autoResponse)
+        .returning({ id: ticketAutoResponses.id });
+      return row?.id;
     } catch (error) {
-      console.error("Error storing auto response:", error);
+      console.error("Error storing auto response:", describeAIError(error));
+      return undefined;
     }
+  }
+
+  /** Sets wasApplied on one stored row (the create path undoes it when the comment could not be written). */
+  async setApplied(rowId: number, applied: boolean): Promise<void> {
+    await db
+      .update(ticketAutoResponses)
+      .set({ wasApplied: applied })
+      .where(eq(ticketAutoResponses.id, rowId));
   }
 
   // Knowledge base learning method for resolved tickets
@@ -332,27 +364,7 @@ export class AIAutoResponseService {
         `Knowledge article created from ticket #${ticket.ticketNumber}`
       );
     } catch (error) {
-      console.error("Error updating knowledge base:", error);
-    }
-  }
-
-  async saveAutoResponse(
-    ticketId: number,
-    response: string,
-    confidence: number,
-    applied: boolean = false
-  ): Promise<void> {
-    try {
-      const autoResponse: InsertTicketAutoResponse = {
-        ticketId,
-        aiResponse: response,
-        confidenceScore: confidence.toString(),
-        wasApplied: applied,
-      };
-
-      await db.insert(ticketAutoResponses).values(autoResponse);
-    } catch (error) {
-      console.error("Error saving auto response:", error);
+      console.error("Error updating knowledge base:", describeAIError(error));
     }
   }
 
@@ -383,7 +395,7 @@ export class AIAutoResponseService {
           },
         });
     } catch (error) {
-      console.error("Error saving complexity score:", error);
+      console.error("Error saving complexity score:", describeAIError(error));
     }
   }
 
@@ -397,7 +409,7 @@ export class AIAutoResponseService {
         .set({ wasHelpful })
         .where(eq(ticketAutoResponses.ticketId, ticketId));
     } catch (error) {
-      console.error("Error updating response effectiveness:", error);
+      console.error("Error updating response effectiveness:", describeAIError(error));
     }
   }
 }

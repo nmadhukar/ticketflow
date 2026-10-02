@@ -6,11 +6,21 @@ import { describeAIError } from "./aiErrors";
 
 /**
  * Runs after a ticket exists. Never throws: a failure here must not fail the
- * create, so every error is logged (type and status only) and swallowed.
+ * create, so every error is logged (ticket id, error type and status only) and swallowed.
  *
  * Settings are read now, not at boot, so an admin toggle applies to the next
  * ticket. With auto-response off, or Bedrock not configured, no Bedrock call is made.
- * The comment is authored by the AI system user, never by the ticket's creator.
+ *
+ * There is ONE decision: aiAutoResponseService.analyzeTicket returns
+ * `shouldAutoRespond` (calculateConfidence, from the admin's enabled flag and
+ * threshold) and stores the single auto-response row with wasApplied set from it.
+ * This function only acts on that answer: it posts the comment, authored by the AI
+ * system user and cut to maxResponseLength, and if the comment cannot be written it
+ * sets the row back to not applied so the row and the comment agree.
+ *
+ * Escalation settings are not applied here: reassigning a customer's new ticket to
+ * another team is a routing decision made by people, and this path never did it
+ * (it only logged). It is not something AI authorship should start doing silently.
  */
 export async function runCreateTimeAutoResponse(task: Task): Promise<void> {
   try {
@@ -23,7 +33,7 @@ export async function runCreateTimeAutoResponse(task: Task): Promise<void> {
     if (!configured) return;
 
     const { aiAutoResponseService } = await import("./aiAutoResponse");
-    const analysis = await aiAutoResponseService.analyzeTicket(task);
+    const analysis = await aiAutoResponseService.analyzeTicket(task, { autoApply: true });
 
     await aiAutoResponseService.saveComplexityScore(
       task.id,
@@ -32,20 +42,24 @@ export async function runCreateTimeAutoResponse(task: Task): Promise<void> {
       `Complexity: ${analysis.complexity}/100. Should escalate: ${analysis.shouldEscalate}`
     );
 
-    const threshold = Math.max(0, Math.min(1, Number(settings.confidenceThreshold)));
-    if (analysis.autoResponse && analysis.confidence >= threshold) {
-      await aiAutoResponseService.saveAutoResponse(task.id, analysis.autoResponse, analysis.confidence, true);
-      try {
-        await storage.addTaskComment({
-          taskId: task.id,
-          userId: await ensureAiSystemUser(),
-          content: `AI Auto-Response (confidence ${(analysis.confidence * 100).toFixed(0)}%): ${analysis.autoResponse}`,
-        } as any);
-      } catch (error) {
-        console.error("AI auto-response comment failed:", describeAIError(error));
+    if (!analysis.autoResponse || !analysis.shouldAutoRespond) return;
+
+    try {
+      const aiUserId = await ensureAiSystemUser();
+      if (!aiUserId) throw new Error("AI system user unavailable");
+      const maxLength = Math.max(100, Math.min(5000, Number(settings.maxResponseLength) || 1000));
+      await storage.addTaskComment({
+        taskId: task.id,
+        userId: aiUserId,
+        content: `AI Auto-Response (confidence ${(analysis.confidence * 100).toFixed(0)}%): ${analysis.autoResponse.slice(0, maxLength)}`,
+      } as any);
+    } catch (error) {
+      console.error(`AI auto-response comment failed for ticket ${task.id}:`, describeAIError(error));
+      if (analysis.autoResponseRowId !== undefined) {
+        await aiAutoResponseService.setApplied(analysis.autoResponseRowId, false);
       }
     }
   } catch (error) {
-    console.error("AI auto-response for new ticket failed:", describeAIError(error));
+    console.error(`AI auto-response for new ticket ${task.id} failed:`, describeAIError(error));
   }
 }

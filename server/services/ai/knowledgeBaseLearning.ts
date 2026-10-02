@@ -31,6 +31,7 @@ import {
 } from "./bedrockIntegration";
 import { loadCostLimits, estimateTokens } from "./costMonitoring";
 import { extractJSON } from "./jsonUtils";
+import { describeAIError, isQuotaBlocked } from "./aiErrors";
 
 /**
  * Structure for AI-generated knowledge articles
@@ -130,13 +131,13 @@ Comments: ${ticket.comments.map((c) => c.content).join("; ")}
 
     return patterns;
   } catch (error) {
-    console.error("Knowledge pattern analysis error:", error);
+    console.error("Knowledge pattern analysis error:", describeAIError(error));
     logSecurityEvent({
       action: "knowledge_learning",
       resource: "tickets",
       success: false,
       details: {
-        error: error instanceof Error ? error.message : String(error),
+        error: describeAIError(error),
       },
     });
     return [];
@@ -172,7 +173,7 @@ export const generateKnowledgeArticle = async (
 
     return article;
   } catch (error) {
-    console.error("Knowledge article generation error:", error);
+    console.error("Knowledge article generation error:", describeAIError(error));
     return null;
   }
 };
@@ -268,7 +269,7 @@ Comments: ${sampleTicket.comments.map((c) => c.content).join("; ")}
           } catch (singleError: any) {
             console.error(
               `  ✗ Failed to analyze ticket ${singleTicket.id}: ${
-                singleError.message || "Unknown error"
+                describeAIError(singleError)
               }`
             );
           }
@@ -276,7 +277,7 @@ Comments: ${sampleTicket.comments.map((c) => c.content).join("; ")}
       } else {
         console.error(
           `  ✗ Batch ${Math.floor(i / batchSize) + 1} failed: ${
-            error.message || "Unknown error"
+            describeAIError(error)
           }`
         );
       }
@@ -532,7 +533,7 @@ export const processKnowledgeLearning = async (options?: {
       articlesPublished: totalPublished,
     };
   } catch (error) {
-    console.error("Knowledge learning process error:", error);
+    console.error("Knowledge learning process error:", describeAIError(error));
 
     // If processing from queue, mark queue items as failed
     if (options?.useQueueItems && queueItems.length > 0) {
@@ -541,7 +542,7 @@ export const processKnowledgeLearning = async (options?: {
         .update(learningQueue)
         .set({
           processStatus: "failed",
-          error: error instanceof Error ? error.message : String(error),
+          error: describeAIError(error),
         })
         .where(inArray(learningQueue.id, queueItemIds));
       console.log(`Marked ${queueItems.length} queue items as failed`);
@@ -616,8 +617,10 @@ Content Preview: ${article.content.substring(0, 300)}...
   } catch (error) {
     console.error(
       "Intelligent search error, falling back to basic search:",
-      error
+      describeAIError(error)
     );
+    // A cost-limit block is reported to the caller (429), not hidden behind the fallback.
+    if (isQuotaBlocked(error)) throw error;
     return await basicKnowledgeSearch(query, category, maxResults);
   }
 };
@@ -643,7 +646,7 @@ const basicKnowledgeSearch = async (
       matchedContent: article.content.substring(0, 200) + "...",
     }));
   } catch (error) {
-    console.error("Basic knowledge search error:", error);
+    console.error("Basic knowledge search error:", describeAIError(error));
     return [];
   }
 };
@@ -712,7 +715,7 @@ export const improveKnowledgeArticle = async (
 
     return false;
   } catch (error) {
-    console.error("Article improvement error:", error);
+    console.error("Article improvement error:", describeAIError(error));
     return false;
   }
 };

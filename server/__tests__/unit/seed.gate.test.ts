@@ -4,6 +4,7 @@ import { runSeeders, type SeederSet } from "../../seed/runSeeders";
 function fakeSeeders() {
   return {
     systemUser: jest.fn(async () => {}),
+    aiSystemUser: jest.fn(async () => null),
     deactivateDemoAccounts: jest.fn(async (_env: NodeJS.ProcessEnv) => []),
     bootstrapAdmin: jest.fn(async (_env: NodeJS.ProcessEnv) => {}),
     emailTemplates: jest.fn(async () => {}),
@@ -34,6 +35,18 @@ describe("seeding gate", () => {
     for (const k of DEMO) expect(s[k]).not.toHaveBeenCalled();
     expect(s.systemUser).toHaveBeenCalled();
     expect(s.emailTemplates).toHaveBeenCalled();
+  });
+
+  it("the AI system user step runs with SEED_DEMO_DATA unset, false and true", async () => {
+    for (const env of [
+      { NODE_ENV: "production" },
+      { NODE_ENV: "production", SEED_DEMO_DATA: "false" },
+      { NODE_ENV: "development", SEED_DEMO_DATA: "true" },
+    ]) {
+      const s = fakeSeeders();
+      await runSeeders(env, asSet(s));
+      expect(s.aiSystemUser).toHaveBeenCalledTimes(1);
+    }
   });
 
   it("no environment seeds demo data unless SEED_DEMO_DATA is exactly 'true'", async () => {

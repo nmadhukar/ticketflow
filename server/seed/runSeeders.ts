@@ -15,8 +15,8 @@ export interface SeederSet {
   /** Startup data fix-up: consistent assignee columns on tickets. Runs right after the role fix-up. */
   migrateAssigneeTypes?(): Promise<unknown>;
   systemUser(): Promise<void>;
-  /** The "ai-assistant" account AI comments are authored by. Runs always, optional so older test doubles still fit. */
-  aiSystemUser?(): Promise<unknown>;
+  /** The "ai-assistant" account AI comments are authored by. Runs always (not behind SEED_DEMO_DATA). */
+  aiSystemUser(): Promise<unknown>;
   deactivateDemoAccounts(env: NodeJS.ProcessEnv): Promise<unknown>;
   bootstrapAdmin(env: NodeJS.ProcessEnv): Promise<void>;
   emailTemplates(): Promise<void>;
@@ -66,7 +66,7 @@ export async function runSeeders(
   await s.migrateLegacyRoles?.();
   await s.migrateAssigneeTypes?.();
   await s.systemUser();
-  await s.aiSystemUser?.();
+  await s.aiSystemUser();
   await s.emailTemplates();
   // Old demo logins must be off before the "is there an admin?" check.
   await s.deactivateDemoAccounts(env);

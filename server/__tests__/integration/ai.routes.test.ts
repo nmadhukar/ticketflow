@@ -1,18 +1,25 @@
 import request from "supertest";
 import { eq } from "drizzle-orm";
-import { aiUsage, taskComments, ticketAutoResponses, users } from "@shared/schema";
-import { bedrockMock } from "../mocks/aws-bedrock.mock";
+import {
+  aiUsage,
+  knowledgeArticles,
+  taskComments,
+  teamMembers,
+  ticketAutoResponses,
+  users,
+} from "@shared/schema";
+import { bedrockMock, MOCK_MODEL_ID } from "../mocks/aws-bedrock.mock";
 import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
 import { createTeam, createTicketAs, createUser, loginAs } from "./helpers/fixtures";
 import { storage } from "../../storage";
 import { db } from "../../storage/db";
-import { AI_SYSTEM_USER_ID, AI_SYSTEM_USERNAME, ensureAiSystemUser } from "../../utils/aiSystemUser";
-import { recordUsage } from "../../services/ai/costMonitoring";
+import { AI_SYSTEM_USER_EMAIL, AI_SYSTEM_USER_ID, AI_SYSTEM_USERNAME, ensureAiSystemUser } from "../../utils/aiSystemUser";
+import { isTicketForeignKeyViolation, recordUsage } from "../../services/ai/costMonitoring";
+import { aiAutoResponseService } from "../../services/ai/aiAutoResponse";
 
-jest.mock("../../services/ai/bedrockIntegration", () =>
-  jest.requireActual("../mocks/aws-bedrock.mock").createBedrockIntegrationModule()
-);
+const KEY_ID = "AKIAFAKEFAKEFAKE"; // the 16-character key id configured below
+const SECRET = "fake-secret-for-tests";
 
 describe("AI routes honour settings, access and authorship", () => {
   let ctx: Awaited<ReturnType<typeof createTestApp>>;
@@ -34,42 +41,64 @@ describe("AI routes honour settings, access and authorship", () => {
     jest.restoreAllMocks();
   });
 
-  async function setSettings(settings: { enabled?: boolean; threshold?: string }) {
+  async function setSettings(settings: {
+    enabled?: boolean;
+    threshold?: string;
+    maxResponseLength?: number;
+    maxTokensPerRequest?: number;
+  }) {
     const admin = await createUser({ role: "admin" });
     await storage.updateBedrockSettings(
       {
-        bedrockAccessKeyId: "AKIAFAKEFAKEFAKE",
-        bedrockSecretAccessKey: "fake-secret-for-tests",
+        bedrockAccessKeyId: KEY_ID,
+        bedrockSecretAccessKey: SECRET,
         bedrockRegion: "us-east-1",
-        bedrockModelId: "mock-model",
+        bedrockModelId: MOCK_MODEL_ID,
         autoResponseEnabled: settings.enabled ?? true,
         confidenceThreshold: settings.threshold ?? "0.7",
+        maxResponseLength: settings.maxResponseLength ?? 1000,
+        maxTokensPerRequest: settings.maxTokensPerRequest ?? 3000,
       } as any,
       admin.id
     );
     return admin;
   }
 
+  /** One published article the title "Printerjam" matches: the real calculateConfidence then scores support/low-complexity tickets about 0.8. */
+  async function seedMatchingArticle() {
+    await db.insert(knowledgeArticles).values({
+      title: "Printerjam fix",
+      content: "How to clear a printerjam",
+      isPublished: true,
+      status: "published",
+    });
+  }
+
   const commentsOf = (taskId: number) =>
     db.select().from(taskComments).where(eq(taskComments.taskId, taskId));
+  const rowsOf = (ticketId: number) =>
+    db.select().from(ticketAutoResponses).where(eq(ticketAutoResponses.ticketId, ticketId));
+  const logged = () => JSON.stringify(errorSpy.mock.calls.map((c: unknown[]) => c.map((a) => (typeof a === "string" ? a : JSON.stringify(a)))));
 
   async function customerTicket(opts: Record<string, unknown> = {}) {
     const customer = await createUser({ role: "customer" });
-    const agent = await loginAs(ctx.app, customer);
-    const res = await createTicketAs(agent, opts);
+    const customerA = await loginAs(ctx.app, customer);
+    const res = await createTicketAs(customerA, { title: "Printerjam broken", ...opts });
     expect(res.status).toBe(201);
-    return { customer, customerA: agent, id: res.body.id as number };
+    return { customer, customerA, id: res.body.id as number };
   }
 
   describe("auto-response at ticket creation", () => {
     it("AI disabled in settings: no Bedrock call at all, ticket still created", async () => {
       await setSettings({ enabled: false });
+      await seedMatchingArticle();
       const { id } = await customerTicket();
       expect(bedrockMock.totalCalls()).toBe(0);
       expect(await commentsOf(id)).toHaveLength(0);
     });
 
     it("the setting is read at create time: an admin toggle applies to the next ticket", async () => {
+      await seedMatchingArticle();
       await setSettings({ enabled: false });
       const off = await customerTicket();
       expect(await commentsOf(off.id)).toHaveLength(0);
@@ -78,23 +107,32 @@ describe("AI routes honour settings, access and authorship", () => {
       expect(await commentsOf(on.id)).toHaveLength(1);
     });
 
-    it("threshold 0.9 and confidence 0.8: no auto-response comment", async () => {
+    it("threshold 0.9 and a real confidence of about 0.8: no comment, exactly one row, not applied", async () => {
       await setSettings({ threshold: "0.90" });
-      bedrockMock.reset({ confidence: 0.8 });
+      await seedMatchingArticle();
       const { id } = await customerTicket();
       expect(bedrockMock.totalCalls()).toBeGreaterThan(0);
       expect(await commentsOf(id)).toHaveLength(0);
-      const rows = await db.select().from(ticketAutoResponses).where(eq(ticketAutoResponses.ticketId, id));
-      expect(rows.every((r) => r.wasApplied === false)).toBe(true);
+      const rows = await rowsOf(id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].wasApplied).toBe(false);
+      expect(Number(rows[0].confidenceScore)).toBeGreaterThan(0.75);
+      expect(Number(rows[0].confidenceScore)).toBeLessThan(0.9);
     });
 
-    it("threshold 0.7 and confidence 0.8: one comment, authored by the AI system user, not the customer", async () => {
+    it("threshold 0.7: one comment by the AI system user (not the customer) and one row applied, in agreement", async () => {
       await setSettings({ threshold: "0.70" });
+      await seedMatchingArticle();
       const { id, customer, customerA } = await customerTicket();
       const comments = await commentsOf(id);
       expect(comments).toHaveLength(1);
       expect(comments[0].userId).toBe(AI_SYSTEM_USER_ID);
       expect(comments[0].userId).not.toBe(customer.id);
+
+      const rows = await rowsOf(id);
+      expect(rows).toHaveLength(1); // one analysis, one row (R22)
+      expect(rows[0].wasApplied).toBe(true);
+      expect(rows[0].respondedBy).toBe(AI_SYSTEM_USER_ID);
 
       const listed = await customerA.get(`/api/tasks/${id}/comments`);
       expect(listed.status).toBe(200);
@@ -103,36 +141,75 @@ describe("AI routes honour settings, access and authorship", () => {
       expect(listed.body[0].user.password).toBeUndefined();
     });
 
-    it("Bedrock throwing: the ticket is still 201 and only the error type is logged", async () => {
+    it("the posted comment is cut to maxResponseLength", async () => {
+      await setSettings({ maxResponseLength: 100 });
+      await seedMatchingArticle();
+      const base = bedrockMock.handler;
+      bedrockMock.handler = (p) =>
+        p.includes("helpful IT support assistant")
+          ? JSON.stringify({ response: "x".repeat(400), confidence: 0.9, knowledgeBaseArticles: [] })
+          : base(p);
+      const { id } = await customerTicket();
+      const [c] = await commentsOf(id);
+      expect(c.content.split("): ")[1]).toHaveLength(100);
+    });
+
+    it("Bedrock throwing: ticket still 201, only the error type, status and ticket id are logged", async () => {
       await setSettings({});
-      const err: any = new Error("PROMPT-TEXT-SECRET and AKIAFAKEFAKEFAKE");
+      await seedMatchingArticle();
+      const err: any = new Error(`PROMPT-TEXT-SECRET ${KEY_ID} ${SECRET}`);
       err.name = "ThrottlingException";
       err.$metadata = { httpStatusCode: 429 };
-      bedrockMock.analyzeTicket.mockRejectedValue(err);
+      bedrockMock.handler = () => err;
       const { id } = await customerTicket();
       expect(id).toBeGreaterThan(0);
       expect(errorSpy).toHaveBeenCalled();
-      const logged = JSON.stringify(errorSpy.mock.calls.map((c) => c.map(String)));
-      expect(logged).toContain("ThrottlingException");
-      expect(logged).not.toContain("PROMPT-TEXT-SECRET");
-      expect(logged).not.toContain("AKIAFAKEFAKEFAKEFAKE");
-      expect(logged).not.toContain("fake-secret-for-tests");
+      const out = logged();
+      expect(out).toContain("ThrottlingException");
+      expect(out).toContain("status=429");
+      expect(out).not.toContain("PROMPT-TEXT-SECRET");
+      expect(out).not.toContain(KEY_ID);
+      expect(out).not.toContain(SECRET);
     });
 
     it("a cost-limit block does not fail the create either", async () => {
-      await setSettings({});
-      const blocked: any = new Error("Request blocked: daily limit");
-      blocked.isBlocked = true;
-      bedrockMock.analyzeTicket.mockRejectedValue(blocked);
+      await setSettings({ maxTokensPerRequest: 1 });
+      await seedMatchingArticle();
       await customerTicket();
     });
 
-    it("a failure writing the auto-response comment is logged, not swallowed silently", async () => {
+    it("a failed comment write is logged with the ticket id and leaves the single row NOT applied", async () => {
       await setSettings({});
+      await seedMatchingArticle();
       jest.spyOn(storage, "addTaskComment").mockRejectedValue(new Error("db down"));
       const { id } = await customerTicket();
-      expect(id).toBeGreaterThan(0);
-      expect(JSON.stringify(errorSpy.mock.calls.map((c) => c.map(String)))).toMatch(/auto-response/i);
+      expect(logged()).toContain(`ticket ${id}`);
+      expect(await commentsOf(id)).toHaveLength(0);
+      const rows = await rowsOf(id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].wasApplied).toBe(false);
+    });
+
+    it("never logs model output, whatever the model says: an unparseable reply with a marker leaves no trace", async () => {
+      await setSettings({});
+      await seedMatchingArticle();
+      const MARK = "MARKER_ZZ9_MODEL_OUTPUT";
+      const spies = (["error", "warn", "log", "info", "debug"] as const).map((m) =>
+        jest.spyOn(console, m).mockImplementation(() => undefined)
+      );
+      // 1) valid-looking JSON start that does not parse (a SyntaxError message quotes the text)
+      // 2) plain text with no JSON at all
+      for (const bad of [`{"response": ${MARK} broken`, `${MARK} plain words, no json`, `[${MARK}`]) {
+        bedrockMock.handler = () => bad;
+        const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+        const { id } = await customerTicket();
+        await adminA.post("/api/ai/analyze-ticket").send({ ticketId: id });
+        await adminA.post("/api/ai/generate-response").send({ ticketId: id });
+        await adminA.post(`/api/tasks/${id}/auto-response/generate`);
+      }
+      const everything = JSON.stringify(spies.flatMap((s) => s.mock.calls.map((c) => c.map((a) => (typeof a === "string" ? a : JSON.stringify(a))))));
+      expect(spies[0].mock.calls.length).toBeGreaterThan(0); // something was logged, so the check bites
+      expect(everything).not.toContain(MARK);
     });
   });
 
@@ -143,15 +220,17 @@ describe("AI routes honour settings, access and authorship", () => {
     ];
 
     describe.each(calls)("%s", (_name, call) => {
-      it("rejects free text without a ticketId with 400", async () => {
+      it("rejects free text, a missing, huge, boolean, array, float or exponent id with 400", async () => {
         await setSettings({});
         const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
         const res = await call(adminA, { title: "t", description: "d", analysis: {} });
         expect(res.status).toBe(400);
         expect(res.body.error).toBe("validation_failed");
         expect(res.body.details.fieldErrors.ticketId).toBeDefined();
-        const bad = await call(adminA, { ticketId: "abc" });
-        expect(bad.status).toBe(400);
+        for (const ticketId of ["abc", 9999999999, "9999999999", true, [1], 1.5, "1e3", -4, 0, null, "0x10"]) {
+          const bad = await call(adminA, { ticketId });
+          expect([JSON.stringify(ticketId), bad.status]).toEqual([JSON.stringify(ticketId), 400]);
+        }
         expect(bedrockMock.totalCalls()).toBe(0);
       });
 
@@ -189,36 +268,42 @@ describe("AI routes honour settings, access and authorship", () => {
           analysis: { complexity: "low" },
         });
         expect(res.status).toBe(200);
-        const seen = JSON.stringify(bedrockMock.runTicketAnalysisPrompt.mock.calls) +
-          JSON.stringify(bedrockMock.runAutoResponseForTicketPrompt.mock.calls) +
-          JSON.stringify(bedrockMock.analyzeTicket.mock.calls) +
-          JSON.stringify(bedrockMock.generateResponse.mock.calls);
-        expect(seen).toContain("Stored title Alpha");
-        expect(seen).not.toContain("CLIENT-SENT-EVIL");
+        expect(bedrockMock.seen()).toContain("Stored title Alpha");
+        expect(bedrockMock.seen()).not.toContain("CLIENT-SENT-EVIL");
       });
 
-      it("a cost-limit block is 429 quota_exceeded", async () => {
+      it("a cost-limit block is 429 quota_exceeded in the error contract", async () => {
         await setSettings({});
         const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
         const { id } = await customerTicket();
+        await setSettings({ maxTokensPerRequest: 1 });
         bedrockMock.reset();
-        const blocked: any = new Error("Request blocked: daily limit");
-        blocked.isBlocked = true;
-        bedrockMock.analyzeTicket.mockRejectedValue(blocked);
-        bedrockMock.runTicketAnalysisPrompt.mockRejectedValue(blocked);
         const res = await call(adminA, { ticketId: id });
         expect(res.status).toBe(429);
         expect(res.body.error).toBe("quota_exceeded");
+        expect(typeof res.body.message).toBe("string");
+        expect(res.body.details.isBlocked).toBe(true);
+        expect(typeof res.body.details.reason).toBe("string");
+        expect(res.body.reason).toBeUndefined();
       });
     });
 
     it("an agent who can see the ticket may use them", async () => {
       await setSettings({});
-      const agent = await createUser({ role: "agent" });
-      const agentA = await loginAs(ctx.app, agent);
+      const agentA = await loginAs(ctx.app, await createUser({ role: "agent" }));
       const created = await createTicketAs(agentA);
       bedrockMock.reset();
       expect((await agentA.post("/api/ai/analyze-ticket").send({ ticketId: created.body.id })).status).toBe(200);
+      expect((await agentA.post("/api/ai/analyze-ticket").send({ ticketId: String(created.body.id) })).status).toBe(200);
+    });
+
+    it("analyze-ticket is read-only: it stores no auto-response row", async () => {
+      await setSettings({});
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      const { id } = await customerTicket();
+      const before = (await rowsOf(id)).length;
+      await adminA.post("/api/ai/analyze-ticket").send({ ticketId: id });
+      expect(await rowsOf(id)).toHaveLength(before);
     });
   });
 
@@ -237,17 +322,167 @@ describe("AI routes honour settings, access and authorship", () => {
       expect((await adminA.post(`/api/tasks/${id}/auto-response/generate`)).status).toBe(200);
     });
 
+    it("stores exactly one NOT-applied draft and posts no comment (no phantom applied row)", async () => {
+      await setSettings({ threshold: "0.70" });
+      await seedMatchingArticle();
+      await setSettings({ enabled: false }); // nothing at create time
+      const { id } = await customerTicket();
+      await setSettings({ enabled: true, threshold: "0.70" });
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      const res = await adminA.post(`/api/tasks/${id}/auto-response/generate`);
+      expect(res.status).toBe(200);
+      const rows = await rowsOf(id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].wasApplied).toBe(false);
+      expect(await commentsOf(id)).toHaveLength(0);
+    });
+
     it("a cost-limit block is 429 quota_exceeded", async () => {
       await setSettings({});
       const { id } = await customerTicket();
+      await setSettings({ maxTokensPerRequest: 1 });
       bedrockMock.reset();
-      const blocked: any = new Error("Request blocked: daily limit");
-      blocked.isBlocked = true;
-      bedrockMock.analyzeTicket.mockRejectedValue(blocked);
       const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
       const res = await adminA.post(`/api/tasks/${id}/auto-response/generate`);
       expect(res.status).toBe(429);
       expect(res.body.error).toBe("quota_exceeded");
+    });
+
+    it("no generated text is 503 ai_unavailable in the error contract", async () => {
+      await setSettings({});
+      const { id } = await customerTicket();
+      jest.spyOn(aiAutoResponseService, "analyzeTicket").mockResolvedValue({
+        autoResponse: null,
+        confidence: 0,
+        complexity: 50,
+        factors: { keywords: 0, urgency: 0, technical: 0, historical: 0, sentiment: 0 },
+        shouldEscalate: true,
+        shouldAutoRespond: false,
+      });
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      const res = await adminA.post(`/api/tasks/${id}/auto-response/generate`);
+      expect(res.status).toBe(503);
+      expect(res.body.error).toBe("ai_unavailable");
+      expect(typeof res.body.message).toBe("string");
+    });
+  });
+
+  describe("GET and apply: customers never see unapplied drafts", () => {
+    async function ticketWithDraft() {
+      await setSettings({ enabled: false });
+      const t = await customerTicket();
+      await setSettings({ enabled: true });
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      expect((await adminA.post(`/api/tasks/${t.id}/auto-response/generate`)).status).toBe(200);
+      return { ...t, adminA };
+    }
+
+    it("GET: customer 404 on an unapplied draft, staff 200; after apply the customer sees it", async () => {
+      const { id, customerA, adminA } = await ticketWithDraft();
+      const denied = await customerA.get(`/api/tasks/${id}/auto-response`);
+      expect(denied.status).toBe(404);
+      expect(denied.body.error).toBe("not_found");
+      const staff = await adminA.get(`/api/tasks/${id}/auto-response`);
+      expect(staff.status).toBe(200);
+      expect(staff.body.wasApplied).toBe(false);
+
+      expect((await adminA.post(`/api/tasks/${id}/auto-response/apply`)).status).toBe(200);
+      const seen = await customerA.get(`/api/tasks/${id}/auto-response`);
+      expect(seen.status).toBe(200);
+      expect(seen.body.wasApplied).toBe(true);
+    });
+
+    it("GET: a customer gets 404 when there is no row at all", async () => {
+      await setSettings({ enabled: false });
+      const { id, customerA } = await customerTicket();
+      expect((await customerA.get(`/api/tasks/${id}/auto-response`)).status).toBe(404);
+    });
+
+    it("apply posts the stored draft as the AI user, marks the row applied, and is idempotent", async () => {
+      const { id, adminA } = await ticketWithDraft();
+      const [draft] = await rowsOf(id);
+      const first = await adminA.post(`/api/tasks/${id}/auto-response/apply`);
+      expect(first.status).toBe(200);
+      expect(first.body).toEqual({ applied: true, alreadyApplied: false });
+      const comments = await commentsOf(id);
+      expect(comments).toHaveLength(1);
+      expect(comments[0].userId).toBe(AI_SYSTEM_USER_ID);
+      expect(comments[0].content).toContain(draft.aiResponse);
+      expect((await rowsOf(id))[0].wasApplied).toBe(true);
+
+      const second = await adminA.post(`/api/tasks/${id}/auto-response/apply`);
+      expect(second.status).toBe(200);
+      expect(second.body.alreadyApplied).toBe(true);
+      expect(await commentsOf(id)).toHaveLength(1);
+    });
+
+    it("two simultaneous applies post one comment", async () => {
+      const { id, adminA } = await ticketWithDraft();
+      await Promise.all([
+        adminA.post(`/api/tasks/${id}/auto-response/apply`),
+        adminA.post(`/api/tasks/${id}/auto-response/apply`),
+      ]);
+      expect(await commentsOf(id)).toHaveLength(1);
+    });
+
+    it("apply: 404 with no draft or no ticket, 403 for a customer and for an agent outside the ticket's scope", async () => {
+      await setSettings({ enabled: false });
+      const { id, customerA } = await customerTicket();
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      const agentA = await loginAs(ctx.app, await createUser({ role: "agent" }));
+      expect((await adminA.post(`/api/tasks/${id}/auto-response/apply`)).status).toBe(404);
+      expect((await adminA.post(`/api/tasks/999999/auto-response/apply`)).status).toBe(404);
+      expect((await customerA.post(`/api/tasks/${id}/auto-response/apply`)).status).toBe(403);
+      expect((await agentA.post(`/api/tasks/${id}/auto-response/apply`)).status).toBe(403);
+      expect(await commentsOf(id)).toHaveLength(0);
+    });
+
+    it("a failed comment write on apply leaves the draft unapplied (so it can be retried)", async () => {
+      const { id, adminA } = await ticketWithDraft();
+      const spy = jest.spyOn(storage, "addTaskComment").mockRejectedValueOnce(new Error("db down"));
+      const res = await adminA.post(`/api/tasks/${id}/auto-response/apply`);
+      expect(res.status).toBe(500);
+      spy.mockRestore();
+      expect((await rowsOf(id))[0].wasApplied).toBe(false);
+      expect((await adminA.post(`/api/tasks/${id}/auto-response/apply`)).status).toBe(200);
+      expect(await commentsOf(id)).toHaveLength(1);
+    });
+  });
+
+  describe("GET /api/ai/knowledge-search", () => {
+    const search = (a: ReturnType<typeof request.agent>, qs: string) => a.get(`/api/ai/knowledge-search${qs}`);
+
+    it("customer 403 (only the staff analytics page calls it), staff 200", async () => {
+      await setSettings({});
+      await seedMatchingArticle();
+      const customerA = await loginAs(ctx.app, await createUser({ role: "customer" }));
+      const agentA = await loginAs(ctx.app, await createUser({ role: "agent" }));
+      const denied = await search(customerA, "?query=printer");
+      expect(denied.status).toBe(403);
+      expect(denied.body.error).toBe("forbidden");
+      expect(bedrockMock.totalCalls()).toBe(0);
+      expect((await search(agentA, "?query=printer")).status).toBe(200);
+    });
+
+    it("validates the query: required, non-empty, at most 500 characters, a single value", async () => {
+      await setSettings({});
+      const agentA = await loginAs(ctx.app, await createUser({ role: "agent" }));
+      for (const qs of ["", "?query=", "?query=%20%20", `?query=${"a".repeat(501)}`, "?query=a&query=b", "?query=a&maxResults=0", "?query=a&maxResults=999"]) {
+        const res = await search(agentA, qs);
+        expect([qs.slice(0, 40), res.status, res.body.error]).toEqual([qs.slice(0, 40), 400, "validation_failed"]);
+      }
+      expect((await search(agentA, `?query=${"a".repeat(500)}`)).status).toBe(200);
+      expect(bedrockMock.totalCalls()).toBe(0); // the 400s never reached the model
+    });
+
+    it("a cost-limit block is 429 quota_exceeded, and only the error type is logged", async () => {
+      await setSettings({ maxTokensPerRequest: 1 });
+      await seedMatchingArticle();
+      const agentA = await loginAs(ctx.app, await createUser({ role: "agent" }));
+      const res = await search(agentA, "?query=printer");
+      expect(res.status).toBe(429);
+      expect(res.body.error).toBe("quota_exceeded");
+      expect(logged()).not.toContain("Request exceeds max tokens");
     });
   });
 
@@ -285,9 +520,32 @@ describe("AI routes honour settings, access and authorship", () => {
     it("is created again on demand when a comment needs it (no seeder run)", async () => {
       await db.delete(users).where(eq(users.id, AI_SYSTEM_USER_ID));
       await setSettings({});
+      await seedMatchingArticle();
       const { id } = await customerTicket();
       const comments = await commentsOf(id);
       expect(comments[0]?.userId).toBe(AI_SYSTEM_USER_ID);
+    });
+
+    it("when ANOTHER account holds its email: startup does not stop, one loud log line without the email, AI authorship is off", async () => {
+      await db.delete(users).where(eq(users.id, AI_SYSTEM_USER_ID));
+      await db.insert(users).values({ id: "squatter-1", email: AI_SYSTEM_USER_EMAIL.toUpperCase(), role: "customer", isActive: true, isApproved: true });
+      errorSpy.mockClear();
+      await expect(ensureAiSystemUser()).resolves.toBeNull();
+      const lines = errorSpy.mock.calls.map((c) => String(c[0]));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("squatter-1");
+      expect(lines[0].toLowerCase()).not.toContain(AI_SYSTEM_USER_EMAIL);
+      expect(await db.select().from(users).where(eq(users.id, AI_SYSTEM_USER_ID))).toHaveLength(0);
+
+      // A new ticket is still created; the AI posts nothing (never as the customer or the squatter).
+      await setSettings({});
+      await seedMatchingArticle();
+      const { id, customer } = await customerTicket();
+      const comments = await commentsOf(id);
+      expect(comments).toHaveLength(0);
+      expect(comments.some((c) => c.userId === customer.id)).toBe(false);
+      const rows = await rowsOf(id);
+      expect(rows.every((r) => r.wasApplied === false)).toBe(true);
     });
 
     it("cannot sign in: login and forgot-password answer exactly as for an unknown account", async () => {
@@ -332,39 +590,47 @@ describe("AI routes honour settings, access and authorship", () => {
       expect([row.password, row.isActive, row.isApproved]).toEqual([null, false, false]);
     });
 
-    it("is absent from /api/users, the team-member picker, admin listing, team members and counts", async () => {
+    it("is absent from /api/users, the team-member picker, admin listing, team members, counts and ticket meta pickers", async () => {
       const admin = await createUser({ role: "admin" });
+      const agent = await createUser({ role: "agent" });
       const adminA = await loginAs(ctx.app, admin);
       const ids = (body: any[]) => body.map((u) => u.id);
 
-      expect(ids((await adminA.get("/api/users")).body)).not.toContain(AI_SYSTEM_USER_ID);
-      expect(ids((await adminA.get("/api/users?forTeamMemberSelection=true")).body)).not.toContain(AI_SYSTEM_USER_ID);
-      expect(ids((await adminA.get("/api/admin/users")).body)).not.toContain(AI_SYSTEM_USER_ID);
+      const all = await adminA.get("/api/users");
+      expect(all.status).toBe(200);
+      expect(ids(all.body)).toContain(agent.id);
+      expect(ids(all.body)).not.toContain(AI_SYSTEM_USER_ID);
+      const picker = await adminA.get("/api/users?forTeamMemberSelection=true");
+      expect(picker.status).toBe(200);
+      expect(ids(picker.body)).toContain(agent.id);
+      expect(ids(picker.body)).not.toContain(AI_SYSTEM_USER_ID);
+      const adminList = await adminA.get("/api/admin/users");
+      expect(adminList.status).toBe(200);
+      expect(ids(adminList.body)).not.toContain(AI_SYSTEM_USER_ID);
 
       const team = await createTeam(admin);
-      await db.execute(
-        (await import("drizzle-orm")).sql`INSERT INTO team_members (team_id, user_id) VALUES (${team.id}, ${AI_SYSTEM_USER_ID})`
-      );
+      await db.insert(teamMembers).values({ teamId: team.id, userId: AI_SYSTEM_USER_ID });
       const members = await adminA.get(`/api/teams/${team.id}/members`);
+      expect(members.status).toBe(200);
       expect(JSON.stringify(members.body)).not.toContain(AI_SYSTEM_USER_ID);
 
       const stats = await storage.getAdminStats();
-      expect(stats.totalUsers).toBe(1);
+      expect(stats.totalUsers).toBe(2);
 
-      const agent = await createUser({ role: "agent" });
-      const { id } = await (async () => {
-        const r = await createTicketAs(adminA);
-        return { id: r.body.id as number };
-      })();
-      const meta = await adminA.get(`/api/tickets/${id}/meta`);
-      expect(JSON.stringify(meta.body)).not.toContain(AI_SYSTEM_USER_ID);
-      expect(agent.id).toBeTruthy();
+      const created = await createTicketAs(adminA);
+      const meta = await adminA.get(`/api/tickets/${created.body.id}/meta`);
+      expect(meta.status).toBe(200);
+      const assignable = ids(meta.body.assignableUsers);
+      expect(assignable).toContain(agent.id);
+      expect(assignable).not.toContain(AI_SYSTEM_USER_ID);
     });
 
-    it("cannot be named as a ticket assignee", async () => {
-      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+    it("cannot be named as a ticket assignee or added to a team", async () => {
+      const admin = await createUser({ role: "admin" });
+      const adminA = await loginAs(ctx.app, admin);
       const res = await createTicketAs(adminA, { assigneeId: AI_SYSTEM_USER_ID });
       expect(res.status).toBe(400);
+      await expect(storage.addTeamMember({ teamId: (await createTeam(admin)).id, userId: AI_SYSTEM_USER_ID } as any)).rejects.toMatchObject({ status: 404 });
     });
   });
 
@@ -387,6 +653,25 @@ describe("AI routes honour settings, access and authorship", () => {
       await recordUsage("mock-model", 10, 20, "analyzeTicket", undefined, String(t.body.id));
       const rows = await db.select().from(aiUsage);
       expect(rows[0].ticketId).toBe(t.body.id);
+    });
+
+    it("a foreign-key violation on user_id is NOT retried without a ticket: the row is not stored", async () => {
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      const t = await createTicketAs(adminA);
+      jest.spyOn(console, "log").mockImplementation(() => undefined);
+      await recordUsage("mock-model", 10, 20, "analyzeTicket", "no-such-user-id", String(t.body.id));
+      expect(await db.select().from(aiUsage)).toHaveLength(0);
+      expect(logged()).toContain("Error recording usage");
+    });
+
+    it("isTicketForeignKeyViolation looks at the violated constraint, bare or wrapped", () => {
+      const ticketFk = { code: "23503", constraint: "ai_usage_ticket_id_tasks_id_fk" };
+      const userFk = { code: "23503", constraint: "ai_usage_user_id_users_id_fk" };
+      expect(isTicketForeignKeyViolation(ticketFk)).toBe(true);
+      expect(isTicketForeignKeyViolation({ cause: ticketFk })).toBe(true);
+      expect(isTicketForeignKeyViolation(userFk)).toBe(false);
+      expect(isTicketForeignKeyViolation({ cause: userFk })).toBe(false);
+      expect(isTicketForeignKeyViolation({ code: "23505", constraint: "ticket_id" })).toBe(false);
     });
   });
 });

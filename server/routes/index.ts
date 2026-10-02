@@ -90,10 +90,10 @@ import {
   getTableColumns,
 } from "drizzle-orm";
 import { teams, departments, users } from "@shared/schema";
-import { excludeAiSystemUser } from "../utils/aiSystemUser";
+import { excludeAiSystemUser, ensureAiSystemUser } from "../utils/aiSystemUser";
 import { runCreateTimeAutoResponse } from "../services/ai/createTimeAutoResponse";
 import { describeAIError, isQuotaBlocked, sendQuotaExceeded } from "../services/ai/aiErrors";
-import { requireStaff } from "../permissions/staff";
+import { requireStaff, isStaffRole } from "../permissions/staff";
 import { loadAiTicket } from "../services/ai/aiTicketGate";
 import { logSecurityEvent } from "../security/rbac";
 import {
@@ -112,7 +112,7 @@ import {
   requireTaskAccess,
   ticketVisibilityWhere,
 } from "../permissions/ticketAccess";
-import { HttpError } from "../http/errors";
+import { HttpError, asyncHandler } from "../http/errors";
 import { createTicketSchema, STAFF_ONLY_TICKET_FIELDS } from "../services/tickets/schemas";
 import { assertAgentMayAssign, assertAssigneesExist } from "../services/tickets/assignees";
 import { parseIdParam } from "../http/params";
@@ -181,6 +181,13 @@ const commentBodySchema = z.object({
  * @param app - Express application instance
  * @returns HTTP server with WebSocket support
  */
+/** GET /api/ai/knowledge-search: free text goes to the model, so it is bounded. */
+const knowledgeSearchQuery = z.object({
+  query: z.string().trim().min(1).max(500),
+  category: z.string().trim().max(100).optional(),
+  maxResults: z.coerce.number().int().min(1).max(50).default(10),
+});
+
 export async function registerRoutes(app: Express): Promise<Server> {
   registerIdParams(app);
 
@@ -4114,6 +4121,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .orderBy(desc(ticketAutoResponses.createdAt))
         .limit(1);
 
+      // Customers never see an unapplied AI draft (it was never posted to them).
+      if (!isStaffRole((req.user as any)?.role) && !autoResponse?.wasApplied) {
+        return res.status(404).json({ error: "not_found", message: "No AI response for this ticket" });
+      }
+
       if (autoResponse) {
         // If respondedBy is null, set respondedByName to "System"
         if (!autoResponse.respondedBy) {
@@ -4124,10 +4136,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.json(null);
       }
     } catch (error) {
-      console.error("Error fetching auto-response:", error);
+      console.error("Error fetching auto-response:", describeAIError(error));
       res.status(500).json({ message: "Failed to fetch auto-response" });
     }
   });
+
+  // Post the stored AI draft as a comment by the AI system user (staff only, idempotent).
+  app.post(
+    "/api/tasks/:id/auto-response/apply",
+    isAuthenticated,
+    requireTaskAccess(),
+    requireStaff,
+    asyncHandler(async (req, res) => {
+      const taskId = parseInt(req.params.id);
+      const [draft] = await db
+        .select()
+        .from(ticketAutoResponses)
+        .where(eq(ticketAutoResponses.ticketId, taskId))
+        .orderBy(desc(ticketAutoResponses.createdAt), desc(ticketAutoResponses.id))
+        .limit(1);
+      if (!draft) throw new HttpError(404, "not_found", "No AI draft exists for this ticket");
+      if (draft.wasApplied) return res.json({ applied: true, alreadyApplied: true });
+
+      const aiUserId = await ensureAiSystemUser();
+      if (!aiUserId) throw new HttpError(503, "ai_user_unavailable", "AI authorship is unavailable");
+
+      // Claim the draft first: of two concurrent applies only one gets the row back and posts.
+      const claimed = await db
+        .update(ticketAutoResponses)
+        .set({ wasApplied: true })
+        .where(and(eq(ticketAutoResponses.id, draft.id), eq(ticketAutoResponses.wasApplied, false)))
+        .returning({ id: ticketAutoResponses.id });
+      if (claimed.length === 0) return res.json({ applied: true, alreadyApplied: true });
+
+      try {
+        const pct = (Number(draft.confidenceScore ?? 0) * 100).toFixed(0);
+        await storage.addTaskComment({
+          taskId,
+          userId: aiUserId,
+          content: `AI Auto-Response (confidence ${pct}%): ${draft.aiResponse}`,
+        } as any);
+      } catch (error) {
+        await db
+          .update(ticketAutoResponses)
+          .set({ wasApplied: false })
+          .where(eq(ticketAutoResponses.id, draft.id));
+        throw error;
+      }
+      res.json({ applied: true, alreadyApplied: false });
+    })
+  );
 
   // Generate auto-response for an existing ticket (on-demand)
   app.post(
@@ -4136,7 +4194,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     requireTaskAccess(),
     // After the access check, so a missing ticket is 404 and an outside one 403 for everyone.
     requireStaff,
-    async (req, res) => {
+    async (req, res, next) => {
       try {
         const taskId = parseInt(req.params.id);
         const task = await storage.getTask(taskId);
@@ -4168,22 +4226,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const { aiAutoResponseService } = await import(
           "../services/ai/aiAutoResponse"
         );
-        const analysis = await aiAutoResponseService.analyzeTicket(task);
+        // The service stores the one draft row (even below the confidence threshold: a
+        // person asked for it), NOT applied: it becomes a comment only through /apply.
+        const analysis = await aiAutoResponseService.analyzeTicket(task, {
+          autoApply: false,
+        });
 
         if (!analysis.autoResponse) {
-          return res.status(503).json({
-            message: "Could not generate auto-response",
+          throw new HttpError(503, "ai_unavailable", "Could not generate auto-response", {
             confidence: analysis.confidence,
           });
         }
-
-        // Save auto-response (even if confidence is below threshold for manual generation)
-        await aiAutoResponseService.saveAutoResponse(
-          task.id,
-          analysis.autoResponse,
-          analysis.confidence,
-          false // Not auto-applied, user can review first
-        );
 
         res.json({
           autoResponse: analysis.autoResponse,
@@ -4192,6 +4245,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           shouldEscalate: analysis.shouldEscalate,
         });
       } catch (error: any) {
+        if (error instanceof HttpError) return next(error);
         console.error("Error generating auto-response:", describeAIError(error));
 
         // If request was blocked due to cost limits
@@ -5343,27 +5397,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get(
     "/api/ai/knowledge-search",
+    // Only the staff AI Analytics page calls this (grep client/src): staff only.
     isAuthenticated,
-    async (req: any, res) => {
+    requireStaff,
+    async (req: any, res, next) => {
       try {
-        const { query, category, maxResults = 10 } = req.query;
-
-        if (!query) {
-          return res
-            .status(400)
-            .json({ message: "Query parameter is required" });
-        }
+        const parsed = knowledgeSearchQuery.parse(req.query ?? {});
 
         const results = await intelligentKnowledgeSearch(
-          query as string,
-          category as string,
-          parseInt(maxResults as string)
+          parsed.query,
+          parsed.category as string,
+          parsed.maxResults
         );
 
         res.json(results);
       } catch (error) {
-        console.error("Knowledge search error:", error);
-        res.status(500).json({ message: "Failed to search knowledge base" });
+        if (error instanceof z.ZodError) return next(error);
+        console.error("Knowledge search error:", describeAIError(error));
+        if (isQuotaBlocked(error)) return sendQuotaExceeded(res, error);
+        res
+          .status(500)
+          .json({ error: "ai_failed", message: "Failed to search knowledge base" });
       }
     }
   );

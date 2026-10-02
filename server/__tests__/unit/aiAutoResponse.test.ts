@@ -99,6 +99,37 @@ describe('AIAutoResponseService.analyzeTicket', () => {
     expect(storeAutoResponse).toHaveBeenCalledWith(7, expect.objectContaining({ applied: true, confidence: 0.9 }));
   });
 
+  it('returns the one decision (shouldAutoRespond) and stores exactly ONE row, whose applied flag matches it', async () => {
+    bedrock.calculateConfidence.mockResolvedValue({ confidenceScore: 0.9, shouldAutoRespond: true });
+    storeAutoResponse.mockResolvedValue(42);
+
+    const result = await service.analyzeTicket(ticket);
+
+    expect(result.shouldAutoRespond).toBe(true);
+    expect(result.autoResponseRowId).toBe(42);
+    expect(storeAutoResponse).toHaveBeenCalledTimes(1);
+    expect(storeAutoResponse).toHaveBeenCalledWith(7, expect.objectContaining({ applied: true }));
+  });
+
+  it('autoApply false (an on-demand draft): the row is NOT applied even when the decision is yes', async () => {
+    bedrock.calculateConfidence.mockResolvedValue({ confidenceScore: 0.9, shouldAutoRespond: true });
+
+    const result = await service.analyzeTicket(ticket, { autoApply: false });
+
+    expect(result.shouldAutoRespond).toBe(true);
+    expect(storeAutoResponse).toHaveBeenCalledTimes(1);
+    expect(storeAutoResponse).toHaveBeenCalledWith(7, expect.objectContaining({ applied: false }));
+  });
+
+  it('decision no: shouldAutoRespond false and the row is not applied', async () => {
+    bedrock.calculateConfidence.mockResolvedValue({ confidenceScore: 0.8, shouldAutoRespond: false });
+
+    const result = await service.analyzeTicket(ticket);
+
+    expect(result.shouldAutoRespond).toBe(false);
+    expect(storeAutoResponse).toHaveBeenCalledWith(7, expect.objectContaining({ applied: false }));
+  });
+
   it('escalates when Bedrock says confidence is below its auto-respond threshold', async () => {
     bedrock.calculateConfidence.mockResolvedValue({ confidenceScore: 0.3, shouldAutoRespond: false });
 
@@ -129,6 +160,7 @@ describe('AIAutoResponseService.analyzeTicket', () => {
       complexity: 50,
       factors: { keywords: 0, urgency: 0, technical: 0, historical: 0, sentiment: 0 },
       shouldEscalate: true,
+      shouldAutoRespond: false,
     });
     expect(storeAutoResponse).not.toHaveBeenCalled();
   });

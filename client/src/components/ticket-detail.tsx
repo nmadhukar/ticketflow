@@ -582,7 +582,7 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
       </div>
 
       {/* AI Response Section */}
-      {aiResponse && !aiResponse.wasApplied && (
+      {aiResponse && !aiResponse.wasApplied && role && role !== "customer" && (
         <Card className="border-primary/20 bg-gray-50">
           <CardHeader>
             <div className="flex items-center justify-between">

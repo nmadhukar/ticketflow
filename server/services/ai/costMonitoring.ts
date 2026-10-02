@@ -7,6 +7,7 @@
 
 import { storage } from "../../storage";
 import { BEDROCK_PRICING } from "./bedrockPrice";
+import { describeAIError } from "./aiErrors";
 
 export interface UsageRecord {
   timestamp: string;
@@ -66,7 +67,7 @@ async function loadUsageRecords(): Promise<UsageRecord[]> {
       ticketId: r.ticketId?.toString() || undefined,
     }));
   } catch (error) {
-    console.error("Error loading usage records:", error);
+    console.error("Error loading usage records:", describeAIError(error));
     return [];
   }
 }
@@ -87,7 +88,7 @@ export async function loadCostLimits(): Promise<CostLimits> {
       maxTokensPerRequest: settings.maxTokensPerRequest ?? 3000,
     };
   } catch (error) {
-    console.error("Error loading cost limits:", error);
+    console.error("Error loading cost limits:", describeAIError(error));
     return DEFAULT_COST_LIMITS;
   }
 }
@@ -112,7 +113,7 @@ export async function saveCostLimits(
       );
     }
   } catch (error) {
-    console.error("Error saving cost limits:", error);
+    console.error("Error saving cost limits:", describeAIError(error));
   }
 }
 
@@ -151,11 +152,17 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-/** Postgres 23503, whether the driver error arrives bare or wrapped with a `cause`. */
-function isForeignKeyViolation(error: unknown): boolean {
+/**
+ * Postgres 23503 on the ticket_id foreign key only (the driver error arrives bare or
+ * wrapped with a `cause`). A violation of any other constraint (user_id, ...) is not
+ * fixed by dropping the ticket link and must take the error path.
+ */
+export function isTicketForeignKeyViolation(error: unknown): boolean {
   let e: any = error;
   for (let depth = 0; e && depth < 3; depth++, e = e.cause) {
-    if (e.code === "23503") return true;
+    if (e.code === "23503") {
+      return typeof e.constraint === "string" && /ticket_id/.test(e.constraint);
+    }
   }
   return false;
 }
@@ -194,7 +201,7 @@ export async function recordUsage(
     } catch (insertError) {
       // The ticket was deleted while the AI job ran. The money was still spent:
       // keep the cost row, just without the ticket link.
-      if (row.ticketId !== null && isForeignKeyViolation(insertError)) {
+      if (row.ticketId !== null && isTicketForeignKeyViolation(insertError)) {
         await storage.recordAIUsage({ ...row, ticketId: null });
       } else {
         throw insertError;
@@ -208,7 +215,7 @@ export async function recordUsage(
       )}`
     );
   } catch (error) {
-    console.error("Error recording usage:", error);
+    console.error("Error recording usage:", describeAIError(error));
   }
 }
 
@@ -379,7 +386,7 @@ export async function resetUsageData(): Promise<void> {
     await storage.deleteAIUsage();
     console.log("Usage data reset successfully");
   } catch (error) {
-    console.error("Error resetting usage data:", error);
+    console.error("Error resetting usage data:", describeAIError(error));
   }
 }
 

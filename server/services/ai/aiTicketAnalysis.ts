@@ -14,8 +14,6 @@ import { storage } from "../../storage";
 import { getAISettings } from "../../admin/aiSettings";
 import { logSecurityEvent } from "../../security";
 import { buildAutoResponsePrompt, buildTicketAnalysisPrompt } from "./prompts";
-import { getSystemUserId } from "../../utils/systemUser";
-import { ensureAiSystemUser } from "../../utils/aiSystemUser";
 import {
   getBedrockClient,
   runTicketAnalysisPrompt,
@@ -261,188 +259,6 @@ export const shouldEscalateTicket = (
   );
 };
 
-// Process ticket with AI analysis and auto-response
-export const processTicketWithAI = async (ticketData: {
-  id: number;
-  title: string;
-  description: string;
-  category: string;
-  priority: string;
-  reporterId: string;
-}): Promise<{
-  analysis: TicketAnalysis | null;
-  autoResponse: AutoResponse | null;
-  complexityScore: number;
-  shouldEscalate: boolean;
-  applied: boolean;
-}> => {
-  try {
-    const settings = await getAISettings();
-    // Step 1: Analyze the ticket
-    const analysis = await analyzeTicket(ticketData);
-    if (!analysis) {
-      return {
-        analysis: null,
-        autoResponse: null,
-        complexityScore: 0,
-        shouldEscalate: false,
-        applied: false,
-      };
-    }
-
-    // Step 2: Search knowledge base for relevant articles
-    const knowledgeContext = await searchKnowledgeBaseForTicket(ticketData);
-
-    // Step 3: Generate auto-response
-    const autoResponse = await generateAutoResponseForTicket(
-      ticketData,
-      analysis,
-      knowledgeContext
-    );
-    if (!autoResponse) {
-      return {
-        analysis,
-        autoResponse: null,
-        complexityScore: calculateComplexityScore(analysis),
-        shouldEscalate: shouldEscalateTicket(analysis, {
-          confidence: 0,
-          escalationNeeded: true,
-        } as AutoResponse),
-        applied: false,
-      };
-    }
-
-    // Step 4: Calculate metrics
-    const complexityScore = calculateComplexityScore(analysis);
-    const shouldEscalateHeuristic = shouldEscalateTicket(
-      analysis,
-      autoResponse
-    );
-
-    // Step 5: Apply auto-response if confidence is high enough
-    const autoResponseEnabled = !!settings.autoResponseEnabled;
-    const confidenceThreshold = Math.round(
-      Math.max(0, Math.min(1, Number(settings.confidenceThreshold ?? 0.7))) *
-        100
-    );
-    const maxResponseLength = Math.max(
-      100,
-      Math.min(5000, Number(settings.maxResponseLength || 1000))
-    );
-    let applied = false;
-
-    if (
-      autoResponseEnabled &&
-      autoResponse.confidence >= confidenceThreshold &&
-      !shouldEscalateHeuristic
-    ) {
-      const trimmed = (autoResponse.response || "").slice(0, maxResponseLength);
-      // Add auto-response as a comment
-      const aiUserId = await ensureAiSystemUser();
-      await storage.addTaskComment({
-        taskId: ticketData.id,
-        userId: aiUserId,
-        content: trimmed,
-      });
-
-      // Store auto-response record
-      await storage.saveAutoResponse({
-        ticketId: ticketData.id,
-        response: trimmed,
-        confidence: autoResponse.confidence,
-        applied: true,
-        createdAt: new Date(),
-      });
-
-      applied = true;
-    }
-
-    // Escalation via settings
-    let shouldEscalate = shouldEscalateHeuristic;
-    if (settings.escalationEnabled) {
-      const meetsThreshold =
-        complexityScore >=
-        Math.max(0, Math.min(100, Number(settings.complexityThreshold || 70)));
-      const modelRequestedEscalation = !!autoResponse.escalationNeeded;
-      shouldEscalate = meetsThreshold || modelRequestedEscalation || !applied;
-
-      if (shouldEscalate && settings.escalationTeamId) {
-        try {
-          const systemUserId = await getSystemUserId();
-          await storage.updateTask(
-            ticketData.id,
-            {
-              assigneeType: "team" as any,
-              assigneeTeamId: settings.escalationTeamId as any,
-              assigneeId: null as any,
-            },
-            systemUserId
-          );
-        } catch (e) {
-          console.error("Failed to assign escalation team:", e);
-        }
-      }
-    }
-
-    // Store complexity score
-    await storage.saveComplexityScore({
-      ticketId: ticketData.id,
-      score: complexityScore,
-      factors: {
-        complexity: analysis.complexity,
-        priority: analysis.priority,
-        estimatedTime: analysis.estimatedResolutionTime,
-        confidence: analysis.confidence,
-      },
-      createdAt: new Date(),
-    });
-
-    return {
-      analysis,
-      autoResponse,
-      complexityScore,
-      shouldEscalate,
-      applied,
-    };
-  } catch (error) {
-    console.error("AI ticket processing error:", error);
-    return {
-      analysis: null,
-      autoResponse: null,
-      complexityScore: 0,
-      shouldEscalate: true,
-      applied: false,
-    };
-  }
-};
-
-// Search knowledge base for relevant articles
-const searchKnowledgeBaseForTicket = async (ticketData: {
-  title: string;
-  description: string;
-  category: string;
-}): Promise<string[]> => {
-  try {
-    // Simple keyword-based search for now
-    const searchTerms = [
-      ...ticketData.title.toLowerCase().split(" "),
-      ...ticketData.description.toLowerCase().split(" "),
-      ticketData.category.toLowerCase(),
-    ].filter((term) => term.length > 3);
-
-    const articles = await storage.searchKnowledgeBase(searchTerms.join(" "));
-    return articles
-      .slice(0, 3)
-      .map(
-        (article: any) =>
-          `${article.title}: ${article.content.substring(0, 500)}`
-      );
-  } catch (error) {
-    console.error("Knowledge base search error:", error);
-    return [];
-  }
-};
-
 // Update AI analytics
 export const updateAIAnalytics = async (analysisResult: {
   analysis: TicketAnalysis | null;
@@ -461,6 +277,6 @@ export const updateAIAnalytics = async (analysisResult: {
 
     await storage.saveAIAnalytics(analytics);
   } catch (error) {
-    console.error("AI analytics update error:", error);
+    console.error("AI analytics update error:", describeAIError(error));
   }
 };

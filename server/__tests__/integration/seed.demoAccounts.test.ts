@@ -13,6 +13,7 @@ import { DEMO_ADMIN_PASSWORD, DEMO_PASSWORD } from "../../seed/demoAccounts";
 const noop = async () => {};
 const seeders = {
   systemUser: noop,
+  aiSystemUser: noop,
   emailTemplates: noop,
   demoUsers: noop,
   departments: noop,

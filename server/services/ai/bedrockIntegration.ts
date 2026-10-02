@@ -333,7 +333,6 @@ export async function analyzeTicket(
     if (!cleanedResponse || cleanedResponse.trim().length === 0) {
       console.error("Empty response after JSON extraction:", {
         originalLength: result.response.length,
-        originalPreview: result.response.substring(0, 500),
       });
       throw new Error("Empty response after JSON extraction");
     }
@@ -346,8 +345,8 @@ export async function analyzeTicket(
       console.warn(
         "JSON extraction may have failed, attempting manual extraction:",
         {
-          originalPreview: result.response.substring(0, 300),
-          extractedPreview: cleanedResponse.substring(0, 300),
+          originalLength: result.response.length,
+          extractedLength: cleanedResponse.length,
         }
       );
 
@@ -422,12 +421,13 @@ export async function analyzeTicket(
     try {
       analysis = JSON.parse(cleanedResponse);
     } catch (parseError: any) {
+      // A SyntaxError message quotes the start of the text it could not parse:
+      // log only its type and the length, and do not pass the message on.
       console.error("JSON parse error:", {
-        error: parseError.message,
+        error: describeAIError(parseError),
         cleanedResponseLength: cleanedResponse.length,
-        cleanedResponsePreview: cleanedResponse.substring(0, 500),
       });
-      throw new Error(`Failed to parse JSON: ${parseError.message}`);
+      throw new Error("Failed to parse JSON from the model response");
     }
 
     // Validate response structure
@@ -508,8 +508,6 @@ export async function generateResponse(
       } else {
         console.error("Empty response after JSON extraction:", {
           originalLength: result.response.length,
-          originalPreview: result.response.substring(0, 500),
-          fullResponse: result.response,
         });
         throw new Error("Empty response after JSON extraction");
       }
@@ -521,9 +519,8 @@ export async function generateResponse(
     // Validate that cleaned response looks like JSON (starts with { or [)
     if (!cleanedResponse.startsWith("{") && !cleanedResponse.startsWith("[")) {
       console.error("Extracted response is not JSON:", {
-        cleanedResponse: cleanedResponse.substring(0, 200),
-        originalPreview: result.response.substring(0, 500),
-        fullResponse: result.response,
+        cleanedLength: cleanedResponse.length,
+        originalLength: result.response.length,
       });
       throw new Error("Extracted response is not valid JSON format");
     }
@@ -534,13 +531,11 @@ export async function generateResponse(
       parsedResponse = JSON.parse(cleanedResponse);
     } catch (parseError: any) {
       console.error("JSON parse error in generateResponse:", {
-        error: parseError.message,
+        error: describeAIError(parseError),
         cleanedResponseLength: cleanedResponse.length,
-        cleanedResponsePreview: cleanedResponse.substring(0, 500),
-        fullCleanedResponse: cleanedResponse,
-        originalResponse: result.response,
+        originalLength: result.response.length,
       });
-      throw new Error(`Failed to parse JSON: ${parseError.message}`);
+      throw new Error("Failed to parse JSON from the model response");
     }
 
     // Extract the response field from the parsed JSON
@@ -636,7 +631,7 @@ export async function updateKnowledgeBase(
       costEstimate: result.costEstimate,
     };
   } catch (error) {
-    console.error("Error extracting knowledge:", error);
+    console.error("Error extracting knowledge:", describeAIError(error));
 
     // If request was blocked, re-throw with cost information
     if ((error as any).isBlocked) {
@@ -750,7 +745,7 @@ export async function testBedrockConnection(): Promise<{
       costEstimate: result.costEstimate,
     };
   } catch (error) {
-    console.error("Bedrock connection test failed:", error);
+    console.error("Bedrock connection test failed:", describeAIError(error));
 
     // If request was blocked, include cost information
     if ((error as any).isBlocked) {
