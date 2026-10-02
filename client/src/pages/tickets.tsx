@@ -874,6 +874,7 @@ export default function Tasks() {
                             <Button
                               variant="ghost"
                               size="sm"
+                              aria-label="View ticket"
                               aria-expanded={expandedTicketId === task.id}
                               onClick={() => {
                                 setExpandedTicketId((prev) =>
@@ -914,6 +915,7 @@ export default function Tasks() {
                                     <Button
                                       variant="ghost"
                                       size="sm"
+                                      aria-label="Ticket actions"
                                       className="h-8 w-8 p-0"
                                     >
                                       <MoreVertical className="h-4 w-4" />

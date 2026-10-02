@@ -15,7 +15,7 @@
 import passport from "passport";
 import { normalizeRole } from "../../permissions/roles";
 import { Strategy as LocalStrategy } from "passport-local";
-import { Express, RequestHandler } from "express";
+import type { Express, RequestHandler } from "express";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";

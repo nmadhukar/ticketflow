@@ -1,5 +1,5 @@
 // Centralized security configuration and middleware
-import { Express } from "express";
+import type { Express } from "express";
 import { installRequestPipeline } from "./pipeline";
 import { authenticateJWT, optionalJWT } from "./jwt";
 import { requireRole, requireAdmin, requireAgentOrAdmin } from "./rbac";
