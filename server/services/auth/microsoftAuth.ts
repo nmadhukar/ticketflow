@@ -144,10 +144,8 @@ export async function setupMicrosoftAuth(app: Express) {
   // Microsoft callback route - handle both GET and POST
   const handleCallback = async (req: any, res: any) => {
     try {
+      // Never log the query or body: they carry the authorization code and state.
       console.log("Microsoft callback received");
-      console.log("Callback method:", req.method);
-      console.log("Callback query:", req.query);
-      console.log("Callback body:", req.body);
 
       const code = req.query.code || req.body.code;
       const state = req.query.state || req.body.state;

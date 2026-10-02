@@ -177,6 +177,16 @@ export function setupAuth(app: Express) {
   app.use((req, res, next) => {
     const changedAt = req.user?.passwordChangedAt;
     if (!req.user || !changedAt) return next();
+    // Signing in again (or out) must work with a revoked cookie, and page loads
+    // must still get the app; every other API route is checked.
+    const p = req.path.toLowerCase();
+    if (
+      !p.startsWith("/api") ||
+      (req.method === "POST" && (p === "/api/auth/login" || p === "/api/auth/logout")) ||
+      (req.method === "GET" && p === "/api/logout")
+    ) {
+      return next();
+    }
     const authAt = (req.session as any)?.authAt;
     if (typeof authAt === "number" && authAt >= new Date(changedAt).getTime()) return next();
     req.session.destroy(() => {
@@ -196,7 +206,7 @@ export function setupAuth(app: Express) {
     const allowed =
       (req.method === "GET" && (path === "/api/auth/user" || path === "/api/logout")) ||
       (req.method === "POST" &&
-        (path === "/api/auth/logout" || path === "/api/auth/change-password"));
+        (path === "/api/auth/login" || path === "/api/auth/logout" || path === "/api/auth/change-password"));
     if (allowed) return next();
     return res.status(403).json({
       error: "password_change_required",
@@ -395,6 +405,9 @@ export function setupAuth(app: Express) {
   app.post("/api/auth/login", async (req, res, next) => {
     try {
       const _validatedData = loginSchema.parse(req.body);
+      // Taken before the credentials are checked: a reset that lands afterwards
+      // makes this session older than passwordChangedAt, so it is refused.
+      const authStartedAt = Date.now();
 
       passport.authenticate("local", (err: any, user: any, info: any) => {
         if (err) {
@@ -428,7 +441,7 @@ export function setupAuth(app: Express) {
               .json({ message: "Failed to establish session" });
           }
           // Stamped after login (which starts a fresh session) for the revocation check.
-          (req.session as any).authAt = Date.now();
+          (req.session as any).authAt = authStartedAt;
 
           res.json({
             id: user.id,
@@ -695,10 +708,12 @@ export function setupAuth(app: Express) {
           message: "Choose a password different from the current one.",
         });
       }
-      await storage.updateUserPassword(current.id, await hashPassword(body.password));
-      // Other devices sign in again; this session stays.
-      // This session stays valid: re-stamp it after the password change.
-      (req.session as any).authAt = Date.now();
+      const newHash = await hashPassword(body.password);
+      // This session stays valid: the change time and its authAt are the same
+      // instant. Other devices sign in again.
+      const changedAt = new Date();
+      await storage.updateUserPassword(current.id, newHash, changedAt);
+      (req.session as any).authAt = changedAt.getTime();
       await storage.revokeUserSessions(current.id, req.sessionID);
       res.json({ message: "Password changed" });
     } catch (error) {

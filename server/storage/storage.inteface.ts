@@ -134,7 +134,11 @@ export interface IStorage {
    * @param userId - User ID
    * @param hashedPassword - New hashed password
    */
-  updateUserPassword(userId: string, hashedPassword: string): Promise<void>;
+  updateUserPassword(
+    userId: string,
+    hashedPassword: string,
+    changedAt?: Date
+  ): Promise<void>;
 
   /**
    * Clears password reset token for a user

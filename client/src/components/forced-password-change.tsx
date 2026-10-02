@@ -20,11 +20,17 @@ export function ForcedPasswordChange() {
   const [busy, setBusy] = useState(false);
 
   async function signOut() {
+    setError(null);
     try {
       await apiRequest("POST", "/api/auth/logout");
-    } finally {
-      await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not sign out.");
+      return;
     }
+    // A refetch would 401 yet keep the previous (flagged) user in the cache, so
+    // mark the user signed out directly and drop everything else cached.
+    queryClient.setQueryData(["/api/auth/user"], null);
+    queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== "/api/auth/user" });
   }
 
   async function submit(e: React.FormEvent) {

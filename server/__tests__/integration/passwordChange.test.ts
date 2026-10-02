@@ -218,6 +218,28 @@ describe("forced password change, session revocation, admin reset rules", () => 
       await adminReset(target.id);
       const row = (await db.select().from(users).where(eq(users.id, target.id)))[0];
       expect(row.passwordChangedAt).toBeInstanceOf(Date);
+      // signing in afterwards with the temporary password gives a working session
+      const temp = (await adminReset(target.id)).body.tempPassword;
+      const fresh = request.agent(ctx.app);
+      expect((await fresh.post("/api/auth/login").send({ email: target.email, password: temp })).status).toBe(200);
+      expect((await fresh.get("/api/auth/user")).status).toBe(200);
+    });
+
+    it("a browser holding a revoked cookie can sign in again; other API routes still refuse it", async () => {
+      const target = await createUser({ role: "agent" });
+      const stale = await loginAs(ctx.app, target);
+      const saved = await snapshot(target.id);
+      const reset = await adminReset(target.id);
+      await restore(saved);
+      expect((await stale.get("/some-page")).status).not.toBe(401);
+      const login = await stale
+        .post("/api/auth/login")
+        .send({ email: target.email, password: reset.body.tempPassword });
+      expect(login.status).toBe(200);
+      expect((await stale.get("/api/auth/user")).status).toBe(200);
+      await adminReset(target.id);
+      await restore(saved);
+      expect((await stale.get("/api/tasks")).status).toBe(401);
     });
 
     it("passwordChangedAt is never sent to clients", async () => {
