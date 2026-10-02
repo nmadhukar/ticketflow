@@ -2,7 +2,8 @@ import request from "supertest";
 import jwt from "jsonwebtoken";
 import { randomBytes } from "crypto";
 import { eq } from "drizzle-orm";
-import { apiKeys, users } from "@shared/schema";
+import { apiKeys, sessions, users } from "@shared/schema";
+import { JWT_AUDIENCE, JWT_ISSUER } from "../../security/jwt";
 import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
 import { createUser, loginAs, createTicketAs } from "./helpers/fixtures";
@@ -13,7 +14,7 @@ import {
   generateApiKey,
   issueApiKey,
 } from "../../services/auth/apiKeys";
-import { bearerAuth } from "../../services/auth/bearer";
+import { bearerAuth, markSessionAuth } from "../../services/auth/bearer";
 
 const DAY = 24 * 60 * 60 * 1000;
 const JWT_SECRET_VALUE = randomBytes(24).toString("hex");
@@ -33,7 +34,23 @@ function signJwt(
   opts: jwt.SignOptions = {},
   secret = JWT_SECRET_VALUE
 ) {
-  return jwt.sign(claims, secret, { algorithm: "HS256", expiresIn: "1h", ...opts });
+  return jwt.sign(claims, secret, {
+    algorithm: "HS256",
+    expiresIn: "1h",
+    issuer: JWT_ISSUER,
+    audience: JWT_AUDIENCE,
+    ...opts,
+  });
+}
+
+function enableJwt() {
+  process.env.JWT_SECRET = JWT_SECRET_VALUE;
+  process.env.BEARER_JWT_ENABLED = "true";
+}
+
+async function sessionCount(): Promise<number> {
+  const rows = await db.select().from(sessions);
+  return rows.length;
 }
 
 beforeAll(async () => {
@@ -44,10 +61,12 @@ afterAll(async () => {
 });
 beforeEach(async () => {
   delete process.env.JWT_SECRET;
+  delete process.env.BEARER_JWT_ENABLED;
   await resetDb();
 });
 afterEach(() => {
   delete process.env.JWT_SECRET;
+  delete process.env.BEARER_JWT_ENABLED;
 });
 
 describe("bearer API keys", () => {
@@ -184,6 +203,7 @@ describe("bearer API keys", () => {
     const { plaintext } = await issueApiKey({ userId: owner.id, name: "k" });
     const req = {
       headers: { authorization: `Bearer ${plaintext}` },
+      path: "/api/tasks",
       ip: freshIp(),
     } as unknown as Request;
     const res = { locals: {} } as unknown as Response;
@@ -211,7 +231,7 @@ describe("bearer JWT", () => {
   });
 
   it("a valid token authenticates the user reloaded by id", async () => {
-    process.env.JWT_SECRET = JWT_SECRET_VALUE;
+    enableJwt();
     const owner = await createUser({ role: "customer" });
     const res = await get("/api/auth/user", signJwt({ userId: owner.id }));
     expect(res.status).toBe(200);
@@ -220,7 +240,7 @@ describe("bearer JWT", () => {
   });
 
   it("accepts the standard sub claim as the user id", async () => {
-    process.env.JWT_SECRET = JWT_SECRET_VALUE;
+    enableJwt();
     const owner = await createUser({ role: "customer" });
     const res = await get("/api/auth/user", signJwt({}, { subject: owner.id }));
     expect(res.status).toBe(200);
@@ -228,7 +248,7 @@ describe("bearer JWT", () => {
   });
 
   it("a forged role:admin claim for a customer is still customer scope", async () => {
-    process.env.JWT_SECRET = JWT_SECRET_VALUE;
+    enableJwt();
     const customer = await createUser({ role: "customer" });
     const other = await createUser({ role: "customer" });
     const otherAgent = await loginAs(ctx.app, other);
@@ -248,7 +268,7 @@ describe("bearer JWT", () => {
   });
 
   it("rejects bad signature, expired, alg none, wrong algorithm, refresh type and unknown user", async () => {
-    process.env.JWT_SECRET = JWT_SECRET_VALUE;
+    enableJwt();
     const owner = await createUser({ role: "customer" });
     const wrongSecret = signJwt({ userId: owner.id }, {}, randomBytes(24).toString("hex"));
     const expired = signJwt({ userId: owner.id }, { expiresIn: -60 });
@@ -265,14 +285,14 @@ describe("bearer JWT", () => {
   });
 
   it("a token for a deactivated user is 401", async () => {
-    process.env.JWT_SECRET = JWT_SECRET_VALUE;
+    enableJwt();
     const owner = await createUser({ role: "customer" });
     await db.update(users).set({ isActive: false }).where(eq(users.id, owner.id));
     expect((await get("/api/auth/user", signJwt({ userId: owner.id }))).status).toBe(401);
   });
 
   it("a token issued before the last password change is 401", async () => {
-    process.env.JWT_SECRET = JWT_SECRET_VALUE;
+    enableJwt();
     const owner = await createUser({ role: "customer" });
     await db
       .update(users)
@@ -286,7 +306,7 @@ describe("bearer JWT", () => {
   });
 
   it("is refused for a user who must change their password", async () => {
-    process.env.JWT_SECRET = JWT_SECRET_VALUE;
+    enableJwt();
     const owner = await createUser({ role: "customer" });
     await db.update(users).set({ mustChangePassword: true }).where(eq(users.id, owner.id));
     const res = await get("/api/auth/user", signJwt({ userId: owner.id }));
@@ -309,13 +329,168 @@ describe("bearer failures are rate limited per IP", () => {
     expect((await get("/api/auth/user", plaintext, ip)).status).toBe(429);
   });
 
-  it("successful bearer requests do not count toward the limit", async () => {
+  it("valid bearers never consume the budget: 30 concurrent valid-key requests all get 200", async () => {
     const owner = await createUser({ role: "customer" });
     const { plaintext } = await issueApiKey({ userId: owner.id, name: "k" });
     const ip = freshIp();
-    for (let i = 0; i < 15; i++) {
-      expect((await get("/api/auth/user", plaintext, ip)).status).toBe(200);
-    }
+    const results = await Promise.all(
+      Array.from({ length: 30 }, () => get("/api/auth/user", plaintext, ip))
+    );
+    expect(results.map((r) => r.status)).toEqual(Array(30).fill(200));
+    // and the budget is still whole: a bad bearer is 401, not 429
+    expect((await get("/api/auth/user", "bad", ip)).status).toBe(401);
+  });
+});
+
+describe("a bearer request never touches a session", () => {
+  async function expectNoSession(
+    method: "get" | "post",
+    path: string,
+    token: string
+  ) {
+    const before = await sessionCount();
+    const call = request(ctx.app)[method](path);
+    const res = await call
+      .set("X-Forwarded-For", freshIp())
+      .set("Authorization", `Bearer ${token}`)
+      .send({});
+    expect(res.headers["set-cookie"]).toBeUndefined();
+    expect(await sessionCount()).toBe(before);
+    return res;
+  }
+
+  it("GET /api/tasks (registered after session tracking) sends no cookie and adds no row", async () => {
+    const owner = await createUser({ role: "customer" });
+    const { plaintext } = await issueApiKey({ userId: owner.id, name: "k" });
+    const res = await expectNoSession("get", "/api/tasks", plaintext);
+    expect(res.status).toBe(200);
+  });
+
+  it("a route registered late (/api/admin/ai-analytics) sends no cookie and adds no row", async () => {
+    const admin = await createUser({ role: "admin" });
+    const { plaintext } = await issueApiKey({ userId: admin.id, name: "k" });
+    await expectNoSession("get", "/api/admin/ai-analytics", plaintext);
+  });
+
+  it("POST /api/auth/logout is refused and touches no session", async () => {
+    const owner = await createUser({ role: "customer" });
+    const { plaintext } = await issueApiKey({ userId: owner.id, name: "k" });
+    const res = await expectNoSession("post", "/api/auth/logout", plaintext);
+    expect(res.status).toBe(403);
+  });
+
+  it("a cookie request is tagged authMethod session", async () => {
+    const req = { user: { id: "u" } } as unknown as Request;
+    markSessionAuth(req, {} as Response, () => undefined);
+    expect(req.authMethod).toBe("session");
+  });
+});
+
+describe("R28: credential management is session-only", () => {
+  async function expectSessionRequired(
+    method: "get" | "post" | "delete" | "patch",
+    path: string,
+    token: string
+  ) {
+    const call = request(ctx.app)[method](path);
+    const res = await call
+      .set("X-Forwarded-For", freshIp())
+      .set("Authorization", `Bearer ${token}`)
+      .send({});
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("session_required");
+  }
+
+  it("refuses an admin key on every credential family, and a session admin still reaches them", async () => {
+    const admin = await createUser({ role: "admin" });
+    const target = await createUser({ role: "customer" });
+    const { plaintext } = await issueApiKey({ userId: admin.id, name: "k" });
+    await expectSessionRequired("get", "/api/api-keys", plaintext);
+    await expectSessionRequired("post", "/api/api-keys", plaintext);
+    await expectSessionRequired("delete", "/api/api-keys/1", plaintext);
+    await expectSessionRequired("post", "/api/auth/change-password", plaintext);
+    await expectSessionRequired("post", "/api/auth/logout", plaintext);
+    await expectSessionRequired("get", "/api/logout", plaintext);
+    await expectSessionRequired("post", `/api/admin/users/${target.id}/reset-password`, plaintext);
+    await expectSessionRequired("post", "/api/sso/config", plaintext);
+    await expectSessionRequired("patch", "/api/company-settings/email/settings", plaintext);
+    await expectSessionRequired("post", "/api/company-settings/email", plaintext);
+
+    // the same admin with a cookie is not blocked by this gate
+    const agent = await loginAs(ctx.app, admin);
+    const ok = await agent.get("/api/api-keys");
+    expect(ok.status).toBe(200);
+  });
+
+  it("refuses a JWT bearer too", async () => {
+    enableJwt();
+    const admin = await createUser({ role: "admin" });
+    await expectSessionRequired("post", "/api/auth/change-password", signJwt({ userId: admin.id }));
+  });
+});
+
+describe("R29: JWT bearer is opt-in and strict", () => {
+  it("a valid token is 401 when BEARER_JWT_ENABLED is not true", async () => {
+    const owner = await createUser({ role: "customer" });
+    process.env.JWT_SECRET = JWT_SECRET_VALUE;
+    expect((await get("/api/auth/user", signJwt({ userId: owner.id }))).status).toBe(401);
+    process.env.BEARER_JWT_ENABLED = "1";
+    expect((await get("/api/auth/user", signJwt({ userId: owner.id }))).status).toBe(401);
+    enableJwt();
+    expect((await get("/api/auth/user", signJwt({ userId: owner.id }))).status).toBe(200);
+  });
+
+  it("wrong issuer or audience is 401", async () => {
+    enableJwt();
+    const owner = await createUser({ role: "customer" });
+    expect((await get("/api/auth/user", signJwt({ userId: owner.id }, { issuer: "other" }))).status).toBe(401);
+    expect((await get("/api/auth/user", signJwt({ userId: owner.id }, { audience: "other" }))).status).toBe(401);
+  });
+
+  it("missing or future iat is 401, small skew is allowed", async () => {
+    enableJwt();
+    const owner = await createUser({ role: "customer" });
+    const now = Math.floor(Date.now() / 1000);
+    const noIat = jwt.sign({ userId: owner.id, exp: now + 3600 }, JWT_SECRET_VALUE, {
+      algorithm: "HS256",
+      noTimestamp: true,
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE,
+    });
+    expect((await get("/api/auth/user", noIat)).status).toBe(401);
+    const future = signJwt({ userId: owner.id, iat: now + 600 }, { expiresIn: "1h" });
+    expect((await get("/api/auth/user", future)).status).toBe(401);
+    const skewed = signJwt({ userId: owner.id, iat: now + 30 }, { expiresIn: "1h" });
+    expect((await get("/api/auth/user", skewed)).status).toBe(200);
+  });
+
+  it("a lifetime over 24 hours is 401, exactly 24 hours is fine", async () => {
+    enableJwt();
+    const owner = await createUser({ role: "customer" });
+    expect((await get("/api/auth/user", signJwt({ userId: owner.id }, { expiresIn: "25h" }))).status).toBe(401);
+    expect((await get("/api/auth/user", signJwt({ userId: owner.id }, { expiresIn: "24h" }))).status).toBe(200);
+  });
+});
+
+describe("bearer is an /api concern", () => {
+  it("a non-API path carrying a junk bearer does not get the JSON 401", async () => {
+    const res = await request(ctx.app)
+      .get("/some-page")
+      .set("X-Forwarded-For", freshIp())
+      .set("Authorization", "Bearer junk");
+    expect(res.body?.error).not.toBe("invalid_token");
+    expect(res.status).not.toBe(401);
+  });
+});
+
+describe("role gates apply to bearer users", () => {
+  it("GET /api/users: customer key 403, admin key 200", async () => {
+    const customer = await createUser({ role: "customer" });
+    const admin = await createUser({ role: "admin" });
+    const c = await issueApiKey({ userId: customer.id, name: "k" });
+    const a = await issueApiKey({ userId: admin.id, name: "k" });
+    expect((await get("/api/users", c.plaintext)).status).toBe(403);
+    expect((await get("/api/users", a.plaintext)).status).toBe(200);
   });
 });
 

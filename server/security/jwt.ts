@@ -6,6 +6,8 @@ import { requireSecret } from "./secrets";
 const JWT_SECRET = requireSecret("JWT_SECRET", {
   devFallback: "dev-only-jwt-secret-not-for-production",
 });
+export const JWT_ISSUER = "ticketflow-helpdesk";
+export const JWT_AUDIENCE = "ticketflow-users";
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || "30d";
 
@@ -28,8 +30,8 @@ export const generateTokens = (payload: Omit<JWTPayload, "iat" | "exp">) => {
     JWT_SECRET as string,
     {
       expiresIn: JWT_EXPIRES_IN,
-      issuer: "ticketflow-helpdesk",
-      audience: "ticketflow-users",
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE,
     } as SignOptions
   );
 
@@ -38,8 +40,8 @@ export const generateTokens = (payload: Omit<JWTPayload, "iat" | "exp">) => {
     JWT_SECRET as string,
     {
       expiresIn: JWT_REFRESH_EXPIRES_IN,
-      issuer: "ticketflow-helpdesk",
-      audience: "ticketflow-users",
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE,
     } as SignOptions
   );
 
@@ -50,8 +52,8 @@ export const generateTokens = (payload: Omit<JWTPayload, "iat" | "exp">) => {
 export const verifyToken = (token: string): JWTPayload => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET, {
-      issuer: "ticketflow-helpdesk",
-      audience: "ticketflow-users",
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE,
     }) as JWTPayload;
     return decoded;
   } catch (error) {

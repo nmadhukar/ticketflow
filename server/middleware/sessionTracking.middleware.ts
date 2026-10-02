@@ -17,6 +17,9 @@ export function sessionTrackingMiddleware(
 ): void {
   // Only for signed-in users: touching the session for anonymous requests would
   // create a session row for every visitor.
+  // A bearer request (API key / JWT) has no session of its own: touching
+  // req.session here would create a sessions row and a Set-Cookie for it.
+  if (req.authMethod === "api_key" || req.authMethod === "jwt") return next();
   if (req.session && req.isAuthenticated?.()) {
     // Update last active time
     (req.session as any).lastActive = new Date();
