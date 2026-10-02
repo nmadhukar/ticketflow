@@ -45,7 +45,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
-import { storage } from "../storage";
+import { storage, publicUserColumns } from "../storage";
 import { setupAuth, isAuthenticated } from "../services/auth";
 import { setupMicrosoftAuth } from "../services/auth/microsoftAuth";
 import { teamsIntegration } from "../services/microsoftTeams";
@@ -174,6 +174,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Users route
   app.get("/api/users", isAuthenticated, async (req: any, res) => {
     try {
+      // Staff only. Role "user" is the legacy name for agent (see Task 6).
+      const requesterRole = (await storage.getUser(getUserId(req)))?.role;
+      if (
+        !requesterRole ||
+        !["admin", "manager", "agent", "user"].includes(requesterRole)
+      ) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
       const forTeamMemberSelection =
         req.query.forTeamMemberSelection === "true";
 
@@ -183,7 +191,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const requester = await storage.getUser(requesterId);
         const isRequesterAdmin = requester?.role === "admin";
 
-        let query = db.select().from(users);
+        let query = db.select(publicUserColumns).from(users);
 
         if (isRequesterAdmin) {
           // Admins can see agents, managers, and other admins
@@ -1297,17 +1305,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
   );
-
-  // Users routes
-  app.get("/api/users", isAuthenticated, async (req, res) => {
-    try {
-      const users = await storage.getAllUsers();
-      res.json(users);
-    } catch (error) {
-      console.error("Error fetching users:", error);
-      res.status(500).json({ message: "Failed to fetch users" });
-    }
-  });
 
   // Admin routes
   app.get("/api/admin/users", isAuthenticated, async (req: any, res) => {

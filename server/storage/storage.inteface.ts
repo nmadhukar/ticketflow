@@ -56,6 +56,7 @@ import {
   type UserInvitation,
   type UserPreferences,
 } from "@shared/schema";
+import type { PublicUser } from "../utils/publicUser";
 
 /**
  * Database Storage Layer for TicketFlow
@@ -87,7 +88,7 @@ export interface IStorage {
    * Retrieves all users in the system
    * @returns Array of all users
    */
-  getAllUsers(): Promise<User[]>;
+  getAllUsers(): Promise<PublicUser[]>;
 
   /**
    * Creates a new user
@@ -168,13 +169,17 @@ export interface IStorage {
   getUserTeams(userId: string): Promise<Team[]>;
   addTeamMember(teamMember: InsertTeamMember): Promise<TeamMember>;
   removeTeamMember(teamId: number, userId: string): Promise<void>;
-  getTeamMembers(teamId: number): Promise<(TeamMember & { user: User })[]>;
+  getTeamMembers(
+    teamId: number
+  ): Promise<(TeamMember & { user: PublicUser })[]>;
 
   // Team admin operations
   isTeamAdmin(userId: string, teamId: number): Promise<boolean>;
   getTeamAdmins(
     teamId: number
-  ): Promise<Array<TeamAdmin & { user: User; grantedByUser: User }>>;
+  ): Promise<
+    Array<TeamAdmin & { user: PublicUser; grantedByUser: PublicUser }>
+  >;
   addTeamAdmin(
     userId: string,
     teamId: number,
@@ -206,7 +211,7 @@ export interface IStorage {
   addTaskComment(comment: InsertTaskComment): Promise<TaskComment>;
   getTaskComments(
     taskId: number
-  ): Promise<(TaskComment & { userName?: string })[]>;
+  ): Promise<(TaskComment & { user?: PublicUser })[]>;
 
   // Statistics
   getTaskStats(userId?: string): Promise<{
@@ -241,9 +246,9 @@ export interface IStorage {
       phone?: string;
       isActive?: boolean;
     }
-  ): Promise<User>;
-  toggleUserStatus(userId: string): Promise<User>;
-  approveUser(userId: string): Promise<User>;
+  ): Promise<PublicUser>;
+  toggleUserStatus(userId: string): Promise<PublicUser>;
+  approveUser(userId: string): Promise<PublicUser>;
   assignUserToTeam(
     userId: string,
     teamId: number,

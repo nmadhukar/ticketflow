@@ -2,6 +2,7 @@ import express, { type Express } from "express";
 import { registerRoutes } from "../../../routes/index";
 import { closeAuth } from "../../../services/auth";
 import { closeDb } from "./testDb";
+import { recordResponse } from "./noSecrets";
 
 /**
  * Builds the real application (the production `registerRoutes`) without
@@ -15,6 +16,17 @@ export async function createTestApp(): Promise<{
   app.set("trust proxy", 1);
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ extended: true }));
+
+  // Test-only: record every JSON body so the integration-wide afterEach hook
+  // (helpers/secretsHook.ts) can fail on password/token fields in any response.
+  app.use((req, res, next) => {
+    const realJson = res.json.bind(res);
+    res.json = ((body?: unknown) => {
+      recordResponse(`${req.method} ${req.originalUrl}`, body);
+      return realJson(body);
+    }) as typeof res.json;
+    next();
+  });
 
   // registerRoutes starts a daily cleanup setInterval that would keep Jest
   // alive; unref any timer created while the routes are being registered.

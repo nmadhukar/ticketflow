@@ -71,7 +71,10 @@ export default {
       testMatch: ['<rootDir>/server/__tests__/integration/**/*.test.ts'],
       transform: tsJest(),
       setupFiles: ['<rootDir>/server/__tests__/integration/helpers/env.ts'],
-      setupFilesAfterEnv: ['<rootDir>/server/__tests__/setup.ts'],
+      setupFilesAfterEnv: [
+        '<rootDir>/server/__tests__/setup.ts',
+        '<rootDir>/server/__tests__/integration/helpers/secretsHook.ts',
+      ],
       testTimeout: 30000,
     },
     {

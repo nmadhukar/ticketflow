@@ -102,6 +102,16 @@ import {
   lte,
 } from "drizzle-orm";
 import { IStorage } from "./storage.inteface";
+import { PUBLIC_USER_FIELDS, type PublicUser } from "../utils/publicUser";
+
+/**
+ * Explicit column projection for every query that returns users to a caller
+ * that may serialise them. Built from the PUBLIC_USER_FIELDS allow-list so a
+ * new secret column is excluded by default.
+ */
+export const publicUserColumns = Object.fromEntries(
+  PUBLIC_USER_FIELDS.map((k) => [k, users[k]])
+) as { [K in (typeof PUBLIC_USER_FIELDS)[number]]: (typeof users)[K] };
 
 /**
  * Database Storage Layer for TicketFlow
@@ -148,8 +158,8 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async getAllUsers(): Promise<User[]> {
-    return await db.select().from(users);
+  async getAllUsers(): Promise<PublicUser[]> {
+    return await db.select(publicUserColumns).from(users);
   }
 
   async createUser(user: InsertUser): Promise<User> {
@@ -855,7 +865,7 @@ export class DatabaseStorage implements IStorage {
 
   async getTeamMembers(
     teamId: number
-  ): Promise<(TeamMember & { user: User })[]> {
+  ): Promise<(TeamMember & { user: PublicUser })[]> {
     const members = await db
       .select({
         id: teamMembers.id,
@@ -863,7 +873,7 @@ export class DatabaseStorage implements IStorage {
         userId: teamMembers.userId,
         role: teamMembers.role,
         joinedAt: teamMembers.joinedAt,
-        user: users,
+        user: publicUserColumns,
       })
       .from(teamMembers)
       .innerJoin(users, eq(teamMembers.userId, users.id))
@@ -885,7 +895,9 @@ export class DatabaseStorage implements IStorage {
 
   async getTeamAdmins(
     teamId: number
-  ): Promise<Array<TeamAdmin & { user: User; grantedByUser: User }>> {
+  ): Promise<
+    Array<TeamAdmin & { user: PublicUser; grantedByUser: PublicUser }>
+  > {
     const adminsWithGrantedBy = await db
       .select({
         id: teamAdmins.id,
@@ -894,7 +906,7 @@ export class DatabaseStorage implements IStorage {
         grantedBy: teamAdmins.grantedBy,
         grantedAt: teamAdmins.grantedAt,
         permissions: teamAdmins.permissions,
-        user: users,
+        user: publicUserColumns,
       })
       .from(teamAdmins)
       .innerJoin(users, eq(teamAdmins.userId, users.id))
@@ -904,14 +916,14 @@ export class DatabaseStorage implements IStorage {
     const result = [];
     for (const admin of adminsWithGrantedBy) {
       const [grantedByUser] = await db
-        .select()
+        .select(publicUserColumns)
         .from(users)
         .where(eq(users.id, admin.grantedBy))
         .limit(1);
 
       result.push({
         ...admin,
-        grantedByUser: grantedByUser || ({} as User),
+        grantedByUser: grantedByUser || ({} as PublicUser),
       });
     }
 
@@ -1106,7 +1118,7 @@ export class DatabaseStorage implements IStorage {
 
   async getTaskComments(
     taskId: number
-  ): Promise<(TaskComment & { user?: User })[]> {
+  ): Promise<(TaskComment & { user?: PublicUser })[]> {
     const comments = await db
       .select({
         id: taskComments.id,
@@ -1114,7 +1126,7 @@ export class DatabaseStorage implements IStorage {
         userId: taskComments.userId,
         content: taskComments.content,
         createdAt: taskComments.createdAt,
-        user: users,
+        user: publicUserColumns,
       })
       .from(taskComments)
       .leftJoin(users, eq(taskComments.userId, users.id))
@@ -1236,7 +1248,7 @@ export class DatabaseStorage implements IStorage {
       phone?: string;
       isActive?: boolean;
     }
-  ): Promise<User> {
+  ): Promise<PublicUser> {
     // Filter out undefined values and convert boolean properly
     const cleanUpdates: any = {};
 
@@ -1257,12 +1269,12 @@ export class DatabaseStorage implements IStorage {
       .update(users)
       .set(cleanUpdates)
       .where(eq(users.id, userId))
-      .returning();
+      .returning(publicUserColumns);
 
     return updatedUser;
   }
 
-  async toggleUserStatus(userId: string): Promise<User> {
+  async toggleUserStatus(userId: string): Promise<PublicUser> {
     const [currentUser] = await db
       .select({ isActive: users.isActive })
       .from(users)
@@ -1275,12 +1287,12 @@ export class DatabaseStorage implements IStorage {
         updatedAt: new Date(),
       })
       .where(eq(users.id, userId))
-      .returning();
+      .returning(publicUserColumns);
 
     return updatedUser;
   }
 
-  async approveUser(userId: string): Promise<User> {
+  async approveUser(userId: string): Promise<PublicUser> {
     const [updatedUser] = await db
       .update(users)
       .set({
@@ -1288,7 +1300,7 @@ export class DatabaseStorage implements IStorage {
         updatedAt: new Date(),
       })
       .where(eq(users.id, userId))
-      .returning();
+      .returning(publicUserColumns);
 
     return updatedUser;
   }
