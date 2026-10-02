@@ -31,6 +31,12 @@ import { isAiSystemUserId } from "../../utils/aiSystemUserId";
 import { ServerResponse, type IncomingMessage } from "http";
 import { disconnectUser } from "../../realtime/connections";
 import { authRateLimit, authRequestRateLimit } from "../../security/rateLimiting";
+import {
+  bearerAuth,
+  bearerRateLimitGate,
+  markSessionAuth,
+  requireSessionForCredentials,
+} from "./bearer";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace -- Express type augmentation requires a namespace
@@ -229,9 +235,20 @@ export function setupAuth(app: Express) {
   app.use(passport.initialize());
   app.use(passport.session());
 
+  // Bearer API keys / JWTs. Runs after passport.session() so a bearer replaces a
+  // cookie's user (and an invalid bearer is 401 despite a valid cookie), and
+  // before the two gates below. The realtime WebSocket upgrade stays
+  // session-only (authenticateUpgrade).
+  app.use(markSessionAuth);
+  app.use(bearerRateLimitGate);
+  app.use(bearerAuth);
+  app.use(requireSessionForCredentials);
+
   // A session that authenticated before the password last changed is dead, even if
   // a request that loaded it earlier saved the row back after the revocation DELETE.
   app.use((req, res, next) => {
+    // Bearer requests have no session; their own checks ran in bearerAuth.
+    if (req.authMethod === "api_key" || req.authMethod === "jwt") return next();
     if (!req.user || !req.user.passwordChangedAt) return next();
     // Signing in again (or out) must work with a revoked cookie, and page loads
     // must still get the app; every other API route is checked.

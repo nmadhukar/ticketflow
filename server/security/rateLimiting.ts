@@ -78,6 +78,38 @@ export const authRateLimit = authLimiter(true);
 /** forgot-password / reset-password answer 200 even for unknown emails, so every request counts. */
 export const authRequestRateLimit = authLimiter(false);
 
+/**
+ * Bearer credential failures (API keys, JWTs): per IP, same limit and window as
+ * login. The gate only READS the count; the count is incremented ONLY when a
+ * bearer is rejected, so valid traffic, sequential or concurrent, never
+ * consumes the budget. Once an IP is at the limit every bearer from it,
+ * valid ones included, gets 429 until the window ends (intended).
+ */
+const bearerFailures = new Map<string, { count: number; resetAt: number }>();
+
+function bearerKey(req: Pick<Request, "ip">): string {
+  return ipKeyGenerator(req.ip ?? "");
+}
+
+/** Seconds until the IP may try again, or 0 when it is under the limit. */
+export function bearerRetryAfterSeconds(req: Pick<Request, "ip">): number {
+  const entry = bearerFailures.get(bearerKey(req));
+  const now = Date.now();
+  if (!entry || entry.resetAt <= now) return 0;
+  return entry.count >= authRateLimitMax() ? Math.ceil((entry.resetAt - now) / 1000) : 0;
+}
+
+export function recordBearerFailure(req: Pick<Request, "ip">): void {
+  const now = Date.now();
+  bearerFailures.forEach((entry, k) => {
+    if (entry.resetAt <= now) bearerFailures.delete(k);
+  });
+  const key = bearerKey(req);
+  const entry = bearerFailures.get(key);
+  if (entry && entry.resetAt > now) entry.count += 1;
+  else bearerFailures.set(key, { count: 1, resetAt: now + authRateLimitWindowMs() });
+}
+
 // Password reset rate limiting
 export const passwordResetRateLimit = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
