@@ -119,7 +119,7 @@ import {
 } from "../permissions/ticketAccess";
 import { LOCKOUT_MINUTES, MAX_FAILED_LOGINS } from "../services/auth/lockout";
 import { hashResetToken } from "../utils/resetToken";
-import { excludeAiSystemUser, isAiSystemUserId } from "../utils/aiSystemUser";
+import { excludeSystemAccounts, isSystemAccountId } from "../utils/aiSystemUser";
 import { s3Service } from "../services/s3Service";
 import { PUBLIC_USER_FIELDS, type PublicUser } from "../utils/publicUser";
 import { containsPattern } from "../utils/like";
@@ -188,7 +188,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllUsers(): Promise<PublicUser[]> {
-    return await db.select(publicUserColumns).from(users).where(excludeAiSystemUser());
+    return await db.select(publicUserColumns).from(users).where(excludeSystemAccounts());
   }
 
   async createUser(user: InsertUser): Promise<User> {
@@ -630,6 +630,7 @@ export class DatabaseStorage implements IStorage {
     userId: string;
     role: unknown;
     status?: string;
+    priority?: string;
     category?: string;
     search?: string;
     assigneeId?: string;
@@ -643,6 +644,7 @@ export class DatabaseStorage implements IStorage {
       userId,
       role,
       status,
+      priority,
       category,
       search,
       assigneeId,
@@ -655,6 +657,7 @@ export class DatabaseStorage implements IStorage {
 
     const filters: SQL[] = [ticketVisibilityWhere({ id: userId, role })];
     if (status) filters.push(eq(tasks.status, status));
+    if (priority) filters.push(eq(tasks.priority, priority));
     if (category) filters.push(eq(tasks.category, category));
     if (search)
       filters.push(
@@ -701,7 +704,8 @@ export class DatabaseStorage implements IStorage {
       .select({ id: tasks.id })
       .from(tasks)
       .where(whereAll)
-      .orderBy(desc(tasks.createdAt));
+      // id breaks createdAt ties so consecutive pages never overlap or skip a row.
+      .orderBy(desc(tasks.createdAt), desc(tasks.id));
     if (limit) idQuery = (idQuery as any).limit(limit);
     if (offset) idQuery = (idQuery as any).offset(offset);
     const ids = (await idQuery).map((r: { id: number }) => r.id);
@@ -711,7 +715,7 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(tasks)
       .where(inArray(tasks.id, ids))
-      .orderBy(desc(tasks.createdAt));
+      .orderBy(desc(tasks.createdAt), desc(tasks.id));
 
     const enhancedTasks: any[] = [];
     for (const task of taskResults) {
@@ -1128,7 +1132,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async addTeamMember(teamMember: InsertTeamMember): Promise<TeamMember> {
-    if (isAiSystemUserId(teamMember.userId)) {
+    if (isSystemAccountId(teamMember.userId)) {
       throw new HttpError(404, "not_found", "User not found");
     }
     const [member] = await db
@@ -1160,7 +1164,7 @@ export class DatabaseStorage implements IStorage {
       })
       .from(teamMembers)
       .innerJoin(users, eq(teamMembers.userId, users.id))
-      .where(and(eq(teamMembers.teamId, teamId), excludeAiSystemUser()));
+      .where(and(eq(teamMembers.teamId, teamId), excludeSystemAccounts()));
 
     return members;
   }
@@ -1464,11 +1468,11 @@ export class DatabaseStorage implements IStorage {
     const [userCount] = await db
       .select({ count: count() })
       .from(users)
-      .where(excludeAiSystemUser());
+      .where(excludeSystemAccounts());
     const [activeUserCount] = await db
       .select({ count: count() })
       .from(users)
-      .where(and(eq(users.isActive, true), excludeAiSystemUser()));
+      .where(and(eq(users.isActive, true), excludeSystemAccounts()));
 
     const [departmentCount] = await db
       .select({ count: count() })
@@ -1626,7 +1630,7 @@ export class DatabaseStorage implements IStorage {
     teamId: number,
     role: string = "member"
   ): Promise<TeamMember> {
-    if (isAiSystemUserId(userId)) {
+    if (isSystemAccountId(userId)) {
       throw new HttpError(404, "not_found", "User not found");
     }
     // Check if the user is already a team member

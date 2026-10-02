@@ -124,17 +124,19 @@ describe("forced password change, session revocation, admin reset rules", () => 
     expect((await live.get("/api/auth/user")).status).toBe(401);
   });
 
-  it("admin reset refuses password-less accounts (SSO and system) with 409 no_local_password", async () => {
+  it("admin reset refuses password-less accounts: SSO with 409 no_local_password, the system user as not found", async () => {
     const id = randomUUID();
     await db.insert(users).values({ id, email: "sso2@example.test", role: "agent", isActive: true, isApproved: true });
     await db
       .insert(users)
       .values({ id: "system", email: "system@ticketflow.local", role: "admin", isActive: true, isApproved: true });
-    for (const target of [id, "system"]) {
-      const res = await adminReset(target);
-      expect(res.status).toBe(409);
-      expect(res.body.error).toBe("no_local_password");
-    }
+    const sso = await adminReset(id);
+    expect(sso.status).toBe(409);
+    expect(sso.body.error).toBe("no_local_password");
+    // The legacy system user is hidden like the AI user (Task 17): no admin route sees it.
+    const system = await adminReset("system");
+    expect(system.status).toBe(404);
+    expect(system.body.error).toBe("user_not_found");
     const [r] = await db.select().from(users).where(eq(users.id, id));
     expect(r.password).toBeNull();
     expect(r.mustChangePassword).toBe(false);

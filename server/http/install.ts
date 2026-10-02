@@ -1,6 +1,6 @@
 import type { Express, NextFunction, Request, Response } from "express";
 import { HttpError, apiNotFound, errorMiddleware } from "./errors";
-import { isAiSystemUserId } from "../utils/aiSystemUserId";
+import { isSystemAccountId } from "../utils/aiSystemUserId";
 import { parseIdParam } from "./params";
 
 /** Route parameters that always hold a numeric (serial) id. userId, sessionId,
@@ -22,7 +22,7 @@ export function registerIdParams(app: Express) {
   // The AI system user is not a person an admin can manage: any route that
   // names it in :userId answers as if no such user existed.
   app.param("userId", (_req: Request, _res: Response, next: NextFunction, value: string) => {
-    if (isAiSystemUserId(value)) return next(new HttpError(404, "user_not_found", "User not found"));
+    if (isSystemAccountId(value)) return next(new HttpError(404, "user_not_found", "User not found"));
     next();
   });
 }

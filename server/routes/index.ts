@@ -91,7 +91,7 @@ import {
   getTableColumns,
 } from "drizzle-orm";
 import { teams, departments, users } from "@shared/schema";
-import { excludeAiSystemUser, ensureAiSystemUser } from "../utils/aiSystemUser";
+import { excludeSystemAccounts, ensureAiSystemUser } from "../utils/aiSystemUser";
 import { runCreateTimeAutoResponse } from "../services/ai/createTimeAutoResponse";
 import { describeAIError, isQuotaBlocked, sendQuotaExceeded } from "../services/ai/aiErrors";
 import { requireStaff, isStaffRole } from "../permissions/staff";
@@ -113,8 +113,9 @@ import {
   requireTaskAccess,
   ticketVisibilityWhere,
 } from "../permissions/ticketAccess";
-import { HttpError, asyncHandler } from "../http/errors";
-import { createTicketSchema, STAFF_ONLY_TICKET_FIELDS } from "../services/tickets/schemas";
+import { HttpError, asyncHandler, fail, logRouteError } from "../http/errors";
+import { projectUserForViewer } from "../utils/publicUser";
+import { createTicketSchema, ticketListQuerySchema, STAFF_ONLY_TICKET_FIELDS } from "../services/tickets/schemas";
 import { assertAgentMayAssign, assertAssigneesExist } from "../services/tickets/assignees";
 import { parseIdParam } from "../http/params";
 import { sanitizeRichHtml } from "../security/sanitizeHtml";
@@ -191,12 +192,38 @@ const knowledgeSearchQuery = z.object({
   maxResults: z.coerce.number().int().min(1).max(50).default(10),
 });
 
+/**
+ * PATCH /api/admin/users/:userId body. `role` must be one of the four roles
+ * (the legacy "user" is stored as "agent"); a typo is a 400, never a stored
+ * role nobody can sign in with.
+ */
+const adminUserUpdateSchema = z.object({
+  firstName: z.string().trim().min(1).max(100).optional(),
+  lastName: z.string().trim().max(100).optional(),
+  email: z.string().trim().toLowerCase().email().max(255).optional(),
+  phone: z
+    .string()
+    .trim()
+    .max(50)
+    .nullable()
+    .transform((v) => v ?? "")
+    .optional(),
+  role: z
+    .string()
+    .refine((v) => normalizeRole(v) !== null, "Unknown role")
+    .transform((v) => normalizeRole(v) as string)
+    .optional(),
+  isActive: z.boolean().optional(),
+});
+
 export async function registerRoutes(app: Express): Promise<Server> {
   registerIdParams(app);
 
   // Auth middleware
   setupAuth(app);
-  setupMicrosoftAuth(app).catch(() => {
+  // Awaited: its routes must exist before the /api 404 handler is installed
+  // after registerRoutes returns, or /api/auth/microsoft answers 404.
+  await setupMicrosoftAuth(app).catch(() => {
     console.error("Microsoft auth setup failed; SSO is unavailable.");
   });
 
@@ -221,7 +248,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         !requesterRole ||
         !["admin", "manager", "agent"].includes(requesterRole)
       ) {
-        return res.status(403).json({ message: "Forbidden" });
+        return fail(res, 403, "Forbidden");
       }
       const forTeamMemberSelection =
         req.query.forTeamMemberSelection === "true";
@@ -238,7 +265,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Admins can see agents, managers, and other admins
           query = query.where(
             and(
-              excludeAiSystemUser(),
+              excludeSystemAccounts(),
               or(
                 eq(users.role, "agent"),
                 eq(users.role, "manager"),
@@ -250,7 +277,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Non-admins can only see agents and managers
           query = query.where(
             and(
-              excludeAiSystemUser(),
+              excludeSystemAccounts(),
               or(eq(users.role, "agent"), eq(users.role, "manager"))
             )
           ) as any;
@@ -264,8 +291,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allUsers = await storage.getAllUsers();
       res.json(allUsers);
     } catch (error) {
-      console.error("Error fetching users:", error);
-      res.status(500).json({ message: "Failed to fetch users" });
+      logRouteError("Error fetching users", error);
+      fail(res, 500, "Failed to fetch users");
     }
   });
 
@@ -296,8 +323,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(preferences);
     } catch (error) {
-      console.error("Error fetching user preferences:", error);
-      res.status(500).json({ message: "Failed to fetch user preferences" });
+      logRouteError("Error fetching user preferences", error);
+      fail(res, 500, "Failed to fetch user preferences");
     }
   });
 
@@ -317,35 +344,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ];
 
       if (updates.theme && !allowedThemes.includes(updates.theme)) {
-        return res.status(400).json({
-          message: `Invalid theme. Must be one of: ${allowedThemes.join(", ")}`,
-        });
+        return fail(res, 400, `Invalid theme. Must be one of: ${allowedThemes.join(", ")}`);
       }
 
       if (updates.language && !allowedLanguages.includes(updates.language)) {
-        return res.status(400).json({
-          message: `Invalid language. Must be one of: ${allowedLanguages.join(
-            ", "
-          )}`,
-        });
+        return fail(res, 400, `Invalid language. Must be one of: ${allowedLanguages.join(", ")}`);
       }
 
       if (
         updates.dateFormat &&
         !allowedDateFormats.includes(updates.dateFormat)
       ) {
-        return res.status(400).json({
-          message: `Invalid date format. Must be one of: ${allowedDateFormats.join(
-            ", "
-          )}`,
-        });
+        return fail(res, 400, `Invalid date format. Must be one of: ${allowedDateFormats.join(", ")}`);
       }
 
       // Validate timezone (basic check - should be IANA format)
       if (updates.timezone && typeof updates.timezone !== "string") {
-        return res.status(400).json({
-          message: "Timezone must be a string (IANA format)",
-        });
+        return fail(res, 400, "Timezone must be a string (IANA format)");
       }
 
       // Validate booleans
@@ -361,9 +376,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           updates[field] !== undefined &&
           typeof updates[field] !== "boolean"
         ) {
-          return res.status(400).json({
-            message: `${field} must be a boolean`,
-          });
+          return fail(res, 400, `${field} must be a boolean`);
         }
       }
 
@@ -374,8 +387,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(updatedPreferences);
     } catch (error) {
-      console.error("Error updating user preferences:", error);
-      res.status(500).json({ message: "Failed to update user preferences" });
+      logRouteError("Error updating user preferences", error);
+      fail(res, 500, "Failed to update user preferences");
     }
   });
 
@@ -388,7 +401,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Save session with updated info
       req.session.save((err: any) => {
         if (err) {
-          console.error("Error saving session:", err);
+          logRouteError("Error saving session", err);
         }
       });
 
@@ -402,8 +415,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(sessionsWithCurrent);
     } catch (error) {
-      console.error("Error fetching user sessions:", error);
-      res.status(500).json({ message: "Failed to fetch sessions" });
+      logRouteError("Error fetching user sessions", error);
+      fail(res, 500, "Failed to fetch sessions");
     }
   });
 
@@ -419,9 +432,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Prevent revoking current session (user should logout instead)
         if (sessionId === currentSessionId) {
-          return res.status(400).json({
-            message: "Cannot revoke current session. Please logout instead.",
-          });
+          return fail(res, 400, "Cannot revoke current session. Please logout instead.");
         }
 
         // Verify the session belongs to the user
@@ -431,98 +442,91 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
 
         if (!sessionExists) {
-          return res.status(404).json({ message: "Session not found" });
+          return fail(res, 404, "Session not found");
         }
 
         await storage.revokeSession(sessionId);
         res.json({ message: "Session revoked successfully" });
       } catch (error) {
-        console.error("Error revoking session:", error);
-        res.status(500).json({ message: "Failed to revoke session" });
+        logRouteError("Error revoking session", error);
+        fail(res, 500, "Failed to revoke session");
       }
     }
   );
 
   // Task routes
-  app.get("/api/tasks", isAuthenticated, async (req: any, res) => {
+  app.get("/api/tasks", isAuthenticated, async (req: any, res, next) => {
     try {
       const userId = getUserId(req);
 
-      const {
-        status,
-        category,
-        assigneeId,
-        teamId,
-        departmentId,
-        mine,
-        search,
-        limit,
-        offset,
-      } = req.query as any;
+      // A value outside the closed sets, or a bad limit/offset, is a 400.
+      const q = ticketListQuerySchema.parse(req.query);
 
       // One visibility rule (ticketVisibilityWhere) for every role; assigneeId,
       // teamId and departmentId only narrow it, they never bypass it.
       const tasks = await storage.getVisibleTasksForUser({
         userId,
         role: req.user?.role,
-        status,
-        category,
-        search,
-        assigneeId: typeof assigneeId === "string" && assigneeId ? assigneeId : undefined,
-        teamId: teamId ? parseInt(teamId) : undefined,
-        departmentId: departmentId ? parseInt(departmentId) : undefined,
-        includeOwn: mine !== "false",
-        limit: limit ? parseInt(limit) : undefined,
-        offset: offset ? parseInt(offset) : undefined,
+        status: q.status,
+        priority: q.priority,
+        category: q.category,
+        search: q.search,
+        assigneeId: q.assigneeId,
+        teamId: q.teamId,
+        departmentId: q.departmentId,
+        includeOwn: q.mine !== "false",
+        limit: q.limit,
+        offset: q.offset,
       });
       return res.json(tasks);
     } catch (error) {
-      console.error("Error fetching tasks:", error);
-      res.status(500).json({ message: "Failed to fetch tasks" });
+      next(error);
     }
   });
 
-  app.get("/api/tasks/my", isAuthenticated, async (req: any, res) => {
+  // Tickets assigned to the caller (user assignments only; assignedToUserSql
+  // inside getVisibleTasksForUser), narrowed by the same validated filters.
+  app.get("/api/tasks/my", isAuthenticated, async (req: any, res, next) => {
     try {
       const userId = getUserId(req);
-      const { status, category, search, limit, offset } = req.query;
+      const q = ticketListQuerySchema.parse(req.query);
       const tasks = await storage.getVisibleTasksForUser({
         userId,
         role: req.user?.role,
         assigneeId: userId,
-        status,
-        category,
-        search,
-        limit: limit ? parseInt(limit) : undefined,
-        offset: offset ? parseInt(offset) : undefined,
+        status: q.status,
+        priority: q.priority,
+        category: q.category,
+        search: q.search,
+        limit: q.limit,
+        offset: q.offset,
       });
       res.json(tasks);
     } catch (error) {
-      console.error("Error fetching user tasks:", error);
-      res.status(500).json({ message: "Failed to fetch user tasks" });
+      next(error);
     }
   });
 
   // Tickets in user's team queues
-  app.get("/api/tasks/my-groups", isAuthenticated, async (req: any, res) => {
+  app.get("/api/tasks/my-groups", isAuthenticated, async (req: any, res, next) => {
     try {
       const userId = getUserId(req);
-      const { status, category, search, limit, offset } = req.query as any;
+      const q = ticketListQuerySchema.parse(req.query);
       // Team queues and teammates' tickets: visible tickets that are not mine
       const tasks = await storage.getVisibleTasksForUser({
         userId,
         role: req.user?.role,
-        status,
-        category,
-        search,
+        status: q.status,
+        priority: q.priority,
+        category: q.category,
+        search: q.search,
         includeOwn: false,
-        limit: limit ? parseInt(limit) : undefined,
-        offset: offset ? parseInt(offset) : undefined,
+        limit: q.limit,
+        offset: q.offset,
       });
       res.json(tasks);
     } catch (error) {
-      console.error("Error fetching my-group tasks:", error);
-      res.status(500).json({ message: "Failed to fetch tasks" });
+      next(error);
     }
   });
 
@@ -537,8 +541,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(task);
     } catch (error) {
-      console.error("Error fetching task:", error);
-      res.status(500).json({ message: "Failed to fetch task" });
+      logRouteError("Error fetching task", error);
+      fail(res, 500, "Failed to fetch task");
     }
   });
 
@@ -656,9 +660,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           for (const file of files) {
             if (file.size > maxSizeBytes) {
-              return res.status(400).json({
-                message: `File ${file.originalname} exceeds ${maxSizeMB}MB limit`,
-              });
+              return fail(res, 400, `File ${file.originalname} exceeds ${maxSizeMB}MB limit`);
             }
           }
         }
@@ -701,10 +703,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             for (const file of uploadedFiles) {
               await s3Service.deleteFile(file.s3Key).catch(() => {});
             }
-            return res.status(500).json({
-              message: "File upload failed",
-              error: error?.message || "Unknown error",
-            });
+            logRouteError("Ticket attachment upload failed", error);
+            return fail(res, 500, "File upload failed", { code: "upload_failed" });
           }
         }
 
@@ -719,9 +719,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           if (assigneeType === "user") {
             if (!assigneeId) {
-              return res.status(400).json({
-                message: "assigneeId is required for user assignment",
-              });
+              return fail(res, 400, "assigneeId is required for user assignment");
             }
             req.body.assigneeId = String(assigneeId);
             req.body.assigneeTeamId = null;
@@ -729,26 +727,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             // departmentId optional
           } else if (assigneeType === "team" || parsedTeamId) {
             if (!parsedTeamId) {
-              return res
-                .status(400)
-                .json({ message: "teamId is required for team assignment" });
+              return fail(res, 400, "teamId is required for team assignment");
             }
             const team = await storage.getTeam(parsedTeamId);
-            if (!team) return res.status(400).json({ message: "Invalid team" });
+            if (!team) return fail(res, 400, "Invalid team");
             if (parsedDeptId) {
               const dept = await storage.getDepartmentById(parsedDeptId);
               if (!dept || (dept as any).isActive === false) {
-                return res
-                  .status(400)
-                  .json({ message: "Invalid or inactive department" });
+                return fail(res, 400, "Invalid or inactive department");
               }
               if (
                 (team as any).departmentId &&
                 (team as any).departmentId !== parsedDeptId
               ) {
-                return res.status(400).json({
-                  message: "Team does not belong to the selected department",
-                });
+                return fail(res, 400, "Team does not belong to the selected department");
               }
             }
             req.body.assigneeType = "team";
@@ -761,9 +753,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } else if (parsedDeptId) {
             const dept = await storage.getDepartmentById(parsedDeptId);
             if (!dept || (dept as any).isActive === false) {
-              return res
-                .status(400)
-                .json({ message: "Invalid or inactive department" });
+              return fail(res, 400, "Invalid or inactive department");
             }
             // Department-only routing: clear team and assignee fields
             req.body.teamId = null;
@@ -936,7 +926,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             `Knowledge base learning triggered for resolved ticket ${updatedTask.ticketNumber}`
           );
         } catch (error) {
-          console.error("Error in knowledge base learning:", error);
+          logRouteError("Error in knowledge base learning", error);
         }
       }
 
@@ -997,21 +987,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Ticket history (same access rule as GET /api/tasks/:id), oldest first.
   app.get("/api/tasks/:id/history", isAuthenticated, requireTaskAccess(), async (req: any, res, next) => {
     try {
-      res.json(await storage.getTaskHistory(parseInt(req.params.id)));
+      const history = await storage.getTaskHistory(parseInt(req.params.id));
+      res.json(
+        history.map((h) => ({
+          ...h,
+          user: h.user ? projectUserForViewer(req.user?.role, h.user) : undefined,
+        }))
+      );
     } catch (error) {
       next(error);
     }
   });
 
   // Task comments
-  app.get("/api/tasks/:id/comments", isAuthenticated, requireTaskAccess(), async (req: any, res) => {
+  app.get("/api/tasks/:id/comments", isAuthenticated, requireTaskAccess(), async (req: any, res, next) => {
     try {
       const taskId = parseInt(req.params.id);
       const comments = await storage.getTaskComments(taskId);
-      res.json(comments);
+      res.json(
+        comments.map((c) => ({
+          ...c,
+          user: c.user ? projectUserForViewer(req.user?.role, c.user) : undefined,
+        }))
+      );
     } catch (error) {
-      console.error("Error fetching task comments:", error);
-      res.status(500).json({ message: "Failed to fetch comments" });
+      next(error);
     }
   });
 
@@ -1050,14 +1050,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const user = await storage.getUser(getUserId(req));
       if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
+        return fail(res, 403, "Forbidden");
       }
 
       const users = await storage.getAllUsers();
       res.json(users);
     } catch (error) {
-      console.error("Error fetching users:", error);
-      res.status(500).json({ message: "Failed to fetch users" });
+      logRouteError("Error fetching users", error);
+      fail(res, 500, "Failed to fetch users");
     }
   });
 
@@ -1065,14 +1065,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const user = await storage.getUser(getUserId(req));
       if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
+        return fail(res, 403, "Forbidden");
       }
 
       const stats = await storage.getAdminStats();
       res.json(stats);
     } catch (error) {
-      console.error("Error fetching admin stats:", error);
-      res.status(500).json({ message: "Failed to fetch stats" });
+      logRouteError("Error fetching admin stats", error);
+      fail(res, 500, "Failed to fetch stats");
     }
   });
 
@@ -1080,7 +1080,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const user = await storage.getUser(getUserId(req));
       if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Forbidden" });
+        return fail(res, 403, "Forbidden");
       }
 
       const stats = await storage.getS3UsageStats();
@@ -1090,29 +1090,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
           "Note: Some files may have been deleted from S3 but are still counted in statistics",
       });
     } catch (error) {
-      console.error("Error fetching S3 usage stats:", error);
-      res.status(500).json({ message: "Failed to fetch S3 usage stats" });
+      logRouteError("Error fetching S3 usage stats", error);
+      fail(res, 500, "Failed to fetch S3 usage stats");
     }
   });
 
   app.patch(
     "/api/admin/users/:userId",
     isAuthenticated,
-    async (req: any, res) => {
+    async (req: any, res, next) => {
       try {
         const user = await storage.getUser(getUserId(req));
         if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Forbidden" });
+          return fail(res, 403, "Forbidden");
         }
 
         const { userId } = req.params;
-        const updates = req.body;
+        // Only these fields are read; anything else in the body is dropped.
+        const updates = adminUserUpdateSchema.parse(req.body ?? {});
 
+        if (!(await storage.getUser(userId))) {
+          throw new HttpError(404, "user_not_found", "User not found");
+        }
+
+        // updateUserProfile also drops the user's open sockets on a role change.
         const updatedUser = await storage.updateUserProfile(userId, updates);
         res.json(updatedUser);
       } catch (error) {
-        console.error("Error updating user:", error);
-        res.status(500).json({ message: "Failed to update user" });
+        if ((error as { code?: string })?.code === "23505") {
+          return next(new HttpError(409, "email_in_use", "That email address is already in use"));
+        }
+        next(error);
       }
     }
   );
@@ -1124,15 +1132,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(getUserId(req));
         if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Forbidden" });
+          return fail(res, 403, "Forbidden");
         }
 
         const { userId } = req.params;
         const updatedUser = await storage.toggleUserStatus(userId);
         res.json(updatedUser);
       } catch (error) {
-        console.error("Error toggling user status:", error);
-        res.status(500).json({ message: "Failed to toggle user status" });
+        logRouteError("Error toggling user status", error);
+        fail(res, 500, "Failed to toggle user status");
       }
     }
   );
@@ -1144,15 +1152,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(getUserId(req));
         if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Forbidden" });
+          return fail(res, 403, "Forbidden");
         }
 
         const { userId } = req.params;
         const updatedUser = await storage.approveUser(userId);
         res.json(updatedUser);
       } catch (error) {
-        console.error("Error approving user:", error);
-        res.status(500).json({ message: "Failed to approve user" });
+        logRouteError("Error approving user", error);
+        fail(res, 500, "Failed to approve user");
       }
     }
   );
@@ -1166,7 +1174,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const { teamId } = req.body;
 
         if (!teamId) {
-          return res.status(400).json({ message: "teamId is required" });
+          return fail(res, 400, "teamId is required");
         }
 
         const currentUserId = getUserId(req);
@@ -1201,8 +1209,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.json(teamMember);
       } catch (error) {
         if (error instanceof HttpError) return next(error);
-        console.error("Error assigning user to team:", error);
-        res.status(500).json({ message: "Failed to assign user to team" });
+        logRouteError("Error assigning user to team", error);
+        fail(res, 500, "Failed to assign user to team");
       }
     }
   );
@@ -1216,7 +1224,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const teamIdNum = parseInt(teamId);
 
         if (isNaN(teamIdNum)) {
-          return res.status(400).json({ message: "Invalid team ID" });
+          return fail(res, 400, "Invalid team ID", { code: "invalid_id" });
         }
 
         const currentUserId = getUserId(req);
@@ -1243,8 +1251,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.removeUserFromTeam(userId, teamIdNum);
         res.status(204).send();
       } catch (error) {
-        console.error("Error removing user from team:", error);
-        res.status(500).json({ message: "Failed to remove user from team" });
+        logRouteError("Error removing user from team", error);
+        fail(res, 500, "Failed to remove user from team");
       }
     }
   );
@@ -1256,7 +1264,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(getUserId(req));
         if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Forbidden" });
+          return fail(res, 403, "Forbidden");
         }
 
         const { userId } = req.params;
@@ -1296,8 +1304,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.set("Cache-Control", "no-store");
         res.json({ tempPassword });
       } catch (error) {
-        console.error("Error resetting password:", error);
-        res.status(500).json({ message: "Failed to reset password" });
+        logRouteError("Error resetting password", error);
+        fail(res, 500, "Failed to reset password");
       }
     }
   );
@@ -1312,8 +1320,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       res.json(stats);
     } catch (error) {
-      console.error("Error fetching stats:", error);
-      res.status(500).json({ message: "Failed to fetch statistics" });
+      logRouteError("Error fetching stats", error);
+      fail(res, 500, "Failed to fetch statistics");
     }
   });
 
@@ -1331,8 +1339,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       res.json(stats);
     } catch (error) {
-      console.error("Error fetching global stats:", error);
-      res.status(500).json({ message: "Failed to fetch global statistics" });
+      logRouteError("Error fetching global stats", error);
+      fail(res, 500, "Failed to fetch global statistics");
     }
   });
 
@@ -1348,8 +1356,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       res.json(activity);
     } catch (error) {
-      console.error("Error fetching activity:", error);
-      res.status(500).json({ message: "Failed to fetch activity" });
+      logRouteError("Error fetching activity", error);
+      fail(res, 500, "Failed to fetch activity");
     }
   });
 
@@ -1386,8 +1394,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.json(attachmentsWithUrls);
       } catch (error) {
-        console.error("Error fetching attachments:", error);
-        res.status(500).json({ message: "Failed to fetch attachments" });
+        logRouteError("Error fetching attachments", error);
+        fail(res, 500, "Failed to fetch attachments");
       }
     }
   );
@@ -1426,7 +1434,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Check if file was uploaded
         if (!req.file) {
-          return res.status(400).json({ message: "File is required" });
+          return fail(res, 400, "File is required");
         }
 
         // Validate file size (use company settings if available)
@@ -1434,9 +1442,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const maxSizeMB = companySettings?.maxFileUploadSize || 10;
         const maxSizeBytes = maxSizeMB * 1024 * 1024;
         if (req.file.size > maxSizeBytes) {
-          return res
-            .status(400)
-            .json({ message: `File size exceeds ${maxSizeMB}MB limit` });
+          return fail(res, 400, `File size exceeds ${maxSizeMB}MB limit`);
         }
 
         // Get company name for path structure
@@ -1470,11 +1476,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(201).json(attachment);
       } catch (error) {
         if (error instanceof z.ZodError) {
-          return res
-            .status(400)
-            .json({ message: "Invalid attachment data", errors: error.errors });
+          return fail(res, 400, "Invalid attachment data", { details: error.flatten() });
         }
-        console.error("Error creating attachment:", error);
+        logRouteError("Error creating attachment", error);
 
         // Check if it's an S3 configuration error
         if (
@@ -1498,10 +1502,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
 
-        res.status(500).json({
-          message: "Failed to create attachment",
-          error: error instanceof Error ? error.message : "Unknown error",
-        });
+        fail(res, 500, "Failed to create attachment");
       }
     }
   );
@@ -1535,9 +1536,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Fetch the file from S3 and stream it to the client
         const s3Response = await fetch(presignedUrl);
         if (!s3Response.ok) {
-          return res.status(500).json({
-            message: "Failed to fetch file from storage",
-            error: s3Response.statusText,
+          return fail(res, 500, "Failed to fetch file from storage", {
+            code: "storage_error",
           });
         }
 
@@ -1557,11 +1557,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.send(Buffer.from(buffer));
       } catch (error) {
         if (error instanceof HttpError) return next(error);
-        console.error("Error generating download URL:", error);
-        res.status(500).json({
-          message: "Failed to generate download URL",
-          error: error instanceof Error ? error.message : "Unknown error",
-        });
+        logRouteError("Error generating download URL", error);
+        fail(res, 500, "Failed to generate download URL");
       }
     }
   );
@@ -1609,11 +1606,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(204).send();
     } catch (error) {
       if (error instanceof HttpError) return next(error);
-      console.error("Error deleting attachment:", error);
-      res.status(500).json({
-        message: "Failed to delete attachment",
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
+      logRouteError("Error deleting attachment", error);
+      fail(res, 500, "Failed to delete attachment");
     }
   });
 
@@ -1626,7 +1620,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       let settings: any = undefined;
@@ -1650,8 +1644,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hasBedrockSecret: !!settings.bedrockSecretAccessKey,
       });
     } catch (error) {
-      console.error("Error fetching Bedrock settings:", error);
-      res.status(500).json({ message: "Failed to fetch Bedrock settings" });
+      logRouteError("Error fetching Bedrock settings", error);
+      fail(res, 500, "Failed to fetch Bedrock settings");
     }
   });
 
@@ -1661,7 +1655,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       const current = await storage.getBedrockSettings();
@@ -1689,8 +1683,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hasBedrockSecret: !!saved.bedrockSecretAccessKey,
       });
     } catch (error) {
-      console.error("Error updating Bedrock settings:", error);
-      res.status(500).json({ message: "Failed to update Bedrock settings" });
+      logRouteError("Error updating Bedrock settings", error);
+      fail(res, 500, "Failed to update Bedrock settings");
     }
   });
 
@@ -1702,14 +1696,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       const settings = await getAISettings();
       res.json(settings);
     } catch (error) {
-      console.error("Error fetching AI settings:", error);
-      res.status(500).json({ message: "Failed to fetch AI settings" });
+      logRouteError("Error fetching AI settings", error);
+      fail(res, 500, "Failed to fetch AI settings");
     }
   });
 
@@ -1718,7 +1712,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       // Validate escalation team if provided
@@ -1728,37 +1722,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ) {
         const teamId = Number(req.body.escalationTeamId);
         if (isNaN(teamId)) {
-          return res.status(400).json({
-            message: "Invalid escalation team ID",
-          });
+          return fail(res, 400, "Invalid escalation team ID");
         }
 
         // Check if team exists
         const team = await storage.getTeam(teamId);
         if (!team) {
-          return res.status(400).json({
-            message: "Escalation team not found",
-          });
+          return fail(res, 400, "Escalation team not found");
         }
 
         // Verify team has a department (required by schema)
         if (!team.departmentId) {
-          return res.status(400).json({
-            message: "Escalation team must belong to a department",
-          });
+          return fail(res, 400, "Escalation team must belong to a department");
         }
 
         // Verify department exists and is active
         const department = await storage.getDepartmentById(team.departmentId);
         if (!department) {
-          return res.status(400).json({
-            message: "Escalation team's department not found",
-          });
+          return fail(res, 400, "Escalation team's department not found");
         }
         if (!department.isActive) {
-          return res.status(400).json({
-            message: "Escalation team's department is not active",
-          });
+          return fail(res, 400, "Escalation team's department is not active");
         }
       }
 
@@ -1769,8 +1753,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const saved = await saveAISettings(next, userId);
       res.json(saved);
     } catch (error) {
-      console.error("Error updating AI settings:", error);
-      res.status(500).json({ message: "Failed to update AI settings" });
+      logRouteError("Error updating AI settings", error);
+      fail(res, 500, "Failed to update AI settings");
     }
   });
 
@@ -1782,22 +1766,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const userId = getUserId(req);
         const user = await storage.getUser(userId);
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const ok = await bedrockIntegration.testConnection();
         if (ok) {
           return res.json({ success: true });
         }
-        return res
-          .status(400)
-          .json({ success: false, message: "Bedrock test failed" });
+        return fail(res, 400, "Bedrock test failed", { code: "bedrock_test_failed" });
       } catch (error: any) {
-        console.error("Error testing Bedrock connection:", error);
-        res.status(500).json({
-          success: false,
-          message: error?.message || "Failed to test Bedrock",
-        });
+        logRouteError("Error testing Bedrock connection", error);
+        fail(res, 500, "Failed to test Bedrock");
       }
     }
   );
@@ -1811,14 +1790,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       const templates = await storage.getEmailTemplates();
       res.json(templates);
     } catch (error) {
-      console.error("Error fetching email templates:", error);
-      res.status(500).json({ message: "Failed to fetch email templates" });
+      logRouteError("Error fetching email templates", error);
+      fail(res, 500, "Failed to fetch email templates");
     }
   });
 
@@ -1829,7 +1808,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       const { name } = req.params;
@@ -1840,8 +1819,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       res.json(template);
     } catch (error) {
-      console.error("Error updating email template:", error);
-      res.status(500).json({ message: "Failed to update email template" });
+      logRouteError("Error updating email template", error);
+      fail(res, 500, "Failed to update email template");
     }
   });
 
@@ -1859,8 +1838,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const notifications = await storage.getUnreadNotifications(userId, limit);
       res.json(notifications);
     } catch (error) {
-      console.error("Error fetching notifications:", error);
-      res.status(500).json({ message: "Failed to fetch notifications" });
+      logRouteError("Error fetching notifications", error);
+      fail(res, 500, "Failed to fetch notifications");
     }
   });
 
@@ -1873,8 +1852,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.markNotificationRead(id);
         res.json({ success: true });
       } catch (error) {
-        console.error("Error marking notification read:", error);
-        res.status(500).json({ message: "Failed to mark notification read" });
+        logRouteError("Error marking notification read", error);
+        fail(res, 500, "Failed to mark notification read");
       }
     }
   );
@@ -1888,10 +1867,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.markAllNotificationsRead(userId);
         res.json({ success: true });
       } catch (error) {
-        console.error("Error marking all notifications read:", error);
-        res
-          .status(500)
-          .json({ message: "Failed to mark all notifications read" });
+        logRouteError("Error marking all notifications read", error);
+        fail(res, 500, "Failed to mark all notifications read");
       }
     }
   );
@@ -1903,14 +1880,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       const documents = await storage.getHelpDocuments();
       res.json(documents);
     } catch (error) {
-      console.error("Error fetching help documents (admin):", error);
-      res.status(500).json({ message: "Failed to fetch help documents" });
+      logRouteError("Error fetching help documents (admin)", error);
+      fail(res, 500, "Failed to fetch help documents");
     }
   });
 
@@ -1920,8 +1897,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const documents = await storage.getHelpDocuments();
       res.json(documents);
     } catch (error) {
-      console.error("Error fetching help documents:", error);
-      res.status(500).json({ message: "Failed to fetch help documents" });
+      logRouteError("Error fetching help documents", error);
+      fail(res, 500, "Failed to fetch help documents");
     }
   });
 
@@ -1930,14 +1907,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { q } = req.query;
       if (!q || typeof q !== "string") {
-        return res.status(400).json({ message: "Search query is required" });
+        return fail(res, 400, "Search query is required");
       }
 
       const documents = await storage.searchHelpDocuments(q);
       res.json(documents);
     } catch (error) {
-      console.error("Error searching help documents:", error);
-      res.status(500).json({ message: "Failed to search help documents" });
+      logRouteError("Error searching help documents", error);
+      fail(res, 500, "Failed to search help documents");
     }
   });
 
@@ -1948,7 +1925,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const document = await storage.getHelpDocument(id);
 
       if (!document) {
-        return res.status(404).json({ message: "Help document not found" });
+        return fail(res, 404, "Help document not found");
       }
 
       // Increment view count
@@ -1956,8 +1933,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(document);
     } catch (error) {
-      console.error("Error fetching help document:", error);
-      res.status(500).json({ message: "Failed to fetch help document" });
+      logRouteError("Error fetching help document", error);
+      fail(res, 500, "Failed to fetch help document");
     }
   });
 
@@ -1968,15 +1945,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       const { title, filename, content, fileData, category, tags } = req.body;
 
       if (!title || !filename || !content || !fileData) {
-        return res.status(400).json({
-          message: "Title, filename, content, and file data are required",
-        });
+        return fail(res, 400, "Title, filename, content, and file data are required");
       }
 
       const document = await storage.createHelpDocument({
@@ -1991,8 +1966,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(document);
     } catch (error) {
-      console.error("Error creating help document:", error);
-      res.status(500).json({ message: "Failed to create help document" });
+      logRouteError("Error creating help document", error);
+      fail(res, 500, "Failed to create help document");
     }
   });
 
@@ -2003,7 +1978,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       const id = parseInt(req.params.id);
@@ -2012,8 +1987,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const document = await storage.updateHelpDocument(id, updates);
       res.json(document);
     } catch (error) {
-      console.error("Error updating help document:", error);
-      res.status(500).json({ message: "Failed to update help document" });
+      logRouteError("Error updating help document", error);
+      fail(res, 500, "Failed to update help document");
     }
   });
 
@@ -2024,7 +1999,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       const id = parseInt(req.params.id);
@@ -2032,8 +2007,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({ message: "Help document deleted successfully" });
     } catch (error) {
-      console.error("Error deleting help document:", error);
-      res.status(500).json({ message: "Failed to delete help document" });
+      logRouteError("Error deleting help document", error);
+      fail(res, 500, "Failed to delete help document");
     }
   });
 
@@ -2045,8 +2020,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const categories = await storage.getUserGuideCategories();
       res.json(categories);
     } catch (error) {
-      console.error("Error fetching guide categories:", error);
-      res.status(500).json({ message: "Failed to fetch guide categories" });
+      logRouteError("Error fetching guide categories", error);
+      fail(res, 500, "Failed to fetch guide categories");
     }
   });
 
@@ -2070,8 +2045,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       res.json(guides.map(publicGuide));
     } catch (error) {
-      console.error("Error fetching guides:", error);
-      res.status(500).json({ message: "Failed to fetch guides" });
+      logRouteError("Error fetching guides", error);
+      fail(res, 500, "Failed to fetch guides");
     }
   });
 
@@ -2085,7 +2060,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         !guide ||
         (guide.isPublished !== true && !isStaffRole((req.user as any)?.role))
       ) {
-        return res.status(404).json({ message: "Guide not found" });
+        return fail(res, 404, "Guide not found");
       }
 
       // Increment view count
@@ -2093,8 +2068,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(publicGuide(guide));
     } catch (error) {
-      console.error("Error fetching guide:", error);
-      res.status(500).json({ message: "Failed to fetch guide" });
+      logRouteError("Error fetching guide", error);
+      fail(res, 500, "Failed to fetch guide");
     }
   });
 
@@ -2105,14 +2080,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       const category = await storage.createUserGuideCategory(req.body);
       res.json(category);
     } catch (error) {
-      console.error("Error creating guide category:", error);
-      res.status(500).json({ message: "Failed to create guide category" });
+      logRouteError("Error creating guide category", error);
+      fail(res, 500, "Failed to create guide category");
     }
   });
 
@@ -2126,15 +2101,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const user = await storage.getUser(userId);
 
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const id = parseInt(req.params.id);
         const category = await storage.updateUserGuideCategory(id, req.body);
         res.json(category);
       } catch (error) {
-        console.error("Error updating guide category:", error);
-        res.status(500).json({ message: "Failed to update guide category" });
+        logRouteError("Error updating guide category", error);
+        fail(res, 500, "Failed to update guide category");
       }
     }
   );
@@ -2149,15 +2124,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const user = await storage.getUser(userId);
 
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const id = parseInt(req.params.id);
         await storage.deleteUserGuideCategory(id);
         res.json({ message: "Guide category deleted successfully" });
       } catch (error) {
-        console.error("Error deleting guide category:", error);
-        res.status(500).json({ message: "Failed to delete guide category" });
+        logRouteError("Error deleting guide category", error);
+        fail(res, 500, "Failed to delete guide category");
       }
     }
   );
@@ -2169,7 +2144,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       // content is required and must be text: without it the insert would
@@ -2187,8 +2162,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(publicGuide(guide));
     } catch (error) {
       if (error instanceof z.ZodError) return next(error);
-      console.error("Error creating guide:", error);
-      res.status(500).json({ message: "Failed to create guide" });
+      logRouteError("Error creating guide", error);
+      fail(res, 500, "Failed to create guide");
     }
   });
 
@@ -2199,7 +2174,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       const id = parseInt(req.params.id);
@@ -2210,8 +2185,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const guide = await storage.updateUserGuide(id, updates);
       res.json(guide ? publicGuide(guide) : guide);
     } catch (error) {
-      console.error("Error updating guide:", error);
-      res.status(500).json({ message: "Failed to update guide" });
+      logRouteError("Error updating guide", error);
+      fail(res, 500, "Failed to update guide");
     }
   });
 
@@ -2222,15 +2197,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       const id = parseInt(req.params.id);
       await storage.deleteUserGuide(id);
       res.json({ message: "Guide deleted successfully" });
     } catch (error) {
-      console.error("Error deleting guide:", error);
-      res.status(500).json({ message: "Failed to delete guide" });
+      logRouteError("Error deleting guide", error);
+      fail(res, 500, "Failed to delete guide");
     }
   });
 
@@ -2278,15 +2253,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Strict input validation
       if (!sessionId) {
-        return res.status(400).json({ message: "Session ID is required" });
+        return fail(res, 400, "Session ID is required");
       }
       const rawMessage =
         typeof message === "string" ? message : String(message ?? "");
       const trimmedMessage = rawMessage.trim();
       if (trimmedMessage.length === 0 || trimmedMessage.length > 2000) {
-        return res
-          .status(400)
-          .json({ message: "Message must be 1-2000 characters" });
+        return fail(res, 400, "Message must be 1-2000 characters");
       }
 
       // Save user message
@@ -2461,7 +2434,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
         } catch (error) {
-          console.error("Error searching help documents:", error);
+          logRouteError("Error searching help documents", error);
           response =
             "I'm experiencing technical difficulties. Please try again later.";
         }
@@ -2491,7 +2464,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       console.error("Error in chat:", describeAIError(error));
-      res.status(500).json({ message: "Failed to process chat message" });
+      fail(res, 500, "Failed to process chat message");
     }
   });
 
@@ -2504,8 +2477,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const messages = await storage.getChatMessages(userId, sessionId);
       res.json(messages);
     } catch (error) {
-      console.error("Error fetching chat history:", error);
-      res.status(500).json({ message: "Failed to fetch chat history" });
+      logRouteError("Error fetching chat history", error);
+      fail(res, 500, "Failed to fetch chat history");
     }
   });
 
@@ -2516,8 +2489,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sessions = await storage.getChatSessions(userId);
       res.json(sessions);
     } catch (error) {
-      console.error("Error fetching chat sessions:", error);
-      res.status(500).json({ message: "Failed to fetch chat sessions" });
+      logRouteError("Error fetching chat sessions", error);
+      fail(res, 500, "Failed to fetch chat sessions");
     }
   });
 
@@ -2576,7 +2549,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(legacyUsage);
     } catch (error) {
       console.error("Error fetching Bedrock usage:", describeAIError(error));
-      res.status(500).json({ message: "Failed to fetch Bedrock usage" });
+      fail(res, 500, "Failed to fetch Bedrock usage");
     }
   });
 
@@ -2590,14 +2563,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const user = await storage.getUser(userId);
 
         if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const stats = await bedrockIntegration.getCostStatistics();
         res.json(stats);
       } catch (error) {
         console.error("Error fetching cost statistics:", describeAIError(error));
-        res.status(500).json({ message: "Failed to fetch cost statistics" });
+        fail(res, 500, "Failed to fetch cost statistics");
       }
     }
   );
@@ -2611,7 +2584,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const user = await storage.getUser(userId);
 
         if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const { dailyLimitUSD, monthlyLimitUSD, maxTokensPerRequest } =
@@ -2629,7 +2602,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.json(updatedLimits);
       } catch (error) {
         console.error("Error updating cost limits:", describeAIError(error));
-        res.status(500).json({ message: "Failed to update cost limits" });
+        fail(res, 500, "Failed to update cost limits");
       }
     }
   );
@@ -2643,14 +2616,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const user = await storage.getUser(userId);
 
         if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         await bedrockIntegration.resetUsageData();
         res.json({ message: "Usage data reset successfully" });
       } catch (error) {
         console.error("Error resetting usage data:", describeAIError(error));
-        res.status(500).json({ message: "Failed to reset usage data" });
+        fail(res, 500, "Failed to reset usage data");
       }
     }
   );
@@ -2664,7 +2637,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const user = await storage.getUser(userId);
 
         if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const { startDate, endDate } = req.query;
@@ -2679,8 +2652,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           dateRange: { startDate, endDate },
         });
       } catch (error) {
-        console.error("Error exporting usage data:", error);
-        res.status(500).json({ message: "Failed to export usage data" });
+        logRouteError("Error exporting usage data", error);
+        fail(res, 500, "Failed to export usage data");
       }
     }
   );
@@ -2694,7 +2667,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const user = await storage.getUser(userId);
 
         if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const result = await bedrockIntegration.testConnection();
@@ -2706,19 +2679,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             costEstimate: result.costEstimate,
           });
         } else {
+          // Admin-only diagnostic: the test's own failure text is the payload.
           res.status(400).json({
+            error: "bedrock_test_failed",
             success: false,
             message: result.error || "Bedrock test failed",
             costEstimate: result.costEstimate,
           });
         }
       } catch (error) {
-        console.error("Error testing Bedrock connection:", error);
-        res.status(500).json({
-          success: false,
-          message:
-            (error as any)?.message || "Failed to test Bedrock connection",
-        });
+        logRouteError("Error testing Bedrock connection", error);
+        fail(res, 500, "Failed to test Bedrock connection");
       }
     }
   );
@@ -2730,15 +2701,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
       const popularFaqs = await storage.getPopularFaqs(limit);
       res.json(popularFaqs);
     } catch (error) {
-      console.error("Error fetching FAQ cache:", error);
-      res.status(500).json({ message: "Failed to fetch FAQ cache" });
+      logRouteError("Error fetching FAQ cache", error);
+      fail(res, 500, "Failed to fetch FAQ cache");
     }
   });
 
@@ -2748,14 +2719,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       await storage.clearFaqCache();
       res.json({ message: "FAQ cache cleared successfully" });
     } catch (error) {
-      console.error("Error clearing FAQ cache:", error);
-      res.status(500).json({ message: "Failed to clear FAQ cache" });
+      logRouteError("Error clearing FAQ cache", error);
+      fail(res, 500, "Failed to clear FAQ cache");
     }
   });
 
@@ -2772,8 +2743,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const policies = await storage.getAllCompanyPolicies(includeInactive);
       res.json(policies);
     } catch (error) {
-      console.error("Error fetching company policies:", error);
-      res.status(500).json({ message: "Failed to fetch company policies" });
+      logRouteError("Error fetching company policies", error);
+      fail(res, 500, "Failed to fetch company policies");
     }
   });
 
@@ -2783,13 +2754,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const policy = await storage.getCompanyPolicyById(policyId);
 
       if (!policy || (!policy.isActive && !isAdminCaller(req))) {
-        return res.status(404).json({ message: "Company policy not found" });
+        return fail(res, 404, "Company policy not found");
       }
 
       res.json(policy);
     } catch (error) {
-      console.error("Error fetching company policy:", error);
-      res.status(500).json({ message: "Failed to fetch company policy" });
+      logRouteError("Error fetching company policy", error);
+      fail(res, 500, "Failed to fetch company policy");
     }
   });
 
@@ -2803,11 +2774,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const user = await storage.getUser(userId);
 
         if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         if (!req.file) {
-          return res.status(400).json({ message: "File is required" });
+          return fail(res, 400, "File is required");
         }
 
         const { description } = req.body;
@@ -2833,8 +2804,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.json(policy);
       } catch (error) {
-        console.error("Error creating company policy:", error);
-        res.status(500).json({ message: "Failed to create company policy" });
+        logRouteError("Error creating company policy", error);
+        fail(res, 500, "Failed to create company policy");
       }
     }
   );
@@ -2849,7 +2820,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const user = await storage.getUser(userId);
 
         if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const policyId = parseInt(req.params.id);
@@ -2869,8 +2840,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const policy = await storage.updateCompanyPolicy(policyId, updateData);
         res.json(policy);
       } catch (error) {
-        console.error("Error updating company policy:", error);
-        res.status(500).json({ message: "Failed to update company policy" });
+        logRouteError("Error updating company policy", error);
+        fail(res, 500, "Failed to update company policy");
       }
     }
   );
@@ -2884,15 +2855,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const user = await storage.getUser(userId);
 
         if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const policyId = parseInt(req.params.id);
         await storage.deleteCompanyPolicy(policyId);
         res.json({ message: "Company policy deleted successfully" });
       } catch (error) {
-        console.error("Error deleting company policy:", error);
-        res.status(500).json({ message: "Failed to delete company policy" });
+        logRouteError("Error deleting company policy", error);
+        fail(res, 500, "Failed to delete company policy");
       }
     }
   );
@@ -2906,17 +2877,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const user = await storage.getUser(userId);
 
         if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const policyId = parseInt(req.params.id);
         const policy = await storage.toggleCompanyPolicyStatus(policyId);
         res.json(policy);
       } catch (error) {
-        console.error("Error toggling company policy status:", error);
-        res
-          .status(500)
-          .json({ message: "Failed to toggle company policy status" });
+        logRouteError("Error toggling company policy status", error);
+        fail(res, 500, "Failed to toggle company policy status");
       }
     }
   );
@@ -2930,7 +2899,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const policy = await storage.getCompanyPolicyById(policyId);
 
         if (!policy || (!policy.isActive && !isAdminCaller(req))) {
-          return res.status(404).json({ message: "Company policy not found" });
+          return fail(res, 404, "Company policy not found");
         }
 
         // Check if fileData exists (new format) or fall back to content (old format)
@@ -2945,8 +2914,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
         res.send(fileBuffer);
       } catch (error) {
-        console.error("Error downloading company policy:", error);
-        res.status(500).json({ message: "Failed to download company policy" });
+        logRouteError("Error downloading company policy", error);
+        fail(res, 500, "Failed to download company policy");
       }
     }
   );
@@ -2961,15 +2930,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const user = await storage.getUser(userId);
 
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const id = parseInt(req.params.id);
         await storage.cancelUserInvitation(id);
         res.json({ message: "Invitation cancelled successfully" });
       } catch (error) {
-        console.error("Error cancelling invitation:", error);
-        res.status(500).json({ message: "Failed to cancel invitation" });
+        logRouteError("Error cancelling invitation", error);
+        fail(res, 500, "Failed to cancel invitation");
       }
     }
   );
@@ -2984,20 +2953,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const user = await storage.getUser(userId);
 
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const id = parseInt(req.params.id);
         const invitation = await storage.getUserInvitationById(id);
 
         if (!invitation) {
-          return res.status(404).json({ message: "Invitation not found" });
+          return fail(res, 404, "Invitation not found");
         }
 
         if (invitation.status === "accepted") {
-          return res
-            .status(400)
-            .json({ message: "Cannot resend accepted invitation" });
+          return fail(res, 400, "Cannot resend accepted invitation");
         }
 
         // Send invitation email using the template
@@ -3097,8 +3064,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.json({ message: "Invitation resent successfully" });
       } catch (error) {
-        console.error("Error resending invitation:", error);
-        res.status(500).json({ message: "Failed to resend invitation" });
+        logRouteError("Error resending invitation", error);
+        fail(res, 500, "Failed to resend invitation");
       }
     }
   );
@@ -3108,19 +3075,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const departmentId = parseInt(req.params.id);
       if (isNaN(departmentId)) {
-        return res.status(400).json({ message: "Invalid department ID" });
+        return fail(res, 400, "Invalid department ID", { code: "invalid_id" });
       }
 
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
 
       if (!user) {
-        return res.status(401).json({ message: "Unauthorized" });
+        return fail(res, 401, "Unauthorized");
       }
 
       const department = await storage.getDepartmentById(departmentId);
       if (!department) {
-        return res.status(404).json({ message: "Department not found" });
+        return fail(res, 404, "Department not found");
       }
 
       // Permission check: Admin can access all, Manager can only access their departments
@@ -3129,18 +3096,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else if (user.role === "manager") {
         // Manager can only access departments they manage
         if (department.managerId !== userId) {
-          return res.status(403).json({
-            message: "You can only access departments you manage",
-          });
+          return fail(res, 403, "You can only access departments you manage");
         }
       } else {
-        return res.status(403).json({ message: "Forbidden" });
+        return fail(res, 403, "Forbidden");
       }
 
       res.json(department);
     } catch (error) {
-      console.error("Error fetching department:", error);
-      res.status(500).json({ message: "Failed to fetch department" });
+      logRouteError("Error fetching department", error);
+      fail(res, 500, "Failed to fetch department");
     }
   });
 
@@ -3150,7 +3115,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user) {
-        return res.status(401).json({ message: "Unauthorized" });
+        return fail(res, 401, "Unauthorized");
       }
 
       if (user.role === "admin") {
@@ -3173,10 +3138,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json(rows);
       }
 
-      return res.status(403).json({ message: "Forbidden" });
+      return fail(res, 403, "Forbidden");
     } catch (error) {
-      console.error("Error fetching departments:", error);
-      res.status(500).json({ message: "Failed to fetch departments" });
+      logRouteError("Error fetching departments", error);
+      fail(res, 500, "Failed to fetch departments");
     }
   });
 
@@ -3186,14 +3151,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       // Validate required fields
       if (!req.body.name || !req.body.description) {
-        return res.status(400).json({
-          message: "Name and description are required",
-        });
+        return fail(res, 400, "Name and description are required");
       }
 
       const department = await storage.createDepartment(req.body);
@@ -3203,8 +3166,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(department);
     } catch (error) {
-      console.error("Error creating department:", error);
-      res.status(500).json({ message: "Failed to create department" });
+      logRouteError("Error creating department", error);
+      fail(res, 500, "Failed to create department");
     }
   });
 
@@ -3214,14 +3177,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       // Validate required fields
       if (!req.body.name || !req.body.description) {
-        return res.status(400).json({
-          message: "Name and description are required",
-        });
+        return fail(res, 400, "Name and description are required");
       }
 
       const id = parseInt(req.params.id);
@@ -3232,8 +3193,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(department);
     } catch (error) {
-      console.error("Error updating department:", error);
-      res.status(500).json({ message: "Failed to update department" });
+      logRouteError("Error updating department", error);
+      fail(res, 500, "Failed to update department");
     }
   });
 
@@ -3246,7 +3207,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const user = await storage.getUser(userId);
 
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const id = parseInt(req.params.id);
@@ -3257,8 +3218,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.json({ message: "Department deleted successfully" });
       } catch (error) {
-        console.error("Error deleting department:", error);
-        res.status(500).json({ message: "Failed to delete department" });
+        logRouteError("Error deleting department", error);
+        fail(res, 500, "Failed to delete department");
       }
     }
   );
@@ -3268,20 +3229,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const departmentId = parseInt(req.params.id);
       if (isNaN(departmentId)) {
-        return res.status(400).json({ message: "Invalid department ID" });
+        return fail(res, 400, "Invalid department ID", { code: "invalid_id" });
       }
 
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
 
       if (!user) {
-        return res.status(401).json({ message: "Unauthorized" });
+        return fail(res, 401, "Unauthorized");
       }
 
       // Check if department exists
       const department = await storage.getDepartmentById(departmentId);
       if (!department) {
-        return res.status(404).json({ message: "Department not found" });
+        return fail(res, 404, "Department not found");
       }
 
       // Permission check: Admin can access all, Manager can only access their departments
@@ -3290,12 +3251,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else if (user.role === "manager") {
         // Manager can only access departments they manage
         if (department.managerId !== userId) {
-          return res.status(403).json({
-            message: "You can only access departments you manage",
-          });
+          return fail(res, 403, "You can only access departments you manage");
         }
       } else {
-        return res.status(403).json({ message: "Forbidden" });
+        return fail(res, 403, "Forbidden");
       }
 
       // Get teams in this department
@@ -3313,8 +3272,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(departmentTeams);
     } catch (error) {
-      console.error("Error fetching department teams:", error);
-      res.status(500).json({ message: "Failed to fetch department teams" });
+      logRouteError("Error fetching department teams", error);
+      fail(res, 500, "Failed to fetch department teams");
     }
   });
 
@@ -3323,20 +3282,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const departmentId = parseInt(req.params.id);
       if (isNaN(departmentId)) {
-        return res.status(400).json({ message: "Invalid department ID" });
+        return fail(res, 400, "Invalid department ID", { code: "invalid_id" });
       }
 
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
 
       if (!user) {
-        return res.status(401).json({ message: "Unauthorized" });
+        return fail(res, 401, "Unauthorized");
       }
 
       // Check if department exists
       const department = await storage.getDepartmentById(departmentId);
       if (!department) {
-        return res.status(404).json({ message: "Department not found" });
+        return fail(res, 404, "Department not found");
       }
 
       // Permission check: Admin can access all, Manager can only access their departments
@@ -3345,12 +3304,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else if (user.role === "manager") {
         // Manager can only access departments they manage
         if (department.managerId !== userId) {
-          return res.status(403).json({
-            message: "You can only access departments you manage",
-          });
+          return fail(res, 403, "You can only access departments you manage");
         }
       } else {
-        return res.status(403).json({ message: "Forbidden" });
+        return fail(res, 403, "Forbidden");
       }
 
       // Get teams in this department
@@ -3410,10 +3367,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         highPriorityTickets,
       });
     } catch (error) {
-      console.error("Error fetching department stats:", error);
-      res
-        .status(500)
-        .json({ message: "Failed to fetch department statistics" });
+      logRouteError("Error fetching department stats", error);
+      fail(res, 500, "Failed to fetch department statistics");
     }
   });
 
@@ -3424,7 +3379,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       const { status } = req.query;
@@ -3433,8 +3388,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       res.json(invitations);
     } catch (error) {
-      console.error("Error fetching invitations:", error);
-      res.status(500).json({ message: "Failed to fetch invitations" });
+      logRouteError("Error fetching invitations", error);
+      fail(res, 500, "Failed to fetch invitations");
     }
   });
 
@@ -3444,16 +3399,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       // Check if a user with this email already exists (case-insensitive)
       const existingUser = await storage.getUserByEmail(req.body.email);
       if (existingUser) {
-        return res.status(400).json({
-          message:
-            "A user with this email address already exists in the system. You cannot send an invitation to an existing user.",
-        });
+        return fail(
+          res,
+          400,
+          "A user with this email address already exists in the system. You cannot send an invitation to an existing user.",
+          { code: "email_registered" }
+        );
       }
 
       // Check for existing pending invitations (not expired)
@@ -3469,10 +3426,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       if (hasPendingInvitation) {
-        return res.status(400).json({
-          message:
-            "An invitation has already been sent to this email address and is still pending. Please wait for it to expire or be accepted before sending a new invitation.",
-        });
+        return fail(
+          res,
+          400,
+          "An invitation has already been sent to this email address and is still pending. Please wait for it to expire or be accepted before sending a new invitation.",
+          { code: "invitation_pending" }
+        );
       }
 
       const inviteRole = normalizeRole(req.body.role);
@@ -3618,8 +3577,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.status(201).json(invitation);
     } catch (error) {
-      console.error("Error creating invitation:", error);
-      res.status(500).json({ message: "Failed to create invitation" });
+      logRouteError("Error creating invitation", error);
+      fail(res, 500, "Failed to create invitation");
     }
   });
 
@@ -3631,7 +3590,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(getUserId(req));
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
         // Check for active email provider
         let emailProviderConfigured = false;
@@ -3668,10 +3627,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             : "Email service is not configured. Please configure AWS SES credentials and email templates.",
         });
       } catch (error) {
-        console.error("Error checking email service status:", error);
-        res
-          .status(500)
-          .json({ message: "Failed to check email service status" });
+        logRouteError("Error checking email service status", error);
+        fail(res, 500, "Failed to check email service status");
       }
     }
   );
@@ -3711,8 +3668,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         departmentId: invitation.departmentId,
       });
     } catch (error) {
-      console.error("Error validating invitation:", error);
-      res.status(500).json({ message: "Failed to validate invitation" });
+      logRouteError("Error validating invitation", error);
+      fail(res, 500, "Failed to validate invitation");
     }
   });
 
@@ -3793,8 +3750,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({ message: "Invitation accepted. Your role has been updated." });
     } catch (error) {
-      console.error("Error accepting invitation:", error);
-      res.status(500).json({ message: "Failed to accept invitation" });
+      logRouteError("Error accepting invitation", error);
+      fail(res, 500, "Failed to accept invitation");
     }
   });
 
@@ -3803,7 +3760,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       await storage.deleteExpiredInvitations();
     } catch (error) {
-      console.error("Error cleaning up expired invitations:", error);
+      logRouteError("Error cleaning up expired invitations", error);
     }
   }, 24 * 60 * 60 * 1000); // Run once per day
 
@@ -3827,8 +3784,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const settings = await storage.getTeamsIntegrationSettings(userId);
         res.json(settings || { enabled: false });
       } catch (error) {
-        console.error("Error fetching Teams settings:", error);
-        res.status(500).json({ message: "Failed to fetch Teams settings" });
+        logRouteError("Error fetching Teams settings", error);
+        fail(res, 500, "Failed to fetch Teams settings");
       }
     }
   );
@@ -3848,8 +3805,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.json(settings);
       } catch (error) {
         if (error instanceof z.ZodError || error instanceof HttpError) return next(error);
-        console.error("Error updating Teams settings:", error);
-        res.status(500).json({ message: "Failed to update Teams settings" });
+        logRouteError("Error updating Teams settings", error);
+        fail(res, 500, "Failed to update Teams settings");
       }
     }
   );
@@ -3864,10 +3821,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.deleteTeamsIntegrationSettings(userId);
         res.json({ message: "Teams integration disabled" });
       } catch (error) {
-        console.error("Error disabling Teams integration:", error);
-        res
-          .status(500)
-          .json({ message: "Failed to disable Teams integration" });
+        logRouteError("Error disabling Teams integration", error);
+        fail(res, 500, "Failed to disable Teams integration");
       }
     }
   );
@@ -3880,9 +3835,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     async (req: any, res) => {
       try {
         if (!req.user.access_token) {
-          return res
-            .status(401)
-            .json({ message: "Microsoft authentication required" });
+          return fail(res, 401, "Microsoft authentication required", {
+            code: "microsoft_auth_required",
+          });
         }
 
         const teams = await teamsIntegration.listTeamsAndChannels(
@@ -3890,8 +3845,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
         res.json(teams);
       } catch (error) {
-        console.error("Error fetching teams:", error);
-        res.status(500).json({ message: "Failed to fetch teams" });
+        logRouteError("Error fetching teams", error);
+        fail(res, 500, "Failed to fetch teams");
       }
     }
   );
@@ -3907,9 +3862,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const settings = await storage.getTeamsIntegrationSettings(userId);
 
         if (!settings || !settings.enabled) {
-          return res
-            .status(400)
-            .json({ message: "Teams integration not configured" });
+          return fail(res, 400, "Teams integration not configured");
         }
 
         // A stored URL that is not allow-listed (or resolves to a private
@@ -3955,12 +3908,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (success) {
           res.json({ message: "Test notification sent successfully" });
         } else {
-          res.status(500).json({ message: "Failed to send test notification" });
+          fail(res, 500, "Failed to send test notification");
         }
       } catch (error) {
         if (error instanceof HttpError) return next(error);
-        console.error("Error sending test notification:", error);
-        res.status(500).json({ message: "Failed to send test notification" });
+        logRouteError("Error sending test notification", error);
+        fail(res, 500, "Failed to send test notification");
       }
     }
   );
@@ -4016,7 +3969,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     } catch (error) {
       console.error("Error fetching auto-response:", describeAIError(error));
-      res.status(500).json({ message: "Failed to fetch auto-response" });
+      fail(res, 500, "Failed to fetch auto-response");
     }
   });
 
@@ -4150,23 +4103,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     "/api/tasks/:id/auto-response/feedback",
     isAuthenticated,
     requireTaskAccess(),
-    async (req, res) => {
+    async (req, res, next) => {
       try {
         const taskId = parseInt(req.params.id);
-        const { wasHelpful } = req.body;
+        const { wasHelpful } = z
+          .object({ wasHelpful: z.boolean() })
+          .parse(req.body ?? {});
 
         const { aiAutoResponseService } = await import(
           "../services/ai/aiAutoResponse"
         );
-        await aiAutoResponseService.updateResponseEffectiveness(
+        const marked = await aiAutoResponseService.updateResponseEffectiveness(
           taskId,
           wasHelpful
         );
+        if (marked === 0) {
+          throw new HttpError(404, "not_found", "This ticket has no auto-response");
+        }
 
         res.json({ message: "Feedback recorded" });
       } catch (error) {
-        console.error("Error recording feedback:", error);
-        res.status(500).json({ message: "Failed to record feedback" });
+        next(error);
       }
     }
   );
@@ -4213,8 +4170,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       // A ZodError becomes 400 validation_failed in the JSON error handler.
       if (error instanceof z.ZodError) return next(error);
-      console.error("Error searching knowledge base:", error);
-      res.status(500).json({ message: "Failed to search knowledge base" });
+      logRouteError("Error searching knowledge base", error);
+      fail(res, 500, "Failed to search knowledge base");
     }
   });
 
@@ -4223,7 +4180,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const user = await storage.getUser(getUserId(req));
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       // status and source filters ported from the removed shadowed copy: the
@@ -4240,8 +4197,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const articles = await storage.getAllKnowledgeArticles(filters);
       res.json(articles);
     } catch (error) {
-      console.error("Error fetching knowledge articles:", error);
-      res.status(500).json({ message: "Failed to fetch knowledge articles" });
+      logRouteError("Error fetching knowledge articles", error);
+      fail(res, 500, "Failed to fetch knowledge articles");
     }
   });
 
@@ -4252,7 +4209,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       // Ported from the removed shadowed copy: required fields and a field
@@ -4293,7 +4250,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(getUserId(req));
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const articleId = parseInt(req.params.id);
@@ -4310,8 +4267,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
         res.json(article);
       } catch (error) {
-        console.error("Error updating knowledge article:", error);
-        res.status(500).json({ message: "Failed to update knowledge article" });
+        logRouteError("Error updating knowledge article", error);
+        fail(res, 500, "Failed to update knowledge article");
       }
     }
   );
@@ -4324,15 +4281,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(getUserId(req));
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const articleId = parseInt(req.params.id);
         await storage.deleteKnowledgeArticle(articleId);
         res.json({ message: "Knowledge article deleted successfully" });
       } catch (error) {
-        console.error("Error deleting knowledge article:", error);
-        res.status(500).json({ message: "Failed to delete knowledge article" });
+        logRouteError("Error deleting knowledge article", error);
+        fail(res, 500, "Failed to delete knowledge article");
       }
     }
   );
@@ -4341,15 +4298,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch(
     "/api/admin/knowledge/:id/publish",
     isAuthenticated,
-    async (req: any, res) => {
+    async (req: any, res, next) => {
       try {
         const user = await storage.getUser(getUserId(req));
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const articleId = parseInt(req.params.id);
-        const { isPublished } = req.body;
+        // With no body this is a toggle; an explicit boolean sets the state.
+        const { isPublished: requested } = z
+          .object({ isPublished: z.boolean().optional() })
+          .parse(req.body ?? {});
+
+        const [article] = await db
+          .select({ isPublished: knowledgeArticles.isPublished })
+          .from(knowledgeArticles)
+          .where(eq(knowledgeArticles.id, articleId))
+          .limit(1);
+        if (!article) {
+          throw new HttpError(404, "not_found", "Article not found");
+        }
+        const isPublished = requested ?? !article.isPublished;
 
         // Sets status together with isPublished (the shadowed copy's fix); the
         // old service calls left `status` stale.
@@ -4358,10 +4328,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           isPublished ? "published" : "draft"
         );
 
-        res.json({ message: "Article updated" });
+        res.json({ message: "Article updated", isPublished });
       } catch (error) {
-        console.error("Error updating article:", error);
-        res.status(500).json({ message: "Failed to update article" });
+        next(error);
       }
     }
   );
@@ -4382,8 +4351,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({ message: "Feedback recorded" });
     } catch (error) {
-      console.error("Error recording feedback:", error);
-      res.status(500).json({ message: "Failed to record feedback" });
+      logRouteError("Error recording feedback", error);
+      fail(res, 500, "Failed to record feedback");
     }
   });
 
@@ -4397,7 +4366,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(getUserId(req));
         if (!user || (user.role !== "admin" && user.role !== "manager")) {
-          return res.status(403).json({ message: "Manager access required" });
+          return fail(res, 403, "Manager access required");
         }
 
         // Get auto-response statistics
@@ -4445,7 +4414,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       } catch (error) {
         console.error("Error fetching AI analytics:", describeAIError(error));
-        res.status(500).json({ message: "Failed to fetch AI analytics" });
+        fail(res, 500, "Failed to fetch AI analytics");
       }
     }
   );
@@ -4460,7 +4429,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(getUserId(req));
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const rules = await db
@@ -4470,8 +4439,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.json(rules);
       } catch (error) {
-        console.error("Error fetching escalation rules:", error);
-        res.status(500).json({ message: "Failed to fetch escalation rules" });
+        logRouteError("Error fetching escalation rules", error);
+        fail(res, 500, "Failed to fetch escalation rules");
       }
     }
   );
@@ -4484,7 +4453,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(getUserId(req));
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const rule = await db
@@ -4494,8 +4463,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.json(rule[0]);
       } catch (error) {
-        console.error("Error creating escalation rule:", error);
-        res.status(500).json({ message: "Failed to create escalation rule" });
+        logRouteError("Error creating escalation rule", error);
+        fail(res, 500, "Failed to create escalation rule");
       }
     }
   );
@@ -4508,7 +4477,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(getUserId(req));
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const ruleId = parseInt(req.params.id);
@@ -4520,8 +4489,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.json(rule[0]);
       } catch (error) {
-        console.error("Error updating escalation rule:", error);
-        res.status(500).json({ message: "Failed to update escalation rule" });
+        logRouteError("Error updating escalation rule", error);
+        fail(res, 500, "Failed to update escalation rule");
       }
     }
   );
@@ -4534,7 +4503,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(getUserId(req));
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const ruleId = parseInt(req.params.id);
@@ -4542,8 +4511,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.json({ message: "Rule deleted successfully" });
       } catch (error) {
-        console.error("Error deleting escalation rule:", error);
-        res.status(500).json({ message: "Failed to delete escalation rule" });
+        logRouteError("Error deleting escalation rule", error);
+        fail(res, 500, "Failed to delete escalation rule");
       }
     }
   );
@@ -4590,9 +4559,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Validate rating
       if (![1, 5].includes(rating)) {
-        return res
-          .status(400)
-          .json({ message: "Rating must be 1 (thumbs down) or 5 (thumbs up)" });
+        throw new HttpError(
+          400,
+          "validation_failed",
+          "Rating must be 1 (thumbs down) or 5 (thumbs up)"
+        );
       }
 
       const feedback = await db
@@ -4621,9 +4592,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(feedback[0]);
     } catch (error) {
-      if (error instanceof HttpError) return next(error);
-      console.error("Error submitting AI feedback:", error);
-      res.status(500).json({ message: "Failed to submit feedback" });
+      next(error);
     }
   });
 
@@ -4670,9 +4639,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.json(feedback);
       } catch (error) {
-        if (error instanceof HttpError) return next(error);
-        console.error("Error fetching AI feedback:", error);
-        res.status(500).json({ message: "Failed to fetch feedback" });
+        next(error);
       }
     }
   );
@@ -4686,7 +4653,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const { query, limit = 5 } = req.body;
 
         if (!query) {
-          return res.status(400).json({ message: "Search query is required" });
+          return fail(res, 400, "Search query is required");
         }
 
         const results = await intelligentKnowledgeSearch(
@@ -4697,8 +4664,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.json(results);
       } catch (error) {
-        console.error("Error searching knowledge base:", error);
-        res.status(500).json({ message: "Failed to search knowledge base" });
+        logRouteError("Error searching knowledge base", error);
+        fail(res, 500, "Failed to search knowledge base");
       }
     }
   );
@@ -4720,9 +4687,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .limit(1);
 
         if (!task || task.status !== "resolved") {
-          return res.status(400).json({
-            message: "Only resolved tickets can be added to learning queue",
-          });
+          return fail(res, 400, "Only resolved tickets can be added to learning queue");
         }
 
         // Check if already in queue
@@ -4733,9 +4698,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .limit(1);
 
         if (existing.length > 0) {
-          return res
-            .status(400)
-            .json({ message: "Ticket already in learning queue" });
+          return fail(res, 400, "Ticket already in learning queue");
         }
 
         // Add to queue
@@ -4746,8 +4709,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.json(queueItem);
       } catch (error) {
-        console.error("Error adding to learning queue:", error);
-        res.status(500).json({ message: "Failed to add to learning queue" });
+        logRouteError("Error adding to learning queue", error);
+        fail(res, 500, "Failed to add to learning queue");
       }
     }
   );
@@ -4760,7 +4723,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(getUserId(req));
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         // Process knowledge learning queue asynchronously
@@ -4768,8 +4731,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.json({ message: "Learning queue processing started" });
       } catch (error) {
-        console.error("Error starting learning queue:", error);
-        res.status(500).json({ message: "Failed to start learning queue" });
+        logRouteError("Error starting learning queue", error);
+        fail(res, 500, "Failed to start learning queue");
       }
     }
   );
@@ -4782,7 +4745,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(getUserId(req));
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const { daysBack = 90 } = req.body;
@@ -4797,8 +4760,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message: `Started seeding historical tickets from the last ${daysBack} days`,
         });
       } catch (error) {
-        console.error("Error seeding historical tickets:", error);
-        res.status(500).json({ message: "Failed to seed historical tickets" });
+        logRouteError("Error seeding historical tickets", error);
+        fail(res, 500, "Failed to seed historical tickets");
       }
     }
   );
@@ -4811,7 +4774,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(getUserId(req));
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const statusArray = await db
@@ -4859,10 +4822,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.json(statusObj);
       } catch (error) {
-        console.error("Error fetching learning queue status:", error);
-        res
-          .status(500)
-          .json({ message: "Failed to fetch learning queue status" });
+        logRouteError("Error fetching learning queue status", error);
+        fail(res, 500, "Failed to fetch learning queue status");
       }
     }
   );
@@ -4875,7 +4836,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(getUserId(req));
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const status = await db
@@ -4888,10 +4849,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.json(status);
       } catch (error) {
-        console.error("Error fetching learning queue status:", error);
-        res
-          .status(500)
-          .json({ message: "Failed to fetch learning queue status" });
+        logRouteError("Error fetching learning queue status", error);
+        fail(res, 500, "Failed to fetch learning queue status");
       }
     }
   );
@@ -4904,15 +4863,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const user = await storage.getUser(getUserId(req));
         if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const { start, end } = req.body;
 
         if (!start || !end) {
-          return res.status(400).json({
-            message: "Start and end dates are required",
-          });
+          return fail(res, 400, "Start and end dates are required");
         }
 
         // Parse dates
@@ -4921,15 +4878,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Validate dates
         if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-          return res.status(400).json({
-            message: "Invalid date format. Use YYYY-MM-DD format",
-          });
+          return fail(res, 400, "Invalid date format. Use YYYY-MM-DD format");
         }
 
         if (startDate > endDate) {
-          return res.status(400).json({
-            message: "Start date must be before end date",
-          });
+          return fail(res, 400, "Start date must be before end date");
         }
 
         // Check if there are any items currently being processed
@@ -4942,12 +4895,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const processingCount = Number(processingCountResult?.count || 0);
 
         if (processingCount > 0) {
-          return res.status(409).json({
-            message:
-              "Batch processing is already in progress. Please wait for the current process to complete.",
-            isProcessing: true,
-            processingCount,
-          });
+          return fail(
+            res,
+            409,
+            "Batch processing is already in progress. Please wait for the current process to complete.",
+            {
+              code: "batch_in_progress",
+              details: { isProcessing: true, processingCount },
+            }
+          );
         }
 
         // Get ticket count for the date range
@@ -5008,7 +4964,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       } catch (error) {
         console.error("Error starting batch processing:", describeAIError(error));
-        res.status(500).json({ message: "Failed to start batch processing" });
+        fail(res, 500, "Failed to start batch processing");
       }
     }
   );
@@ -5018,7 +4974,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const user = await storage.getUser(getUserId(req));
       if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
+        return fail(res, 403, "Admin access required");
       }
 
       // Get knowledge articles statistics
@@ -5088,7 +5044,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       console.error("Error fetching AI analytics:", describeAIError(error));
-      res.status(500).json({ message: "Failed to fetch AI analytics" });
+      fail(res, 500, "Failed to fetch AI analytics");
     }
   });
 
@@ -5206,7 +5162,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Only admins can manually trigger knowledge learning
         if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const results = await processKnowledgeLearning();
@@ -5216,7 +5172,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       } catch (error) {
         console.error("Knowledge learning error:", describeAIError(error));
-        res.status(500).json({ message: "Failed to run knowledge learning" });
+        fail(res, 500, "Failed to run knowledge learning");
       }
     }
   );
@@ -5301,7 +5257,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       console.error("AI status check error:", describeAIError(error));
-      res.status(500).json({ message: "Failed to check AI status" });
+      fail(res, 500, "Failed to check AI status");
     }
   });
 
@@ -5317,22 +5273,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const user = await storage.getUser(userId);
 
         if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         }
 
         const id = parseInt(req.params.id);
         const article = await storage.getKnowledgeArticle(id);
 
         if (!article) {
-          return res
-            .status(404)
-            .json({ message: "Knowledge article not found" });
+          return fail(res, 404, "Knowledge article not found");
         }
 
         res.json(article);
       } catch (error) {
-        console.error("Error fetching knowledge article:", error);
-        res.status(500).json({ message: "Failed to fetch knowledge article" });
+        logRouteError("Error fetching knowledge article", error);
+        fail(res, 500, "Failed to fetch knowledge article");
       }
     }
   );
@@ -5347,13 +5301,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const userId = getUserId(req);
         const user = await storage.getUser(userId);
         if (user?.role !== "admin")
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         const id = parseInt(req.params.id);
         const article = await storage.setKnowledgeArticleStatus(id, "draft");
         res.json(article);
       } catch (error) {
-        console.error("Error unpublishing article:", error);
-        res.status(500).json({ message: "Failed to unpublish article" });
+        logRouteError("Error unpublishing article", error);
+        fail(res, 500, "Failed to unpublish article");
       }
     }
   );
@@ -5366,13 +5320,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const userId = getUserId(req);
         const user = await storage.getUser(userId);
         if (user?.role !== "admin")
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         const id = parseInt(req.params.id);
         const article = await storage.setKnowledgeArticleStatus(id, "archived");
         res.json(article);
       } catch (error) {
-        console.error("Error archiving article:", error);
-        res.status(500).json({ message: "Failed to archive article" });
+        logRouteError("Error archiving article", error);
+        fail(res, 500, "Failed to archive article");
       }
     }
   );
@@ -5385,13 +5339,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const userId = getUserId(req);
         const user = await storage.getUser(userId);
         if (user?.role !== "admin")
-          return res.status(403).json({ message: "Admin access required" });
+          return fail(res, 403, "Admin access required");
         const id = parseInt(req.params.id);
         const article = await storage.setKnowledgeArticleStatus(id, "draft");
         res.json(article);
       } catch (error) {
-        console.error("Error unarchiving article:", error);
-        res.status(500).json({ message: "Failed to unarchive article" });
+        logRouteError("Error unarchiving article", error);
+        fail(res, 500, "Failed to unarchive article");
       }
     }
   );
@@ -5405,8 +5359,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
       res.json(articles);
     } catch (error) {
-      console.error("Error fetching published articles:", error);
-      res.status(500).json({ message: "Failed to fetch knowledge articles" });
+      logRouteError("Error fetching published articles", error);
+      fail(res, 500, "Failed to fetch knowledge articles");
     }
   });
 
@@ -5420,8 +5374,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.incrementKnowledgeArticleView(id);
         res.json({ success: true });
       } catch (error) {
-        console.error("Error incrementing view count:", error);
-        res.status(500).json({ message: "Failed to increment view count" });
+        logRouteError("Error incrementing view count", error);
+        fail(res, 500, "Failed to increment view count");
       }
     }
   );
@@ -5436,8 +5390,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.incrementKnowledgeArticleUsage(id);
         res.json({ message: "Usage tracked successfully" });
       } catch (error) {
-        console.error("Error tracking article usage:", error);
-        res.status(500).json({ message: "Failed to track usage" });
+        logRouteError("Error tracking article usage", error);
+        fail(res, 500, "Failed to track usage");
       }
     }
   );
@@ -5452,9 +5406,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const { rating } = req.body;
 
         if (rating < 1 || rating > 5) {
-          return res
-            .status(400)
-            .json({ message: "Rating must be between 1 and 5" });
+          return fail(res, 400, "Rating must be between 1 and 5");
         }
 
         // Update helpful/unhelpful counters based on rating
@@ -5470,8 +5422,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.updateArticleEffectiveness(id, rating);
         res.json({ message: "Rating submitted successfully" });
       } catch (error) {
-        console.error("Error rating article:", error);
-        res.status(500).json({ message: "Failed to submit rating" });
+        logRouteError("Error rating article", error);
+        fail(res, 500, "Failed to submit rating");
       }
     }
   );
@@ -5483,20 +5435,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        return fail(res, 404, "User not found", { code: "user_not_found" });
       }
 
       if (user.role !== "agent") {
-        return res
-          .status(403)
-          .json({ message: "Access denied. Agent role required." });
+        return fail(res, 403, "Access denied. Agent role required.");
       }
 
       const stats = await storage.getAgentStats(userId);
       res.json(stats);
     } catch (error) {
-      console.error("Error fetching agent stats:", error);
-      res.status(500).json({ message: "Failed to fetch agent stats" });
+      logRouteError("Error fetching agent stats", error);
+      fail(res, 500, "Failed to fetch agent stats");
     }
   });
 
@@ -5506,20 +5456,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(userId);
 
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        return fail(res, 404, "User not found", { code: "user_not_found" });
       }
 
       if (user.role !== "manager") {
-        return res
-          .status(403)
-          .json({ message: "Access denied. Manager role required." });
+        return fail(res, 403, "Access denied. Manager role required.");
       }
 
       const stats = await storage.getManagerStats(userId);
       res.json(stats);
     } catch (error) {
-      console.error("Error fetching manager stats:", error);
-      res.status(500).json({ message: "Failed to fetch manager stats" });
+      logRouteError("Error fetching manager stats", error);
+      fail(res, 500, "Failed to fetch manager stats");
     }
   });
 
@@ -5529,7 +5477,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     scheduleKnowledgeLearning();
     console.log("AI systems initialized successfully");
   } catch (error) {
-    console.error("AI system initialization error:", error);
+    logRouteError("AI system initialization error", error);
   }
 
   return httpServer;

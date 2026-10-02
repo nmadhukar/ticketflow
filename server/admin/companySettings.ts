@@ -10,6 +10,7 @@ import { getEmailAdapter } from "../email/adapters";
 import { getUserId, isAdmin } from "../middleware/admin.middleware";
 import { isAuthenticated } from "../services/auth";
 import { s3Service } from "../services/s3Service";
+import { fail, logRouteError } from "../http/errors";
 
 /** The submitted secret if non-blank, else the stored one if any, as a metadata fragment. */
 function secretOrKept(
@@ -53,8 +54,8 @@ export function registerCompanySettingsRoutes(app: Express): void {
           primaryColor: s?.primaryColor ?? "#3b82f6",
         });
       } catch (error) {
-        console.error("Error fetching branding settings:", error);
-        res.status(500).json({ message: "Failed to fetch branding settings" });
+        logRouteError("Error fetching branding settings", error);
+        fail(res, 500, "Failed to fetch branding settings");
       }
     }
   );
@@ -72,8 +73,8 @@ export function registerCompanySettingsRoutes(app: Express): void {
           autoCloseDays: s?.autoCloseDays ?? 7,
         });
       } catch (error) {
-        console.error("Error fetching ticket settings:", error);
-        res.status(500).json({ message: "Failed to fetch ticket settings" });
+        logRouteError("Error fetching ticket settings", error);
+        fail(res, 500, "Failed to fetch ticket settings");
       }
     }
   );
@@ -93,10 +94,8 @@ export function registerCompanySettingsRoutes(app: Express): void {
           maintenanceMode: s?.maintenanceMode ?? false,
         });
       } catch (error) {
-        console.error("Error fetching preference settings:", error);
-        res
-          .status(500)
-          .json({ message: "Failed to fetch preference settings" });
+        logRouteError("Error fetching preference settings", error);
+        fail(res, 500, "Failed to fetch preference settings");
       }
     }
   );
@@ -121,8 +120,8 @@ export function registerCompanySettingsRoutes(app: Express): void {
           logoUrl: updated.logoUrl,
         });
       } catch (error) {
-        console.error("Error updating branding settings:", error);
-        res.status(500).json({ message: "Failed to update branding settings" });
+        logRouteError("Error updating branding settings", error);
+        fail(res, 500, "Failed to update branding settings");
       }
     }
   );
@@ -136,19 +135,17 @@ export function registerCompanySettingsRoutes(app: Express): void {
       try {
         if (req.body.defaultTicketPriority) {
           if (!TICKET_PRIORITIES.includes(req.body.defaultTicketPriority)) {
-            return res.status(400).json({
-              message: `Invalid priority. Must be one of: ${TICKET_PRIORITIES.join(
-                ", "
-              )}`,
-            });
+            return fail(
+              res,
+              400,
+              `Invalid priority. Must be one of: ${TICKET_PRIORITIES.join(", ")}`
+            );
           }
         }
         if (req.body.autoCloseDays !== undefined) {
           const days = Number(req.body.autoCloseDays);
           if (isNaN(days)) {
-            return res
-              .status(400)
-              .json({ message: "autoCloseDays must be a number or null" });
+            return fail(res, 400, "autoCloseDays must be a number or null");
           }
           if (days === 0) req.body.autoCloseDays = null;
           else req.body.autoCloseDays = Math.max(1, Math.min(365, days));
@@ -168,8 +165,8 @@ export function registerCompanySettingsRoutes(app: Express): void {
           autoCloseDays: updated.autoCloseDays,
         });
       } catch (error) {
-        console.error("Error updating ticket settings:", error);
-        res.status(500).json({ message: "Failed to update ticket settings" });
+        logRouteError("Error updating ticket settings", error);
+        fail(res, 500, "Failed to update ticket settings");
       }
     }
   );
@@ -184,9 +181,7 @@ export function registerCompanySettingsRoutes(app: Express): void {
         if (req.body.maxFileUploadSize !== undefined) {
           const size = Number(req.body.maxFileUploadSize);
           if (isNaN(size) || size < 1 || size > 100) {
-            return res.status(400).json({
-              message: "maxFileUploadSize must be between 1 and 100 MB",
-            });
+            return fail(res, 400, "maxFileUploadSize must be between 1 and 100 MB");
           }
         }
         const userId = getUserId(req);
@@ -209,10 +204,8 @@ export function registerCompanySettingsRoutes(app: Express): void {
           maintenanceMode: updated.maintenanceMode,
         });
       } catch (error) {
-        console.error("Error updating preference settings:", error);
-        res
-          .status(500)
-          .json({ message: "Failed to update preference settings" });
+        logRouteError("Error updating preference settings", error);
+        fail(res, 500, "Failed to update preference settings");
       }
     }
   );
@@ -227,12 +220,10 @@ export function registerCompanySettingsRoutes(app: Express): void {
         const { fileName: _fileName, fileType, fileData } = req.body;
 
         if (!fileData || typeof fileData !== "string") {
-          return res.status(400).json({ message: "File data is required" });
+          return fail(res, 400, "File data is required");
         }
         if (!["image/jpeg", "image/jpg", "image/png"].includes(fileType)) {
-          return res.status(400).json({
-            message: "Invalid file type. Only JPG and PNG are allowed.",
-          });
+          return fail(res, 400, "Invalid file type. Only JPG and PNG are allowed.");
         }
 
         const estimatedBinarySize = (fileData.length * 3) / 4;
@@ -240,14 +231,10 @@ export function registerCompanySettingsRoutes(app: Express): void {
         const maxSizeMB = companySettings?.maxFileUploadSize || 10;
         const maxSizeBytes = maxSizeMB * 1024 * 1024;
         if (estimatedBinarySize > maxSizeBytes) {
-          return res
-            .status(400)
-            .json({ message: `File size exceeds ${maxSizeMB}MB limit` });
+          return fail(res, 400, `File size exceeds ${maxSizeMB}MB limit`);
         }
         if (!/^[A-Za-z0-9+/]*={0,2}$/.test(fileData)) {
-          return res
-            .status(400)
-            .json({ message: "Invalid base64 file data format" });
+          return fail(res, 400, "Invalid base64 file data format");
         }
 
         // Convert base64 to Buffer
@@ -286,11 +273,8 @@ export function registerCompanySettingsRoutes(app: Express): void {
         );
         res.json(settings);
       } catch (error) {
-        console.error("Error uploading logo:", error);
-        res.status(500).json({
-          message: "Failed to upload logo",
-          error: error instanceof Error ? error.message : "Unknown error",
-        });
+        logRouteError("Error uploading logo", error);
+        fail(res, 500, "Failed to upload logo");
       }
     }
   );
@@ -324,8 +308,8 @@ export function registerCompanySettingsRoutes(app: Express): void {
           hasSmtpPassword: !!meta.password,
         });
       } catch (error) {
-        console.error("Error fetching email provider:", error);
-        res.status(500).json({ message: "Failed to fetch email settings" });
+        logRouteError("Error fetching email provider", error);
+        fail(res, 500, "Failed to fetch email settings");
       }
     }
   );
@@ -338,9 +322,9 @@ export function registerCompanySettingsRoutes(app: Express): void {
       try {
         const parsed = SaveEmailSettingsSchema.safeParse(req.body);
         if (!parsed.success) {
-          return res
-            .status(400)
-            .json({ message: "Invalid payload", issues: parsed.error.issues });
+          return fail(res, 400, "Invalid payload", {
+            details: { issues: parsed.error.issues },
+          });
         }
 
         const userId = getUserId(req);
@@ -440,8 +424,8 @@ export function registerCompanySettingsRoutes(app: Express): void {
           isActive: (saved as any).isActive,
         });
       } catch (error) {
-        console.error("Error updating email settings:", error);
-        res.status(500).json({ message: "Failed to update email settings" });
+        logRouteError("Error updating email settings", error);
+        fail(res, 500, "Failed to update email settings");
       }
     }
   );
@@ -455,10 +439,10 @@ export function registerCompanySettingsRoutes(app: Express): void {
       try {
         const { fromEmail, fromName } = req.body || {};
         if (!fromEmail || typeof fromEmail !== "string") {
-          return res.status(400).json({ message: "fromEmail is required" });
+          return fail(res, 400, "fromEmail is required");
         }
         if (!fromName || typeof fromName !== "string") {
-          return res.status(400).json({ message: "fromName is required" });
+          return fail(res, 400, "fromName is required");
         }
         const updated = await storage.updateActiveEmailProvider({
           fromEmail,
@@ -470,8 +454,8 @@ export function registerCompanySettingsRoutes(app: Express): void {
           fromName: (updated as any).fromName,
         });
       } catch (error) {
-        console.error("Error updating sender:", error);
-        res.status(500).json({ message: "Failed to update sender" });
+        logRouteError("Error updating sender", error);
+        fail(res, 500, "Failed to update sender");
       }
     }
   );
@@ -485,10 +469,10 @@ export function registerCompanySettingsRoutes(app: Express): void {
       try {
         const { fromEmail, fromName, template } = req.body || {};
         if (!fromEmail || typeof fromEmail !== "string") {
-          return res.status(400).json({ message: "fromEmail is required" });
+          return fail(res, 400, "fromEmail is required");
         }
         if (!fromName || typeof fromName !== "string") {
-          return res.status(400).json({ message: "fromName is required" });
+          return fail(res, 400, "fromName is required");
         }
         const updated = await storage.updateActiveEmailProvider({
           fromEmail,
@@ -515,8 +499,8 @@ export function registerCompanySettingsRoutes(app: Express): void {
           template: updatedTemplate,
         });
       } catch (error) {
-        console.error("Error updating email settings:", error);
-        res.status(500).json({ message: "Failed to update email settings" });
+        logRouteError("Error updating email settings", error);
+        fail(res, 500, "Failed to update email settings");
       }
     }
   );
@@ -529,16 +513,14 @@ export function registerCompanySettingsRoutes(app: Express): void {
       try {
         const parsed = TestEmailSchema.safeParse(req.body);
         if (!parsed.success) {
-          return res
-            .status(400)
-            .json({ message: "Invalid payload", issues: parsed.error.issues });
+          return fail(res, 400, "Invalid payload", {
+            details: { issues: parsed.error.issues },
+          });
         }
 
         const active = await storage.getActiveEmailProvider();
         if (!active) {
-          return res
-            .status(400)
-            .json({ message: "Email provider not configured" });
+          return fail(res, 400, "Email provider not configured");
         }
 
         const provider = (active as any).provider as string;
@@ -554,13 +536,12 @@ export function registerCompanySettingsRoutes(app: Express): void {
         if (result.success) {
           res.json({ message: "Test email sent successfully" });
         } else {
-          res
-            .status(501)
-            .json({ message: result.message || "Failed to send test email" });
+          // The adapter's own message can echo provider responses; send a fixed one.
+          fail(res, 501, "Failed to send test email", { code: "email_test_failed" });
         }
       } catch (error) {
-        console.error("Email test error:", error);
-        res.status(500).json({ message: "Failed to test email configuration" });
+        logRouteError("Email test error", error);
+        fail(res, 500, "Failed to test email configuration");
       }
     }
   );

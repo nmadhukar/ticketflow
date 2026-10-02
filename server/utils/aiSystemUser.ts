@@ -1,4 +1,4 @@
-import { and, ne, sql, type SQL } from "drizzle-orm";
+import { and, ne, notInArray, sql, type SQL } from "drizzle-orm";
 import { users } from "@shared/schema";
 import { db } from "../storage/db";
 
@@ -10,18 +10,24 @@ import { db } from "../storage/db";
  * SSO, session deserialize) accepts it. See migrations/0013_ai_system_user.sql
  * (the idempotent record of the same row; production creates it here).
  */
-import { AI_SYSTEM_USER_EMAIL, AI_SYSTEM_USER_ID } from "./aiSystemUserId";
+import { AI_SYSTEM_USER_EMAIL, AI_SYSTEM_USER_ID, SYSTEM_ACCOUNT_IDS } from "./aiSystemUserId";
 
 export {
   AI_SYSTEM_USERNAME,
   AI_SYSTEM_USER_ID,
   AI_SYSTEM_USER_EMAIL,
+  LEGACY_SYSTEM_USER_ID,
+  SYSTEM_ACCOUNT_IDS,
   isAiSystemUserId,
+  isSystemAccountId,
 } from "./aiSystemUserId";
 
-/** WHERE fragment for any listing, picker or count over `users`. */
-export function excludeAiSystemUser(): SQL {
-  return ne(users.id, AI_SYSTEM_USER_ID);
+/**
+ * WHERE fragment for any listing, picker or count over `users`: leaves out
+ * both system accounts (the AI user and the legacy "system" user).
+ */
+export function excludeSystemAccounts(): SQL {
+  return notInArray(users.id, [...SYSTEM_ACCOUNT_IDS]);
 }
 
 /**
