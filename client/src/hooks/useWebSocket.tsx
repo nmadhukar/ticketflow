@@ -5,8 +5,19 @@ import { useToast } from "@/hooks/use-toast";
 
 interface WebSocketMessage {
   type: string;
-  data: any;
-  timestamp: string;
+  data?: any;
+  ticketId?: number;
+  reason?: string;
+  timestamp?: string;
+}
+
+/** The lists and counters a ticket change can alter. */
+function invalidateTicketQueries() {
+  queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/stats/agent"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/stats/manager"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/activity"] });
 }
 
 export function useWebSocket() {
@@ -17,6 +28,10 @@ export function useWebSocket() {
   const [isConnected, setIsConnected] = useState(false);
   const reconnectAttemptsRef = useRef(0);
   const lastErrorAtRef = useRef<number>(0);
+  // True while we want a live socket (signed in); false once we close it on purpose.
+  const wantConnectedRef = useRef(false);
+  const hadDropRef = useRef(false);
+  const connectRef = useRef<() => void>(() => {});
 
   const connect = useCallback(() => {
     const rs = socketRef.current?.readyState;
@@ -56,15 +71,11 @@ export function useWebSocket() {
         console.log("WebSocket connected");
         setIsConnected(true);
         reconnectAttemptsRef.current = 0;
-
-        // Send authentication message
-        if ((user as any)?.id) {
-          socket.send(
-            JSON.stringify({
-              type: "auth",
-              userId: (user as any).id,
-            })
-          );
+        // No identity is sent: the server knows who we are from the session cookie.
+        // Events missed while the socket was down are recovered by refetching.
+        if (hadDropRef.current) {
+          hadDropRef.current = false;
+          invalidateTicketQueries();
         }
       };
 
@@ -90,22 +101,17 @@ export function useWebSocket() {
         }
       };
 
-      socket.onclose = () => {
+      socket.onclose = (event) => {
         console.log("WebSocket disconnected");
         setIsConnected(false);
-        socketRef.current = null;
-
-        // Attempt to reconnect with exponential backoff
-        const attempts = reconnectAttemptsRef.current;
-        if (isAuthenticated && attempts < 5) {
-          const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
-          console.log(`Reconnecting in ${delay}ms...`);
-
-          reconnectTimeoutRef.current = setTimeout(() => {
-            reconnectAttemptsRef.current = attempts + 1;
-            connect();
-          }, delay);
-        }
+        if (socketRef.current === socket) socketRef.current = null;
+        // We closed it ourselves (sign-out, unmount): do not come back.
+        if (!wantConnectedRef.current) return;
+        hadDropRef.current = true;
+        // 1008: the server refused our session. Retrying with the same cookie cannot
+        // succeed; the next sign-in (isAuthenticated flips) connects again.
+        if (event.code === 1008) return;
+        scheduleReconnect();
       };
 
       socketRef.current = socket;
@@ -121,18 +127,28 @@ export function useWebSocket() {
         });
       }
       // Trigger a backoff retry even when constructor throws
-      const attempts = reconnectAttemptsRef.current;
-      if (isAuthenticated && attempts < 5) {
-        const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
-        reconnectTimeoutRef.current = setTimeout(() => {
-          reconnectAttemptsRef.current = attempts + 1;
-          connect();
-        }, delay);
-      }
+      if (wantConnectedRef.current) scheduleReconnect();
     }
   }, [isAuthenticated]);
 
+  // Exponential backoff with jitter, capped at 30s, retried for as long as we want
+  // to be connected (a laptop that sleeps overnight must still reconnect).
+  function scheduleReconnect() {
+    if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+    const attempts = reconnectAttemptsRef.current;
+    const base = Math.min(1000 * Math.pow(2, attempts), 30000);
+    const delay = Math.round(base / 2 + Math.random() * (base / 2));
+    reconnectTimeoutRef.current = setTimeout(() => {
+      reconnectTimeoutRef.current = null;
+      reconnectAttemptsRef.current = attempts + 1;
+      connectRef.current();
+    }, delay);
+  }
+
+  connectRef.current = connect;
+
   const disconnect = useCallback(() => {
+    wantConnectedRef.current = false;
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
@@ -163,7 +179,7 @@ export function useWebSocket() {
   const handleMessage = (message: WebSocketMessage) => {
     console.log("WebSocket message received:", message);
     try {
-      const key = `${message.type}:${JSON.stringify(message.data || {})}`;
+      const key = `${message.type}:${message.ticketId ?? ""}:${JSON.stringify(message.data || {})}`;
       const now = Date.now();
       if (
         lastMsgRef.current &&
@@ -181,6 +197,18 @@ export function useWebSocket() {
       case "connected":
         // Initial handshake from server
         break;
+      case "ticket_updated": {
+        // The server only sends this to users who can see the ticket. Refetch that
+        // ticket (and its comments, history) and every list that may contain it.
+        const ticketId = (message as any).ticketId;
+        if (ticketId !== undefined && ticketId !== null) {
+          queryClient.invalidateQueries({ queryKey: [`/api/tasks/${ticketId}`] });
+          queryClient.invalidateQueries({ queryKey: [`/api/tasks/${ticketId}/comments`] });
+          queryClient.invalidateQueries({ queryKey: [`/api/tasks/${ticketId}/history`] });
+        }
+        invalidateTicketQueries();
+        break;
+      }
       case "ticket:created":
         // Invalidate ticket queries to refresh the list
         queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
@@ -488,6 +516,7 @@ export function useWebSocket() {
   // Connect when authenticated
   useEffect(() => {
     if (isAuthenticated) {
+      wantConnectedRef.current = true;
       connect();
     } else {
       disconnect();

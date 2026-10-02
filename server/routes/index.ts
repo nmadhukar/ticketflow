@@ -44,7 +44,7 @@
 
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { WebSocketServer, WebSocket } from "ws";
+import { attachRealtime, notifyTicket, ticketRecipients, notifyStaff } from "../realtime/ws";
 import { storage, publicUserColumns } from "../storage";
 import { setupAuth, isAuthenticated, hashPassword } from "../services/auth";
 import { normalizeRole } from "../permissions/roles";
@@ -812,22 +812,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // user, never fails the create (logs type/status only).
         await runCreateTimeAutoResponse(task);
 
-        // WS: notify creator and, if team routed, team members (placeholder selection)
-        try {
-          const creatorMsg = envelope("ticket:created", {
-            id: task.id,
-            ticketNumber: (task as any).ticketNumber,
-            title: task.title,
-            assigneeType: task.assigneeType,
-            assigneeId: task.assigneeId,
-            assigneeTeamId: (task as any).assigneeTeamId,
-          });
-          // Notify creator
-          const creatorId = userId;
-          broadcastToMany([creatorId], creatorMsg);
-        } catch (e) {
-          console.error("WS notify ticket:created error:", e);
-        }
+        // WS: everyone connected who can see the new ticket (creator, assignee, team, teammates)
+        await notifyTicket(task.id, "created");
 
         // Send Teams notification for new task
         try {
@@ -997,6 +983,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error("Error sending Teams notifications:", error);
       }
 
+      // WS: everyone connected who can see the ticket as it is now
+      await notifyTicket(taskId, "updated");
+
       res.json(updatedTask);
     } catch (error) {
       if (error instanceof HttpError || error instanceof z.ZodError) return next(error);
@@ -1018,7 +1007,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .status(403)
           .json({ error: "forbidden", message: verdict.reason ?? "Access denied" });
       }
+      // Who could see it must be read before the row is gone.
+      const recipients = await ticketRecipients(taskId).catch(() => [] as string[]);
       await storage.deleteTask(taskId);
+      await notifyTicket(taskId, "deleted", recipients);
       res.status(204).send();
     } catch (error) {
       next(error);
@@ -1065,18 +1057,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         const comment = await storage.addTaskComment(commentData);
 
-        // WS: notify about new comment
-        try {
-          const msg = envelope("ticket:comment", {
-            ticketId: taskId,
-            commentId: (comment as any).id,
-            ticketNumber: undefined,
-            isReply: true,
-          });
-          broadcastToMany([userId], msg);
-        } catch (e) {
-          console.error("WS notify ticket:comment error:", e);
-        }
+        // WS: everyone connected who can see the ticket
+        await notifyTicket(taskId, "comment");
 
         res.status(201).json(comment);
       } catch (error) {
@@ -3330,14 +3312,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const department = await storage.createDepartment(req.body);
 
       // Broadcast department created event
-      if ((app as any).broadcastToAll) {
-        (app as any).broadcastToAll({
-          type: "department:created",
-          data: { ...department },
-          ts: Date.now(),
-          v: 1,
-        });
-      }
+      notifyStaff("department:created", { ...department });
 
       res.json(department);
     } catch (error) {
@@ -3366,14 +3341,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const department = await storage.updateDepartment(id, req.body);
 
       // Broadcast department updated event
-      if ((app as any).broadcastToAll) {
-        (app as any).broadcastToAll({
-          type: "department:updated",
-          data: { ...department },
-          ts: Date.now(),
-          v: 1,
-        });
-      }
+      notifyStaff("department:updated", { ...department });
 
       res.json(department);
     } catch (error) {
@@ -3398,14 +3366,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.deleteDepartment(id);
 
         // Broadcast department deleted event
-        if ((app as any).broadcastToAll) {
-          (app as any).broadcastToAll({
-            type: "department:deleted",
-            data: { id },
-            ts: Date.now(),
-            v: 1,
-          });
-        }
+        notifyStaff("department:deleted", { id });
 
         res.json({ message: "Department deleted successfully" });
       } catch (error) {
@@ -5186,90 +5147,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const httpServer = createServer(app);
 
-  // WebSocket server for real-time updates
-  const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
-
-  // Store connected clients with their user IDs
-  const clients = new Map<string, WebSocket>();
-
-  function send(ws: WebSocket, msg: any) {
-    try {
-      ws.send(JSON.stringify(msg));
-    } catch (e) {
-      console.error("WS send error:", e);
-    }
-  }
-
-  function envelope(type: string, data: any) {
-    return { type, data, ts: Date.now(), v: 1 };
-  }
-
-  function broadcastToMany(userIds: string[], message: any) {
-    for (const uid of userIds) {
-      const c = clients.get(uid);
-      if (c && c.readyState === WebSocket.OPEN) send(c, message);
-    }
-  }
-
-  wss.on("connection", (ws, _req) => {
-    console.log("WebSocket client connected");
-
-    // Extract user ID from the session or authentication
-    let userId: string | null = null;
-
-    ws.on("message", (message) => {
-      try {
-        const data: any = JSON.parse(message.toString());
-
-        if (data.type === "auth" && data.userId) {
-          userId = data.userId;
-          //clients.set(userId, ws);
-          ws.send(
-            JSON.stringify({
-              type: "connected",
-              message: "WebSocket connection established",
-            })
-          );
-        }
-
-        // Handle other message types if needed
-      } catch (error) {
-        console.error("WebSocket message error:", error);
-      }
-    });
-
-    ws.on("close", () => {
-      if (userId) {
-        clients.delete(userId);
-      }
-      console.log("WebSocket client disconnected");
-    });
-
-    ws.on("error", (error) => {
-      console.error("WebSocket error:", error);
-    });
-  });
-
-  // Helper function to broadcast updates to specific users
-  function broadcastToUser(userId: string, message: any) {
-    const client = clients.get(userId);
-    if (client && client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify(message));
-    }
-  }
-
-  // Helper function to broadcast to all connected clients
-  function broadcastToAll(message: any) {
-    clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(message));
-      }
-    });
-  }
-
-  // Attach broadcast functions to app for use in routes
-  (app as any).broadcastToUser = broadcastToUser;
-  (app as any).broadcastToAll = broadcastToAll;
+  // Real-time updates: the WebSocket lives in ../realtime/ws (session-authenticated upgrade).
+  attachRealtime(httpServer);
 
   /* Staff tool on the AI Analytics page: runs Bedrock-powered analysis on a TICKET
    * the caller may see and returns (complexity, confidence, auto-response, ...).
