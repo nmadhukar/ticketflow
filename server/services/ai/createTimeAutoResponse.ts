@@ -33,7 +33,7 @@ export async function runCreateTimeAutoResponse(task: Task): Promise<void> {
     if (!configured) return;
 
     const { aiAutoResponseService } = await import("./aiAutoResponse");
-    const analysis = await aiAutoResponseService.analyzeTicket(task, { autoApply: true });
+    const analysis = await aiAutoResponseService.analyzeTicket(task);
 
     await aiAutoResponseService.saveComplexityScore(
       task.id,
@@ -47,17 +47,17 @@ export async function runCreateTimeAutoResponse(task: Task): Promise<void> {
     try {
       const aiUserId = await ensureAiSystemUser();
       if (!aiUserId) throw new Error("AI system user unavailable");
-      const maxLength = Math.max(100, Math.min(5000, Number(settings.maxResponseLength) || 1000));
       await storage.addTaskComment({
         taskId: task.id,
         userId: aiUserId,
-        content: `AI Auto-Response (confidence ${(analysis.confidence * 100).toFixed(0)}%): ${analysis.autoResponse.slice(0, maxLength)}`,
+        content: `AI Auto-Response (confidence ${(analysis.confidence * 100).toFixed(0)}%): ${analysis.autoResponse}`,
       } as any);
+      // The row was stored NOT applied; it becomes applied only now that the comment exists.
+      if (analysis.autoResponseRowId !== undefined) {
+        await aiAutoResponseService.setApplied(analysis.autoResponseRowId, true);
+      }
     } catch (error) {
       console.error(`AI auto-response comment failed for ticket ${task.id}:`, describeAIError(error));
-      if (analysis.autoResponseRowId !== undefined) {
-        await aiAutoResponseService.setApplied(analysis.autoResponseRowId, false);
-      }
     }
   } catch (error) {
     console.error(`AI auto-response for new ticket ${task.id} failed:`, describeAIError(error));

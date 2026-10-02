@@ -4,6 +4,7 @@ import {
   aiUsage,
   knowledgeArticles,
   taskComments,
+  tasks,
   teamMembers,
   ticketAutoResponses,
   users,
@@ -672,6 +673,204 @@ describe("AI routes honour settings, access and authorship", () => {
       expect(isTicketForeignKeyViolation(userFk)).toBe(false);
       expect(isTicketForeignKeyViolation({ cause: userFk })).toBe(false);
       expect(isTicketForeignKeyViolation({ code: "23505", constraint: "ticket_id" })).toBe(false);
+    });
+  });
+
+  describe("rows stay unapplied until the comment exists; text is clamped once", () => {
+    it("at the moment the create-time comment is written the row is still NOT applied, and it is applied right after", async () => {
+      await setSettings({});
+      await seedMatchingArticle();
+      let seenDuringComment: boolean | undefined;
+      const real = storage.addTaskComment.bind(storage);
+      jest.spyOn(storage, "addTaskComment").mockImplementation(async (c: any) => {
+        const rows = await rowsOf(c.taskId);
+        seenDuringComment = rows[0]?.wasApplied ?? undefined;
+        return real(c);
+      });
+      const { id } = await customerTicket();
+      expect(seenDuringComment).toBe(false);
+      expect((await rowsOf(id))[0].wasApplied).toBe(true);
+    });
+
+    it("the stored row, the create-time comment and an applied draft are all cut to maxResponseLength", async () => {
+      await setSettings({ maxResponseLength: 100 });
+      await seedMatchingArticle();
+      const base = bedrockMock.handler;
+      bedrockMock.handler = (p) =>
+        p.includes("helpful IT support assistant")
+          ? JSON.stringify({ response: "y".repeat(400), confidence: 0.9, knowledgeBaseArticles: [] })
+          : base(p);
+      const { id } = await customerTicket();
+      expect((await rowsOf(id))[0].aiResponse).toHaveLength(100);
+
+      await setSettings({ enabled: false, maxResponseLength: 100 });
+      const t2 = await customerTicket();
+      await setSettings({ enabled: true, maxResponseLength: 100 });
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      await adminA.post(`/api/tasks/${t2.id}/auto-response/generate`);
+      expect((await rowsOf(t2.id))[0].aiResponse).toHaveLength(100);
+      await adminA.post(`/api/tasks/${t2.id}/auto-response/apply`);
+      const [c] = await commentsOf(t2.id);
+      expect(c.content.split("): ")[1]).toHaveLength(100);
+    });
+
+    it("if releasing the claim fails too, both failures are logged and the ORIGINAL error is what the client gets", async () => {
+      await setSettings({ enabled: false });
+      const { id } = await customerTicket();
+      await setSettings({ enabled: true });
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      await adminA.post(`/api/tasks/${id}/auto-response/generate`);
+      const commentErr: any = new Error("COMMENT-FAIL-DETAIL");
+      commentErr.name = "CommentWriteError";
+      jest.spyOn(storage, "addTaskComment").mockRejectedValue(commentErr);
+      const realUpdate = db.update.bind(db);
+      let updates = 0;
+      jest.spyOn(db, "update").mockImplementation(((...a: any[]) => {
+        updates++;
+        if (updates === 2) throw Object.assign(new Error("ROLLBACK-FAIL-DETAIL"), { name: "RollbackError" });
+        return (realUpdate as any)(...a);
+      }) as any);
+      const res = await adminA.post(`/api/tasks/${id}/auto-response/apply`);
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe("internal_error");
+      const out = logged();
+      expect(out).toContain("CommentWriteError");
+      expect(out).toContain("RollbackError");
+      expect(out).not.toContain("COMMENT-FAIL-DETAIL");
+      expect(out).not.toContain("ROLLBACK-FAIL-DETAIL");
+    });
+
+    it("a customer keeps seeing the applied create-time row after staff generate a newer draft", async () => {
+      await setSettings({});
+      await seedMatchingArticle();
+      const { id, customerA } = await customerTicket();
+      const applied = (await rowsOf(id))[0];
+      expect(applied.wasApplied).toBe(true);
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      expect((await adminA.post(`/api/tasks/${id}/auto-response/generate`)).status).toBe(200);
+      expect(await rowsOf(id)).toHaveLength(2);
+
+      const seen = await customerA.get(`/api/tasks/${id}/auto-response`);
+      expect(seen.status).toBe(200);
+      expect(seen.body.id).toBe(applied.id);
+      expect(seen.body.wasApplied).toBe(true);
+      const staff = await adminA.get(`/api/tasks/${id}/auto-response`);
+      expect(staff.body.wasApplied).toBe(false); // staff see the newest row, the draft
+      expect(staff.body.id).not.toBe(applied.id);
+    });
+  });
+
+  describe("no model-derived text in any log (knowledge learning, article improvement, chat)", () => {
+    it("titles, reasons, problem types and error messages from the model leave no trace", async () => {
+      await setSettings({ enabled: false });
+      const MARK = "MARKER_ZZ9_DERIVED";
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      for (let i = 0; i < 5; i++) {
+        const t = await createTicketAs(adminA, { title: `Login problem ${i}`, description: "cannot sign in" });
+        await db.update(tasks).set({ status: "resolved", resolvedAt: new Date() }).where(eq(tasks.id, t.body.id));
+      }
+      const spies = (["error", "warn", "log", "info", "debug"] as const).map((m) =>
+        jest.spyOn(console, m).mockImplementation(() => undefined)
+      );
+      bedrockMock.handler = (p) => {
+        if (p.includes("expert knowledge management AI"))
+          return JSON.stringify([
+            {
+              problemType: `login ${MARK}`,
+              commonSolutions: [`reset ${MARK}`],
+              preventiveMeasures: [MARK],
+              averageResolutionTime: 2,
+              frequency: 5,
+              successRate: 95,
+            },
+          ]);
+        if (p.includes("technical writer creating a knowledge base article"))
+          return JSON.stringify({
+            title: `Title ${MARK}`,
+            content: `Body ${MARK}`,
+            category: `cat-${MARK}`,
+            tags: [MARK],
+            difficulty: "beginner",
+            estimatedReadTime: 2,
+            confidence: 90,
+          });
+        if (p.includes("improving a knowledge base article"))
+          return JSON.stringify({
+            shouldUpdate: true,
+            confidence: 95,
+            improvedContent: `Better ${MARK}`,
+            improvementReason: `Because ${MARK}`,
+          });
+        return new Error(`${MARK} upstream said no`);
+      };
+      const { processKnowledgeLearning, improveKnowledgeArticle } = await import("../../services/ai/knowledgeBaseLearning");
+      const result = await processKnowledgeLearning();
+      expect(result.articlesCreated).toBeGreaterThan(0); // the "created" log path really ran
+      const [article] = await db.select().from(knowledgeArticles);
+      expect(article.createdBy).toBe(AI_SYSTEM_USER_ID);
+      expect(await improveKnowledgeArticle(article.id, { ticketId: 1, resolution: "r", resolutionTime: 1, success: true })).toBe(true);
+
+      await processKnowledgeLearning(); // second pass: the "similar article exists" log path
+
+      // chat: the model errors with a message carrying the marker
+      const chat = await adminA.post("/api/chat").send({ sessionId: "s-marker", message: "how do I reset my password?" });
+      expect([200, 500]).toContain(chat.status);
+      expect(bedrockMock.prompts.length).toBeGreaterThan(0);
+
+      const everything = JSON.stringify(
+        spies.flatMap((s) => s.mock.calls.map((c: unknown[]) => c.map((a) => (typeof a === "string" ? a : JSON.stringify(a)))))
+      );
+      expect(spies[0].mock.calls.length + spies[2].mock.calls.length).toBeGreaterThan(0);
+      expect(everything).not.toContain(MARK);
+    });
+  });
+
+  describe("AI analytics count only what happened", () => {
+    /** Four tickets: A applied then resolved, B two applied rows and still open, C draft only, D draft+applied then closed. */
+    async function seedMix() {
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      const mk = async () => (await createTicketAs(adminA)).body.id as number;
+      const [a, b, c, d] = [await mk(), await mk(), await mk(), await mk()];
+      const row = (ticketId: number, wasApplied: boolean, createdAt: Date, wasHelpful: boolean | null = null) =>
+        db.insert(ticketAutoResponses).values({ ticketId, aiResponse: "r", confidenceScore: "0.8", wasApplied, wasHelpful, createdAt });
+      const t0 = new Date(Date.now() - 3 * 3600_000);
+      await row(a, true, t0, true);
+      await row(b, true, t0, false);
+      await row(b, true, t0);
+      await row(c, false, t0);
+      await row(d, false, t0);
+      await row(d, true, t0);
+      const later = new Date(Date.now() - 3600_000);
+      await db.update(tasks).set({ status: "resolved", resolvedAt: later }).where(eq(tasks.id, a));
+      await db.update(tasks).set({ status: "closed", closedAt: later }).where(eq(tasks.id, d));
+      return adminA;
+    }
+
+    it("ai-performance: total counts every row, applied and helpful only the true ones", async () => {
+      const adminA = await seedMix();
+      const res = await adminA.get("/api/analytics/ai-performance");
+      expect(res.status).toBe(200);
+      expect(Number(res.body.autoResponse.total)).toBe(6);
+      expect(Number(res.body.autoResponse.applied)).toBe(4);
+      expect(Number(res.body.autoResponse.helpful)).toBe(1);
+    });
+
+    it("ai-analytics: autoResponsesSent counts applied rows; ticketsResolvedByAI counts DISTINCT resolved/closed tickets whose applied response came first", async () => {
+      const adminA = await seedMix();
+      const res = await adminA.get("/api/admin/ai-analytics");
+      expect(res.status).toBe(200);
+      expect(res.body.autoResponsesSent).toBe(4); // not 6: drafts were never sent
+      expect(res.body.ticketsResolvedByAI).toBe(2); // A and D; B is open, C had only a draft
+    });
+
+    it("an applied response posted AFTER the ticket was resolved does not count as resolving it", async () => {
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      const id = (await createTicketAs(adminA)).body.id as number;
+      await db.update(tasks).set({ status: "resolved", resolvedAt: new Date(Date.now() - 7200_000) }).where(eq(tasks.id, id));
+      await db.insert(ticketAutoResponses).values({ ticketId: id, aiResponse: "r", confidenceScore: "0.8", wasApplied: true, createdAt: new Date() });
+      const res = await adminA.get("/api/admin/ai-analytics");
+      expect(res.body.autoResponsesSent).toBe(1);
+      expect(res.body.ticketsResolvedByAI).toBe(0);
     });
   });
 });

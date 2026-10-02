@@ -81,7 +81,7 @@ describe('AIAutoResponseService.analyzeTicket', () => {
     bedrock.generateResponse.mockResolvedValue({ response: 'Reset your password.', suggestedArticles: [11] });
   });
 
-  it('returns the generated response and stores it as applied when confidence is high', async () => {
+  it('returns the generated response and the decision when confidence is high', async () => {
     bedrock.calculateConfidence.mockResolvedValue({ confidenceScore: 0.9, shouldAutoRespond: true });
 
     const result = await service.analyzeTicket(ticket);
@@ -96,10 +96,10 @@ describe('AIAutoResponseService.analyzeTicket', () => {
     });
     expect(result.factors.urgency).toBe(20); // high priority
     expect(result.factors.historical).toBe(0); // a similar ticket exists
-    expect(storeAutoResponse).toHaveBeenCalledWith(7, expect.objectContaining({ applied: true, confidence: 0.9 }));
+    expect(storeAutoResponse).toHaveBeenCalledWith(7, expect.objectContaining({ confidence: 0.9 }));
   });
 
-  it('returns the one decision (shouldAutoRespond) and stores exactly ONE row, whose applied flag matches it', async () => {
+  it('returns the one decision and stores exactly ONE row, never marked applied by the service itself', async () => {
     bedrock.calculateConfidence.mockResolvedValue({ confidenceScore: 0.9, shouldAutoRespond: true });
     storeAutoResponse.mockResolvedValue(42);
 
@@ -108,26 +108,27 @@ describe('AIAutoResponseService.analyzeTicket', () => {
     expect(result.shouldAutoRespond).toBe(true);
     expect(result.autoResponseRowId).toBe(42);
     expect(storeAutoResponse).toHaveBeenCalledTimes(1);
-    expect(storeAutoResponse).toHaveBeenCalledWith(7, expect.objectContaining({ applied: true }));
+    expect(storeAutoResponse.mock.calls[0][1]).not.toHaveProperty('applied');
   });
 
-  it('autoApply false (an on-demand draft): the row is NOT applied even when the decision is yes', async () => {
-    bedrock.calculateConfidence.mockResolvedValue({ confidenceScore: 0.9, shouldAutoRespond: true });
-
-    const result = await service.analyzeTicket(ticket, { autoApply: false });
-
-    expect(result.shouldAutoRespond).toBe(true);
-    expect(storeAutoResponse).toHaveBeenCalledTimes(1);
-    expect(storeAutoResponse).toHaveBeenCalledWith(7, expect.objectContaining({ applied: false }));
-  });
-
-  it('decision no: shouldAutoRespond false and the row is not applied', async () => {
+  it('decision no: shouldAutoRespond false, still one row (a draft)', async () => {
     bedrock.calculateConfidence.mockResolvedValue({ confidenceScore: 0.8, shouldAutoRespond: false });
 
     const result = await service.analyzeTicket(ticket);
 
     expect(result.shouldAutoRespond).toBe(false);
-    expect(storeAutoResponse).toHaveBeenCalledWith(7, expect.objectContaining({ applied: false }));
+    expect(storeAutoResponse).toHaveBeenCalledTimes(1);
+  });
+
+  it('cuts the stored and returned text to maxResponseLength (the one clamp)', async () => {
+    bedrock.generateResponse.mockResolvedValue({ response: 'x'.repeat(5000), suggestedArticles: [] });
+    bedrock.calculateConfidence.mockResolvedValue({ confidenceScore: 0.9, shouldAutoRespond: true });
+
+    const result = await service.analyzeTicket(ticket);
+
+    // getAISettings falls back to its defaults without a database (maxResponseLength 1000)
+    expect(result.autoResponse).toHaveLength(1000);
+    expect((storeAutoResponse.mock.calls[0][1] as { response: string }).response).toHaveLength(1000);
   });
 
   it('escalates when Bedrock says confidence is below its auto-respond threshold', async () => {
@@ -137,7 +138,7 @@ describe('AIAutoResponseService.analyzeTicket', () => {
 
     expect(result.shouldEscalate).toBe(true);
     expect(result.autoResponse).toBe('Reset your password.');
-    expect(storeAutoResponse).toHaveBeenCalledWith(7, expect.objectContaining({ applied: false }));
+    expect(storeAutoResponse).toHaveBeenCalledTimes(1);
   });
 
   it('does not store a response when confidence is zero', async () => {

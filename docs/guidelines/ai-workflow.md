@@ -145,72 +145,13 @@ Operational Notes
 - For production, consider Redis for rate‑limit trackers.
 - Keep model lists synced with account availability; show warnings when premium models are selected under strict free‑tier policy.
 
-#### End-to-End Ticket AI Pipeline (`processTicketWithAI`)
+#### Ticket AI pipeline (current code)
 
-The `processTicketWithAI` helper in `server/services/ai/aiTicketAnalysis.ts` runs the **full AI workflow** for a single ticket in one call:
+`processTicketWithAI` no longer exists. The pieces are:
 
-export const processTicketWithAI = async (ticketData: {
-id: number;
-title: string;
-description: string;
-category: string;
-priority: string;
-reporterId: string;
-}): Promise<{
-analysis: TicketAnalysis | null;
-autoResponse: AutoResponse | null;
-complexityScore: number;
-shouldEscalate: boolean;
-applied: boolean;
-}>;It performs these steps:
-
-1. **Analyze ticket (Bedrock)**
-
-   - Calls `analyzeTicket(ticketData)` to produce a `TicketAnalysis`:
-     - `complexity`, `category`, `priority`, `estimatedResolutionTime`, `tags`, `confidence`, `reasoning`.
-   - If analysis fails, returns a result with `analysis: null` and no side effects.
-
-2. **Search knowledge base**
-
-   - Calls `searchKnowledgeBaseForTicket(ticketData)` to build a short context from up to 3 relevant KB articles.
-   - This context is passed into the response generator so replies can reference existing knowledge.
-
-3. **Generate AI auto-response**
-
-   - Calls `generateAutoResponseForTicket(ticketData, analysis, knowledgeContext)` to get an `AutoResponse`:
-     - `response`, `confidence`, `knowledgeBaseArticles`, `followUpActions`, `escalationNeeded`.
-   - If response generation fails, it returns the analysis and a conservative escalation recommendation, but does **not** apply or store a response.
-
-4. **Calculate complexity and escalation**
-
-   - Computes a numeric `complexityScore` via `calculateComplexityScore(analysis)`.
-   - Determines whether the ticket should be escalated using `shouldEscalateTicket(analysis, autoResponse)` and current AI settings.
-
-5. **Optionally apply the auto-response & update ticket**
-
-   - Reads AI settings (`autoResponseEnabled`, `confidenceThreshold`, `maxResponseLength`, escalation flags).
-   - If conditions are met:
-     - Adds the AI response as a **comment** to the ticket.
-     - Stores an auto-response record in `ticket_auto_responses`.
-     - Optionally reassigns the ticket to an escalation team when `escalationTeamId` is configured.
-
-6. **Persist complexity metrics**
-   - Writes/updates a row in `ticket_complexity_scores` for the ticket with:
-     - `score`, `factors` (complexity, priority, estimatedTime, confidence), and `calculatedAt`.
-
-**When to use `processTicketWithAI`**
-
-Use `processTicketWithAI` when you want a **single call** that:
-
-- Analyzes a ticket,
-- Optionally generates and applies an AI response,
-- Calculates and stores complexity metrics, and
-- Decides/escalates according to admin-configured AI policies.
-
-Typical integration points:
-
-- A background job that runs when a new ticket is created.
-- A “Run full AI assist” action in the agent UI.
-- Batch processing of existing tickets (e.g., nightly AI enrichment).
-
-For **admin test tools** (like `/api/ai/analyze-ticket` and `/api/ai/generate-response` in the AI Analytics page), call the underlying pieces (`analyzeTicket`, `generateAutoResponseForTicket`) without side effects, and reserve `processTicketWithAI` for real workflow automation.
+- `server/services/ai/createTimeAutoResponse.ts` (`runCreateTimeAutoResponse`) runs after `POST /api/tasks` has created the ticket. It never throws; failures are logged as error type, HTTP status and ticket id only (never prompts, model output or credentials). Settings are read per ticket: with `autoResponseEnabled` off, or Bedrock unconfigured, no Bedrock call is made.
+- `aiAutoResponseService.analyzeTicket(ticket)` (`server/services/ai/aiAutoResponse.ts`) does the analysis and owns the single `ticket_auto_responses` write for it: one row per analysis, text cut to `maxResponseLength`, always stored with `wasApplied = false`. It returns `shouldAutoRespond`, the one decision, made by the real `calculateConfidence` (`bedrockIntegration.ts`) from the admin settings: `autoResponseEnabled` and `confidenceThreshold`.
+- When `shouldAutoRespond` is true the create path posts the comment as the AI system user (`ai-assistant`, shown to clients as "AI Assistant") and only then sets the row `wasApplied = true`. A failed comment leaves the row unapplied.
+- `POST /api/tasks/:id/auto-response/generate` (staff) stores a draft the same way and posts nothing. `POST /api/tasks/:id/auto-response/apply` (staff, idempotent) posts the stored draft as the AI user and marks it applied. `GET /api/tasks/:id/auto-response` shows customers only the latest applied row; staff see the latest row of any kind.
+- `POST /api/ai/analyze-ticket` and `/api/ai/generate-response` (staff) take `{ ticketId }`, load the ticket from the database, require access to it (404 missing, 403 outside scope or customer) and map a cost-limit block to 429 `quota_exceeded`. analyze-ticket stores nothing.
+- Escalation settings (`escalationEnabled`, `escalationTeamId`, `complexityThreshold`) are stored but not active: nothing reassigns tickets from them, and the admin UI does not show them.

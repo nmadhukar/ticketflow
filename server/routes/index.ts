@@ -2545,9 +2545,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // If AI fails, fall back to help documents search (same as "AI not configured")
           console.error(
             "Error calling AWS Bedrock, falling back to help documents:",
-            error
+            describeAIError(error)
           );
-          console.error("Error details:", error?.message, error?.name);
 
           // Set flag to use fallback logic
           aiSucceeded = false;
@@ -2626,8 +2625,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           : undefined,
       });
     } catch (error: any) {
-      console.error("Error in chat:", error);
-      console.error("Chat error details:", error.message, error.stack);
+      console.error("Error in chat:", describeAIError(error));
       res.status(500).json({ message: "Failed to process chat message" });
     }
   });
@@ -2712,7 +2710,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }));
       res.json(legacyUsage);
     } catch (error) {
-      console.error("Error fetching Bedrock usage:", error);
+      console.error("Error fetching Bedrock usage:", describeAIError(error));
       res.status(500).json({ message: "Failed to fetch Bedrock usage" });
     }
   });
@@ -2733,7 +2731,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const stats = await bedrockIntegration.getCostStatistics();
         res.json(stats);
       } catch (error) {
-        console.error("Error fetching cost statistics:", error);
+        console.error("Error fetching cost statistics:", describeAIError(error));
         res.status(500).json({ message: "Failed to fetch cost statistics" });
       }
     }
@@ -2765,7 +2763,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.json(updatedLimits);
       } catch (error) {
-        console.error("Error updating cost limits:", error);
+        console.error("Error updating cost limits:", describeAIError(error));
         res.status(500).json({ message: "Failed to update cost limits" });
       }
     }
@@ -2786,7 +2784,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await bedrockIntegration.resetUsageData();
         res.json({ message: "Usage data reset successfully" });
       } catch (error) {
-        console.error("Error resetting usage data:", error);
+        console.error("Error resetting usage data:", describeAIError(error));
         res.status(500).json({ message: "Failed to reset usage data" });
       }
     }
@@ -4099,6 +4097,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/tasks/:id/auto-response", isAuthenticated, requireTaskAccess(), async (req, res) => {
     try {
       const taskId = parseInt(req.params.id);
+      const isStaff = isStaffRole((req.user as any)?.role);
       const [autoResponse] = await db
         .select({
           id: ticketAutoResponses.id,
@@ -4117,12 +4116,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
         .from(ticketAutoResponses)
         .leftJoin(users, eq(ticketAutoResponses.respondedBy, users.id))
-        .where(eq(ticketAutoResponses.ticketId, taskId))
-        .orderBy(desc(ticketAutoResponses.createdAt))
+        // A customer is shown the latest APPLIED row (a newer staff draft must not hide it);
+        // staff see the latest row of any kind.
+        .where(
+          and(
+            eq(ticketAutoResponses.ticketId, taskId),
+            isStaff ? undefined : eq(ticketAutoResponses.wasApplied, true)
+          )
+        )
+        .orderBy(desc(ticketAutoResponses.createdAt), desc(ticketAutoResponses.id))
         .limit(1);
 
-      // Customers never see an unapplied AI draft (it was never posted to them).
-      if (!isStaffRole((req.user as any)?.role) && !autoResponse?.wasApplied) {
+      if (!isStaff && !autoResponse) {
         return res.status(404).json({ error: "not_found", message: "No AI response for this ticket" });
       }
 
@@ -4177,10 +4182,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           content: `AI Auto-Response (confidence ${pct}%): ${draft.aiResponse}`,
         } as any);
       } catch (error) {
-        await db
-          .update(ticketAutoResponses)
-          .set({ wasApplied: false })
-          .where(eq(ticketAutoResponses.id, draft.id));
+        // Release the claim so the draft can be applied again. If that fails too, log
+        // both (type/status only) and still surface the ORIGINAL error. (A transaction
+        // was not used: the comment goes through storage.addTaskComment, which has its
+        // own connection and side effects.)
+        try {
+          await db
+            .update(ticketAutoResponses)
+            .set({ wasApplied: false })
+            .where(eq(ticketAutoResponses.id, draft.id));
+        } catch (rollbackError) {
+          console.error(
+            `Apply of AI draft ${draft.id} failed (${describeAIError(error)}) and releasing the claim failed too (${describeAIError(rollbackError)})`
+          );
+        }
         throw error;
       }
       res.json({ applied: true, alreadyApplied: false });
@@ -4228,9 +4243,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
         // The service stores the one draft row (even below the confidence threshold: a
         // person asked for it), NOT applied: it becomes a comment only through /apply.
-        const analysis = await aiAutoResponseService.analyzeTicket(task, {
-          autoApply: false,
-        });
+        const analysis = await aiAutoResponseService.analyzeTicket(task);
 
         if (!analysis.autoResponse) {
           throw new HttpError(503, "ai_unavailable", "Could not generate auto-response", {
@@ -4507,8 +4520,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const autoResponseStats = await db
           .select({
             total: count(),
-            applied: count(ticketAutoResponses.wasApplied),
-            helpful: count(ticketAutoResponses.wasHelpful),
+            // count(col) counts every non-null value, true and false alike: count only the trues.
+            applied: sql<number>`count(*) FILTER (WHERE ${ticketAutoResponses.wasApplied} = true)::int`,
+            helpful: sql<number>`count(*) FILTER (WHERE ${ticketAutoResponses.wasHelpful} = true)::int`,
             avgConfidence: avg(ticketAutoResponses.confidenceScore),
           })
           .from(ticketAutoResponses);
@@ -4534,7 +4548,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const kbStats = await db
           .select({
             totalArticles: count(),
-            publishedArticles: count(knowledgeArticles.isPublished),
+            publishedArticles: sql<number>`count(*) FILTER (WHERE ${knowledgeArticles.isPublished} = true)::int`,
             avgEffectiveness: avg(knowledgeArticles.effectivenessScore),
             totalUsage: sum(knowledgeArticles.usageCount),
           })
@@ -4546,7 +4560,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           knowledgeBase: kbStats[0],
         });
       } catch (error) {
-        console.error("Error fetching AI analytics:", error);
+        console.error("Error fetching AI analytics:", describeAIError(error));
         res.status(500).json({ message: "Failed to fetch AI analytics" });
       }
     }
@@ -5101,7 +5115,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           endDate,
           useQueueItems: true,
         }).catch((error) => {
-          console.error("Error processing batch learning:", error);
+          console.error("Error processing batch learning:", describeAIError(error));
         });
 
         res.json({
@@ -5109,7 +5123,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message: `Batch processing started for ${ticketCount} resolved tickets from ${start} to ${end}`,
         });
       } catch (error) {
-        console.error("Error starting batch processing:", error);
+        console.error("Error starting batch processing:", describeAIError(error));
         res.status(500).json({ message: "Failed to start batch processing" });
       }
     }
@@ -5146,15 +5160,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         : 0;
 
       // Get auto-responses sent count
+      // (applied ones only: a draft nobody posted was not "sent")
       const [autoResponsesCount] = await db
-        .select({ count: count() })
-        .from(ticketAutoResponses);
-
-      // Get tickets resolved by AI (where wasApplied is true)
-      const [ticketsResolvedByAIResult] = await db
         .select({ count: count() })
         .from(ticketAutoResponses)
         .where(eq(ticketAutoResponses.wasApplied, true));
+
+      // Tickets resolved by AI: DISTINCT tickets that are resolved/closed and whose applied
+      // auto-response was posted before that resolved/closed time.
+      const [ticketsResolvedByAIResult] = await db
+        .select({ count: sql<number>`count(DISTINCT ${ticketAutoResponses.ticketId})::int` })
+        .from(ticketAutoResponses)
+        .innerJoin(tasks, eq(ticketAutoResponses.ticketId, tasks.id))
+        .where(
+          and(
+            eq(ticketAutoResponses.wasApplied, true),
+            inArray(tasks.status, ["resolved", "closed"]),
+            sql`COALESCE(${tasks.resolvedAt}, ${tasks.closedAt}) >= ${ticketAutoResponses.createdAt}`
+          )
+        );
 
       // Get top categories by article count
       const topCategories = await db
@@ -5179,7 +5203,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })),
       });
     } catch (error) {
-      console.error("Error fetching AI analytics:", error);
+      console.error("Error fetching AI analytics:", describeAIError(error));
       res.status(500).json({ message: "Failed to fetch AI analytics" });
     }
   });
@@ -5389,7 +5413,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ...results,
         });
       } catch (error) {
-        console.error("Knowledge learning error:", error);
+        console.error("Knowledge learning error:", describeAIError(error));
         res.status(500).json({ message: "Failed to run knowledge learning" });
       }
     }
@@ -5474,7 +5498,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
       });
     } catch (error) {
-      console.error("AI status check error:", error);
+      console.error("AI status check error:", describeAIError(error));
       res.status(500).json({ message: "Failed to check AI status" });
     }
   });

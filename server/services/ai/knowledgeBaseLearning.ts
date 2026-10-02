@@ -32,6 +32,7 @@ import {
 import { loadCostLimits, estimateTokens } from "./costMonitoring";
 import { extractJSON } from "./jsonUtils";
 import { describeAIError, isQuotaBlocked } from "./aiErrors";
+import { ensureAiSystemUser } from "../../utils/aiSystemUser";
 
 /**
  * Structure for AI-generated knowledge articles
@@ -168,7 +169,9 @@ export const generateKnowledgeArticle = async (
       ...articleData,
       relatedTickets,
       isPublished: false,
-      createdBy: "ai-learning",
+      // "ai-learning" was never a user row, so created_by's foreign key rejected every
+      // generated article. The AI system user is a real row (null if its email is taken).
+      createdBy: ((await ensureAiSystemUser()) ?? undefined) as string,
     };
 
     return article;
@@ -488,13 +491,14 @@ export const processKnowledgeLearning = async (options?: {
               )
                 totalPublished++;
 
+              // Ids and lengths only: the title is model output.
               console.log(
-                `Created knowledge article: "${article.title}" (${
+                `Created knowledge article ${(savedArticle as any).id} (title ${String(article.title ?? "").length} chars, ${
                   article.isPublished ? "published" : "draft"
                 })`
               );
             } else {
-              console.log(`Similar article already exists: "${article.title}"`);
+              console.log(`Similar article already exists (id ${(existingArticle as any).id})`);
             }
           }
         }
@@ -706,8 +710,9 @@ export const improveKnowledgeArticle = async (
           // updatedAt: new Date(),
         });
 
+        // The reason is model output: log its length only.
         console.log(
-          `Improved knowledge article ${articleId}: ${improvement.improvementReason}`
+          `Improved knowledge article ${articleId} (reason ${String(improvement.improvementReason ?? "").length} chars)`
         );
         return true;
       }

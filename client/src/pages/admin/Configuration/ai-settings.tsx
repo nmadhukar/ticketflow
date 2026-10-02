@@ -110,6 +110,9 @@ interface AISettings {
   maxTokens: number;
 }
 
+/** Escalation settings are not active (ruling R23): flip this only when the server acts on them. */
+const ESCALATION_ACTIVE = false;
+
 export default function AISettings() {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -1041,7 +1044,9 @@ export default function AISettings() {
 
             <Separator />
 
-            {/* Escalation */}
+            {/* Escalation controls are hidden: the stored fields and the API still accept them, but nothing acts on them (no ticket is reassigned from these settings). */}
+            {ESCALATION_ACTIVE && (
+            <>
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
@@ -1157,6 +1162,8 @@ export default function AISettings() {
             </div>
 
             <Separator />
+            </>
+            )}
 
             {/* Knowledge Learning */}
             <div className="space-y-4 col-span-1 md:col-span-2 lg:col-span-1">

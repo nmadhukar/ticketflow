@@ -69,6 +69,8 @@ interface RouteSpec {
   call(agent: Agent, id: number): Promise<Res>;
   /** Statuses that mean the access gate let the request through. */
   allowed: number[];
+  /** Per-role override of `allowed` for routes whose success status differs by role (kept exact, never a union). */
+  allowedFor?(who: Who): number[];
   /** Runs before each call on an existing ticket (puts shared state back so the call tests access, not state). */
   prepare?(id: number): Promise<unknown>;
   /** Roles the route's own role rule refuses (403) even on a ticket they can see. */
@@ -106,14 +108,34 @@ const ROUTES: RouteSpec[] = [
     call: (a, id) => a.post(`/api/tasks/${id}/attachments`),
     allowed: [400, 503],
   },
-  // Fixture tickets have no AI row: staff get 200 null, a customer 404 (customers see only applied drafts). Outside scope stays 403.
-  { name: "GET /api/tasks/:id/auto-response", call: (a, id) => a.get(`/api/tasks/${id}/auto-response`), allowed: [200, 404] },
+  {
+    // An UNAPPLIED draft: staff 200, the ticket's own customer 404 (customers see only applied rows). Outside scope stays 403.
+    name: "GET /api/tasks/:id/auto-response (unapplied draft)",
+    call: (a, id) => a.get(`/api/tasks/${id}/auto-response`),
+    allowed: [200],
+    allowedFor: (who) => (who === "C1" || who === "C2" ? [404] : [200]),
+    prepare: async (id) => {
+      await db.delete(ticketAutoResponses).where(eq(ticketAutoResponses.ticketId, id));
+      await db.insert(ticketAutoResponses).values({ ticketId: id, aiResponse: "draft", confidenceScore: "0.5", wasApplied: false });
+    },
+  },
+  {
+    // An APPLIED row: everyone who can see the ticket gets exactly 200.
+    name: "GET /api/tasks/:id/auto-response (applied)",
+    call: (a, id) => a.get(`/api/tasks/${id}/auto-response`),
+    allowed: [200],
+    prepare: async (id) => {
+      await db.delete(ticketAutoResponses).where(eq(ticketAutoResponses.ticketId, id));
+      await db.insert(ticketAutoResponses).values({ ticketId: id, aiResponse: "sent", confidenceScore: "0.5", wasApplied: true });
+    },
+  },
   {
     // No draft exists for the fixture tickets: the gate passes, then 404 for staff.
     name: "POST /api/tasks/:id/auto-response/apply",
     call: (a, id) => a.post(`/api/tasks/${id}/auto-response/apply`),
     allowed: [404],
     refusedRoles: ["C1", "C2"],
+    prepare: (id) => db.delete(ticketAutoResponses).where(eq(ticketAutoResponses.ticketId, id)),
   },
   {
     // AI is not configured in the test env: the gate passes, then 503 / 400.
@@ -224,7 +246,7 @@ describe("ticket isolation matrix", () => {
 
         await route.prepare?.(ids[t]);
         const res = await route.call(agents[who], ids[t]);
-        if (route.allowed.includes(res.status)) actual[t] = "allowed";
+        if ((route.allowedFor?.(who) ?? route.allowed).includes(res.status)) actual[t] = "allowed";
         else if (res.status === 403 && res.body?.error === "forbidden") actual[t] = "403 forbidden";
         else actual[t] = `${res.status} ${JSON.stringify(res.body)}`;
       }

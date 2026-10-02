@@ -15,6 +15,7 @@ import type {
 import { bedrockIntegration } from "./bedrockIntegration";
 import { knowledgeBaseService } from "./knowledgeBase";
 import { ensureAiSystemUser } from "../../utils/aiSystemUser";
+import { getAISettings } from "../../admin/aiSettings";
 import { describeAIError, isQuotaBlocked } from "./aiErrors";
 
 interface ComplexityFactors {
@@ -31,14 +32,12 @@ export class AIAutoResponseService {
    * the analysis (this method owns the write; callers must not store another).
    *
    * `shouldAutoRespond` is the one decision, made by calculateConfidence from the
-   * admin settings (enabled flag and confidence threshold). The row's wasApplied is
-   * that decision AND `autoApply`: pass autoApply false for an on-demand draft that
-   * a person applies later, so no row claims to be applied when no comment exists.
+   * admin settings (enabled flag and confidence threshold). The row is ALWAYS stored
+   * with wasApplied false and the text already cut to maxResponseLength (the one
+   * clamp): whoever posts the comment (create path, or a person via /apply) marks
+   * the row applied afterwards, so no row ever claims a comment that does not exist.
    */
-  async analyzeTicket(
-    ticket: Task,
-    opts: { autoApply?: boolean } = {}
-  ): Promise<{
+  async analyzeTicket(ticket: Task): Promise<{
     autoResponse: string | null;
     confidence: number;
     complexity: number;
@@ -47,7 +46,6 @@ export class AIAutoResponseService {
     shouldAutoRespond: boolean;
     autoResponseRowId?: number;
   }> {
-    const autoApply = opts.autoApply ?? true;
     try {
       // Search for similar resolved tickets
       const similarTickets = await this.findSimilarResolvedTickets(
@@ -81,22 +79,25 @@ export class AIAutoResponseService {
       const factors = this.calculateComplexityFactors(ticket, similarTickets);
 
       // Store the AI response in the database (only if ticket has an ID)
+      const maxLength = Math.max(
+        100,
+        Math.min(5000, Number((await getAISettings()).maxResponseLength) || 1000)
+      );
+      const responseText = responseResult.response
+        ? responseResult.response.slice(0, maxLength)
+        : responseResult.response;
+
       let autoResponseRowId: number | undefined;
-      if (
-        responseResult.response &&
-        confidenceResult.confidenceScore > 0 &&
-        ticket.id
-      ) {
+      if (responseText && confidenceResult.confidenceScore > 0 && ticket.id) {
         autoResponseRowId = await this.storeAutoResponse(ticket.id, {
-          response: responseResult.response,
+          response: responseText,
           confidence: confidenceResult.confidenceScore,
           suggestedArticles: responseResult.suggestedArticles,
-          applied: autoApply && confidenceResult.shouldAutoRespond,
         });
       }
 
       return {
-        autoResponse: responseResult.response,
+        autoResponse: responseText,
         confidence: confidenceResult.confidenceScore,
         complexity: analysis.complexityScore,
         factors,
@@ -305,7 +306,6 @@ export class AIAutoResponseService {
       response: string;
       confidence: number;
       suggestedArticles: number[];
-      applied: boolean;
     }
   ): Promise<number | undefined> {
     try {
@@ -316,7 +316,7 @@ export class AIAutoResponseService {
         aiResponse: response.response,
         confidenceScore: response.confidence.toString(),
         // suggestedArticles: response.suggestedArticles,
-        wasApplied: response.applied,
+        wasApplied: false,
         respondedBy: aiUserId ?? null,
       };
 

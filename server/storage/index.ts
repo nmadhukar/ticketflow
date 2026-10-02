@@ -2711,11 +2711,6 @@ export class DatabaseStorage implements IStorage {
     console.log("Saving ticket analysis for user:", userId, analysis);
   }
 
-  async saveAutoResponse(data: any): Promise<void> {
-    // In production, implement proper database storage
-    console.log("Saving auto-response:", data);
-  }
-
   async saveComplexityScore(data: any): Promise<void> {
     // In production, implement proper database storage
     console.log("Saving complexity score:", data);

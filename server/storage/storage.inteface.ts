@@ -539,7 +539,6 @@ export interface IStorage {
 
   // AI Analysis and Learning Methods (legacy compatibility)
   saveTicketAnalysis(userId: string, analysis: any): Promise<void>;
-  saveAutoResponse(data: any): Promise<void>;
   saveComplexityScore(data: any): Promise<void>;
   saveAIAnalytics(analytics: any): Promise<void>;
   getRecentResolvedTickets(days: number): Promise<Task[]>;
