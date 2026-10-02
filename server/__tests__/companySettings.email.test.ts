@@ -3,7 +3,7 @@ import express from "express";
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 
 // Bypass auth in tests
-jest.mock("../auth", () => ({
+jest.mock("../services/auth", () => ({
   isAuthenticated: (_req: any, _res: any, next: any) => next(),
 }));
 
@@ -22,7 +22,7 @@ jest.mock("../storage", () => ({
 }));
 
 // Mock SES send for adapter path
-jest.mock("../ses", () => ({
+jest.mock("../services/ses", () => ({
   sendTestEmail: jest.fn().mockResolvedValue(true),
 }));
 

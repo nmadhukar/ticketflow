@@ -1,6 +1,6 @@
 import request from 'supertest';
 import express from 'express';
-import { setupAuth } from '../auth';
+import { setupAuth, hashPassword } from '../services/auth';
 import { storage } from '../storage';
 
 // Mock storage
@@ -8,7 +8,11 @@ jest.mock('../storage', () => ({
   storage: {
     getUserByEmail: jest.fn(),
     createUser: jest.fn(),
-    updateUser: jest.fn(),
+    upsertUser: jest.fn(),
+    setPasswordResetToken: jest.fn(),
+    getEmailTemplate: jest.fn(),
+    getCompanySettings: jest.fn(),
+    getActiveEmailProvider: jest.fn(),
     getUserInvitations: jest.fn(),
     markInvitationAccepted: jest.fn(),
   }
@@ -102,7 +106,7 @@ describe('Auth Routes', () => {
         role: 'user',
         expiresAt: new Date(Date.now() + 86400000)
       }]);
-      (storage.updateUser as jest.Mock).mockResolvedValue(undefined);
+      (storage.upsertUser as jest.Mock).mockResolvedValue(undefined);
       (storage.markInvitationAccepted as jest.Mock).mockResolvedValue(undefined);
 
       const response = await request(app)
@@ -111,31 +115,45 @@ describe('Auth Routes', () => {
 
       expect(response.status).toBe(201);
       expect(response.body.message).toContain('Account activated successfully');
-      expect(storage.updateUser).toHaveBeenCalled();
+      expect(storage.upsertUser).toHaveBeenCalled();
     });
   });
 
   describe('POST /api/auth/login', () => {
-    it('should login successfully with valid credentials', async () => {
-      const user = {
+    // A successful login writes a session row, so it is covered against a real
+    // database in integration/smoke.test.ts.
+    it('should reject login with a wrong password', async () => {
+      (storage.getUserByEmail as jest.Mock).mockResolvedValue({
         id: '123',
         email: 'test@example.com',
-        password: '$2b$10$hashedpassword', // Mock hashed password
+        password: await hashPassword('the-right-password'),
         isApproved: true,
         isActive: true
-      };
-
-      (storage.getUserByEmail as jest.Mock).mockResolvedValue(user);
+      });
 
       const response = await request(app)
         .post('/api/auth/login')
-        .send({
-          email: 'test@example.com',
-          password: 'password123'
-        });
+        .send({ email: 'test@example.com', password: 'the-wrong-password' });
 
-      // Note: This test would need proper password comparison mocking
-      expect(response.status).toBeLessThan(500); // Basic check
+      expect(response.status).toBe(401);
+      expect(response.body.message).toBe('Invalid email or password');
+    });
+
+    it('should reject login for a deactivated account', async () => {
+      (storage.getUserByEmail as jest.Mock).mockResolvedValue({
+        id: '123',
+        email: 'test@example.com',
+        password: await hashPassword('password123'),
+        isApproved: true,
+        isActive: false
+      });
+
+      const response = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'test@example.com', password: 'password123' });
+
+      expect(response.status).toBe(401);
+      expect(response.body.message).toBe('Account is deactivated');
     });
 
     it('should reject login with invalid email', async () => {
@@ -160,15 +178,23 @@ describe('Auth Routes', () => {
       };
 
       (storage.getUserByEmail as jest.Mock).mockResolvedValue(user);
-      (storage.updateUser as jest.Mock).mockResolvedValue(undefined);
+      (storage.setPasswordResetToken as jest.Mock).mockResolvedValue(undefined);
+      // No template or provider configured: the token is stored, no email goes out.
+      (storage.getEmailTemplate as jest.Mock).mockResolvedValue(undefined);
+      (storage.getCompanySettings as jest.Mock).mockResolvedValue(undefined);
+      (storage.getActiveEmailProvider as jest.Mock).mockResolvedValue(undefined);
 
       const response = await request(app)
         .post('/api/auth/forgot-password')
         .send({ email: 'test@example.com' });
 
       expect(response.status).toBe(200);
-      expect(response.body.message).toContain('password reset link');
-      expect(storage.updateUser).toHaveBeenCalled();
+      expect(response.body.message).toContain('reset link');
+      expect(storage.setPasswordResetToken).toHaveBeenCalledWith(
+        '123',
+        expect.any(String),
+        expect.any(Date)
+      );
     });
 
     it('should return generic message for non-existent email', async () => {
@@ -179,8 +205,8 @@ describe('Auth Routes', () => {
         .send({ email: 'nonexistent@example.com' });
 
       expect(response.status).toBe(200);
-      expect(response.body.message).toContain('password reset link');
-      expect(storage.updateUser).not.toHaveBeenCalled();
+      expect(response.body.message).toContain('reset link');
+      expect(storage.setPasswordResetToken).not.toHaveBeenCalled();
     });
   });
 });

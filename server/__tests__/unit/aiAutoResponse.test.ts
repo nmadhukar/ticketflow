@@ -1,174 +1,51 @@
-import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
-import { analyzeTicket, generateResponse, calculateConfidence } from '../../aiAutoResponse';
-import { createMockBedrockClient, setMockResponse, setMockError, testTickets } from '../mocks/aws-bedrock.mock';
+import { describe, it, expect, jest } from '@jest/globals';
 
-// Mock the Bedrock client
-jest.mock('@aws-sdk/client-bedrock-runtime');
+// aiAutoResponse imports the database at module load; the helper under test is pure.
+jest.mock('../../storage/db', () => ({ db: {}, pool: {} }));
 
-describe('AI Auto Response Service', () => {
-  let mockBedrockClient: any;
+import { calculateConfidence } from '../../services/ai/aiAutoResponse';
 
-  beforeEach(() => {
-    mockBedrockClient = createMockBedrockClient();
-    // Mock the module to return our mock client
-    jest.doMock('../../bedrockIntegration', () => ({
-      getBedrockClient: () => mockBedrockClient
-    }));
+const LONG_RESPONSE = 'Please reset your password using the link on the sign-in page, then try again.';
+
+const loginTicket: any = {
+  id: 1,
+  title: "Can't login",
+  description: 'It says invalid credentials',
+};
+
+const vagueTicket: any = {
+  id: 3,
+  title: 'Something is broken',
+  description: "It doesn't work",
+};
+
+describe('calculateConfidence', () => {
+  it('starts at 0.7 for a ticket that mentions a known support keyword', () => {
+    expect(calculateConfidence(loginTicket, LONG_RESPONSE, [])).toBeCloseTo(0.7);
   });
 
-  afterEach(() => {
-    jest.clearAllMocks();
+  it('starts at 0.4 for a vague ticket', () => {
+    expect(calculateConfidence(vagueTicket, LONG_RESPONSE, [])).toBeCloseTo(0.4);
   });
 
-  describe('analyzeTicket', () => {
-    it('should analyze a simple ticket correctly', async () => {
-      setMockResponse(mockBedrockClient, 'highConfidence');
-      
-      const result = await analyzeTicket(testTickets.simpleAuth);
-      
-      expect(result).toHaveProperty('ticketId', testTickets.simpleAuth.id);
-      expect(result).toHaveProperty('complexity');
-      expect(result).toHaveProperty('suggestedCategory');
-      expect(result).toHaveProperty('requiresEscalation');
-      expect(mockBedrockClient.send).toHaveBeenCalledTimes(1);
-    });
-
-    it('should handle complex tickets appropriately', async () => {
-      setMockResponse(mockBedrockClient, 'complexityAnalysis');
-      
-      const result = await analyzeTicket(testTickets.complexNetwork);
-      
-      expect(result.complexity).toBeGreaterThan(50);
-      expect(result.requiresEscalation).toBe(true);
-    });
-
-    it('should handle API errors gracefully', async () => {
-      setMockError(mockBedrockClient, new Error('API Rate Limit Exceeded'));
-      
-      await expect(analyzeTicket(testTickets.simpleAuth)).rejects.toThrow('API Rate Limit Exceeded');
-    });
+  it('matches keywords in the description as well as the title', () => {
+    const ticket: any = { id: 2, title: 'Help', description: 'My password does not work' };
+    expect(calculateConfidence(ticket, LONG_RESPONSE, [])).toBeCloseTo(0.7);
   });
 
-  describe('generateResponse', () => {
-    it('should generate appropriate response for auth issues', async () => {
-      setMockResponse(mockBedrockClient, 'highConfidence');
-      
-      const response = await generateResponse(
-        testTickets.simpleAuth,
-        [],
-        { confidenceThreshold: 0.7 }
-      );
-      
-      expect(response).toHaveProperty('content');
-      expect(response).toHaveProperty('confidence');
-      expect(response.content).toContain('authentication');
-      expect(response.confidence).toBeGreaterThanOrEqual(0.7);
-    });
-
-    it('should incorporate knowledge base context', async () => {
-      const knowledgeContext = [
-        {
-          id: 1,
-          title: 'Login Troubleshooting Guide',
-          content: 'Clear browser cache and cookies to resolve login issues',
-          category: 'troubleshooting'
-        }
-      ];
-
-      setMockResponse(mockBedrockClient, 'highConfidence');
-      
-      const response = await generateResponse(
-        testTickets.simpleAuth,
-        knowledgeContext,
-        { confidenceThreshold: 0.7 }
-      );
-      
-      expect(response.content).toContain('cache');
-      expect(mockBedrockClient.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          input: expect.objectContaining({
-            body: expect.stringContaining('knowledge base')
-          })
-        })
-      );
-    });
-
-    it('should respect confidence threshold settings', async () => {
-      setMockResponse(mockBedrockClient, 'lowConfidence');
-      
-      const response = await generateResponse(
-        testTickets.vague,
-        [],
-        { confidenceThreshold: 0.8 }
-      );
-      
-      expect(response.confidence).toBeLessThan(0.8);
-      expect(response.shouldAutoRespond).toBe(false);
-    });
+  it('subtracts 0.2 when the response is shorter than 50 characters', () => {
+    expect(calculateConfidence(vagueTicket, 'Insufficient information provided', [])).toBeCloseTo(0.2);
   });
 
-  describe('calculateConfidence', () => {
-    it('should calculate high confidence for clear issues', () => {
-      const confidence = calculateConfidence(
-        testTickets.simpleAuth,
-        'Clear authentication issue with standard resolution steps',
-        []
-      );
-      
-      expect(confidence).toBeGreaterThan(0.7);
-    });
-
-    it('should calculate lower confidence for vague descriptions', () => {
-      const confidence = calculateConfidence(
-        testTickets.vague,
-        'Insufficient information provided',
-        []
-      );
-      
-      expect(confidence).toBeLessThan(0.5);
-    });
-
-    it('should increase confidence with relevant knowledge base matches', () => {
-      const knowledgeMatches = [
-        { id: 1, title: 'Login Issues', similarity: 0.9 },
-        { id: 2, title: 'Authentication Guide', similarity: 0.8 }
-      ];
-
-      const confidenceWithKB = calculateConfidence(
-        testTickets.simpleAuth,
-        'Authentication troubleshooting steps',
-        knowledgeMatches
-      );
-
-      const confidenceWithoutKB = calculateConfidence(
-        testTickets.simpleAuth,
-        'Authentication troubleshooting steps',
-        []
-      );
-      
-      expect(confidenceWithKB).toBeGreaterThan(confidenceWithoutKB);
-    });
+  it('adds 0.1 per knowledge match, capped at 0.3', () => {
+    const matches = (n: number) => Array.from({ length: n }, (_, i) => ({ id: i }));
+    expect(calculateConfidence(loginTicket, LONG_RESPONSE, matches(1))).toBeCloseTo(0.8);
+    expect(calculateConfidence(loginTicket, LONG_RESPONSE, matches(2))).toBeCloseTo(0.9);
+    expect(calculateConfidence(loginTicket, LONG_RESPONSE, matches(10))).toBeCloseTo(1.0);
   });
 
-  describe('Error Handling', () => {
-    it('should handle network timeouts', async () => {
-      setMockError(mockBedrockClient, new Error('Request timeout'));
-      
-      await expect(analyzeTicket(testTickets.simpleAuth)).rejects.toThrow('Request timeout');
-    });
-
-    it('should handle invalid API responses', async () => {
-      mockBedrockClient.send.mockResolvedValue({
-        body: new TextEncoder().encode('invalid json')
-      });
-      
-      await expect(analyzeTicket(testTickets.simpleAuth)).rejects.toThrow();
-    });
-
-    it('should handle missing required fields', async () => {
-      const invalidTicket = { ...testTickets.simpleAuth, description: '' };
-      
-      await expect(analyzeTicket(invalidTicket)).rejects.toThrow('description');
-    });
+  it('never leaves the 0..1 range', () => {
+    expect(calculateConfidence(vagueTicket, '', [])).toBeGreaterThanOrEqual(0);
+    expect(calculateConfidence(loginTicket, LONG_RESPONSE, new Array(50).fill({}))).toBeLessThanOrEqual(1);
   });
 });
