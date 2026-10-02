@@ -46,3 +46,6 @@ report
 DOCKER_USAGE.md
 
 .cursor
+# Playwright output
+test-results/
+playwright-report/
