@@ -39,6 +39,7 @@
 import { Client } from "@microsoft/microsoft-graph-client";
 import { ConfidentialClientApplication } from "@azure/msal-node";
 import { Task } from "@shared/schema";
+import { postWebhookJson } from "./webhookGuard";
 
 export class MicrosoftTeamsIntegration {
   private msalClient: ConfidentialClientApplication | null = null;
@@ -175,17 +176,13 @@ export class MicrosoftTeamsIntegration {
         ],
       };
 
-      const response = await fetch(webhookUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(card),
-      });
-
-      return response.ok;
+      // Allow-listed host, public DNS only, no redirects, timeout (webhookGuard).
+      return await postWebhookJson(webhookUrl, card);
     } catch (error) {
-      console.error("Error sending webhook notification:", error);
+      console.error(
+        "Error building webhook notification:",
+        error instanceof Error ? error.name : "error"
+      );
       return false;
     }
   }

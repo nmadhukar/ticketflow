@@ -2,6 +2,7 @@ import { IStorage } from "../storage/storage.inteface";
 import { db } from "../storage/db";
 import { teamAdmins, departments } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
+import { normalizeRole } from "./roles";
 
 /**
  * Team Permissions Module
@@ -96,6 +97,45 @@ export async function canManageTeam(
   }
 
   return false;
+}
+
+/**
+ * Ruling R12: who may create a team in a department. Only an admin, or the
+ * manager of that department (departments.manager_id, and a manager role).
+ * Team creators, team admins and members have no such right.
+ */
+export async function canAdministerDepartment(
+  storage: IStorage,
+  userId: string,
+  departmentId: number
+): Promise<boolean> {
+  const user = await storage.getUser(userId);
+  const role = normalizeRole(user?.role);
+  if (!user || !role) return false;
+  if (role === "admin") return true;
+  if (role !== "manager") return false;
+  const [department] = await db
+    .select({ id: departments.id })
+    .from(departments)
+    .where(and(eq(departments.id, departmentId), eq(departments.managerId as any, userId)))
+    .limit(1);
+  return !!department;
+}
+
+/**
+ * Ruling R12: who may add or remove team members. Membership widens ticket
+ * visibility (the teammate term), so only an admin or the manager of the
+ * team's department may change it. Being the team's creator or a team admin
+ * is not enough, and no one can add themselves.
+ */
+export async function canChangeTeamMembership(
+  storage: IStorage,
+  userId: string,
+  teamId: number
+): Promise<boolean> {
+  const team = await storage.getTeam(teamId);
+  if (!team) return false;
+  return canAdministerDepartment(storage, userId, team.departmentId);
 }
 
 /**
