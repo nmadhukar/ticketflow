@@ -2,6 +2,7 @@ import Joi from "joi";
 import { body, param, query, validationResult } from "express-validator";
 import { Request, Response, NextFunction } from "express";
 import DOMPurify from "isomorphic-dompurify";
+import { stripActiveMarkup } from "./sanitizeHtml";
 
 // Custom sanitizer for text content
 export const sanitizeText = (text: string): string => {
@@ -283,30 +284,55 @@ export const checkValidationResult = (
   next();
 };
 
-// Sanitization middleware
+// Values that are credentials, tokens or opaque payloads: never rewritten.
+const UNSANITISED_KEYS = new Set([
+  "password",
+  "currentPassword",
+  "newPassword",
+  "confirmPassword",
+  "token",
+  "inviteToken",
+  "resetToken",
+  "fileData",
+]);
+const MAX_SANITISE_DEPTH = 20;
+
+/**
+ * Recursively neutralise executable markup in every string of a parsed value.
+ * Text is not HTML-escaped (React escapes on render; escaping here would
+ * double-escape ticket text). Fields rendered AS HTML (guide content) are
+ * sanitised with an allow-list in their own routes, on write and on read.
+ */
+export const sanitizeDeep = (value: unknown, depth = 0): unknown => {
+  if (typeof value === "string") return stripActiveMarkup(value);
+  if (depth >= MAX_SANITISE_DEPTH || value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeDeep(item, depth + 1));
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+    out[key] = UNSANITISED_KEYS.has(key) ? inner : sanitizeDeep(inner, depth + 1);
+  }
+  return out;
+};
+
+// Sanitization middleware. Mount it AFTER the body parsers (see pipeline.ts).
 export const sanitizeInput = (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
-  // Sanitize string fields in request body
   if (req.body && typeof req.body === "object") {
-    for (const [key, value] of Object.entries(req.body)) {
-      if (typeof value === "string") {
-        req.body[key] = sanitizeText(value);
-      }
-    }
+    req.body = sanitizeDeep(req.body);
   }
-
-  // Sanitize query parameters
   if (req.query && typeof req.query === "object") {
-    for (const [key, value] of Object.entries(req.query)) {
-      if (typeof value === "string") {
-        req.query[key] = sanitizeText(value);
-      }
+    const cleaned = sanitizeDeep(req.query) as Record<string, unknown>;
+    for (const key of Object.keys(req.query)) {
+      (req.query as Record<string, unknown>)[key] = cleaned[key];
     }
   }
-
   next();
 };
 
@@ -358,13 +384,6 @@ export const preventXSS = (req: Request, res: Response, next: NextFunction) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("X-XSS-Protection", "1; mode=block");
-  res.setHeader(
-    "Content-Security-Policy",
-    "default-src 'self'; " +
-      "script-src 'self' 'unsafe-inline'; " +
-      "style-src 'self' 'unsafe-inline'; " +
-      "img-src 'self' data: https:; " +
-      "font-src 'self' https://fonts.gstatic.com"
-  );
+  // The Content-Security-Policy is set once, by helmet (security/pipeline.ts).
   next();
 };

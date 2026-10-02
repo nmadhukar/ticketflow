@@ -1,6 +1,6 @@
 // Centralized security configuration and middleware
 import { Express } from "express";
-import helmet from "helmet";
+import { installRequestPipeline } from "./pipeline";
 import { authenticateJWT, optionalJWT } from "./jwt";
 import { requireRole, requireAdmin, requireAgentOrAdmin } from "./rbac";
 import { generalRateLimit, authRateLimit } from "./rateLimiting";
@@ -51,52 +51,16 @@ export const securityConfig = {
   },
 };
 
-// Apply security middleware to Express app
+// Apply security middleware to Express app: headers, rate limit, body parsers
+// (limit from MAX_REQUEST_SIZE_MB, default 50, for base64 uploads), then the
+// input sanitiser, in that order (see pipeline.ts).
 export const applySecurity = (app: Express) => {
-  // Helmet for basic security headers
-  app.use(
-    helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          styleSrc: [
-            "'self'",
-            "'unsafe-inline'",
-            "https://fonts.googleapis.com",
-          ],
-          fontSrc: ["'self'", "https://fonts.gstatic.com"],
-          imgSrc: ["'self'", "data:", "https:"],
-          scriptSrc: ["'self'", "'unsafe-inline'"],
-          connectSrc: ["'self'", "https:"],
-          frameSrc: ["'none'"],
-          objectSrc: ["'none'"],
-          mediaSrc: ["'self'"],
-          manifestSrc: ["'self'"],
-        },
-      },
-      crossOriginResourcePolicy: { policy: "cross-origin" },
-      crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
-      crossOriginEmbedderPolicy: false,
-      hsts: {
-        maxAge: 31536000,
-        includeSubDomains: true,
-        preload: true,
-      },
-    })
-  );
-
-  // XSS Protection
-  app.use(preventXSS);
-
-  // Input sanitization
-  if (securityConfig.validation.enabled) {
-    app.use(sanitizeInput);
-  }
-
-  // General rate limiting (API routes only)
-  if (securityConfig.rateLimiting.enabled) {
-    app.use("/api", generalRateLimit);
-  }
+  const maxRequestSizeMB = parseInt(process.env.MAX_REQUEST_SIZE_MB || "50", 10);
+  installRequestPipeline(app, {
+    bodyLimit: `${maxRequestSizeMB}mb`,
+    sanitize: securityConfig.validation.enabled,
+    rateLimit: securityConfig.rateLimiting.enabled ? generalRateLimit : undefined,
+  });
 
   console.log("Security middleware applied successfully");
 };

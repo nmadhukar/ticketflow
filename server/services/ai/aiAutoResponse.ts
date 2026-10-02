@@ -16,6 +16,7 @@ import { bedrockIntegration } from "./bedrockIntegration";
 import { knowledgeBaseService } from "./knowledgeBase";
 import { ensureAiSystemUser } from "../../utils/aiSystemUser";
 import { describeAIError, isQuotaBlocked } from "./aiErrors";
+import { containsPattern } from "../../utils/like";
 
 interface ComplexityFactors {
   keywords: number;
@@ -139,8 +140,8 @@ export class AIAutoResponseService {
 
       const conditions = searchTerms.map((term) =>
         or(
-          ilike(tasks.title, `%${term}%`),
-          ilike(tasks.description, `%${term}%`)
+          ilike(tasks.title, containsPattern(term)),
+          ilike(tasks.description, containsPattern(term))
         )
       );
 
@@ -210,9 +211,9 @@ export class AIAutoResponseService {
 
       const conditions = searchTerms.map((term) =>
         or(
-          ilike(knowledgeArticles.title, `%${term}%`),
-          ilike(knowledgeArticles.content, `%${term}%`),
-          sql`${knowledgeArticles.tags}::text ILIKE ${"%" + term + "%"}`
+          ilike(knowledgeArticles.title, containsPattern(term)),
+          ilike(knowledgeArticles.content, containsPattern(term)),
+          sql`${knowledgeArticles.tags}::text ILIKE ${containsPattern(term)}`
         )
       );
 

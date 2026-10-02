@@ -15,15 +15,10 @@ const app = express();
 // Trust Nginx/reverse proxy so req.ip uses the real client IP via X-Forwarded-For
 app.set("trust proxy", 1);
 
-// Apply security middleware first
+// Security headers, rate limit, body parsers (MAX_REQUEST_SIZE_MB, default
+// 50MB, for base64 uploads) and then the input sanitiser: the sanitiser must
+// run after the parsers, so all of it is installed together, in order.
 applySecurity(app);
-
-// Increase JSON body parser limit to handle base64 file uploads (logo, etc.)
-// Increased to support file uploads with task creation
-// Uses MAX_REQUEST_SIZE_MB env variable, defaults to 50MB
-const maxRequestSizeMB = parseInt(process.env.MAX_REQUEST_SIZE_MB || "50", 10);
-app.use(express.json({ limit: `${maxRequestSizeMB}mb` }));
-app.use(express.urlencoded({ extended: true, limit: `${maxRequestSizeMB}mb` }));
 
 // Request log: token path segments redacted, no auth/invitation bodies.
 app.use(requestLogger(log));

@@ -109,7 +109,9 @@ describe('Auth Routes', () => {
         .post('/api/auth/register')
         .send(validUser);
 
-      expect(response.status).toBe(409);
+      // Identical to a password account's answer: SSO-ness is not revealed.
+      expect(response.status).toBe(400);
+      expect(response.body.message).toBe('Email already registered');
       expect(storage.upsertUser).not.toHaveBeenCalled();
     });
   });

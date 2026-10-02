@@ -116,6 +116,8 @@ import { HttpError, asyncHandler } from "../http/errors";
 import { createTicketSchema, STAFF_ONLY_TICKET_FIELDS } from "../services/tickets/schemas";
 import { assertAgentMayAssign, assertAssigneesExist } from "../services/tickets/assignees";
 import { parseIdParam } from "../http/params";
+import { sanitizeRichHtml } from "../security/sanitizeHtml";
+import { containsPattern } from "../utils/like";
 import { registerTeamsRoutes } from "./teams";
 import { registerIdParams } from "../http/install";
 import {
@@ -2076,8 +2078,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get all help documents (public)
-  app.get("/api/help", async (req, res) => {
+  // Get all help documents (any signed-in user)
+  app.get("/api/help", isAuthenticated, async (req, res) => {
     try {
       const documents = await storage.getHelpDocuments();
       res.json(documents);
@@ -2087,8 +2089,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Search help documents (public)
-  app.get("/api/help/search", async (req, res) => {
+  // Search help documents (any signed-in user)
+  app.get("/api/help/search", isAuthenticated, async (req, res) => {
     try {
       const { q } = req.query;
       if (!q || typeof q !== "string") {
@@ -2103,8 +2105,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get single help document (public)
-  app.get("/api/help/:id", async (req, res) => {
+  // Get single help document (any signed-in user)
+  app.get("/api/help/:id", isAuthenticated, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const document = await storage.getHelpDocument(id);
@@ -2212,34 +2214,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get all guides (optionally filter by published status)
+  // Guide HTML is rendered as HTML by the client, so it is sanitised with an
+  // allow-list on the way in (admin routes below) AND on the way out (rows
+  // stored before sanitising existed).
+  const publicGuide = <T extends { content: string }>(guide: T): T => ({
+    ...guide,
+    content: sanitizeRichHtml(guide.content),
+  });
+
+  // Get all guides. Staff may ask for drafts; everyone else sees only
+  // published guides, whatever the query says.
   app.get("/api/guides", isAuthenticated, async (req, res) => {
     try {
       const { published } = req.query;
+      const publishedOnly =
+        !isStaffRole((req.user as any)?.role) || published === "true";
       const guides = await storage.getUserGuides(
-        published === "true" ? { isPublished: true } : undefined
+        publishedOnly ? { isPublished: true } : undefined
       );
-      res.json(guides);
+      res.json(guides.map(publicGuide));
     } catch (error) {
       console.error("Error fetching guides:", error);
       res.status(500).json({ message: "Failed to fetch guides" });
     }
   });
 
-  // Get single guide
+  // Get single guide (a draft is 404 for non-staff)
   app.get("/api/guides/:id", isAuthenticated, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const guide = await storage.getUserGuideById(id);
 
-      if (!guide) {
+      if (
+        !guide ||
+        (guide.isPublished !== true && !isStaffRole((req.user as any)?.role))
+      ) {
         return res.status(404).json({ message: "Guide not found" });
       }
 
       // Increment view count
       await storage.incrementGuideViewCount(id);
 
-      res.json(guide);
+      res.json(publicGuide(guide));
     } catch (error) {
       console.error("Error fetching guide:", error);
       res.status(500).json({ message: "Failed to fetch guide" });
@@ -2322,9 +2338,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const guide = await storage.createUserGuide({
         ...req.body,
+        content: sanitizeRichHtml(req.body?.content),
         createdBy: userId,
       });
-      res.json(guide);
+      res.json(publicGuide(guide));
     } catch (error) {
       console.error("Error creating guide:", error);
       res.status(500).json({ message: "Failed to create guide" });
@@ -2342,8 +2359,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const id = parseInt(req.params.id);
-      const guide = await storage.updateUserGuide(id, req.body);
-      res.json(guide);
+      const updates = { ...req.body };
+      if ("content" in updates) {
+        updates.content = sanitizeRichHtml(updates.content);
+      }
+      const guide = await storage.updateUserGuide(id, updates);
+      res.json(guide ? publicGuide(guide) : guide);
     } catch (error) {
       console.error("Error updating guide:", error);
       res.status(500).json({ message: "Failed to update guide" });
@@ -2897,9 +2918,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Company Policy endpoints
+  // Retired (inactive) policies are for admins only: everyone else gets the
+  // active ones, and a retired policy is 404 by id and by download.
+  const isAdminCaller = (req: any): boolean =>
+    normalizeRole(req.user?.role) === "admin";
+
   app.get("/api/company-policies", isAuthenticated, async (req, res) => {
     try {
-      const includeInactive = req.query.includeInactive === "true";
+      const includeInactive =
+        req.query.includeInactive === "true" && isAdminCaller(req);
       const policies = await storage.getAllCompanyPolicies(includeInactive);
       res.json(policies);
     } catch (error) {
@@ -2913,7 +2940,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const policyId = parseInt(req.params.id);
       const policy = await storage.getCompanyPolicyById(policyId);
 
-      if (!policy) {
+      if (!policy || (!policy.isActive && !isAdminCaller(req))) {
         return res.status(404).json({ message: "Company policy not found" });
       }
 
@@ -3060,7 +3087,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const policyId = parseInt(req.params.id);
         const policy = await storage.getCompanyPolicyById(policyId);
 
-        if (!policy) {
+        if (!policy || (!policy.isActive && !isAdminCaller(req))) {
           return res.status(404).json({ message: "Company policy not found" });
         }
 
@@ -4287,9 +4314,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Knowledge Base Routes
 
   // Search knowledge base
-  app.get("/api/knowledge/search", isAuthenticated, async (req, res) => {
+  const knowledgeListSearchQuery = z.object({
+    query: z.string().max(200).optional(),
+    category: z.string().max(100).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(10),
+  });
+
+  app.get("/api/knowledge/search", isAuthenticated, async (req, res, next) => {
     try {
-      const { query, category, limit = 10 } = req.query;
+      const parsed = knowledgeListSearchQuery.safeParse(req.query);
+      if (!parsed.success) {
+        throw parsed.error;
+      }
+      const { query, category, limit } = parsed.data;
 
       const articles = await db
         .select()
@@ -4299,23 +4336,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
             eq(knowledgeArticles.isPublished, true),
             query
               ? or(
-                  ilike(knowledgeArticles.title, `%${query}%`),
-                  ilike(knowledgeArticles.content, `%${query}%`)
+                  ilike(knowledgeArticles.title, containsPattern(query)),
+                  ilike(knowledgeArticles.content, containsPattern(query))
                 )
               : undefined,
-            category
-              ? eq(knowledgeArticles.category, category as string)
-              : undefined
+            category ? eq(knowledgeArticles.category, category) : undefined
           )
         )
         .orderBy(
           desc(knowledgeArticles.effectivenessScore),
           desc(knowledgeArticles.usageCount)
         )
-        .limit(parseInt(limit as string));
+        .limit(limit);
 
       res.json(articles);
     } catch (error) {
+      // A ZodError becomes 400 validation_failed in the JSON error handler.
+      if (error instanceof z.ZodError) return next(error);
       console.error("Error searching knowledge base:", error);
       res.status(500).json({ message: "Failed to search knowledge base" });
     }

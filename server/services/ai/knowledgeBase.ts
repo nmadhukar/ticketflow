@@ -12,6 +12,7 @@ import type {
   KnowledgeArticle,
 } from "@shared/schema";
 import { buildCreateKnowledgeArticlePrompt } from "./prompts";
+import { containsPattern } from "../../utils/like";
 import {
   getBedrockClient,
   runKnowledgeArticleGenerationPrompt,
@@ -324,7 +325,7 @@ ${aiEnhancement?.variations?.join("\n") || ""}
       .where(
         and(
           eq(knowledgeArticles.isPublished, true),
-          ilike(knowledgeArticles.content, `%${query}%`)
+          ilike(knowledgeArticles.content, containsPattern(query))
         )
       )
       .limit(limit);

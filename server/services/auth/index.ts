@@ -331,16 +331,13 @@ export function setupAuth(app: Express) {
       }
 
       // Never let a registration take over an existing account, including
-      // a password-less (SSO) one.
+      // a password-less (SSO) one. The answer is the same whatever kind of
+      // account holds the email, so it does not reveal which kind it is.
       if (existingUser) {
-        if (!existingUser.password) {
-          return res.status(409).json({
-            error: "account_exists",
-            message:
-              "An account for this email already exists. Sign in with your single sign-on provider.",
-          });
-        }
-        return res.status(400).json({ message: "Email already registered" });
+        return res.status(400).json({
+          error: "email_registered",
+          message: "Email already registered",
+        });
       }
 
       // Hash password
@@ -729,20 +726,8 @@ export function setupAuth(app: Express) {
     }
   });
 
-  // Check email availability
-  app.post("/api/auth/check-email", async (req, res) => {
-    try {
-      const { email } = req.body;
-      if (!email) {
-        return res.status(400).json({ message: "Email is required" });
-      }
-
-      const user = await storage.getUserByEmail(email);
-      res.json({ available: !user });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to check email" });
-    }
-  });
+  // No "is this email taken" endpoint: no client uses one, and an anonymous
+  // yes/no per address is an account-enumeration oracle (removed in Task 13).
 }
 
 /**

@@ -124,6 +124,9 @@ export default function UserGuides() {
     }
   };
 
+  // guide.content is HTML, and is safe to inject only because /api/guides and
+  // /api/guides/:id return it already sanitised with the server's allow-list
+  // (server/security/sanitizeHtml.ts). Never render guide HTML from another source.
   const renderGuideContent = (guide: UserGuide) => {
     if (guide.type === "scribehow" || guide.type === "video") {
       // Render embed code directly
