@@ -67,6 +67,7 @@ describe('DatabaseStorage', () => {
       (db.insert as jest.Mock).mockReturnValue(insertMock);
 
       const newUser = {
+        id: 'user-1',
         email: 'test@example.com',
         firstName: 'Test',
         lastName: 'User',
@@ -98,6 +99,7 @@ describe('DatabaseStorage', () => {
       (db.insert as jest.Mock).mockReturnValue(insertMock);
 
       const newTeam = {
+        departmentId: 1,
         name: 'Test Team',
         description: 'Test Description',
         createdBy: '123'

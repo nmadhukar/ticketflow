@@ -23,12 +23,14 @@ jest.mock("../storage", () => ({
 
 // Mock SES send for adapter path
 jest.mock("../services/ses", () => ({
-  sendTestEmail: jest.fn().mockResolvedValue(true),
+  sendTestEmail: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
 }));
 
 import { registerCompanySettingsRoutes } from "../admin/companySettings";
 import { storage } from "../storage";
 import { EMAIL_PROVIDERS } from "../../shared/constants";
+
+type AsyncMock = jest.Mock<(...args: unknown[]) => Promise<unknown>>;
 
 describe("Company Settings - Email Endpoints", () => {
   let app: express.Express;
@@ -42,7 +44,7 @@ describe("Company Settings - Email Endpoints", () => {
 
   describe("GET /api/company-settings/email", () => {
     it("returns empty object when no active provider", async () => {
-      (storage.getActiveEmailProvider as jest.Mock).mockResolvedValue(
+      (storage.getActiveEmailProvider as unknown as AsyncMock).mockResolvedValue(
         undefined
       );
       const res = await request(app).get("/api/company-settings/email");
@@ -51,7 +53,7 @@ describe("Company Settings - Email Endpoints", () => {
     });
 
     it("returns active provider summary when configured", async () => {
-      (storage.getActiveEmailProvider as jest.Mock).mockResolvedValue({
+      (storage.getActiveEmailProvider as unknown as AsyncMock).mockResolvedValue({
         provider: EMAIL_PROVIDERS.AWS,
         fromEmail: "no-reply@example.com",
         fromName: "TicketFlow",
@@ -67,7 +69,7 @@ describe("Company Settings - Email Endpoints", () => {
 
   describe("POST /api/company-settings/email", () => {
     it("validates payload and saves AWS provider", async () => {
-      (storage.upsertEmailProvider as jest.Mock).mockResolvedValue({
+      (storage.upsertEmailProvider as unknown as AsyncMock).mockResolvedValue({
         provider: EMAIL_PROVIDERS.AWS,
         fromEmail: "no-reply@example.com",
         fromName: "TicketFlow",
@@ -85,7 +87,7 @@ describe("Company Settings - Email Endpoints", () => {
 
       expect(res.status).toBe(200);
       expect(storage.upsertEmailProvider).toHaveBeenCalled();
-      const call = (storage.upsertEmailProvider as unknown as jest.Mock).mock
+      const call = (storage.upsertEmailProvider as unknown as unknown as AsyncMock).mock
         .calls[0][0] as any;
       expect(call.provider).toBe(EMAIL_PROVIDERS.AWS);
       expect(call.fromEmail).toBe("no-reply@example.com");
@@ -103,7 +105,7 @@ describe("Company Settings - Email Endpoints", () => {
 
   describe("POST /api/company-settings/email/test", () => {
     it("succeeds for AWS adapter", async () => {
-      (storage.getActiveEmailProvider as jest.Mock).mockResolvedValue({
+      (storage.getActiveEmailProvider as unknown as AsyncMock).mockResolvedValue({
         provider: EMAIL_PROVIDERS.AWS,
         fromEmail: "no-reply@example.com",
         fromName: "TicketFlow",
@@ -122,7 +124,7 @@ describe("Company Settings - Email Endpoints", () => {
     });
 
     it("returns 400 when not configured", async () => {
-      (storage.getActiveEmailProvider as jest.Mock).mockResolvedValue(
+      (storage.getActiveEmailProvider as unknown as AsyncMock).mockResolvedValue(
         undefined
       );
       const res = await request(app)

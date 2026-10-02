@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "client/src/**/*.test.ts",
+    "client/src/**/*.test.tsx",
+    "server/**/*.test.ts",
+    "shared/**/*.test.ts",
+    "server/__tests__/**/*.ts",
+    "client/src/**/__tests__/**/*",
+    "client/src/**/*.d.ts",
+    "jest.setup*",
+    "client/src/vite-env.d.ts"
+  ],
+  "exclude": ["node_modules", "build", "dist"],
+  "compilerOptions": {
+    "incremental": false,
+    "types": ["node", "vite/client", "jest", "@testing-library/jest-dom"]
+  }
+}
