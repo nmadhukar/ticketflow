@@ -26,7 +26,7 @@ describe('DatabaseStorage', () => {
       email: 'test@example.com',
       firstName: 'Test',
       lastName: 'User',
-      role: 'user',
+      role: 'agent',
       isActive: true,
       isApproved: true,
       createdAt: new Date(),
@@ -72,7 +72,7 @@ describe('DatabaseStorage', () => {
         firstName: 'Test',
         lastName: 'User',
         password: 'hashedpassword',
-        role: 'user' as const
+        role: 'agent' as const
       };
 
       const result = await storage.createUser(newUser);

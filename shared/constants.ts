@@ -40,7 +40,7 @@ export type TicketSeverity = (typeof TICKET_SEVERITIES)[number];
 
 export const USER_ROLES = {
   CUSTOMER: "customer",
-  USER: "user",
+  AGENT: "agent",
   MANAGER: "manager",
   ADMIN: "admin",
 } as const;

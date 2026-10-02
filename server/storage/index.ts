@@ -104,6 +104,7 @@ import {
 } from "drizzle-orm";
 import { IStorage } from "./storage.inteface";
 import { LOCKOUT_MINUTES, MAX_FAILED_LOGINS } from "../services/auth/lockout";
+import { hashResetToken } from "../utils/resetToken";
 import { PUBLIC_USER_FIELDS, type PublicUser } from "../utils/publicUser";
 
 /**
@@ -221,7 +222,8 @@ export class DatabaseStorage implements IStorage {
     await db
       .update(users)
       .set({
-        passwordResetToken: token,
+        // Only the sha256 of the token is stored; the plain token lives in the email.
+        passwordResetToken: hashResetToken(token),
         passwordResetExpires: expires,
         updatedAt: new Date(),
       })
@@ -234,7 +236,7 @@ export class DatabaseStorage implements IStorage {
       .from(users)
       .where(
         and(
-          eq(users.passwordResetToken, token),
+          eq(users.passwordResetToken, hashResetToken(token)),
           sql`${users.passwordResetExpires} > NOW()`
         )
       );
@@ -249,9 +251,93 @@ export class DatabaseStorage implements IStorage {
       .update(users)
       .set({
         password: hashedPassword,
+        // The user chose this password themselves.
+        mustChangePassword: false,
         updatedAt: new Date(),
       })
       .where(eq(users.id, userId));
+  }
+
+  /**
+   * Admin reset: stores an already-hashed temporary password, flags the
+   * account to change it, and clears any lockout. False when no such user.
+   */
+  async setTemporaryPassword(
+    userId: string,
+    hashedPassword: string
+  ): Promise<boolean> {
+    const rows = await db
+      .update(users)
+      .set({
+        password: hashedPassword,
+        mustChangePassword: true,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        passwordResetToken: null,
+        passwordResetExpires: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+      .returning({ id: users.id });
+    return rows.length > 0;
+  }
+
+  /**
+   * Creates a user and claims their invitation in ONE transaction. The claim
+   * is a single conditional UPDATE, so of two concurrent registrations with
+   * one token exactly one gets a row back; the other creates nothing and
+   * gets null.
+   */
+  async createUserClaimingInvitation(
+    user: InsertUser,
+    invitationId: number
+  ): Promise<User | null> {
+    return await (db as any).transaction(async (tx: typeof db) => {
+      const claimed = await tx
+        .update(userInvitations)
+        .set({ status: "accepted", acceptedAt: new Date() })
+        .where(
+          and(
+            eq(userInvitations.id, invitationId),
+            eq(userInvitations.status, "pending"),
+            sql`${userInvitations.expiresAt} > NOW()`
+          )
+        )
+        .returning({ id: userInvitations.id });
+      if (claimed.length === 0) return null;
+      const [created] = await tx.insert(users).values(user).returning();
+      return created as User;
+    });
+  }
+
+  /**
+   * Accept path: claims the invitation and applies its role to the existing
+   * user in one transaction. False when the claim finds nothing pending.
+   */
+  async acceptInvitationForUser(
+    invitationId: number,
+    userId: string,
+    role: string
+  ): Promise<boolean> {
+    return await (db as any).transaction(async (tx: typeof db) => {
+      const claimed = await tx
+        .update(userInvitations)
+        .set({ status: "accepted", acceptedAt: new Date() })
+        .where(
+          and(
+            eq(userInvitations.id, invitationId),
+            eq(userInvitations.status, "pending"),
+            sql`${userInvitations.expiresAt} > NOW()`
+          )
+        )
+        .returning({ id: userInvitations.id });
+      if (claimed.length === 0) return false;
+      await tx
+        .update(users)
+        .set({ role, isApproved: true, updatedAt: new Date() })
+        .where(eq(users.id, userId));
+      return true;
+    });
   }
 
   async clearPasswordResetToken(userId: string): Promise<void> {
@@ -1495,21 +1581,6 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
 
     return history;
-  }
-
-  async resetUserPassword(_userId: string): Promise<{ tempPassword: string }> {
-    // Generate a temporary password (8 characters)
-    const tempPassword = Math.random().toString(36).slice(-8);
-
-    // In a real app, you would hash the password and store it
-    // For this demo, we'll just return the temp password
-    // Note: In production, you'd want to:
-    // 1. Hash the password with bcrypt
-    // 2. Store it in the database
-    // 3. Send it via secure email
-    // 4. Force password change on next login
-
-    return { tempPassword };
   }
 
   // Session operations

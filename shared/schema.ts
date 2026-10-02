@@ -66,7 +66,7 @@ export const users = pgTable("users", {
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
-  role: varchar("role", { length: 50 }).notNull().default("user"), // user, admin, manager, customer
+  role: varchar("role", { length: 50 }).notNull().default("customer"), // admin, manager, agent, customer (legacy "user" means agent)
   phone: varchar("phone", { length: 50 }),
   isActive: boolean("is_active").default(true),
   isApproved: boolean("is_approved").default(false), // Admin must approve before login
@@ -75,6 +75,8 @@ export const users = pgTable("users", {
   // Login lockout (server/services/auth/lockout.ts). Never sent to clients.
   failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
   lockedUntil: timestamp("locked_until"),
+  // Set by an admin reset; cleared when the user sets their own password.
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -682,7 +684,7 @@ export const userInvitations = pgTable("user_invitations", {
   email: varchar("email").notNull(),
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
-  role: varchar("role", { length: 50 }).notNull().default("user"),
+  role: varchar("role", { length: 50 }).notNull().default("agent"),
   department: varchar("department", { length: 100 }),
   departmentId: integer("department_id").references(() => departments.id),
   invitedBy: varchar("invited_by")

@@ -17,7 +17,7 @@ jest.mock('../storage', () => ({
     getActiveEmailProvider: jest.fn(),
     getUserInvitations: jest.fn(),
     getUserInvitationByToken: jest.fn(),
-    markInvitationAccepted: jest.fn(),
+    createUserClaimingInvitation: jest.fn(),
   }
 }));
 
@@ -74,18 +74,17 @@ describe('Auth Routes', () => {
       (storage.getUserInvitationByToken as jest.Mock).mockResolvedValue({
         id: 1,
         email: validUser.email,
-        role: 'user',
+        role: 'agent',
         status: 'pending',
         expiresAt: new Date(Date.now() + 86400000),
         departmentId: 1
       });
-      (storage.createUser as jest.Mock).mockResolvedValue({
+      (storage.createUserClaimingInvitation as jest.Mock).mockResolvedValue({
         id: '123',
         ...validUser,
-        role: 'user',
+        role: 'agent',
         isApproved: true
       });
-      (storage.markInvitationAccepted as jest.Mock).mockResolvedValue(undefined);
 
       const response = await request(app)
         .post('/api/auth/register')
@@ -93,7 +92,10 @@ describe('Auth Routes', () => {
 
       expect(response.status).toBe(201);
       expect(response.body.message).toContain('You can now log in');
-      expect(storage.markInvitationAccepted).toHaveBeenCalledWith(1);
+      expect(storage.createUserClaimingInvitation).toHaveBeenCalledWith(
+        expect.objectContaining({ role: 'agent', isApproved: true }),
+        1
+      );
     });
 
     it('should refuse to set a password on an existing SSO account', async () => {
@@ -167,7 +169,8 @@ describe('Auth Routes', () => {
     it('should send password reset email for existing user', async () => {
       const user = {
         id: '123',
-        email: 'test@example.com'
+        email: 'test@example.com',
+        password: 'stored-hash'
       };
 
       (storage.getUserByEmail as jest.Mock).mockResolvedValue(user);

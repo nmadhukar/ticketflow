@@ -9,7 +9,7 @@ import { DEMO_ACCOUNTS } from "./demoAccounts";
  * published passwords. Deactivate (never delete) every active account whose
  * email is a known demo email AND whose stored hash still verifies against the
  * published password; an account whose password was changed is left alone.
- * Skipped when SEED_DEMO_DATA=true. Idempotent. Logs counts and emails only.
+ * A failure on one account is logged and skipped. Skipped when SEED_DEMO_DATA=true. Idempotent. Logs counts and emails only.
  */
 export async function deactivateDemoAccounts(
   env: NodeJS.ProcessEnv = process.env
@@ -24,9 +24,17 @@ export async function deactivateDemoAccounts(
       .where(sql`lower(${users.email}) = ${demo.email}`)
       .limit(1);
     if (!row || !row.isActive || !row.password) continue;
-    if (!(await comparePasswords(demo.password, row.password))) continue;
-    await db.update(users).set({ isActive: false }).where(eq(users.id, row.id));
-    deactivated.push(demo.email);
+    try {
+      if (!(await comparePasswords(demo.password, row.password))) continue;
+      await db.update(users).set({ isActive: false }).where(eq(users.id, row.id));
+      deactivated.push(demo.email);
+    } catch (error) {
+      // One bad row (e.g. a malformed stored hash) must not stop the rest.
+      console.error(
+        `Could not check demo account ${demo.email}; skipping it:`,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
   }
   if (deactivated.length > 0) {
     console.warn(

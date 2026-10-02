@@ -46,7 +46,8 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage, publicUserColumns } from "../storage";
-import { setupAuth, isAuthenticated } from "../services/auth";
+import { setupAuth, isAuthenticated, hashPassword } from "../services/auth";
+import { normalizeRole } from "../permissions/roles";
 import { setupMicrosoftAuth } from "../services/auth/microsoftAuth";
 import { teamsIntegration } from "../services/microsoftTeams";
 import { canManageTeam } from "../permissions/teams";
@@ -72,7 +73,7 @@ import {
   scheduleKnowledgeLearning,
 } from "../services/ai/knowledgeBaseLearning";
 import { z } from "zod";
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import multer from "multer";
 import { db } from "../storage/db";
 import {
@@ -174,11 +175,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Users route
   app.get("/api/users", isAuthenticated, async (req: any, res) => {
     try {
-      // Staff only. Role "user" is the legacy name for agent (see Task 6).
-      const requesterRole = (await storage.getUser(getUserId(req)))?.role;
+      // Staff only. normalizeRole reads the legacy role "user" as agent.
+      const requesterRole = normalizeRole(
+        (await storage.getUser(getUserId(req)))?.role
+      );
       if (
         !requesterRole ||
-        !["admin", "manager", "agent", "user"].includes(requesterRole)
+        !["admin", "manager", "agent"].includes(requesterRole)
       ) {
         return res.status(403).json({ message: "Forbidden" });
       }
@@ -573,7 +576,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(
             or(
               eq(users.role, "admin"),
-              or(eq(users.role, "manager"), eq(users.role, "user"))
+              or(eq(users.role, "manager"), eq(users.role, "agent"))
             )
           );
         basePermissions.canAssign = true;
@@ -1511,8 +1514,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const { userId } = req.params;
-        const result = await storage.resetUserPassword(userId);
-        res.json(result);
+        // Strong random temporary password, hashed with the login routine,
+        // shown to the admin once; the user must change it at next sign-in.
+        const tempPassword = randomBytes(15).toString("base64url");
+        const updated = await storage.setTemporaryPassword(
+          userId,
+          await hashPassword(tempPassword)
+        );
+        if (!updated) {
+          return res
+            .status(404)
+            .json({ error: "user_not_found", message: "User not found" });
+        }
+        res.json({ tempPassword });
       } catch (error) {
         console.error("Error resetting password:", error);
         res.status(500).json({ message: "Failed to reset password" });
@@ -3957,6 +3971,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      const inviteRole = normalizeRole(req.body.role);
+      if (
+        typeof req.body.role !== "string" ||
+        req.body.role === "user" ||
+        !inviteRole
+      ) {
+        return res.status(400).json({
+          error: "invalid_role",
+          message: "role must be one of agent, manager, admin, customer",
+        });
+      }
+
       // Whitelist fields: the caller may not set status, token, etc.
       let expiresAt: Date | undefined;
       if (
@@ -3971,10 +3997,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             message: "expiresAt must be a valid date",
           });
         }
+        const MAX_INVITE_DAYS = 30;
+        if (
+          expiresAt.getTime() <= Date.now() ||
+          expiresAt.getTime() > Date.now() + MAX_INVITE_DAYS * 86400000
+        ) {
+          return res.status(400).json({
+            error: "invalid_expiry",
+            message: `expiresAt must be in the future and at most ${MAX_INVITE_DAYS} days ahead`,
+          });
+        }
       }
       const invitation = await storage.createUserInvitation({
         email: req.body.email,
-        role: req.body.role,
+        role: inviteRole,
         firstName: req.body.firstName,
         lastName: req.body.lastName,
         department: req.body.department,
@@ -4235,13 +4271,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      await storage.upsertUser({
-        id: current.id,
-        email: current.email,
-        role: invitation.role,
-        isApproved: true,
-      } as any);
-      await storage.markInvitationAccepted(invitation.id);
+      const grantedRole = normalizeRole(invitation.role);
+      // Claim and role change are one transaction; a lost race changes nothing.
+      const claimed = grantedRole
+        ? await storage.acceptInvitationForUser(
+            invitation.id,
+            current.id,
+            grantedRole
+          )
+        : false;
+      if (!claimed) {
+        return res.status(400).json({
+          error: "invalid_invitation",
+          message: "This invitation is invalid, expired or already used.",
+        });
+      }
 
       res.json({ message: "Invitation accepted. Your role has been updated." });
     } catch (error) {

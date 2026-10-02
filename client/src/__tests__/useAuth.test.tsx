@@ -33,7 +33,7 @@ describe('useAuth Hook', () => {
       email: 'test@example.com',
       firstName: 'Test',
       lastName: 'User',
-      role: 'user'
+      role: 'agent'
     };
 
     (global.fetch as jest.Mock).mockResolvedValueOnce({

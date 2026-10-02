@@ -13,6 +13,7 @@
  */
 
 import passport from "passport";
+import { normalizeRole } from "../../permissions/roles";
 import { Strategy as LocalStrategy } from "passport-local";
 import { Express, RequestHandler } from "express";
 import session from "express-session";
@@ -229,7 +230,10 @@ export function setupAuth(app: Express) {
       if (!user || !user.isActive || !user.isApproved) {
         return done(null, false);
       }
-      done(null, user);
+      // One canonical role per request ("user" reads as agent); an unknown role fails closed.
+      const role = normalizeRole(user.role);
+      if (!role) return done(null, false);
+      done(null, { ...user, role });
     } catch (error) {
       console.error("Deserialize user error:", error);
       done(null, false);
@@ -264,6 +268,12 @@ export function setupAuth(app: Express) {
             message: "This invitation is invalid, expired or not for this email.",
           });
         }
+        if (!normalizeRole(candidate.role)) {
+          return res.status(400).json({
+            error: "invalid_invitation",
+            message: "This invitation is invalid, expired or not for this email.",
+          });
+        }
         invitation = candidate;
       }
 
@@ -290,16 +300,28 @@ export function setupAuth(app: Express) {
         firstName: validatedData.firstName,
         lastName: validatedData.lastName,
         password: hashedPassword,
-        role: invitation ? invitation.role : "customer", // Use invitation role if exists
+        role: invitation ? normalizeRole(invitation.role)! : "customer",
         isActive: true,
         isApproved: invitation ? true : false, // Auto-approve if invited
       };
 
-      const user = await storage.createUser(newUser);
-
-      // Mark invitation as accepted if exists
+      // With an invitation, the claim and the user insert are one transaction:
+      // a lost race creates nothing.
+      let user;
       if (invitation) {
-        await storage.markInvitationAccepted(invitation.id);
+        const created = await storage.createUserClaimingInvitation(
+          newUser,
+          invitation.id
+        );
+        if (!created) {
+          return res.status(400).json({
+            error: "invalid_invitation",
+            message: "This invitation is invalid, expired or not for this email.",
+          });
+        }
+        user = created;
+      } else {
+        user = await storage.createUser(newUser);
       }
 
       // Don't log in automatically unless auto-approved
@@ -364,7 +386,8 @@ export function setupAuth(app: Express) {
             email: user.email,
             firstName: user.firstName,
             lastName: user.lastName,
-            role: user.role,
+            role: normalizeRole(user.role) ?? user.role,
+            mustChangePassword: user.mustChangePassword === true,
           });
         });
       })(req, res, next);
@@ -412,6 +435,7 @@ export function setupAuth(app: Express) {
       firstName: user.firstName,
       lastName: user.lastName,
       role: user.role,
+      mustChangePassword: user.mustChangePassword === true,
       profileImageUrl: user.profileImageUrl,
       phone: user.phone,
       createdAt: user.createdAt,
@@ -425,7 +449,9 @@ export function setupAuth(app: Express) {
       const validatedData = forgotPasswordSchema.parse(req.body);
 
       const user = await storage.getUserByEmail(validatedData.email);
-      if (!user) {
+      // A password-less (SSO) account has nothing to reset: same answer as an
+      // unknown email, nothing stored, nothing sent.
+      if (!user || !user.password) {
         // Don't reveal if email exists for security
         return res.json({
           message: "If the email exists, a reset link has been sent",
@@ -542,8 +568,6 @@ export function setupAuth(app: Express) {
         console.warn(
           "Password reset email not sent: email template or provider not configured"
         );
-        // Log token for development/debugging (remove in production)
-        console.log(`Password reset token for ${user.email}: ${resetToken}`);
       }
 
       res.json({ message: "If the email exists, a reset link has been sent" });
@@ -629,8 +653,8 @@ export function requireRole(...roles: string[]): RequestHandler {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const userRole = req.user.role;
-    if (!roles.includes(userRole)) {
+    const userRole = normalizeRole(req.user.role);
+    if (!userRole || !roles.includes(userRole)) {
       return res.status(403).json({ message: "Forbidden" });
     }
 

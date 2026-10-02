@@ -85,4 +85,20 @@ describe("leftover demo accounts on an existing deployment", () => {
     expect(root.role).toBe("admin");
     expect(root.isActive).toBe(true);
   });
+  it("a malformed stored hash on one demo row is logged and skipped; the rest still deactivate", async () => {
+    await insertDemo("admin@ticketflow.local", DEMO_ADMIN_PASSWORD, "admin");
+    await insertDemo("agent1@ticketflow.local", DEMO_PASSWORD, "agent");
+    await insertDemo("agent2@ticketflow.local", DEMO_PASSWORD, "agent");
+    await db.update(users).set({ password: "not-a-valid-hash" }).where(eq(users.email, "admin@ticketflow.local"));
+    const error = console.error as unknown as jest.Mock;
+    error.mockClear();
+    const done = await deactivateDemoAccounts({});
+    expect(done.sort()).toEqual(["agent1@ticketflow.local", "agent2@ticketflow.local"]);
+    expect(await active("admin@ticketflow.local")).toBe(true);
+    expect(await active("agent1@ticketflow.local")).toBe(false);
+    expect(await active("agent2@ticketflow.local")).toBe(false);
+    const text = error.mock.calls.map((c: unknown[]) => c.map(String).join(" ")).join("\n");
+    expect(text).toContain("admin@ticketflow.local");
+    expect(text).not.toContain("not-a-valid-hash");
+  });
 });

@@ -73,4 +73,20 @@ describe("bootstrap admin", () => {
     const [row] = await db.select().from(users).where(eq(users.email, "root@example.test"));
     expect(row).toBeDefined();
   });
+  it("when ADMIN_EMAIL already belongs to a non-admin account, warns clearly, changes nothing and does not throw", async () => {
+    const u = await createUser({ role: "agent", email: "root@example.test" });
+    const warn = console.warn as unknown as jest.Mock;
+    warn.mockClear();
+    await expect(
+      seedBootstrapAdmin({ ADMIN_EMAIL: "Root@Example.test", ADMIN_PASSWORD: PW })
+    ).resolves.toBeUndefined();
+    const all = await db.select().from(users);
+    expect(all).toHaveLength(1);
+    expect(all[0].role).toBe("agent");
+    expect(all[0].password).toBe(u.password);
+    const text = warn.mock.calls.map((c: unknown[]) => c.join(" ")).join("\n");
+    expect(text).toMatch(/ADMIN_EMAIL/);
+    expect(text).toContain("root@example.test");
+    expect(text).not.toContain(PW);
+  });
 });
