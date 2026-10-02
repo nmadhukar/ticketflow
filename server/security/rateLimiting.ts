@@ -1,5 +1,5 @@
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
-import { Request } from "express";
+import type { Request, RequestHandler } from "express";
 import { AuthenticatedRequest } from "./jwt";
 
 // General API rate limiting
@@ -17,6 +17,29 @@ export const generalRateLimit = rateLimit({
   // `trust proxy` = 1, so req.ip is the address the reverse proxy saw.
   keyGenerator: (req) => ipKeyGenerator(req.ip ?? ""),
 });
+
+/**
+ * POST /api/email/inbound. SNS delivers from AWS addresses shared by many accounts and retries
+ * on failure, so the limit is generous (600 per 15 minutes per IP); it exists to bound a
+ * flood of unsigned junk, whose signature check is the only real gate. The route is exempt
+ * from generalRateLimit (security/index.ts).
+ */
+export const inboundEmailRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  message: { error: "too_many_requests", message: "Too many requests." },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => ipKeyGenerator(req.ip ?? ""),
+});
+
+/** Path, relative to the /api mount, of the SNS inbound-email endpoint. */
+export const INBOUND_EMAIL_PATH = "/email/inbound";
+
+/** Wraps a limiter mounted at /api so POST /api/email/inbound bypasses it (it has its own). */
+export function exceptInboundEmail(limiter: RequestHandler): RequestHandler {
+  return (req, res, next) => (req.path === INBOUND_EMAIL_PATH ? next() : limiter(req, res, next));
+}
 
 /**
  * Auth limit settings. The overrides exist for the test suite only: they are

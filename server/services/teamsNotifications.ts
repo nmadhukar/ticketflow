@@ -55,7 +55,8 @@ export interface TicketWebhookEvent {
   /** Set on an update that (re)assigned the ticket to a user. */
   assignedToUserId?: string | null;
   actorEmail?: string | null;
-  actionUrl: string;
+  /** Link for the card; null when the site origin is unknown (inbound email without APP_BASE_URL). */
+  actionUrl: string | null;
 }
 
 /**

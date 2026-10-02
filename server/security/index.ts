@@ -3,7 +3,7 @@ import { Express } from "express";
 import { installRequestPipeline } from "./pipeline";
 import { authenticateJWT, optionalJWT } from "./jwt";
 import { requireRole, requireAdmin, requireAgentOrAdmin } from "./rbac";
-import { generalRateLimit, authRateLimit } from "./rateLimiting";
+import { generalRateLimit, authRateLimit, exceptInboundEmail } from "./rateLimiting";
 import {
   sanitizeInput,
   preventXSS,
@@ -59,7 +59,9 @@ export const applySecurity = (app: Express) => {
   installRequestPipeline(app, {
     bodyLimit: `${maxRequestSizeMB}mb`,
     sanitize: securityConfig.validation.enabled,
-    rateLimit: securityConfig.rateLimiting.enabled ? generalRateLimit : undefined,
+    // POST /api/email/inbound has its own limiter (inboundEmailRateLimit): SNS's shared AWS
+    // addresses would exhaust the general 100 per 15 minutes and drop real mail.
+    rateLimit: securityConfig.rateLimiting.enabled ? exceptInboundEmail(generalRateLimit) : undefined,
   });
 
   console.log("Security middleware applied successfully");

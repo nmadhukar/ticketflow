@@ -1,0 +1,11 @@
+{
+  "Type": "SubscriptionConfirmation",
+  "MessageId": "fixture-sns-confirm-0001",
+  "Token": "fixture-token-0001",
+  "TopicArn": "arn:aws:sns:us-east-1:111122223333:ticketflow-inbound-test",
+  "Message": "You have chosen to subscribe to the topic. To confirm the subscription, visit the SubscribeURL included in this message.",
+  "SubscribeURL": "https://sns.us-east-1.amazonaws.com/?Action=ConfirmSubscription&TopicArn=arn:aws:sns:us-east-1:111122223333:ticketflow-inbound-test&Token=fixture-token-0001",
+  "Timestamp": "2026-10-01T12:00:00.000Z",
+  "SignatureVersion": "1",
+  "SigningCertURL": "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-fixture.pem"
+}

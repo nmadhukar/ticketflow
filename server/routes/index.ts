@@ -92,7 +92,6 @@ import {
 } from "drizzle-orm";
 import { teams, departments, users } from "@shared/schema";
 import { excludeAiSystemUser, ensureAiSystemUser } from "../utils/aiSystemUser";
-import { runCreateTimeAutoResponse } from "../services/ai/createTimeAutoResponse";
 import { describeAIError, isQuotaBlocked, sendQuotaExceeded } from "../services/ai/aiErrors";
 import { requireStaff, isStaffRole } from "../permissions/staff";
 import { loadAiTicket } from "../services/ai/aiTicketGate";
@@ -115,6 +114,13 @@ import {
 } from "../permissions/ticketAccess";
 import { HttpError, asyncHandler } from "../http/errors";
 import { createTicketSchema, STAFF_ONLY_TICKET_FIELDS } from "../services/tickets/schemas";
+import { commentBodySchema } from "../services/tickets/commentSchema";
+import {
+  createTicketRecord,
+  runTicketCreatedHooks,
+  setTicketCreatedBroadcaster,
+} from "../services/tickets/create";
+import { registerEmailRoutes } from "./email";
 import { assertAgentMayAssign, assertAssigneesExist } from "../services/tickets/assignees";
 import { parseIdParam } from "../http/params";
 import { sanitizeRichHtml } from "../security/sanitizeHtml";
@@ -174,9 +180,6 @@ const upload = multer({
   },
 });
 
-const commentBodySchema = z.object({
-  content: z.string().trim().min(1).max(10000),
-});
 
 /**
  * Registers all application routes and returns HTTP server instance
@@ -193,6 +196,10 @@ const knowledgeSearchQuery = z.object({
 
 export async function registerRoutes(app: Express): Promise<Server> {
   registerIdParams(app);
+
+  // SNS calls this without a session: its signature is the only authentication. Mounted
+  // before setupAuth so no session or auth middleware can touch it.
+  registerEmailRoutes(app);
 
   // Auth middleware
   setupAuth(app);
@@ -784,11 +791,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const finalBody: Record<string, unknown> = { ...createTicketSchema.parse(req.body) };
         if (isCustomer) await checkAssignment(finalBody);
         else normalizeAssigneeUpdate(finalBody);
-        const taskData = insertTaskSchema.parse({
-          ...finalBody,
-          createdBy: userId,
-        });
-        const task = await storage.createTask(taskData);
+        const task = await createTicketRecord(finalBody, userId);
 
         // 4. Create attachment records (if files provided)
         const attachmentErrors: string[] = [];
@@ -813,26 +816,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
 
-        // AI auto-response: reads the settings now, authored by the AI system
-        // user, never fails the create (logs type/status only).
-        await runCreateTimeAutoResponse(task);
-
-        // WS: everyone connected who can see the new ticket (creator, assignee, team, teammates)
-        await notifyTicket(task.id, "created");
-
-        // Send Teams notification for new task
-        // Only webhooks whose owner can access this ticket receive it.
-        try {
-          const user = await storage.getUser(userId);
-          await notifyTicketWebhooks({
-            task,
-            kind: "created",
-            actorEmail: user?.email,
-            actionUrl: `${req.protocol}://${req.get("host")}/my-tasks`,
-          });
-        } catch (error) {
-          console.error("Error sending Teams notifications:", error instanceof Error ? error.name : "error");
-        }
+        // After-create effects shared with inbound email: AI auto-response (settings,
+        // never fails the create), realtime broadcast to everyone who can see the
+        // ticket, and Teams webhooks whose owner can access it.
+        await runTicketCreatedHooks(task, userId, `${req.protocol}://${req.get("host")}`);
 
         // Return task with warning if some attachments failed
         if (attachmentErrors.length > 0) {
@@ -5096,6 +5083,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Real-time updates: the WebSocket lives in ../realtime/ws (session-authenticated upgrade).
   attachRealtime(httpServer);
+
+  // Inbound email creates tickets outside this file; its "created" event goes to the
+  // same recipients as POST /api/tasks (everyone connected who can see the ticket).
+  setTicketCreatedBroadcaster((task) => {
+    void notifyTicket(task.id, "created");
+  });
 
   /* Staff tool on the AI Analytics page: runs Bedrock-powered analysis on a TICKET
    * the caller may see and returns (complexity, confidence, auto-response, ...).

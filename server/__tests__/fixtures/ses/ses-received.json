@@ -1,0 +1,25 @@
+{
+  "notificationType": "Received",
+  "mail": {
+    "timestamp": "2026-10-01T12:00:00.000Z",
+    "source": "{{FROM}}",
+    "messageId": "fixture-ses-message-0001",
+    "destination": ["support@tickets.example.test"],
+    "commonHeaders": {
+      "from": ["{{FROM}}"],
+      "to": ["support@tickets.example.test"],
+      "subject": "{{SUBJECT}}"
+    }
+  },
+  "receipt": {
+    "timestamp": "2026-10-01T12:00:00.000Z",
+    "recipients": ["support@tickets.example.test"],
+    "spamVerdict": { "status": "PASS" },
+    "virusVerdict": { "status": "PASS" },
+    "spfVerdict": { "status": "PASS" },
+    "dkimVerdict": { "status": "PASS" },
+    "dmarcVerdict": { "status": "PASS" },
+    "action": { "type": "SNS", "topicArn": "arn:aws:sns:us-east-1:111122223333:ticketflow-inbound-test", "encoding": "UTF8" }
+  },
+  "content": "Return-Path: <{{FROM}}>\r\nFrom: Test Sender <{{FROM}}>\r\nTo: support@tickets.example.test\r\nSubject: {{SUBJECT}}\r\nMessage-ID: <fixture-0001@mail.example.test>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"fixture-boundary\"\r\n\r\n--fixture-boundary\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\n{{BODY}}\r\n--fixture-boundary\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n<p>{{BODY}}</p>\r\n--fixture-boundary--\r\n"
+}
