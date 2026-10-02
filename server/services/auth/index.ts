@@ -25,6 +25,12 @@ import { z } from "zod";
 import { randomUUID } from "crypto";
 import * as client from "openid-client";
 import { EMAIL_PROVIDERS } from "@shared/constants";
+import { requireSecret } from "../../security/secrets";
+import { authRateLimit, authRequestRateLimit } from "../../security/rateLimiting";
+import {
+  isLocked,
+  lockExpired,
+} from "./lockout";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace -- Express type augmentation requires a namespace
@@ -119,6 +125,11 @@ export async function closeAuth(): Promise<void> {
  * Setup authentication middleware and routes
  */
 export function setupAuth(app: Express) {
+  // Throws before anything connects when production has no SESSION_SECRET.
+  const sessionSecret = requireSecret("SESSION_SECRET", {
+    devFallback: "dev-only-session-secret-not-for-production",
+  });
+
   // Session configuration
   const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
   const pgStore = connectPg(session);
@@ -135,8 +146,7 @@ export function setupAuth(app: Express) {
   activeSessionStore = sessionStore;
 
   const sessionSettings: session.SessionOptions = {
-    secret:
-      process.env.SESSION_SECRET || "your-secret-key-change-in-production",
+    secret: sessionSecret,
     store: sessionStore,
     resave: false,
     saveUninitialized: false,
@@ -149,6 +159,11 @@ export function setupAuth(app: Express) {
   };
 
   app.set("trust proxy", 1);
+  // Auth rate limits (every environment), registered before the handlers.
+  app.post("/api/auth/login", authRateLimit);
+  app.post("/api/auth/forgot-password", authRequestRateLimit);
+  app.post("/api/auth/reset-password", authRequestRateLimit);
+
   app.use(session(sessionSettings));
   app.use(passport.initialize());
   app.use(passport.session());
@@ -171,9 +186,30 @@ export function setupAuth(app: Express) {
             return done(null, false, { message: "Password not set" });
           }
 
+          const now = new Date();
+          if (isLocked(user, now)) {
+            // Refused before the password is checked, so a guess made while
+            // locked tells the attacker nothing.
+            return done(null, false, {
+              message:
+                "Too many failed login attempts. Try again in a few minutes.",
+              code: "account_locked",
+            } as any);
+          }
+          if (lockExpired(user, now)) {
+            // The lock ran out: start counting from zero.
+            await storage.resetFailedLogins(user.id);
+            user.failedLoginAttempts = 0;
+          }
+
           const isValid = await comparePasswords(password, user.password);
           if (!isValid) {
+            await storage.recordFailedLogin(user.id, now);
             return done(null, false, { message: "Invalid email or password" });
+          }
+
+          if (user.failedLoginAttempts > 0) {
+            await storage.resetFailedLogins(user.id);
           }
 
           if (!user.isActive) {
@@ -200,7 +236,8 @@ export function setupAuth(app: Express) {
   passport.deserializeUser(async (id: string, done) => {
     try {
       const user = await storage.getUser(id);
-      if (!user) {
+      // A deactivated or un-approved user's existing sessions stop working.
+      if (!user || !user.isActive || !user.isApproved) {
         return done(null, false);
       }
       done(null, user);
@@ -316,6 +353,11 @@ export function setupAuth(app: Express) {
         }
 
         if (!user) {
+          if (info?.code === "account_locked") {
+            return res
+              .status(423)
+              .json({ error: "account_locked", message: info.message });
+          }
           return res
             .status(401)
             .json({ message: info?.message || "Invalid credentials" });
@@ -615,7 +657,9 @@ export function getSession() {
     tableName: "sessions",
   });
   return session({
-    secret: process.env.SESSION_SECRET!,
+    secret: requireSecret("SESSION_SECRET", {
+      devFallback: "dev-only-session-secret-not-for-production",
+    }),
     store: sessionStore,
     resave: false,
     saveUninitialized: false,

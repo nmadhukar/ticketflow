@@ -1,8 +1,11 @@
 import jwt, { SignOptions } from "jsonwebtoken";
 import { Request, Response, NextFunction } from "express";
+import { requireSecret } from "./secrets";
 
-const JWT_SECRET =
-  process.env.JWT_SECRET || "your-super-secret-jwt-key-change-in-production";
+// Throws at import time in production when JWT_SECRET is unset.
+const JWT_SECRET = requireSecret("JWT_SECRET", {
+  devFallback: "dev-only-jwt-secret-not-for-production",
+});
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || "30d";
 

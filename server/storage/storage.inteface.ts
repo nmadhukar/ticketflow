@@ -104,6 +104,12 @@ export interface IStorage {
    */
   getUserByEmail(email: string): Promise<User | undefined>;
 
+  /** Counts one wrong password; locks the account at the limit (services/auth/lockout.ts). */
+  recordFailedLogin(userId: string, now?: Date): Promise<void>;
+
+  /** Clears the failed-login counter and any lock. */
+  resetFailedLogins(userId: string): Promise<void>;
+
   /**
    * Sets password reset token for a user
    * @param userId - User ID

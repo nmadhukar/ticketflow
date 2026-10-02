@@ -7,6 +7,8 @@ import { storage } from '../storage';
 jest.mock('../storage', () => ({
   storage: {
     getUserByEmail: jest.fn(),
+    recordFailedLogin: jest.fn(),
+    resetFailedLogins: jest.fn(),
     createUser: jest.fn(),
     upsertUser: jest.fn(),
     setPasswordResetToken: jest.fn(),

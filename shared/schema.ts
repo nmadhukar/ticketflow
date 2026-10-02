@@ -72,6 +72,9 @@ export const users = pgTable("users", {
   isApproved: boolean("is_approved").default(false), // Admin must approve before login
   passwordResetToken: varchar("password_reset_token"),
   passwordResetExpires: timestamp("password_reset_expires"),
+  // Login lockout (server/services/auth/lockout.ts). Never sent to clients.
+  failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
+  lockedUntil: timestamp("locked_until"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

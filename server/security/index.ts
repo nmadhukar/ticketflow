@@ -35,9 +35,6 @@ if (awsConfigured) {
 // Security configuration object
 export const securityConfig = {
   jwt: {
-    secret:
-      process.env.JWT_SECRET ||
-      "your-super-secret-jwt-key-change-in-production",
     expiresIn: process.env.JWT_EXPIRES_IN || "7d",
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "30d",
   },
@@ -111,15 +108,10 @@ export const applySecurity = (app: Express) => {
 
 // Apply route-specific security (simplified for integration)
 export const applyRouteSpecificSecurity = (_app: Express) => {
-  // Temporarily disable rate limiting to fix IPv6 compatibility issues
-  // TODO: Re-enable with proper IPv6 support
-  // app.use('/api/auth/login', authRateLimit);
-  // app.use('/api/auth/register', authRateLimit);
-  // app.use('/api/auth/password-reset', passwordResetRateLimit);
-
-  console.log(
-    "Route-specific security applied successfully (rate limiting temporarily disabled)"
-  );
+  // The auth rate limits (login, forgot-password, reset-password) are wired
+  // in setupAuth (services/auth), next to the routes they protect, so the
+  // integration harness exercises the same wiring as production.
+  console.log("Route-specific security applied successfully");
 };
 
 // Security validation middleware combinations
@@ -224,10 +216,7 @@ export const logPermissionDenied = (event: {
 // Health check for security components
 export const securityHealthCheck = () => {
   const checks = {
-    jwtSecret:
-      !!process.env.JWT_SECRET &&
-      process.env.JWT_SECRET !==
-        "your-super-secret-jwt-key-change-in-production",
+    jwtSecret: !!process.env.JWT_SECRET,
     awsCredentials:
       !!process.env.AWS_ACCESS_KEY_ID && !!process.env.AWS_SECRET_ACCESS_KEY,
     rateLimiting: securityConfig.rateLimiting.enabled,

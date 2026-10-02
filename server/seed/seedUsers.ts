@@ -67,37 +67,42 @@ async function createInvitationForUser(
   });
 }
 
+/**
+ * The passwordless "system" user the app attributes machine-made rows to
+ * (AI settings, API keys). It cannot log in. Needed in every environment.
+ */
+export async function seedSystemUser() {
+  const SYSTEM_USER_EMAIL = "system@ticketflow.local";
+  const SYSTEM_USER_ID = "system";
+
+  const existingSystemUser = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, SYSTEM_USER_ID))
+    .limit(1);
+
+  if (existingSystemUser.length === 0) {
+    await db.insert(users).values({
+      id: SYSTEM_USER_ID,
+      email: SYSTEM_USER_EMAIL,
+      firstName: "System",
+      lastName: "User",
+      role: "admin",
+      isActive: true,
+      isApproved: true,
+      // No password - system user cannot login
+    });
+    console.log("System user created.");
+  }
+}
+
+/**
+ * DEMO accounts with fixed, publicly known passwords. Only runs when
+ * SEED_DEMO_DATA=true (see seed/runSeeders.ts). Never logs a password.
+ */
 export async function seedUsers() {
   try {
-    console.log("Checking for default admin user...");
-
-    // First, ensure system user exists
-    const SYSTEM_USER_EMAIL = "system@ticketflow.local";
-    const SYSTEM_USER_ID = "system";
-
-    const existingSystemUser = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, SYSTEM_USER_ID))
-      .limit(1);
-
-    if (existingSystemUser.length === 0) {
-      await db.insert(users).values({
-        id: SYSTEM_USER_ID,
-        email: SYSTEM_USER_EMAIL,
-        firstName: "System",
-        lastName: "User",
-        role: "admin",
-        isActive: true,
-        isApproved: true,
-        // No password - system user cannot login
-      });
-      console.log("✓ System user created successfully!");
-      console.log("  ID: system");
-      console.log("  Email: system@ticketflow.local");
-    } else {
-      console.log("System user already exists.");
-    }
+    console.log("Seeding demo users...");
 
     let adminUserId: string | undefined;
 
@@ -122,9 +127,7 @@ export async function seedUsers() {
         isApproved: true,
       });
 
-      console.log("✓ Default admin user created successfully!");
-      console.log("  Email: admin@ticketflow.local");
-      console.log("  Password: Admin123!");
+      console.log("Demo admin user created: admin@ticketflow.local");
     } else {
       adminUserId = existing[0].id;
       console.log("Default admin user already exists.");

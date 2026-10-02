@@ -103,6 +103,7 @@ import {
   lte,
 } from "drizzle-orm";
 import { IStorage } from "./storage.inteface";
+import { LOCKOUT_MINUTES, MAX_FAILED_LOGINS } from "../services/auth/lockout";
 import { PUBLIC_USER_FIELDS, type PublicUser } from "../utils/publicUser";
 
 /**
@@ -166,6 +167,29 @@ export class DatabaseStorage implements IStorage {
   async createUser(user: InsertUser): Promise<User> {
     const [createdUser] = await db.insert(users).values(user).returning();
     return createdUser;
+  }
+
+  /**
+   * Counts one wrong password. Increment and lock decision are a single
+   * UPDATE so concurrent guesses cannot slip past the limit.
+   */
+  async recordFailedLogin(userId: string, now: Date = new Date()): Promise<void> {
+    const lockUntil = new Date(now.getTime() + LOCKOUT_MINUTES * 60 * 1000);
+    await db
+      .update(users)
+      .set({
+        failedLoginAttempts: sql`${users.failedLoginAttempts} + 1`,
+        lockedUntil: sql`CASE WHEN ${users.failedLoginAttempts} + 1 >= ${MAX_FAILED_LOGINS} THEN ${lockUntil.toISOString()}::timestamp ELSE ${users.lockedUntil} END`,
+      })
+      .where(eq(users.id, userId));
+  }
+
+  /** Forgets earlier failures (successful login, or an expired lock). */
+  async resetFailedLogins(userId: string): Promise<void> {
+    await db
+      .update(users)
+      .set({ failedLoginAttempts: 0, lockedUntil: null })
+      .where(eq(users.id, userId));
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {

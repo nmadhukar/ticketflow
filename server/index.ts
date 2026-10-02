@@ -2,6 +2,7 @@ import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes/index";
 import { setupVite, serveStatic, log } from "./vite";
+import { requestLogger } from "./utils/requestLogger";
 import {
   applySecurity,
   applyRouteSpecificSecurity,
@@ -23,35 +24,8 @@ const maxRequestSizeMB = parseInt(process.env.MAX_REQUEST_SIZE_MB || "50", 10);
 app.use(express.json({ limit: `${maxRequestSizeMB}mb` }));
 app.use(express.urlencoded({ extended: true, limit: `${maxRequestSizeMB}mb` }));
 
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
-
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
-
-      log(logLine);
-    }
-  });
-
-  next();
-});
+// Request log: token path segments redacted, no auth/invitation bodies.
+app.use(requestLogger(log));
 
 (async () => {
   try {
@@ -61,26 +35,10 @@ app.use((req, res, next) => {
     console.log("PORT:", process.env.PORT);
     console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
 
-    // Seed default users, departments, teams, tickets, knowledge articles, and help/docs on startup
+    // Required seed data always; demo data only with SEED_DEMO_DATA=true
     try {
-      const {
-        seedUsers,
-        seedDepartments,
-        seedTeams,
-        seedTickets,
-        seedKnowledgeArticles,
-        seedHelpAndDocs,
-        seedEmailTemplates,
-        seedKnowledgeLearning,
-      } = await import("./seed");
-      await seedUsers();
-      await seedDepartments();
-      await seedTeams();
-      await seedTickets();
-      await seedKnowledgeArticles();
-      await seedHelpAndDocs();
-      await seedEmailTemplates();
-      await seedKnowledgeLearning();
+      const { runSeeders } = await import("./seed/runSeeders");
+      await runSeeders();
     } catch (error) {
       console.error("Failed to run seeders:", error);
     }

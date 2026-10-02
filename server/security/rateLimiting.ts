@@ -13,29 +13,33 @@ export const generalRateLimit = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    const xf = String(req.headers["x-forwarded-for"] || "");
-    const forwarded = (xf.split(",")[0] || "").trim();
-    // Use validated helper for IPv6-safe fallback
-    return forwarded.length > 0 ? forwarded : ipKeyGenerator(req as any);
-  },
-  // Use default IP-based rate limiting for IPv6 compatibility
+  // Key on req.ip, never on the client-supplied X-Forwarded-For. The app sets
+  // `trust proxy` = 1, so req.ip is the address the reverse proxy saw.
+  keyGenerator: (req) => ipKeyGenerator(req.ip ?? ""),
 });
 
-// Strict rate limiting for authentication endpoints
-export const authRateLimit = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Limit each IP to 5 login attempts per 15 minutes
-  message: {
-    error: "Too many authentication attempts",
-    message: "Too many login attempts, please try again later.",
-    retryAfter: "15 minutes",
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skipSuccessfulRequests: true, // Don't count successful requests
-  // Use default IP-based rate limiting
-});
+// Auth endpoints (login, forgot-password, reset-password): per IP, always on
+// (every environment). Window and limit are read per request so tests can
+// raise them via AUTH_RATE_LIMIT_MAX; the limiter cannot be switched off.
+function authLimiter(skipSuccessfulRequests: boolean) {
+  return rateLimit({
+    windowMs: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS) || 60 * 1000,
+    max: () => Number(process.env.AUTH_RATE_LIMIT_MAX) || 10,
+    message: {
+      error: "too_many_requests",
+      message: "Too many attempts, please try again later.",
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests,
+    keyGenerator: (req) => ipKeyGenerator(req.ip ?? ""),
+  });
+}
+
+/** Login: wrong passwords count, successful logins do not. */
+export const authRateLimit = authLimiter(true);
+/** forgot-password / reset-password answer 200 even for unknown emails, so every request counts. */
+export const authRequestRateLimit = authLimiter(false);
 
 // Password reset rate limiting
 export const passwordResetRateLimit = rateLimit({
