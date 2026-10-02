@@ -24,15 +24,24 @@ describe("parseSingleMailbox", () => {
     expect(parseSingleMailbox("Ann <ann@example.test>,")).toBe("ann@example.test");
   });
 
-  it("takes the real mailbox, not an address smuggled into the display name", () => {
-    // A quoted display name that looks like another address.
-    expect(parseSingleMailbox('"<admin@company.test>" <mallory@attacker.test>')).toBe("mallory@attacker.test");
-    expect(parseSingleMailbox('"admin@company.test" <mallory@attacker.test>')).toBe("mallory@attacker.test");
-    // The same, base64 encoded: the display name is never decoded for an address.
+  it("never lets a display name smuggle an address: encoded words are not decoded", () => {
     const encoded = `=?UTF-8?B?${Buffer.from("<admin@company.test>").toString("base64")}?=`;
     expect(parseSingleMailbox(`${encoded} <mallory@attacker.test>`)).toBe("mallory@attacker.test");
-    // A comment that looks like an address.
-    expect(parseSingleMailbox("mallory@attacker.test (<admin@company.test>)")).toBe("mallory@attacker.test");
+  });
+
+  it.each([
+    '"<mallory@attacker.test>" <admin@company.test>',
+    '"<admin@company.test>" <mallory@attacker.test>',
+    '"admin@company.test" <mallory@attacker.test>',
+    "(\\) <mallory@attacker.test>) <admin@company.test>",
+    "admin@company.test (<mallory@attacker.test>)",
+    "mallory@attacker.test (<admin@company.test>)",
+    "mallory@attacker.test (admin@company.test)",
+    '"a>b" <mallory@attacker.test>',
+    '"a\\"b" <mallory@attacker.test>',
+    "Ann \\(x <ann@example.test>",
+  ])("refuses a quote or comment holding a bracket or address, and any backslash: %s", (value) => {
+    expect(parseSingleMailbox(value)).toBeNull();
   });
 
   it.each([
@@ -82,7 +91,7 @@ describe("parseEmail sender handling", () => {
     const dup = parseEmail(crlf(["From: a@b.test", "From: c@d.test", "Subject: x", "", "body"]));
     expect(dup.duplicateFrom).toBe(true);
     const spoof = parseEmail(crlf(['From: "<admin@company.test>" <mallory@attacker.test>', "Subject: x", "", "body"]));
-    expect(spoof.fromAddress).toBe("mallory@attacker.test");
+    expect(spoof.fromAddress).toBeNull();
   });
 
   it("cuts a Subject over 2 KB before decoding it", () => {
@@ -125,6 +134,30 @@ describe("parseEmail header block limits", () => {
     expect(mail.fromAddress).toBeNull();
     // A CRLF pair is still an ordinary line break.
     expect(parseEmail("From: <a@b.test>\r\nSubject: x\r\n\r\nbody").refusal).toBeNull();
+  });
+
+  it("refuses a header block that mixes CRLF and bare LF, however the separator is written", () => {
+    const attacks = [
+      "From: <admin@company.test>\r\nX-A: y\n\r\nFrom: <mallory@attacker.test>\r\n\r\nb",
+      "From: <admin@company.test>\r\n\nFrom: <mallory@attacker.test>\r\n\r\nb",
+      "From: <admin@company.test>\nX-A: y\r\n\nb",
+    ];
+    for (const raw of attacks) {
+      const mail = parseEmail(raw);
+      expect([raw, mail.refusal]).toEqual([raw, "header_malformed"]);
+      expect(mail.fromAddress).toBeNull();
+    }
+  });
+
+  it("still accepts all-LF and all-CRLF mail, and mixed endings after the headers", () => {
+    for (const raw of [
+      "From: <a@b.test>\nSubject: x\n\nbody\nmore",
+      "From: <a@b.test>\r\nSubject: x\r\n\r\nbody\r\nmore",
+      "From: <a@b.test>\r\nSubject: x\r\n\r\nbody\nmixed\r\nin the body",
+    ]) {
+      const mail = parseEmail(raw);
+      expect([raw, mail.refusal, mail.fromAddress]).toEqual([raw, null, "a@b.test"]);
+    }
   });
 
   it("refuses a NUL in the header block", () => {
@@ -176,18 +209,31 @@ describe("parseEmail on adversarial input (linear time)", () => {
     }
   });
 
+  // These stay under both caps (2 KB for From, 64 KB for the header block) and assert the message
+  // was really read (refusal === null), so the tokeniser and decoders run on the hostile text.
   it("a From header with no '@', with many '<', with many quotes and with many comments", () => {
-    for (const from of ["a".repeat(SIZE), "<".repeat(SIZE), '"'.repeat(SIZE), "(".repeat(SIZE), "a ".repeat(SIZE / 2)]) {
+    for (const from of ["a".repeat(2000), "<".repeat(2000), '"'.repeat(2000), "(".repeat(2000), "a ".repeat(1000)]) {
       const { ms, mail } = timed(crlf([`From: ${from}`, "Subject: x", "", "body"]));
+      expect(mail.refusal).toBeNull();
       expect(ms).toBeLessThan(BOUND_MS);
       expect(mail.fromAddress).toBeNull();
     }
   });
 
-  it("a Subject full of encoded-word starts, and a huge header block", () => {
-    const subject = timed(crlf([`Subject: ${"=?a?b?".repeat(SIZE / 6)}`, "From: a@b.test", "", "x"]));
+  it("a 60 KB Subject full of encoded-word starts, and a 60 KB header block", () => {
+    const subject = timed(crlf([`Subject: ${"=?a?b?".repeat(10 * 1024)}`, "From: a@b.test", "", "x"]));
+    expect(subject.mail.refusal).toBeNull();
+    expect(subject.mail.fromAddress).toBe("a@b.test");
+    expect(subject.mail.subject.length).toBeLessThanOrEqual(2048);
     expect(subject.ms).toBeLessThan(BOUND_MS);
-    const block = timed(crlf([...Array.from({ length: SIZE / 12 }, (_, i) => `X-H${i}: y`), "From: a@b.test", "", "x"]));
+
+    const lines = Array.from({ length: 5000 }, (_, i) => `X-H${i}: y`);
+    const raw = crlf([...lines, "From: a@b.test", "", "x"]);
+    expect(raw.length).toBeLessThan(64 * 1024);
+    expect(raw.length).toBeGreaterThan(50 * 1024);
+    const block = timed(raw);
+    expect(block.mail.refusal).toBeNull();
+    expect(block.mail.fromAddress).toBe("a@b.test");
     expect(block.ms).toBeLessThan(BOUND_MS);
   });
 

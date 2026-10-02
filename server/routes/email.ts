@@ -1,6 +1,6 @@
 import express, { type Express, type Request, type Response } from "express";
 import https from "https";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { snsMessageDedupe } from "@shared/schema";
 import { db } from "../storage/db";
 import {
@@ -83,7 +83,9 @@ function readBody(req: Request): SnsMessage | null {
  *  - "done": the message was fully handled, nothing to do;
  *  - "busy": another delivery is working on it right now (a fresh 'processing' claim).
  */
-async function claimMessage(messageId: string): Promise<"claimed" | "done" | "busy"> {
+export async function claimMessage(
+  messageId: string
+): Promise<{ state: "claimed"; token: string } | { state: "done" } | { state: "busy" }> {
   const rows = await db
     .insert(snsMessageDedupe)
     .values({ messageId, status: "processing" })
@@ -92,14 +94,38 @@ async function claimMessage(messageId: string): Promise<"claimed" | "done" | "bu
       set: { status: "processing", receivedAt: sql`now()` },
       setWhere: sql`${snsMessageDedupe.status} = 'processing' AND ${snsMessageDedupe.receivedAt} < now() - make_interval(secs => ${CLAIM_STALE_SECONDS})`,
     })
-    .returning({ id: snsMessageDedupe.messageId });
-  if (rows.length > 0) return "claimed";
+    // The claim's token is its timestamp as text (microsecond precision, which a JS Date would lose).
+    .returning({ token: sql<string>`${snsMessageDedupe.receivedAt}::text` });
+  if (rows.length > 0) return { state: "claimed", token: rows[0].token };
   const [row] = await db
     .select({ status: snsMessageDedupe.status })
     .from(snsMessageDedupe)
     .where(eq(snsMessageDedupe.messageId, messageId))
     .limit(1);
-  return row?.status === "done" ? "done" : "busy";
+  return row?.status === "done" ? { state: "done" } : { state: "busy" };
+}
+
+/** Matches only the row this holder claimed: a newer holder's claim has a different timestamp. */
+const ownedBy = (messageId: string, token: string) =>
+  and(eq(snsMessageDedupe.messageId, messageId), sql`${snsMessageDedupe.receivedAt} = ${token}::timestamp`);
+
+/** Makes the holder's own claim final. False when the claim is no longer this holder's. */
+export async function markMessageDone(messageId: string, token: string): Promise<boolean> {
+  const rows = await db
+    .update(snsMessageDedupe)
+    .set({ status: "done" })
+    .where(ownedBy(messageId, token))
+    .returning({ id: snsMessageDedupe.messageId });
+  return rows.length > 0;
+}
+
+/** Gives up the holder's own claim so a retry can take it. Never touches another holder's claim. */
+export async function releaseMessageClaim(messageId: string, token: string): Promise<boolean> {
+  const rows = await db
+    .delete(snsMessageDedupe)
+    .where(ownedBy(messageId, token))
+    .returning({ id: snsMessageDedupe.messageId });
+  return rows.length > 0;
 }
 
 async function handleInbound(req: Request, res: Response) {
@@ -150,8 +176,8 @@ async function handleInbound(req: Request, res: Response) {
   const messageId = typeof msg.MessageId === "string" ? msg.MessageId.slice(0, 200) : "";
   if (!messageId) return json(res, 400, "invalid_message", "MessageId is missing");
   const claim = await claimMessage(messageId);
-  if (claim === "done") return res.status(200).json({ status: "duplicate" });
-  if (claim === "busy") {
+  if (claim.state === "done") return res.status(200).json({ status: "duplicate" });
+  if (claim.state === "busy") {
     // Not finished by whoever holds it: do not report it handled. SNS retries, and the retry
     // finds it done, or stale and takes it over.
     res.setHeader("Retry-After", "20");
@@ -170,10 +196,7 @@ async function handleInbound(req: Request, res: Response) {
   } catch (error) {
     // Nothing was committed to the caller as done: release the claim so SNS's retry processes
     // the message again, and answer 500 (the error type is logged, never message content).
-    await db
-      .delete(snsMessageDedupe)
-      .where(eq(snsMessageDedupe.messageId, messageId))
-      .catch(() => undefined);
+    await releaseMessageClaim(messageId, claim.token).catch(() => undefined);
     console.error(`inbound email failed: ${error instanceof Error ? error.name : "error"}`);
     return json(res, 500, "internal_error", "Internal server error");
   }
@@ -185,7 +208,9 @@ async function handleInbound(req: Request, res: Response) {
   // The ticket or comment is committed: make the claim final, answer SNS, and only then run the
   // non-essential effects (AI auto-response, realtime, Teams). None of them can change the answer.
   try {
-    await db.update(snsMessageDedupe).set({ status: "done" }).where(eq(snsMessageDedupe.messageId, messageId));
+    if (!(await markMessageDone(messageId, claim.token))) {
+      console.warn("inbound email: claim was taken over by a newer delivery before this one finished");
+    }
   } catch (error) {
     // The claim stays 'processing' and turns stale; SNS must still be told the message was handled.
     console.error(`inbound email: could not mark message done: ${error instanceof Error ? error.name : "error"}`);

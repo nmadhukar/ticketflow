@@ -233,11 +233,15 @@ const DISPLAY_CHAR = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.@\s-]$/;
  * or angle bracket, any quoted string when there is no <...> (the text is then the address),
  * a backslash or other non-atext character outside a quoted string or comment, an "@" in the
  * display name, an invalid address.
- * So `"<admin@x.test>" <mallory@y.test>` is mallory@y.test, and an encoded-word display name
- * that decodes to an address changes nothing.
+ * Also refused: a quoted string or comment containing `<`, `>` or `@`, and any backslash
+ * (quoted-pair), so the answer never hinges on a parser's quote/comment nesting rules. An
+ * encoded-word display name that would decode to an address changes nothing (never decoded).
  */
 export function parseSingleMailbox(value: string | undefined): string | null {
   if (!value || value.length > MAX_HEADER_VALUE) return null;
+  // No quoted-pair (backslash escape) anywhere: how it nests with quotes and comments is exactly
+  // where parsers disagree, and no legitimate sender needs one.
+  if (value.includes("\\")) return null;
   const addresses: string[] = [];
   let display = ""; // unquoted, uncommented text outside <...> in the current mailbox
   let angle = ""; // text inside the current <...>
@@ -272,16 +276,22 @@ export function parseSingleMailbox(value: string | undefined): string | null {
       if (inAngle || hasAngle) return null; // nothing quoted inside or after the address
       quoted = true;
       i++;
-      while (i < value.length && value[i] !== '"') i += value[i] === "\\" ? 2 : 1;
+      while (i < value.length && value[i] !== '"') {
+        // A quoted display name has no business holding an address or a bracket; refusing them
+        // means the result never depends on how another parser reads quotes.
+        if (value[i] === "<" || value[i] === ">" || value[i] === "@") return null;
+        i++;
+      }
       if (i >= value.length) return null; // unterminated quote
     } else if (ch === "(") {
       if (inAngle) return null;
       let depth = 1;
       i++;
       while (i < value.length && depth > 0) {
-        if (value[i] === "\\") i++;
-        else if (value[i] === "(") depth++;
-        else if (value[i] === ")") depth--;
+        const c = value[i];
+        if (c === "<" || c === ">" || c === "@") return null; // same rule as for quoted strings
+        if (c === "(") depth++;
+        else if (c === ")") depth--;
         i++;
       }
       if (depth > 0) return null; // unterminated comment
@@ -316,17 +326,42 @@ export function parseSingleMailbox(value: string | undefined): string | null {
   return addresses.length === 1 ? addresses[0] : null;
 }
 
+/**
+ * True when the raw header block, up to and including its blank-line separator, mixes CRLF and
+ * bare-LF line endings. Checked before CRLF is normalised to LF (which would hide the mix):
+ * readers disagree about where such a block ends, so a header could be seen by one and not
+ * the other. A linear scan, bounded to the size a legitimate block can have.
+ */
+function mixedLineEndings(raw: string): boolean {
+  let crlf = false;
+  let bareLf = false;
+  let pos = 0;
+  const limit = MAX_HEADER_BLOCK + 1024; // a longer block is refused as too large anyway
+  while (pos <= limit && pos < raw.length) {
+    const lf = raw.indexOf("\n", pos);
+    if (lf === -1) break;
+    const endsCr = lf > pos && raw[lf - 1] === "\r";
+    if (endsCr) crlf = true;
+    else bareLf = true;
+    if (crlf && bareLf) return true;
+    const contentLength = lf - pos - (endsCr ? 1 : 0);
+    if (contentLength === 0) break; // the blank line that ends the headers
+    pos = lf + 1;
+  }
+  return false;
+}
+
 export function parseEmail(raw: string): ParsedEmail {
   const { head } = splitHeadBody(raw);
 
   // The top-level header block must be read whole or not at all: a From header hidden past a
-  // cut-off, or behind a lone CR that another reader treats as a line break, would let the
-  // sender seen here differ from the one SES evaluated.
+  // cut-off, or behind a lone CR or a mixed line ending that another reader treats as a line
+  // break, would let the sender seen here differ from the one SES evaluated.
   const refusal =
     head.length > MAX_HEADER_BLOCK
       ? "header_too_large"
-      : head.includes("\r") || head.includes("\u0000") // a CR left after CRLF -> LF is a bare CR
-        ? "header_malformed"
+      : head.includes("\r") || head.includes("\u0000") || mixedLineEndings(raw)
+        ? "header_malformed" // (a CR left after CRLF -> LF is a bare CR)
         : null;
   if (refusal) {
     return { headers: {}, subject: "", fromAddress: null, duplicateFrom: false, text: "", refusal };

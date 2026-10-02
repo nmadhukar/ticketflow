@@ -10,7 +10,7 @@ import { setTicketCreatedBroadcaster } from "../../services/tickets/create";
 import { teamsIntegration } from "../../services/microsoftTeams";
 import { db } from "../../storage/db";
 import { storage } from "../../storage";
-import { emailInboundDeps } from "../../routes/email";
+import { claimMessage, emailInboundDeps, markMessageDone, releaseMessageClaim } from "../../routes/email";
 import { clearCertCache, type SnsMessage } from "../../services/email/snsVerify";
 import { AI_SYSTEM_USER_ID, ensureAiSystemUser } from "../../utils/aiSystemUser";
 import { createSnsTestSigner, generateKeyPairSync } from "../utils/snsTestSigner";
@@ -447,6 +447,17 @@ describe("POST /api/email/inbound", () => {
           })
         )
       );
+      const mixed = await post(
+        notification(
+          sesBody({
+            from: "ann.customer@example.test",
+            subject: "x",
+            body: "x",
+            headers: "From: <ann.customer@example.test>\r\nX-A: y\n\nFrom: <mallory@attacker.test>",
+          })
+        )
+      );
+      expect(mixed.body).toEqual({ status: "ignored", reason: "header_malformed" });
       expect(hidden.body).toEqual({ status: "ignored", reason: "header_too_large" });
       expect(loneCr.body).toEqual({ status: "ignored", reason: "header_malformed" });
       expect(await countTickets()).toBe(0);
@@ -671,6 +682,31 @@ describe("POST /api/email/inbound", () => {
       const [row] = await db.select().from(snsMessageDedupe);
       expect(row.status).toBe("done");
       expect((await post(msg)).body).toEqual({ status: "duplicate" });
+    });
+
+    it("a slow holder can neither complete nor release a newer holder's claim", async () => {
+      const id = `fence-${randomUUID()}`;
+      const a = await claimMessage(id);
+      if (a.state !== "claimed") throw new Error("A should have claimed a new id");
+      expect((await claimMessage(id)).state).toBe("busy"); // fresh: A is working
+      // A stalls past the stale window; B takes over.
+      await db
+        .update(snsMessageDedupe)
+        .set({ receivedAt: new Date(Date.now() - 50 * 1000) })
+        .where(eq(snsMessageDedupe.messageId, id));
+      const b = await claimMessage(id);
+      if (b.state !== "claimed") throw new Error("B should have re-claimed the stale claim");
+      expect(b.token).not.toBe(a.token);
+      // A wakes up late: both of its writes match no row.
+      expect(await releaseMessageClaim(id, a.token)).toBe(false);
+      expect(await markMessageDone(id, a.token)).toBe(false);
+      let [row] = await db.select().from(snsMessageDedupe).where(eq(snsMessageDedupe.messageId, id));
+      expect(row.status).toBe("processing"); // B's claim survived A's late delete and done
+      // B's own done succeeds, and makes the claim final for everyone.
+      expect(await markMessageDone(id, b.token)).toBe(true);
+      [row] = await db.select().from(snsMessageDedupe).where(eq(snsMessageDedupe.messageId, id));
+      expect(row.status).toBe("done");
+      expect((await claimMessage(id)).state).toBe("done");
     });
 
     it("a failed attempt releases the MessageId so the retry is processed", async () => {
