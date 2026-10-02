@@ -1,5 +1,6 @@
 import { randomBytes } from "crypto";
 import { HttpError } from "../http/errors";
+import { disconnectUser } from "../realtime/connections";
 import {
   users,
   tasks,
@@ -309,6 +310,7 @@ export class DatabaseStorage implements IStorage {
     if (rows.length === 0) return false;
     // The old password may be in someone else's hands: end every session.
     await this.revokeUserSessions(userId);
+    disconnectUser(userId);
     return true;
   }
 
@@ -1576,6 +1578,11 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.id, userId))
       .returning(publicUserColumns);
 
+    // Open sockets must not outlive the state they were admitted under: a
+    // deactivated user is dropped for good, a role change reconnects with the new role.
+    if (updates.isActive === false) disconnectUser(userId);
+    else if (updates.role !== undefined) disconnectUser(userId, 1012);
+
     return updatedUser;
   }
 
@@ -1593,6 +1600,8 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(users.id, userId))
       .returning(publicUserColumns);
+
+    if (updatedUser && !updatedUser.isActive) disconnectUser(userId);
 
     return updatedUser;
   }

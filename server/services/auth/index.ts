@@ -28,6 +28,8 @@ import * as client from "openid-client";
 import { EMAIL_PROVIDERS } from "@shared/constants";
 import { requireSecret } from "../../security/secrets";
 import { isAiSystemUserId } from "../../utils/aiSystemUserId";
+import { ServerResponse, type IncomingMessage } from "http";
+import { disconnectUser } from "../../realtime/connections";
 import { authRateLimit, authRequestRateLimit } from "../../security/rateLimiting";
 
 declare global {
@@ -113,6 +115,7 @@ const changePasswordSchema = z.object({
 });
 
 let activeSessionStore: InstanceType<ReturnType<typeof connectPg>> | undefined;
+let activeSessionMiddleware: RequestHandler | undefined;
 
 /**
  * Closes the session store's own connection pool (created by setupAuth).
@@ -121,7 +124,54 @@ let activeSessionStore: InstanceType<ReturnType<typeof connectPg>> | undefined;
 export async function closeAuth(): Promise<void> {
   const store = activeSessionStore;
   activeSessionStore = undefined;
+  activeSessionMiddleware = undefined;
   await store?.close();
+}
+
+/**
+ * A session that authenticated before the password last changed is dead. Shared by
+ * the HTTP check in setupAuth and the WebSocket upgrade so they cannot disagree.
+ */
+export function isSessionRevoked(
+  user: { passwordChangedAt?: Date | string | null } | undefined,
+  session: unknown
+): boolean {
+  const changedAt = user?.passwordChangedAt;
+  if (!changedAt) return false;
+  const authAt = (session as { authAt?: unknown } | undefined)?.authAt;
+  return !(typeof authAt === "number" && authAt >= new Date(changedAt).getTime());
+}
+
+/**
+ * Resolves the signed-in user of a raw HTTP request (a WebSocket upgrade) with the
+ * same machinery an Express request goes through: the session cookie, the session
+ * store and passport's deserializeUser (which refuses inactive, unapproved, AI and
+ * unknown-role users). Returns the user and the session's authAt, or null for no session, a revoked session, a user who
+ * must change their password first, or the AI system user.
+ */
+export async function authenticateUpgrade(
+  req: IncomingMessage
+): Promise<{ user: Express.User; authAt: unknown } | null> {
+  const sessionMiddleware = activeSessionMiddleware;
+  if (!sessionMiddleware) return null;
+  const res = new ServerResponse(req);
+  const run = (mw: RequestHandler) =>
+    new Promise<void>((resolve, reject) =>
+      mw(req as any, res as any, (err?: unknown) => (err ? reject(err) : resolve()))
+    );
+  try {
+    await run(sessionMiddleware);
+    await run(passport.initialize());
+    await run(passport.session());
+  } catch (error) {
+    console.error("WebSocket auth error:", error instanceof Error ? error.message : "unknown");
+    return null;
+  }
+  const user = (req as any).user as Express.User | undefined;
+  if (!user || isAiSystemUserId(user.id)) return null;
+  if (isSessionRevoked(user, (req as any).session)) return null;
+  if (user.mustChangePassword) return null;
+  return { user, authAt: (req as any).session?.authAt };
 }
 
 /**
@@ -174,15 +224,15 @@ export function setupAuth(app: Express) {
   limitPost("/api/auth/reset-password", authRequestRateLimit);
   limitPost("/api/auth/change-password", authRequestRateLimit);
 
-  app.use(session(sessionSettings));
+  activeSessionMiddleware = session(sessionSettings);
+  app.use(activeSessionMiddleware);
   app.use(passport.initialize());
   app.use(passport.session());
 
   // A session that authenticated before the password last changed is dead, even if
   // a request that loaded it earlier saved the row back after the revocation DELETE.
   app.use((req, res, next) => {
-    const changedAt = req.user?.passwordChangedAt;
-    if (!req.user || !changedAt) return next();
+    if (!req.user || !req.user.passwordChangedAt) return next();
     // Signing in again (or out) must work with a revoked cookie, and page loads
     // must still get the app; every other API route is checked.
     const p = req.path.toLowerCase();
@@ -193,8 +243,7 @@ export function setupAuth(app: Express) {
     ) {
       return next();
     }
-    const authAt = (req.session as any)?.authAt;
-    if (typeof authAt === "number" && authAt >= new Date(changedAt).getTime()) return next();
+    if (!isSessionRevoked(req.user, req.session)) return next();
     req.session.destroy(() => {
       res.status(401).json({
         error: "session_revoked",
@@ -670,6 +719,7 @@ export function setupAuth(app: Express) {
       await storage.clearPasswordResetToken(user.id);
       // Whoever held the old password (or this token) must sign in again.
       await storage.revokeUserSessions(user.id);
+      disconnectUser(user.id);
       // A token reset is the recovery path from a lockout.
       await storage.resetFailedLogins(user.id);
 
@@ -719,6 +769,10 @@ export function setupAuth(app: Express) {
       await storage.updateUserPassword(current.id, newHash, changedAt);
       (req.session as any).authAt = changedAt.getTime();
       await storage.revokeUserSessions(current.id, req.sessionID);
+      // Sockets of other devices must go (their sessions are revoked); this device's
+      // socket reconnects, so its new authAt must be stored before it does.
+      await new Promise<void>((resolve) => req.session.save(() => resolve()));
+      disconnectUser(current.id, 1012);
       res.json({ message: "Password changed" });
     } catch (error) {
       if (error instanceof z.ZodError) {
