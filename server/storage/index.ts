@@ -102,6 +102,7 @@ import {
   sql,
   isNotNull,
   inArray,
+  ne,
   ilike,
   gt,
   gte,
@@ -1474,7 +1475,7 @@ export class DatabaseStorage implements IStorage {
     const [urgentTicketCount] = await db
       .select({ count: count() })
       .from(tasks)
-      .where(and(eq(tasks.status, "open"), eq(tasks.priority, "urgent")));
+      .where(and(ne(tasks.status, "closed"), eq(tasks.priority, "urgent")));
 
     // Calculate average resolution time (in hours)
     // Use resolvedAt/closedAt if available, otherwise use updatedAt as fallback
@@ -1668,65 +1669,41 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Statistics
-  async getTaskStats(userId?: string): Promise<{
+  /** Counts over the tickets `viewer` may see (ticketVisibilityWhere, the rule GET /api/tasks uses).
+   *  `urgent` is every non-closed ticket with priority urgent; `highPriority` is priority high only. */
+  async getTaskStats(viewer: AccessUser): Promise<{
     total: number;
     open: number;
     inProgress: number;
+    onHold: number;
     resolved: number;
     closed: number;
     highPriority: number;
+    urgent: number;
   }> {
-    let baseQuery = db.select({ count: count() }).from(tasks);
-
-    if (userId) {
-      baseQuery = baseQuery.where(
-        or(eq(tasks.assigneeId, userId), eq(tasks.createdBy, userId))
-      ) as any;
-    }
-
-    const [totalResult] = await baseQuery;
-    const total = totalResult.count;
-
-    let statusQuery = db
+    const [row] = await db
       .select({
-        status: tasks.status,
-        count: count(),
+        total: count(),
+        open: sql<number>`count(*) filter (where ${tasks.status} = 'open')`.mapWith(Number),
+        inProgress: sql<number>`count(*) filter (where ${tasks.status} = 'in_progress')`.mapWith(Number),
+        onHold: sql<number>`count(*) filter (where ${tasks.status} = 'on_hold')`.mapWith(Number),
+        resolved: sql<number>`count(*) filter (where ${tasks.status} = 'resolved')`.mapWith(Number),
+        closed: sql<number>`count(*) filter (where ${tasks.status} = 'closed')`.mapWith(Number),
+        highPriority: sql<number>`count(*) filter (where ${tasks.priority} = 'high')`.mapWith(Number),
+        urgent: sql<number>`count(*) filter (where ${tasks.priority} = 'urgent' and ${tasks.status} <> 'closed')`.mapWith(Number),
       })
       .from(tasks)
-      .groupBy(tasks.status);
-
-    if (userId) {
-      statusQuery = statusQuery.where(
-        or(eq(tasks.assigneeId, userId), eq(tasks.createdBy, userId))
-      ) as any;
-    }
-
-    const statuses = await statusQuery;
-
-    let highPriorityBase = and(eq(tasks.priority, "high"));
-    if (userId) {
-      highPriorityBase = and(
-        highPriorityBase,
-        or(eq(tasks.assigneeId, userId), eq(tasks.createdBy, userId))
-      );
-    }
-    const [highPriorityResult] = await db
-      .select({ count: count() })
-      .from(tasks)
-      .where(highPriorityBase);
-
-    const statusCounts = statuses.reduce((acc, { status, count }) => {
-      acc[status] = count;
-      return acc;
-    }, {} as Record<string, number>);
+      .where(ticketVisibilityWhere(viewer));
 
     return {
-      total,
-      open: statusCounts.open || 0,
-      inProgress: statusCounts.in_progress || 0,
-      resolved: statusCounts.resolved || 0,
-      closed: statusCounts.closed || 0,
-      highPriority: highPriorityResult.count,
+      total: Number(row.total),
+      open: row.open,
+      inProgress: row.inProgress,
+      onHold: row.onHold,
+      resolved: row.resolved,
+      closed: row.closed,
+      highPriority: row.highPriority,
+      urgent: row.urgent,
     };
   }
 
@@ -3112,7 +3089,7 @@ export class DatabaseStorage implements IStorage {
     const assignedTickets = await db
       .select({ count: count() })
       .from(tasks)
-      .where(and(eq(tasks.assigneeId, userId), eq(tasks.assigneeType, "user")));
+      .where(and(eq(tasks.assigneeId, userId), assignedToUserSql));
 
     const assignedCount = Number(assignedTickets[0]?.count || 0);
 
@@ -3136,7 +3113,7 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           eq(tasks.assigneeId, userId),
-          eq(tasks.assigneeType, "user"),
+          assignedToUserSql,
           or(eq(tasks.status, "resolved"), eq(tasks.status, "closed"))
         )
       );
@@ -3541,7 +3518,7 @@ export class DatabaseStorage implements IStorage {
               .where(
                 and(
                   eq(tasks.assigneeId, member.user.id),
-                  eq(tasks.assigneeType, "user")
+                  assignedToUserSql
                 )
               );
 
@@ -3558,7 +3535,7 @@ export class DatabaseStorage implements IStorage {
               .where(
                 and(
                   eq(tasks.assigneeId, member.user.id),
-                  eq(tasks.assigneeType, "user"),
+                  assignedToUserSql,
                   or(eq(tasks.status, "resolved"), eq(tasks.status, "closed"))
                 )
               );

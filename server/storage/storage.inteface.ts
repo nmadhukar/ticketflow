@@ -253,13 +253,15 @@ export interface IStorage {
   ): Promise<(TaskComment & { user?: PublicUser })[]>;
 
   // Statistics
-  getTaskStats(userId?: string): Promise<{
+  getTaskStats(viewer: AccessUser): Promise<{
     total: number;
     open: number;
     inProgress: number;
+    onHold: number;
     resolved: number;
     closed: number;
     highPriority: number;
+    urgent: number;
   }>;
 
   // Activity

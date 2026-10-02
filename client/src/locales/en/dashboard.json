@@ -28,7 +28,7 @@
     "priorityTickets": "Priority Tickets",
     "highUrgent": "High / Urgent",
     "ticketStatus": "Ticket Status",
-    "openInProgressCompleted": "Open / In Progress / Completed",
+    "openInProgressCompleted": "Open / In Progress / On Hold / Resolved or Closed",
     "avgResolutionTime": "Avg Resolution Time",
     "hours": "hours",
     "pendingArticles": "Pending Articles",

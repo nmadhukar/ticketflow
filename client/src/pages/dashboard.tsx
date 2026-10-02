@@ -155,8 +155,8 @@ export default function Dashboard() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
         <StatsCard
           title={t("dashboard:admin.ticketStatus")}
-          value={`${(systemStats as any)?.openTickets || 0} / ${
-            stats?.inProgress || 0
+          value={`${stats?.open || 0} / ${stats?.inProgress || 0} / ${
+            stats?.onHold || 0
           } / ${(stats?.resolved || 0) + (stats?.closed || 0)}`}
           subtitle={t("dashboard:admin.openInProgressCompleted")}
           icon={<BarChart3 className="h-4 w-4" />}
@@ -167,7 +167,7 @@ export default function Dashboard() {
         <StatsCard
           title={t("dashboard:admin.priorityTickets")}
           value={`${stats?.highPriority || 0} / ${
-            (systemStats as any)?.urgentTickets || 0
+            stats?.urgent ?? (systemStats as any)?.urgentTickets ?? 0
           }`}
           subtitle={t("dashboard:admin.highUrgent")}
           icon={<AlertTriangle className="h-4 w-4" />}

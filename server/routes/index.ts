@@ -1367,13 +1367,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Statistics
   app.get("/api/stats", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-
-      // If admin, show all stats, otherwise show user-specific stats
-      const stats = await storage.getTaskStats(
-        user?.role === "admin" ? undefined : userId
-      );
+      // Same visibility rule as GET /api/tasks for this caller (admin: every ticket).
+      const stats = await storage.getTaskStats({
+        id: getUserId(req),
+        role: req.user?.role,
+      });
       res.json(stats);
     } catch (error) {
       console.error("Error fetching stats:", error);
@@ -1389,7 +1387,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .status(403)
           .json({ error: "forbidden", message: "Only administrators can read global statistics" });
       }
-      const stats = await storage.getTaskStats();
+      const stats = await storage.getTaskStats({
+        id: (req.user as { id: string }).id,
+        role: req.user?.role,
+      });
       res.json(stats);
     } catch (error) {
       console.error("Error fetching global stats:", error);
