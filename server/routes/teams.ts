@@ -6,7 +6,7 @@ import {
   teamMembers,
 } from "@shared/schema";
 import { and, desc, eq, not, inArray } from "drizzle-orm";
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import { isAuthenticated } from "server/services/auth";
 import { db } from "server/storage/db";
 import { getUserId } from "server/middleware/admin.middleware";
@@ -16,7 +16,34 @@ import {
   isTeamAdmin,
 } from "server/permissions/teams";
 import { storage } from "server/storage";
+import { assertTaskAccess, type AccessUser } from "server/permissions/ticketAccess";
+import { HttpError } from "server/http/errors";
+import type { TaskAssignmentBinding } from "server/storage/storage.inteface";
 import { z } from "zod";
+
+/**
+ * Before an assignment is changed through /api/teams/:id/tasks/:taskId/assignments/:assignmentId:
+ * 404 unless the assignment belongs to that ticket and that team; then the ticket must be inside
+ * the user's scope (404 / 403); then the user must be able to manage the team (403).
+ */
+async function authorizeAssignmentWrite(
+  req: Request,
+  binding: TaskAssignmentBinding,
+  verb: "update" | "delete"
+): Promise<void> {
+  const assignment = await storage.getTaskAssignmentById(binding.assignmentId);
+  if (
+    !assignment ||
+    assignment.taskId !== binding.taskId ||
+    assignment.teamId !== binding.teamId
+  ) {
+    throw new HttpError(404, "not_found", "Assignment not found for this ticket and team");
+  }
+  await assertTaskAccess(req.user as AccessUser, binding.taskId);
+  if (!(await canManageTeam(storage, getUserId(req), binding.teamId))) {
+    throw new HttpError(403, "forbidden", `You don't have permission to ${verb} task assignments`);
+  }
+}
 
 export function registerTeamsRoutes(app: Express): void {
   // Team routes
@@ -248,7 +275,7 @@ export function registerTeamsRoutes(app: Express): void {
   });
 
   // Get team members
-  app.get("/api/teams/:id/members", isAuthenticated, async (req: any, res) => {
+  app.get("/api/teams/:id/members", isAuthenticated, async (req: any, res, next) => {
     try {
       const teamId = parseInt(req.params.id);
       if (isNaN(teamId)) {
@@ -310,6 +337,8 @@ export function registerTeamsRoutes(app: Express): void {
         ? parseInt(req.query.taskId as string)
         : null;
       if (taskId && !isNaN(taskId)) {
+        // Who is assigned to a ticket is ticket data: same rule as GET /api/tasks/:id.
+        await assertTaskAccess(req.user, taskId);
         const existingAssignments = await storage.getTaskAssignments(
           taskId,
           teamId
@@ -339,6 +368,7 @@ export function registerTeamsRoutes(app: Express): void {
 
       res.json(membersWithAdminFlag);
     } catch (error) {
+      if (error instanceof HttpError) return next(error);
       console.error("Error fetching team members:", error);
       res.status(500).json({ message: "Failed to fetch team members" });
     }
@@ -513,7 +543,10 @@ export function registerTeamsRoutes(app: Express): void {
         return res.status(404).json({ message: "User not found" });
       }
 
-      // Check access: team members, team admins, team creator, managers
+      // Check access: team members, team admins, team creator, managers.
+      // Whoever passes still sees only the queue's tickets the ticket rule
+      // lets them see (getTeamTasks intersects with ticketVisibilityWhere).
+      const viewer = { id: userId, role: req.user?.role };
       const team = await storage.getTeam(teamId);
       if (!team) {
         return res.status(404).json({ message: "Team not found" });
@@ -521,20 +554,20 @@ export function registerTeamsRoutes(app: Express): void {
 
       // System admins can always access
       if (user.role === "admin") {
-        const tasks = await storage.getTeamTasks(teamId);
+        const tasks = await storage.getTeamTasks(teamId, viewer);
         return res.json(tasks);
       }
 
       // Team creator can access
       if (team.createdBy === userId) {
-        const tasks = await storage.getTeamTasks(teamId);
+        const tasks = await storage.getTeamTasks(teamId, viewer);
         return res.json(tasks);
       }
 
       // Team admins can access
       const isAdmin = await isTeamAdmin(storage, userId, teamId);
       if (isAdmin) {
-        const tasks = await storage.getTeamTasks(teamId);
+        const tasks = await storage.getTeamTasks(teamId, viewer);
         return res.json(tasks);
       }
 
@@ -551,7 +584,7 @@ export function registerTeamsRoutes(app: Express): void {
           )
           .limit(1);
         if (department) {
-          const tasks = await storage.getTeamTasks(teamId);
+          const tasks = await storage.getTeamTasks(teamId, viewer);
           return res.json(tasks);
         }
       }
@@ -560,7 +593,7 @@ export function registerTeamsRoutes(app: Express): void {
       const userTeams = await storage.getUserTeams(userId);
       const isMember = userTeams.some((t) => t.id === teamId);
       if (isMember) {
-        const tasks = await storage.getTeamTasks(teamId);
+        const tasks = await storage.getTeamTasks(teamId, viewer);
         return res.json(tasks);
       }
 
@@ -577,7 +610,7 @@ export function registerTeamsRoutes(app: Express): void {
   app.get(
     "/api/teams/:id/tasks/:taskId/assignments",
     isAuthenticated,
-    async (req: any, res) => {
+    async (req: any, res, next) => {
       try {
         const teamId = parseInt(req.params.id);
         const taskId = parseInt(req.params.taskId);
@@ -601,10 +634,14 @@ export function registerTeamsRoutes(app: Express): void {
           return res.status(404).json({ message: "Team not found" });
         }
 
+        // The ticket itself must be inside the user's scope (404 / 403),
+        // whatever team-level rights they hold.
+        await assertTaskAccess(req.user, taskId);
+
         // Verify task is assigned to this team
         const task = await storage.getTask(taskId);
         if (!task) {
-          return res.status(404).json({ message: "Task not found" });
+          return res.status(404).json({ error: "not_found", message: "Ticket not found" });
         }
 
         if (task.assigneeType !== "team" || task.assigneeTeamId !== teamId) {
@@ -665,6 +702,7 @@ export function registerTeamsRoutes(app: Express): void {
           message: "You don't have permission to view task assignments",
         });
       } catch (error) {
+        if (error instanceof HttpError) return next(error);
         console.error("Error fetching task assignments:", error);
         res.status(500).json({ message: "Failed to fetch task assignments" });
       }
@@ -675,7 +713,7 @@ export function registerTeamsRoutes(app: Express): void {
   app.post(
     "/api/teams/:id/tasks/:taskId/assignments",
     isAuthenticated,
-    async (req: any, res) => {
+    async (req: any, res, next) => {
       try {
         const teamId = parseInt(req.params.id);
         const taskId = parseInt(req.params.taskId);
@@ -693,10 +731,14 @@ export function registerTeamsRoutes(app: Express): void {
           return res.status(400).json({ message: "userId is required" });
         }
 
-        // Check if user can manage the team (team admin, team creator, manager, system admin)
+        // The ticket must be inside the user's scope (404 / 403) ...
+        await assertTaskAccess(req.user, taskId);
+
+        // ... and the user must be able to manage the team (team admin, team creator, manager, system admin)
         const canManage = await canManageTeam(storage, userId, teamId);
         if (!canManage) {
           return res.status(403).json({
+            error: "forbidden",
             message: "You don't have permission to assign team tasks",
           });
         }
@@ -704,7 +746,7 @@ export function registerTeamsRoutes(app: Express): void {
         // Verify task is assigned to this team
         const task = await storage.getTask(taskId);
         if (!task) {
-          return res.status(404).json({ message: "Task not found" });
+          return res.status(404).json({ error: "not_found", message: "Ticket not found" });
         }
 
         if (task.assigneeType !== "team" || task.assigneeTeamId !== teamId) {
@@ -734,6 +776,7 @@ export function registerTeamsRoutes(app: Express): void {
 
         res.status(201).json(assignment);
       } catch (error) {
+        if (error instanceof HttpError) return next(error);
         console.error("Error creating task assignment:", error);
         res.status(500).json({ message: "Failed to create task assignment" });
       }
@@ -744,7 +787,7 @@ export function registerTeamsRoutes(app: Express): void {
   app.patch(
     "/api/teams/:id/tasks/:taskId/assignments/:assignmentId",
     isAuthenticated,
-    async (req: any, res) => {
+    async (req: any, res, next) => {
       try {
         const teamId = parseInt(req.params.id);
         const taskId = parseInt(req.params.taskId);
@@ -756,16 +799,9 @@ export function registerTeamsRoutes(app: Express): void {
           });
         }
 
-        const userId = getUserId(req);
         const { status, notes, priority } = req.body;
-
-        // Check if user can manage the team
-        const canManage = await canManageTeam(storage, userId, teamId);
-        if (!canManage) {
-          return res.status(403).json({
-            message: "You don't have permission to update task assignments",
-          });
-        }
+        const binding = { assignmentId, taskId, teamId };
+        await authorizeAssignmentWrite(req, binding, "update");
 
         const updates: any = {};
         if (status !== undefined) updates.status = status;
@@ -776,13 +812,15 @@ export function registerTeamsRoutes(app: Express): void {
           return res.status(400).json({ message: "No updates provided" });
         }
 
-        const updatedAssignment = await storage.updateTaskAssignment(
-          assignmentId,
-          updates
-        );
+        // The WHERE also binds task and team, so the write cannot reach another row.
+        const updatedAssignment = await storage.updateTaskAssignment(binding, updates);
+        if (!updatedAssignment) {
+          return res.status(404).json({ error: "not_found", message: "Assignment not found" });
+        }
 
         res.json(updatedAssignment);
       } catch (error) {
+        if (error instanceof HttpError) return next(error);
         console.error("Error updating task assignment:", error);
         res.status(500).json({ message: "Failed to update task assignment" });
       }
@@ -793,7 +831,7 @@ export function registerTeamsRoutes(app: Express): void {
   app.delete(
     "/api/teams/:id/tasks/:taskId/assignments/:assignmentId",
     isAuthenticated,
-    async (req: any, res) => {
+    async (req: any, res, next) => {
       try {
         const teamId = parseInt(req.params.id);
         const taskId = parseInt(req.params.taskId);
@@ -805,19 +843,16 @@ export function registerTeamsRoutes(app: Express): void {
           });
         }
 
-        const userId = getUserId(req);
+        const binding = { assignmentId, taskId, teamId };
+        await authorizeAssignmentWrite(req, binding, "delete");
 
-        // Check if user can manage the team
-        const canManage = await canManageTeam(storage, userId, teamId);
-        if (!canManage) {
-          return res.status(403).json({
-            message: "You don't have permission to delete task assignments",
-          });
+        // The WHERE also binds task and team, so the delete cannot reach another row.
+        if (!(await storage.deleteTaskAssignment(binding))) {
+          return res.status(404).json({ error: "not_found", message: "Assignment not found" });
         }
-
-        await storage.deleteTaskAssignment(assignmentId);
         res.json({ message: "Task assignment deleted successfully" });
       } catch (error) {
+        if (error instanceof HttpError) return next(error);
         console.error("Error deleting task assignment:", error);
         res.status(500).json({ message: "Failed to delete task assignment" });
       }

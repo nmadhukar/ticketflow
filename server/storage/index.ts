@@ -103,8 +103,13 @@ import {
   lte,
   type SQL,
 } from "drizzle-orm";
-import { IStorage } from "./storage.inteface";
-import { ticketVisibilityWhere, type AccessUser } from "../permissions/ticketAccess";
+import { IStorage, type TaskAssignmentBinding } from "./storage.inteface";
+import {
+  assignedToUserSql,
+  queuedToTeamSql,
+  ticketVisibilityWhere,
+  type AccessUser,
+} from "../permissions/ticketAccess";
 import { LOCKOUT_MINUTES, MAX_FAILED_LOGINS } from "../services/auth/lockout";
 import { hashResetToken } from "../utils/resetToken";
 import { PUBLIC_USER_FIELDS, type PublicUser } from "../utils/publicUser";
@@ -117,6 +122,15 @@ import { PUBLIC_USER_FIELDS, type PublicUser } from "../utils/publicUser";
 export const publicUserColumns = Object.fromEntries(
   PUBLIC_USER_FIELDS.map((k) => [k, users[k]])
 ) as { [K in (typeof PUBLIC_USER_FIELDS)[number]]: (typeof users)[K] };
+
+/** id AND task_id AND team_id: an assignment is only ever written through its own ticket and team. */
+function assignmentBindingWhere(binding: TaskAssignmentBinding): SQL {
+  return and(
+    eq(teamTaskAssignments.id, binding.assignmentId),
+    eq(teamTaskAssignments.taskId, binding.taskId),
+    eq(teamTaskAssignments.teamId, binding.teamId)
+  )!;
+}
 
 /**
  * Database Storage Layer for TicketFlow
@@ -597,22 +611,28 @@ export class DatabaseStorage implements IStorage {
           like(tasks.description, `%${search}%`)
         )!
       );
-    if (assigneeId) filters.push(eq(tasks.assigneeId, assigneeId));
+    // Like the rule, assignee_id counts only on user tickets and
+    // assignee_team_id only on team tickets.
+    if (assigneeId) {
+      filters.push(sql`(${assignedToUserSql} AND ${tasks.assigneeId} = ${assigneeId})`);
+    }
     if (teamId) {
       filters.push(sql`(
-        ${tasks.assigneeTeamId} = ${teamId}
-        OR EXISTS (
+        (${queuedToTeamSql} AND ${tasks.assigneeTeamId} = ${teamId})
+        OR (${assignedToUserSql} AND EXISTS (
           SELECT 1 FROM ${teamMembers} tm3 WHERE tm3.user_id = ${tasks.assigneeId} AND tm3.team_id = ${teamId}
-        )
+        ))
       )`);
     }
     if (departmentId) {
       filters.push(sql`(
-        EXISTS (SELECT 1 FROM ${teams} tt WHERE tt.id = ${tasks.assigneeTeamId} AND tt.department_id = ${departmentId})
-        OR EXISTS (
+        (${queuedToTeamSql} AND EXISTS (
+          SELECT 1 FROM ${teams} tt WHERE tt.id = ${tasks.assigneeTeamId} AND tt.department_id = ${departmentId}
+        ))
+        OR (${assignedToUserSql} AND EXISTS (
           SELECT 1 FROM ${teamMembers} tm4 JOIN ${teams} t4 ON t4.id = tm4.team_id
           WHERE tm4.user_id = ${tasks.assigneeId} AND t4.department_id = ${departmentId}
-        )
+        ))
       )`);
     }
     if (!includeOwn) {
@@ -1093,15 +1113,31 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Team task assignment operations
-  async getTeamTasks(teamId: number): Promise<Task[]> {
+  /** The team's queue, limited to the tickets `viewer` may see (ticketVisibilityWhere). */
+  async getTeamTasks(teamId: number, viewer: AccessUser): Promise<Task[]> {
     const teamTasks = await db
       .select()
       .from(tasks)
       .where(
-        and(eq(tasks.assigneeType, "team"), eq(tasks.assigneeTeamId, teamId))
+        and(
+          eq(tasks.assigneeType, "team"),
+          eq(tasks.assigneeTeamId, teamId),
+          ticketVisibilityWhere(viewer)
+        )
       );
 
     return teamTasks;
+  }
+
+  async getTaskAssignmentById(
+    assignmentId: number
+  ): Promise<TeamTaskAssignment | undefined> {
+    const [assignment] = await db
+      .select()
+      .from(teamTaskAssignments)
+      .where(eq(teamTaskAssignments.id, assignmentId))
+      .limit(1);
+    return assignment;
   }
 
   async getTaskAssignments(
@@ -1182,10 +1218,11 @@ export class DatabaseStorage implements IStorage {
     return newAssignment;
   }
 
+  /** Updates the assignment only if it belongs to that ticket and team; undefined otherwise. */
   async updateTaskAssignment(
-    assignmentId: number,
+    binding: TaskAssignmentBinding,
     updates: Partial<InsertTeamTaskAssignment>
-  ): Promise<TeamTaskAssignment> {
+  ): Promise<TeamTaskAssignment | undefined> {
     const updateData: any = { ...updates };
 
     // Handle completedAt based on status
@@ -1198,16 +1235,19 @@ export class DatabaseStorage implements IStorage {
     const [updatedAssignment] = await db
       .update(teamTaskAssignments)
       .set(updateData)
-      .where(eq(teamTaskAssignments.id, assignmentId))
+      .where(assignmentBindingWhere(binding))
       .returning();
 
     return updatedAssignment;
   }
 
-  async deleteTaskAssignment(assignmentId: number): Promise<void> {
-    await db
+  /** Deletes the assignment only if it belongs to that ticket and team; false otherwise. */
+  async deleteTaskAssignment(binding: TaskAssignmentBinding): Promise<boolean> {
+    const deleted = await db
       .delete(teamTaskAssignments)
-      .where(eq(teamTaskAssignments.id, assignmentId));
+      .where(assignmentBindingWhere(binding))
+      .returning({ id: teamTaskAssignments.id });
+    return deleted.length > 0;
   }
 
   // Comment operations

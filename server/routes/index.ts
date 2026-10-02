@@ -87,6 +87,7 @@ import {
   sum,
   sql,
   inArray,
+  getTableColumns,
 } from "drizzle-orm";
 import { teams, departments, users } from "@shared/schema";
 import { logSecurityEvent } from "../security/rbac";
@@ -99,8 +100,12 @@ import { registerAdminRoutes } from "../admin";
 import { bedrockIntegration } from "../services/ai/bedrockIntegration";
 import { s3Service } from "../services/s3Service";
 import { DEFAULT_COMPANY, EMAIL_PROVIDERS } from "@shared/constants";
-import { getTicketMetaForUser } from "../permissions/tickets";
-import { assertTaskAccess, requireTaskAccess } from "../permissions/ticketAccess";
+import { getTicketMetaForUser, normalizeAssigneeUpdate } from "../permissions/tickets";
+import {
+  assertTaskAccess,
+  requireTaskAccess,
+  ticketVisibilityWhere,
+} from "../permissions/ticketAccess";
 import { HttpError } from "../http/errors";
 import { parseIdParam } from "../http/params";
 import { registerTeamsRoutes } from "./teams";
@@ -1073,7 +1078,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
-  app.patch("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res) => {
+  app.patch("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res, next) => {
     try {
       const taskId = parseInt(req.params.id);
       const userId = getUserId(req);
@@ -1123,6 +1128,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       const updates = insertTaskSchema.partial().parse(result.prunedPayload);
+      // A reassignment clears the other assignee column (no stale scope).
+      normalizeAssigneeUpdate(updates);
       const updatedTask = await storage.updateTask(taskId, updates, userId);
 
       // If task was resolved, trigger knowledge base learning (policy-aware)
@@ -1188,6 +1195,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(updatedTask);
     } catch (error) {
+      if (error instanceof HttpError) return next(error);
       if (error instanceof z.ZodError) {
         return res
           .status(400)
@@ -4865,9 +4873,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getUserId(req);
       const { feedbackType, referenceId, rating, comment, ticketId } = req.body;
 
-      // Feedback attached to a ticket needs access to that ticket.
-      if (ticketId !== undefined && ticketId !== null) {
-        await assertTaskAccess(req.user, parseIdParam(String(ticketId), "ticketId"));
+      // Feedback attached to a ticket needs access to that ticket. Feedback on
+      // an auto-response belongs to that auto-response's ticket: the ticket is
+      // derived from it, and a client ticketId may only confirm it.
+      let feedbackTicketId: number | null = null;
+      if (feedbackType === "auto_response") {
+        const autoResponseId = parseIdParam(String(referenceId ?? ""), "referenceId");
+        const [autoResponse] = await db
+          .select({ ticketId: ticketAutoResponses.ticketId })
+          .from(ticketAutoResponses)
+          .where(eq(ticketAutoResponses.id, autoResponseId))
+          .limit(1);
+        if (!autoResponse) {
+          throw new HttpError(404, "not_found", "Auto-response not found");
+        }
+        await assertTaskAccess(req.user, autoResponse.ticketId);
+        if (
+          ticketId !== undefined &&
+          ticketId !== null &&
+          Number(ticketId) !== autoResponse.ticketId
+        ) {
+          throw new HttpError(
+            400,
+            "validation_failed",
+            "ticketId does not match the auto-response's ticket"
+          );
+        }
+        feedbackTicketId = autoResponse.ticketId;
+      } else if (ticketId !== undefined && ticketId !== null) {
+        feedbackTicketId = parseIdParam(String(ticketId), "ticketId");
+        await assertTaskAccess(req.user, feedbackTicketId);
       }
 
       // Validate rating
@@ -4885,7 +4920,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userId,
           rating,
           comment,
-          ticketId,
+          ticketId: feedbackTicketId,
         })
         .returning();
 
@@ -4913,23 +4948,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get(
     "/api/ai-feedback/:type/:referenceId",
     isAuthenticated,
-    async (req: any, res) => {
+    async (req: any, res, next) => {
       try {
-        const { type, referenceId } = req.params;
+        const { type } = req.params;
+        const referenceId = parseIdParam(req.params.referenceId, "referenceId");
+        const sameReference = and(
+          eq(aiFeedback.feedbackType, type),
+          eq(aiFeedback.referenceId, referenceId)
+        );
 
+        if (type === "auto_response") {
+          // Feedback on an auto-response is readable by whoever may see its ticket.
+          const [autoResponse] = await db
+            .select({ ticketId: ticketAutoResponses.ticketId })
+            .from(ticketAutoResponses)
+            .where(eq(ticketAutoResponses.id, referenceId))
+            .limit(1);
+          if (!autoResponse) {
+            throw new HttpError(404, "not_found", "Auto-response not found");
+          }
+          await assertTaskAccess(req.user, autoResponse.ticketId);
+          const feedback = await db
+            .select()
+            .from(aiFeedback)
+            .where(sameReference)
+            .orderBy(desc(aiFeedback.createdAt));
+          return res.json(feedback);
+        }
+
+        // Other types: only rows whose ticket the user may see. A row with no
+        // ticket matches no tasks row, so only an admin (rule TRUE) sees it.
         const feedback = await db
-          .select()
+          .select(getTableColumns(aiFeedback))
           .from(aiFeedback)
-          .where(
-            and(
-              eq(aiFeedback.feedbackType, type),
-              eq(aiFeedback.referenceId, parseInt(referenceId))
-            )
-          )
+          .leftJoin(tasks, eq(tasks.id, aiFeedback.ticketId))
+          .where(and(sameReference, ticketVisibilityWhere(req.user)))
           .orderBy(desc(aiFeedback.createdAt));
 
         res.json(feedback);
       } catch (error) {
+        if (error instanceof HttpError) return next(error);
         console.error("Error fetching AI feedback:", error);
         res.status(500).json({ message: "Failed to fetch feedback" });
       }

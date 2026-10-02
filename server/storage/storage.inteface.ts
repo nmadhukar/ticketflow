@@ -59,6 +59,13 @@ import {
 import type { PublicUser } from "../utils/publicUser";
 import type { AccessUser } from "../permissions/ticketAccess";
 
+/** An assignment addressed through its ticket and team (route :id/:taskId/:assignmentId). */
+export interface TaskAssignmentBinding {
+  assignmentId: number;
+  taskId: number;
+  teamId: number;
+}
+
 /**
  * Database Storage Layer for TicketFlow
  *
@@ -200,7 +207,9 @@ export interface IStorage {
   getUserTeamAdminStatus(userId: string): Promise<Record<number, boolean>>;
 
   // Team task assignment operations
-  getTeamTasks(teamId: number): Promise<Task[]>;
+  /** The team's queue, limited to what `viewer` may see (ticketVisibilityWhere). */
+  getTeamTasks(teamId: number, viewer: AccessUser): Promise<Task[]>;
+  getTaskAssignmentById(assignmentId: number): Promise<TeamTaskAssignment | undefined>;
   getTaskAssignments(
     taskId: number,
     teamId: number
@@ -215,11 +224,12 @@ export interface IStorage {
   createTaskAssignment(
     assignment: InsertTeamTaskAssignment
   ): Promise<TeamTaskAssignment>;
+  /** Writes only when the assignment belongs to binding.taskId and binding.teamId. */
   updateTaskAssignment(
-    assignmentId: number,
+    binding: TaskAssignmentBinding,
     updates: Partial<InsertTeamTaskAssignment>
-  ): Promise<TeamTaskAssignment>;
-  deleteTaskAssignment(assignmentId: number): Promise<void>;
+  ): Promise<TeamTaskAssignment | undefined>;
+  deleteTaskAssignment(binding: TaskAssignmentBinding): Promise<boolean>;
 
   // Comment operations
   addTaskComment(comment: InsertTaskComment): Promise<TaskComment>;

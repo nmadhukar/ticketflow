@@ -2,12 +2,7 @@
 import { Express } from "express";
 import helmet from "helmet";
 import { authenticateJWT, optionalJWT } from "./jwt";
-import {
-  requireRole,
-  requirePermission,
-  requireAdmin,
-  requireAgentOrAdmin,
-} from "./rbac";
+import { requireRole, requireAdmin, requireAgentOrAdmin } from "./rbac";
 import { generalRateLimit, authRateLimit } from "./rateLimiting";
 import {
   sanitizeInput,
@@ -267,9 +262,8 @@ export {
   authenticateJWT,
   optionalJWT,
 
-  // RBAC
+  // RBAC (ticket access is server/permissions/ticketAccess.ts, not a role table)
   requireRole,
-  requirePermission,
   requireAdmin,
   requireAgentOrAdmin,
 

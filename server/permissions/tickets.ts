@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { normalizeRole, type Role } from "./roles";
 import { canAccessTask } from "./ticketAccess";
+import { HttpError } from "../http/errors";
 
 // Fields allowed to be updated in principle (subset will be applied per role)
 export const updatableFields = [
@@ -126,6 +127,34 @@ export async function canUpdateTicket({
   } catch (e: any) {
     return { allowed: false, reason: e?.message || "Invalid payload" };
   }
+}
+
+/**
+ * Keep assignee_type, assignee_id and assignee_team_id consistent on update, so
+ * a reassignment leaves no stale column behind (mutates `updates`):
+ * - assigneeType "team" clears assigneeId; "user" clears assigneeTeamId;
+ * - no type but a non-null assigneeId (or assigneeTeamId) sets the type to
+ *   user (or team) and clears the other column;
+ * - no type and both ids non-null is ambiguous: 400 validation_failed.
+ */
+export function normalizeAssigneeUpdate(updates: Record<string, unknown>): void {
+  let type = updates.assigneeType;
+  if (type === undefined || type === null) {
+    const hasUser = updates.assigneeId !== undefined && updates.assigneeId !== null;
+    const hasTeam = updates.assigneeTeamId !== undefined && updates.assigneeTeamId !== null;
+    if (hasUser && hasTeam) {
+      throw new HttpError(
+        400,
+        "validation_failed",
+        "Give assigneeType when setting both assigneeId and assigneeTeamId"
+      );
+    }
+    if (!hasUser && !hasTeam) return;
+    type = hasUser ? "user" : "team";
+    updates.assigneeType = type;
+  }
+  if (type === "team") updates.assigneeId = null;
+  if (type === "user") updates.assigneeTeamId = null;
 }
 
 interface CanDeleteArgs {

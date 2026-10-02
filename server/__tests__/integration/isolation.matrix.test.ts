@@ -1,5 +1,15 @@
 import type request from "supertest";
-import { taskAttachments, type User } from "@shared/schema";
+import { eq } from "drizzle-orm";
+import {
+  aiFeedback,
+  taskAttachments,
+  tasks,
+  teamAdmins,
+  teamTaskAssignments,
+  ticketAutoResponses,
+  type InsertTask,
+  type User,
+} from "@shared/schema";
 import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
 import { createTeam, createUser, loginAs } from "./helpers/fixtures";
@@ -10,38 +20,44 @@ import { db } from "../../storage/db";
  * Ticket isolation matrix (one access rule everywhere).
  *
  * Fixture:
- *   department D1 (manager M1) -> team T1 with agents A1, A2
- *   department D2 (manager M2) -> team T2 with agent A3
+ *   department D1 (manager M1) -> team T1 (created by M1) with agents A1, A2
+ *   department D2 (manager M2) -> team T2 (created by M2) with agent A3
+ *   A3 is also a team ADMIN of T1 without being a member (team-level rights,
+ *   no ticket rights): the team routes must not show him T1's tickets.
  *   customers C1, C2; one admin
  *   t1  created by C1, queued to team T1
  *   t2  created by C2, assigned to A3
  *   t3  created by C1, assigned to A2
  *   t4  created by A1, assigned to A3   ("created by me" for an agent)
  *   t5  created by M1, queued to team T2 ("created by me" for a manager)
+ *   t6  created by C2, assigned to user A3, with a STALE assignee_team_id = T1
+ *   t7  created by C2, queued to team T2, with a STALE assignee_id = A1
  *
  * Rule: admin all; manager = assigned/created by them, queued to a team in a
  * department they manage, or assigned to a member of such a team; agent =
  * assigned/created by them, queued to a team they belong to, or assigned to a
- * teammate; customer = created by them.
+ * teammate; customer = created by them. "Assigned" terms apply only when
+ * assignee_type is user, "queued" terms only when it is team.
  */
 type Who = "A1" | "A2" | "A3" | "M1" | "M2" | "C1" | "C2" | "admin";
-type Ticket = "t1" | "t2" | "t3" | "t4" | "t5";
+type Ticket = "t1" | "t2" | "t3" | "t4" | "t5" | "t6" | "t7";
 const WHO: Who[] = ["A1", "A2", "A3", "M1", "M2", "C1", "C2", "admin"];
-const TICKETS: Ticket[] = ["t1", "t2", "t3", "t4", "t5"];
+const TICKETS: Ticket[] = ["t1", "t2", "t3", "t4", "t5", "t6", "t7"];
 
 const Y = true;
 const N = false;
+type Row = [boolean, boolean, boolean, boolean, boolean, boolean, boolean];
 /** The allow/deny table. Y = may see/act on the ticket, N = 403. */
-const MATRIX: Record<Who, [boolean, boolean, boolean, boolean, boolean]> = {
-  //       t1 t2 t3 t4 t5
-  A1:    [Y, N, Y, Y, N], // t1 queued to his team; t3 assigned to teammate A2; t4 created by him
-  A2:    [Y, N, Y, N, N], // t1 his team's queue; t3 his own. t4 only CREATED by a teammate -> N
-  A3:    [N, Y, N, Y, Y], // t2, t4 assigned to him; t5 queued to his team T2
-  M1:    [Y, N, Y, N, Y], // t1 queued to T1 (D1); t3 assigned to A2 (T1, D1); t5 created by him
-  M2:    [N, Y, N, Y, Y], // t2, t4 assigned to A3 (T2, D2); t5 queued to T2 (D2)
-  C1:    [Y, N, Y, N, N], // created by C1
-  C2:    [N, Y, N, N, N], // created by C2
-  admin: [Y, Y, Y, Y, Y],
+const MATRIX: Record<Who, Row> = {
+  //       t1 t2 t3 t4 t5 t6 t7
+  A1:    [Y, N, Y, Y, N, N, N], // t1 his team's queue; t3 teammate A2's; t4 created by him. t6 stale T1, t7 stale A1 -> N
+  A2:    [Y, N, Y, N, N, N, N], // t1 his team's queue; t3 his own. t4 only CREATED by a teammate -> N
+  A3:    [N, Y, N, Y, Y, Y, Y], // t2, t4, t6 assigned to him; t5, t7 queued to his team T2. Team admin of T1 grants no t1
+  M1:    [Y, N, Y, N, Y, N, N], // t1 queued to T1 (D1); t3 assigned to A2 (T1, D1); t5 created by him. t6/t7 stale -> N
+  M2:    [N, Y, N, Y, Y, Y, Y], // t2, t4, t6 assigned to A3 (T2, D2); t5, t7 queued to T2 (D2)
+  C1:    [Y, N, Y, N, N, N, N], // created by C1
+  C2:    [N, Y, N, N, N, Y, Y], // created by C2
+  admin: [Y, Y, Y, Y, Y, Y, Y],
 };
 const visibleTo = (who: Who): Ticket[] => TICKETS.filter((_, i) => MATRIX[who][i]);
 
@@ -109,6 +125,8 @@ describe("ticket isolation matrix", () => {
   const users = {} as Record<Who, User>;
   const agents = {} as Record<Who, Agent>;
   const ids = {} as Record<Ticket, number>;
+  let T1 = 0;
+  let T2 = 0;
   const ticketOf = (id: number) => TICKETS.find((t) => ids[t] === id);
   const sortedTickets = (list: Array<{ id: number }>) =>
     list.map((r) => ticketOf(r.id) ?? `#${r.id}`).sort();
@@ -123,15 +141,19 @@ describe("ticket isolation matrix", () => {
     for (const w of ["A1", "A2", "A3"] as const) users[w] = await createUser({ role: "agent" });
     for (const w of ["C1", "C2"] as const) users[w] = await createUser({ role: "customer" });
 
-    const T1 = await createTeam(users.M1); // creates D1 managed by M1
-    const T2 = await createTeam(users.M2); // creates D2 managed by M2
-    await storage.addTeamMember({ teamId: T1.id, userId: users.A1.id });
-    await storage.addTeamMember({ teamId: T1.id, userId: users.A2.id });
-    await storage.addTeamMember({ teamId: T2.id, userId: users.A3.id });
+    T1 = (await createTeam(users.M1)).id; // creates D1 managed by M1
+    T2 = (await createTeam(users.M2)).id; // creates D2 managed by M2
+    await storage.addTeamMember({ teamId: T1, userId: users.A1.id });
+    await storage.addTeamMember({ teamId: T1, userId: users.A2.id });
+    await storage.addTeamMember({ teamId: T2, userId: users.A3.id });
+    // Team-level rights on T1 for A3 (not a member, not in D1): no ticket rights.
+    await db
+      .insert(teamAdmins)
+      .values({ teamId: T1, userId: users.A3.id, grantedBy: users.admin.id });
 
     const ticket = async (
       createdBy: Who,
-      assignee: { user: Who } | { team: number }
+      assignee: Pick<InsertTask, "assigneeType" | "assigneeId" | "assigneeTeamId">
     ) => {
       const t = await storage.createTask({
         title: `ticket by ${createdBy}`,
@@ -140,17 +162,20 @@ describe("ticket isolation matrix", () => {
         priority: "medium",
         status: "open",
         createdBy: users[createdBy].id,
-        ...("user" in assignee
-          ? { assigneeType: "user", assigneeId: users[assignee.user].id, assigneeTeamId: null }
-          : { assigneeType: "team", assigneeId: null, assigneeTeamId: assignee.team }),
+        ...assignee,
       });
       return t.id;
     };
-    ids.t1 = await ticket("C1", { team: T1.id });
-    ids.t2 = await ticket("C2", { user: "A3" });
-    ids.t3 = await ticket("C1", { user: "A2" });
-    ids.t4 = await ticket("A1", { user: "A3" });
-    ids.t5 = await ticket("M1", { team: T2.id });
+    const toUser = (w: Who) => ({ assigneeType: "user", assigneeId: users[w].id, assigneeTeamId: null });
+    const toTeam = (team: number) => ({ assigneeType: "team", assigneeId: null, assigneeTeamId: team });
+    ids.t1 = await ticket("C1", toTeam(T1));
+    ids.t2 = await ticket("C2", toUser("A3"));
+    ids.t3 = await ticket("C1", toUser("A2"));
+    ids.t4 = await ticket("A1", toUser("A3"));
+    ids.t5 = await ticket("M1", toTeam(T2));
+    // Stale columns left behind by a reassignment: they must grant nothing.
+    ids.t6 = await ticket("C2", { assigneeType: "user", assigneeId: users.A3.id, assigneeTeamId: T1 });
+    ids.t7 = await ticket("C2", { assigneeType: "team", assigneeId: users.A1.id, assigneeTeamId: T2 });
 
     for (const w of WHO) agents[w] = await loginAs(ctx.app, users[w]);
   });
@@ -211,14 +236,17 @@ describe("ticket isolation matrix", () => {
       expect(await list("A1", "A3")).toEqual(["t4"]); // not t2: A3 is not A1's teammate
       expect(await list("A2", "A3")).toEqual([]);
       expect(await list("M1", "A3")).toEqual([]);
-      expect(await list("M2", "A3")).toEqual(["t2", "t4"]);
-      expect(await list("admin", "A3")).toEqual(["t2", "t4"]);
+      expect(await list("M2", "A3")).toEqual(["t2", "t4", "t6"]);
+      expect(await list("admin", "A3")).toEqual(["t2", "t4", "t6"]);
       expect(await list("C1", "A2")).toEqual(["t3"]);
       expect(await list("C2", "A2")).toEqual([]);
+      // t7's stale assignee_id (it is queued to a team) is not an assignment.
+      expect(await list("admin", "A1")).toEqual([]);
     });
 
     it("GET /api/tasks/my lists only tickets assigned to me", async () => {
-      expect(sortedTickets((await agents.A3.get("/api/tasks/my")).body)).toEqual(["t2", "t4"]);
+      expect(sortedTickets((await agents.A3.get("/api/tasks/my")).body)).toEqual(["t2", "t4", "t6"]);
+      expect(sortedTickets((await agents.A1.get("/api/tasks/my")).body)).toEqual([]);
       expect(sortedTickets((await agents.A2.get("/api/tasks/my")).body)).toEqual(["t3"]);
       expect(sortedTickets((await agents.C1.get("/api/tasks/my")).body)).toEqual([]);
     });
@@ -247,7 +275,7 @@ describe("ticket isolation matrix", () => {
         const res = await agents[who].get("/api/stats/global");
         if (who === "admin") {
           expect(res.status).toBe(200);
-          expect(res.body.total).toBe(5);
+          expect(res.body.total).toBe(TICKETS.length);
         } else {
           expect({ who, status: res.status, error: res.body?.error }).toEqual({
             who,
@@ -322,18 +350,225 @@ describe("ticket isolation matrix", () => {
       expect(res.body.error).toBe("forbidden");
     });
 
-    it("POST /api/ai-feedback with a ticketId is refused outside scope", async () => {
-      const send = (who: Who, t: Ticket) =>
+  });
+
+  describe("team routes never show a ticket the by-id route would refuse", () => {
+    it("GET /api/teams/:id/tasks is the team's queue intersected with the ticket rule", async () => {
+      const queue = async (who: Who, team: number) => {
+        const res = await agents[who].get(`/api/teams/${team}/tasks`);
+        return res.status === 200 ? sortedTickets(res.body) : `${res.status} ${res.body?.error ?? ""}`.trim();
+      };
+      expect(await queue("A1", T1)).toEqual(["t1"]);
+      expect(await queue("M1", T1)).toEqual(["t1"]);
+      expect(await queue("admin", T1)).toEqual(["t1"]);
+      // A3 is a team admin of T1 (team-level rights) but may not see t1.
+      expect(await queue("A3", T1)).toEqual([]);
+      expect(await queue("A3", T2)).toEqual(["t5", "t7"]);
+      expect(await queue("M2", T2)).toEqual(["t5", "t7"]);
+    });
+
+    it("GET /api/teams/:id/tasks/:taskId/assignments requires access to the ticket", async () => {
+      const res = await agents.A3.get(`/api/teams/${T1}/tasks/${ids.t1}/assignments`);
+      expect({ status: res.status, error: res.body?.error }).toEqual({ status: 403, error: "forbidden" });
+      expect((await agents.A1.get(`/api/teams/${T1}/tasks/${ids.t1}/assignments`)).status).toBe(200);
+      expect((await agents.M1.get(`/api/teams/${T1}/tasks/${ids.t1}/assignments`)).status).toBe(200);
+      expect((await agents.admin.get(`/api/teams/${T1}/tasks/999999/assignments`)).status).toBe(404);
+    });
+
+    it("GET /api/teams/:id/members?taskId= requires access to that ticket", async () => {
+      const res = await agents.A3.get(`/api/teams/${T2}/members?taskId=${ids.t1}`);
+      expect({ status: res.status, error: res.body?.error }).toEqual({ status: 403, error: "forbidden" });
+      expect((await agents.A3.get(`/api/teams/${T2}/members?taskId=${ids.t5}`)).status).toBe(200);
+    });
+
+    it("POST /api/teams/:id/tasks/:taskId/assignments requires access to the ticket", async () => {
+      // A3 can manage T1 (team admin) but cannot see t1.
+      const denied = await agents.A3
+        .post(`/api/teams/${T1}/tasks/${ids.t1}/assignments`)
+        .send({ userId: users.A2.id });
+      expect({ status: denied.status, error: denied.body?.error }).toEqual({ status: 403, error: "forbidden" });
+      const ok = await agents.M1
+        .post(`/api/teams/${T1}/tasks/${ids.t1}/assignments`)
+        .send({ userId: users.A2.id });
+      expect(ok.status).toBe(201);
+    });
+  });
+
+  describe("team task assignments are bound to their ticket and team", () => {
+    let asg = 0;
+    beforeEach(async () => {
+      await db.delete(teamTaskAssignments);
+      const row = await storage.createTaskAssignment({
+        taskId: ids.t1,
+        teamId: T1,
+        assignedUserId: users.A1.id,
+        assignedBy: users.M1.id,
+        status: "active",
+        notes: "original",
+      });
+      asg = row.id;
+    });
+    const current = async () =>
+      (await db.select().from(teamTaskAssignments).where(eq(teamTaskAssignments.id, asg)))[0];
+    const patch = (who: Who, team: number, t: number, id = asg) =>
+      agents[who].patch(`/api/teams/${team}/tasks/${t}/assignments/${id}`).send({ notes: `by ${who}` });
+    const del = (who: Who, team: number, t: number, id = asg) =>
+      agents[who].delete(`/api/teams/${team}/tasks/${t}/assignments/${id}`);
+    const outcome = (res: Res) => `${res.status}${res.status >= 400 ? ` ${res.body?.error}` : ""}`;
+
+    it("M2 (manages D2/T2) cannot reach a D1 ticket's assignment through his own team or ticket", async () => {
+      expect(outcome(await patch("M2", T2, ids.t1))).toBe("404 not_found"); // team mismatch
+      expect(outcome(await patch("M2", T2, ids.t5))).toBe("404 not_found"); // ticket and team mismatch
+      expect(outcome(await patch("M2", T1, ids.t1))).toBe("403 forbidden"); // bound, but no access to t1
+      expect(outcome(await del("M2", T2, ids.t1))).toBe("404 not_found");
+      expect(outcome(await del("M2", T2, ids.t5))).toBe("404 not_found");
+      expect(outcome(await del("M2", T1, ids.t1))).toBe("403 forbidden");
+      expect(await current()).toMatchObject({ notes: "original", taskId: ids.t1, teamId: T1 });
+    });
+
+    it("a mismatched taskId or a missing assignment id is 404", async () => {
+      expect(outcome(await patch("M1", T1, ids.t3))).toBe("404 not_found");
+      expect(outcome(await del("M1", T1, ids.t3))).toBe("404 not_found");
+      expect(outcome(await patch("admin", T1, ids.t1, 999999))).toBe("404 not_found");
+      expect(outcome(await del("admin", T1, ids.t1, 999999))).toBe("404 not_found");
+      expect(await current()).toMatchObject({ notes: "original" });
+    });
+
+    it("a team admin without access to the ticket, and a member who cannot manage the team, are refused", async () => {
+      expect(outcome(await patch("A3", T1, ids.t1))).toBe("403 forbidden"); // team admin, no ticket access
+      expect(outcome(await patch("A1", T1, ids.t1))).toBe("403 forbidden"); // sees t1, cannot manage T1
+      expect(outcome(await del("A3", T1, ids.t1))).toBe("403 forbidden");
+      expect(outcome(await del("A1", T1, ids.t1))).toBe("403 forbidden");
+      expect(await current()).toMatchObject({ notes: "original" });
+    });
+
+    it("the department's manager and an admin may update and delete it", async () => {
+      expect(outcome(await patch("M1", T1, ids.t1))).toBe("200");
+      expect(await current()).toMatchObject({ notes: "by M1" });
+      expect(outcome(await patch("admin", T1, ids.t1))).toBe("200");
+      expect(outcome(await del("M1", T1, ids.t1))).toBe("200");
+      expect(await current()).toBeUndefined();
+    });
+  });
+
+  describe("AI feedback", () => {
+    let ar2 = 0; // an auto-response on t2
+    beforeAll(async () => {
+      const [ar] = await db
+        .insert(ticketAutoResponses)
+        .values({ ticketId: ids.t2, aiResponse: "Try turning it off and on.", confidenceScore: "0.50" })
+        .returning();
+      ar2 = ar.id;
+      await db.insert(aiFeedback).values([
+        { feedbackType: "auto_response", referenceId: ar2, userId: users.A3.id, rating: 5, ticketId: ids.t2, comment: "on t2" },
+        { feedbackType: "knowledge_article", referenceId: 77, userId: users.A3.id, rating: 1, ticketId: null, comment: "no ticket" },
+        { feedbackType: "knowledge_article", referenceId: 77, userId: users.A3.id, rating: 5, ticketId: ids.t2, comment: "kb on t2" },
+      ]);
+    });
+    const comments = (res: Res) => (res.body as Array<{ comment: string }>).map((r) => r.comment).sort();
+
+    it("GET /api/ai-feedback/auto_response/:id follows the auto-response's ticket", async () => {
+      const denied = await agents.A1.get(`/api/ai-feedback/auto_response/${ar2}`);
+      expect({ status: denied.status, error: denied.body?.error }).toEqual({ status: 403, error: "forbidden" });
+      expect(JSON.stringify(denied.body)).not.toContain("on t2");
+      for (const who of ["A3", "M2", "C2", "admin"] as const) {
+        const res = await agents[who].get(`/api/ai-feedback/auto_response/${ar2}`);
+        expect({ who, status: res.status }).toEqual({ who, status: 200 });
+        expect(comments(res)).toEqual(["on t2"]);
+      }
+      expect((await agents.admin.get("/api/ai-feedback/auto_response/999999")).status).toBe(404);
+    });
+
+    it("GET /api/ai-feedback/:type/:id for other types keeps rows of visible tickets; ticketless rows are admin only", async () => {
+      expect(comments(await agents.A1.get("/api/ai-feedback/knowledge_article/77"))).toEqual([]);
+      expect(comments(await agents.C1.get("/api/ai-feedback/knowledge_article/77"))).toEqual([]);
+      expect(comments(await agents.A3.get("/api/ai-feedback/knowledge_article/77"))).toEqual(["kb on t2"]);
+      expect(comments(await agents.admin.get("/api/ai-feedback/knowledge_article/77"))).toEqual([
+        "kb on t2",
+        "no ticket",
+      ]);
+    });
+
+    it("POST /api/ai-feedback for an auto-response is tied to that auto-response's ticket", async () => {
+      const send = (who: Who, body: Record<string, unknown>) =>
+        agents[who].post("/api/ai-feedback").send({ feedbackType: "auto_response", rating: 5, ...body });
+      // A1 cannot see t2, whatever ticketId he claims (t1 is a ticket he can see).
+      const denied = await send("A1", { referenceId: ar2, ticketId: ids.t1 });
+      expect({ status: denied.status, error: denied.body?.error }).toEqual({ status: 403, error: "forbidden" });
+      const denied2 = await send("A1", { referenceId: ar2 });
+      expect({ status: denied2.status, error: denied2.body?.error }).toEqual({ status: 403, error: "forbidden" });
+      // A ticketId that does not match the auto-response's ticket is rejected.
+      const mismatch = await send("A3", { referenceId: ar2, ticketId: ids.t4 });
+      expect({ status: mismatch.status, error: mismatch.body?.error }).toEqual({ status: 400, error: "validation_failed" });
+      // The ticket is derived from the auto-response.
+      const ok = await send("A3", { referenceId: ar2 });
+      expect(ok.status).toBe(200);
+      expect(ok.body.ticketId).toBe(ids.t2);
+      expect((await send("A3", { referenceId: ar2, ticketId: ids.t2 })).status).toBe(200);
+      expect((await send("A3", { referenceId: 999999 })).status).toBe(404);
+    });
+
+    it("POST /api/ai-feedback for another type with a ticketId needs access to that ticket", async () => {
+      const send = (who: Who, t: number) =>
         agents[who]
           .post("/api/ai-feedback")
-          .send({ feedbackType: "auto_response", referenceId: 1, rating: 5, ticketId: ids[t] });
-      const denied = await send("A3", "t1");
-      expect(denied.status).toBe(403);
-      expect(denied.body.error).toBe("forbidden");
-      expect((await send("A3", "t2")).status).toBe(200);
-      expect((await agents.A3.post("/api/ai-feedback").send({
-        feedbackType: "auto_response", referenceId: 1, rating: 5, ticketId: 999999,
-      })).status).toBe(404);
+          .send({ feedbackType: "knowledge_article", referenceId: 77, rating: 5, ticketId: t });
+      const denied = await send("A3", ids.t1);
+      expect({ status: denied.status, error: denied.body?.error }).toEqual({ status: 403, error: "forbidden" });
+      expect((await send("A3", ids.t2)).status).toBe(200);
+      expect((await send("A3", 999999)).status).toBe(404);
+    });
+  });
+
+  describe("PATCH reassignment leaves no stale scope", () => {
+    let t8 = 0;
+    beforeAll(async () => {
+      const t = await storage.createTask({
+        title: "reassigned",
+        category: "support",
+        priority: "medium",
+        status: "open",
+        createdBy: users.admin.id,
+        assigneeType: "user",
+        assigneeId: users.A2.id,
+        assigneeTeamId: null,
+      });
+      t8 = t.id;
+    });
+    const row = async () => (await db.select().from(tasks).where(eq(tasks.id, t8)))[0];
+    const sees = async (who: Who) => (await agents[who].get(`/api/tasks/${t8}`)).status;
+
+    it("user -> team clears assignee_id; the old assignee's team loses the ticket", async () => {
+      expect(await sees("A1")).toBe(200); // teammate of A2
+      const res = await agents.admin
+        .patch(`/api/tasks/${t8}`)
+        .send({ assigneeType: "team", assigneeTeamId: T2 });
+      expect(res.status).toBe(200);
+      expect(await row()).toMatchObject({ assigneeType: "team", assigneeId: null, assigneeTeamId: T2 });
+      expect(await sees("A1")).toBe(403);
+      expect(await sees("A2")).toBe(403);
+      expect(await sees("A3")).toBe(200);
+    });
+
+    it("assigning a person (no type given) makes it a user assignment and clears the team", async () => {
+      const res = await agents.admin.patch(`/api/tasks/${t8}`).send({ assigneeId: users.A1.id });
+      expect(res.status).toBe(200);
+      expect(await row()).toMatchObject({ assigneeType: "user", assigneeId: users.A1.id, assigneeTeamId: null });
+      expect(await sees("A3")).toBe(403);
+      expect(await sees("A2")).toBe(200); // teammate of A1
+    });
+
+    it("an explicit type wins over a contradicting id, and both ids without a type is a 400", async () => {
+      const res = await agents.admin
+        .patch(`/api/tasks/${t8}`)
+        .send({ assigneeType: "user", assigneeId: users.A3.id, assigneeTeamId: T1 });
+      expect(res.status).toBe(200);
+      expect(await row()).toMatchObject({ assigneeType: "user", assigneeId: users.A3.id, assigneeTeamId: null });
+      const both = await agents.admin
+        .patch(`/api/tasks/${t8}`)
+        .send({ assigneeId: users.A1.id, assigneeTeamId: T1 });
+      expect({ status: both.status, error: both.body?.error }).toEqual({ status: 400, error: "validation_failed" });
+      expect(await row()).toMatchObject({ assigneeId: users.A3.id, assigneeTeamId: null });
     });
   });
 });

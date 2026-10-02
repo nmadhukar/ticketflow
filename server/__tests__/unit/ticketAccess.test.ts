@@ -23,7 +23,7 @@ import {
   canAccessTask,
   assertTaskAccess,
 } from "../../permissions/ticketAccess";
-import { canUpdateTicket } from "../../permissions/tickets";
+import { canUpdateTicket, normalizeAssigneeUpdate } from "../../permissions/tickets";
 
 const dialect = new PgDialect();
 const render = (s: SQL) => dialect.sqlToQuery(s);
@@ -75,6 +75,23 @@ describe("ticketVisibilityWhere", () => {
     expect(q.params.every((p) => p === ME)).toBe(true);
     expect(q.params.length).toBeGreaterThanOrEqual(4);
   });
+
+  it.each([["agent"], ["manager"]])(
+    "%s: 'assigned' terms only for user tickets, 'queued' terms only for team tickets (stale columns grant nothing)",
+    (role) => {
+      const q = render(ticketVisibilityWhere({ id: ME, role }));
+      // Every assignee_id term sits behind the user gate...
+      expect(q.sql).toMatch(
+        /COALESCE\("tasks"\."assignee_type", 'user'\) = 'user' AND \("tasks"\."assignee_id" = \$\d+ OR EXISTS/
+      );
+      // ...and every assignee_team_id term behind the team gate.
+      expect(q.sql).toMatch(/"tasks"\."assignee_type" = 'team' AND EXISTS \([^)]*"tasks"\."assignee_team_id"/);
+      expect(q.sql.match(/"tasks"\."assignee_id"/g)).toHaveLength(2);
+      expect(q.sql.match(/"tasks"\."assignee_team_id"/g)).toHaveLength(1);
+      // created_by needs no gate.
+      expect(q.sql).toMatch(/^\("tasks"\."created_by" = \$\d+\s+OR /);
+    }
+  );
 
   it("legacy role user is read as agent", () => {
     expect(render(ticketVisibilityWhere({ id: ME, role: "user" }))).toEqual(
@@ -199,5 +216,51 @@ describe("canUpdateTicket = access + role field table", () => {
     });
     expect(v.allowed).toBe(false);
     expect(mockWheres).toHaveLength(0);
+  });
+});
+
+describe("normalizeAssigneeUpdate: a reassignment leaves no stale column", () => {
+  const norm = (u: Record<string, unknown>) => {
+    const copy = { ...u };
+    normalizeAssigneeUpdate(copy);
+    return copy;
+  };
+
+  it("switching to a team clears assignee_id", () => {
+    expect(norm({ assigneeType: "team", assigneeTeamId: 2, assigneeId: "x" })).toEqual({
+      assigneeType: "team",
+      assigneeTeamId: 2,
+      assigneeId: null,
+    });
+  });
+
+  it("switching to a user clears assignee_team_id", () => {
+    expect(norm({ assigneeType: "user", assigneeId: "x", assigneeTeamId: 2 })).toEqual({
+      assigneeType: "user",
+      assigneeId: "x",
+      assigneeTeamId: null,
+    });
+  });
+
+  it("an id without a type sets the type and clears the other column", () => {
+    expect(norm({ assigneeId: "x" })).toEqual({ assigneeType: "user", assigneeId: "x", assigneeTeamId: null });
+    expect(norm({ assigneeTeamId: 2 })).toEqual({ assigneeType: "team", assigneeTeamId: 2, assigneeId: null });
+  });
+
+  it("unassigning or not touching the assignee changes nothing", () => {
+    expect(norm({ assigneeId: null })).toEqual({ assigneeId: null });
+    expect(norm({ status: "open" })).toEqual({ status: "open" });
+  });
+
+  it("both ids without a type is a 400", () => {
+    let err: unknown;
+    try {
+      norm({ assigneeId: "x", assigneeTeamId: 2 });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(HttpError);
+    expect((err as HttpError).status).toBe(400);
+    expect((err as HttpError).code).toBe("validation_failed");
   });
 });
