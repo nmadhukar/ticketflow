@@ -1,30 +1,151 @@
 {
   "info": {
     "name": "TicketFlow API Collection",
-    "description": "Complete API collection for TicketFlow - A comprehensive ticketing system for small business use",
-    "version": "1.0.0"
+    "description": "TicketFlow API. Browser-style requests use the session cookie from Login (Postman keeps it in its cookie jar), so the collection sends no Authorization header by default. Folders marked \"API key\" and \"MCP\" send \"Authorization: Bearer {{apiKey}}\": set the collection variable apiKey to a key an admin issued with POST /api/api-keys (shown once, prefix tfk_). Never put a real key in the collection file. A request that carries a Bearer header is authenticated by the bearer alone (an invalid one is 401 even with a valid cookie). Errors are always {error, message, details?}.",
+    "version": "2.0.0"
   },
   "variable": [
     {
       "key": "baseUrl",
-      "value": "https://your-replit-app.replit.app",
-      "description": "Base URL for your TicketFlow application"
+      "value": "http://localhost:5000",
+      "description": "Server origin, no trailing slash"
+    },
+    {
+      "key": "apiKey",
+      "value": "",
+      "description": "API key issued by an admin (tfk_...). Leave blank in the file; set it in your environment."
+    },
+    {
+      "key": "taskId",
+      "value": "1",
+      "description": "Sample task ID for testing"
+    },
+    {
+      "key": "teamId",
+      "value": "1",
+      "description": "Sample team ID for testing"
+    },
+    {
+      "key": "userId",
+      "value": "user123",
+      "description": "Sample user ID for testing"
+    },
+    {
+      "key": "assignmentId",
+      "value": "1",
+      "description": "Team task assignment id"
+    },
+    {
+      "key": "keyId",
+      "value": "1",
+      "description": "API key row id"
+    },
+    {
+      "key": "sessionId",
+      "value": "session-id",
+      "description": "A session id from GET /api/user/sessions"
+    },
+    {
+      "key": "invitationToken",
+      "value": "invitation-token",
+      "description": "Invitation token (placeholder)"
     }
   ],
   "auth": {
-    "type": "bearer",
-    "bearer": [
-      {
-        "key": "token",
-        "value": "{{authToken}}",
-        "type": "string"
-      }
-    ]
+    "type": "noauth"
   },
   "item": [
     {
       "name": "Authentication",
       "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Creates an unapproved customer (or the invited role when inviteToken matches the email). An existing email answers 400 {\"error\":\"email_registered\"} for password and SSO accounts alike. There is no check-email endpoint.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"change-me-please\",\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Doe\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Sets the session cookie. 401 invalid_credentials, 423 account_locked after 5 wrong passwords (15 minutes), 429 after 10 attempts per minute per IP.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"change-me-please\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Ends the session. Session only: a bearer request gets 403 session_required."
+          },
+          "response": []
+        },
         {
           "name": "Get Current User",
           "request": {
@@ -32,42 +153,164 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/auth/user",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "auth", "user"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "user"
+              ]
             },
-            "description": "Get the currently authenticated user's profile information"
+            "description": "The signed-in user's profile (includes mustChangePassword)."
           },
           "response": []
         },
         {
-          "name": "Login",
+          "name": "Forgot Password",
           "request": {
-            "method": "GET",
-            "header": [],
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
-              "raw": "{{baseUrl}}/api/login",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "login"]
+              "raw": "{{baseUrl}}/api/auth/forgot-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "forgot-password"
+              ]
             },
-            "description": "Redirect to Replit OAuth login"
+            "description": "Always the same generic 200, for known, unknown and SSO-only emails.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "response": []
         },
         {
-          "name": "Logout",
+          "name": "Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/reset-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "reset-password"
+              ]
+            },
+            "description": "Token from the reset email. Ends all sessions of that user. 400 invalid_reset_token when bad or expired.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"reset-token-from-email\",\n  \"password\": \"a-new-password-123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/change-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "change-password"
+              ]
+            },
+            "description": "Session only (R28). Also how a forced change after an admin reset ends. 409 no_local_password for SSO accounts.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"old-password\",\n  \"password\": \"a-new-password-123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "My Sessions",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/logout",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "logout"]
+              "raw": "{{baseUrl}}/api/user/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "sessions"
+              ]
             },
-            "description": "Logout and redirect to home page"
+            "description": "The caller's active sessions."
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke Session",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/user/sessions/{{sessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "sessions",
+                "{{sessionId}}"
+              ]
+            },
+            "description": "Revoke one of your other sessions."
           },
           "response": []
         }
-      ]
+      ],
+      "description": "Cookie-session authentication. Use Login first."
     },
     {
       "name": "Tasks",
@@ -78,43 +321,42 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/tasks?status=open&category=bug&assigneeId=user123&search=login&limit=10&offset=0",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "tasks"],
+              "raw": "{{baseUrl}}/api/tasks?status=open&category=support&assigneeId={{userId}}&search=login&limit=10&offset=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks"
+              ],
               "query": [
                 {
                   "key": "status",
-                  "value": "open",
-                  "description": "Filter by status (open, in_progress, resolved, closed, on_hold)"
+                  "value": "open"
                 },
                 {
                   "key": "category",
-                  "value": "bug",
-                  "description": "Filter by category (bug, feature, support, enhancement, incident, request)"
+                  "value": "support"
                 },
                 {
                   "key": "assigneeId",
-                  "value": "user123",
-                  "description": "Filter by assignee user ID"
+                  "value": "{{userId}}"
                 },
                 {
                   "key": "search",
-                  "value": "login",
-                  "description": "Search in title and description"
+                  "value": "login"
                 },
                 {
                   "key": "limit",
-                  "value": "10",
-                  "description": "Number of results to return"
+                  "value": "10"
                 },
                 {
                   "key": "offset",
-                  "value": "0",
-                  "description": "Number of results to skip for pagination"
+                  "value": "0"
                 }
               ]
             },
-            "description": "Get all tasks with optional filtering and pagination"
+            "description": "Bare JSON array of the tickets the caller may see, newest first. status: open|in_progress|on_hold|resolved|closed. limit 1-500 (omitted = all). An invalid status, priority, category, limit or offset is 400, never an empty list."
           },
           "response": []
         },
@@ -124,38 +366,57 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/tasks/my?status=open&category=bug&search=login&limit=10&offset=0",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "tasks", "my"],
+              "raw": "{{baseUrl}}/api/tasks/my?status=open&limit=10&offset=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks",
+                "my"
+              ],
               "query": [
                 {
                   "key": "status",
-                  "value": "open",
-                  "description": "Filter by status"
-                },
-                {
-                  "key": "category",
-                  "value": "bug",
-                  "description": "Filter by category"
-                },
-                {
-                  "key": "search",
-                  "value": "login",
-                  "description": "Search in title and description"
+                  "value": "open"
                 },
                 {
                   "key": "limit",
-                  "value": "10",
-                  "description": "Number of results to return"
+                  "value": "10"
                 },
                 {
                   "key": "offset",
-                  "value": "0",
-                  "description": "Number of results to skip"
+                  "value": "0"
                 }
               ]
             },
-            "description": "Get tasks assigned to the current user"
+            "description": "Only tickets assigned to the caller. Same filters and paging."
+          },
+          "response": []
+        },
+        {
+          "name": "Get My Group Tasks",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tasks/my-groups?limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks",
+                "my-groups"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Visible tickets that are not the caller's own (team queues, teammates)."
           },
           "response": []
         },
@@ -166,10 +427,16 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/tasks/{{taskId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "tasks", "{{taskId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks",
+                "{{taskId}}"
+              ]
             },
-            "description": "Get a specific task by its ID"
+            "description": "404 missing, 403 outside the caller scope, 400 invalid_id for a non-numeric id."
           },
           "response": []
         },
@@ -183,16 +450,26 @@
                 "value": "application/json"
               }
             ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"title\": \"Fix login issue\",\n  \"description\": \"Users are unable to login with their credentials\",\n  \"category\": \"bug\",\n  \"status\": \"open\",\n  \"priority\": \"high\",\n  \"severity\": \"major\",\n  \"assigneeId\": \"user123\",\n  \"assigneeType\": \"user\",\n  \"dueDate\": \"2024-12-31T23:59:59.999Z\",\n  \"estimatedHours\": 8,\n  \"tags\": [\"authentication\", \"urgent\"]\n}"
-            },
             "url": {
               "raw": "{{baseUrl}}/api/tasks",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "tasks"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks"
+              ]
             },
-            "description": "Create a new task"
+            "description": "Strict body: title and category required; status and other server-owned fields are 400. estimatedHours/actualHours are staff only. Returns 201 with the ticket (status open, ticketNumber TKT-YYYY-NNNN).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Database connection timeout\",\n  \"description\": \"Users see timeouts on the dashboard\",\n  \"category\": \"support\",\n  \"priority\": \"high\",\n  \"dueDate\": \"2026-12-01T00:00:00Z\",\n  \"tags\": [\n    \"database\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "response": []
         },
@@ -206,16 +483,95 @@
                 "value": "application/json"
               }
             ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"status\": \"in_progress\",\n  \"priority\": \"urgent\",\n  \"notes\": \"Started investigating the issue\",\n  \"actualHours\": 2\n}"
-            },
             "url": {
               "raw": "{{baseUrl}}/api/tasks/{{taskId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "tasks", "{{taskId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks",
+                "{{taskId}}"
+              ]
             },
-            "description": "Update an existing task"
+            "description": "PATCH, not PUT. Fields allowed depend on the role; status follows the workflow (409 invalid_transition for an illegal staff move, 403 for a customer other than reopening their own ticket).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priority\": \"urgent\",\n  \"notes\": \"Escalated by the customer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Close Task (staff)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/tasks/{{taskId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks",
+                "{{taskId}}"
+              ]
+            },
+            "description": "Staff close from any open state.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"closed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reopen Task (staff or creating customer)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/tasks/{{taskId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks",
+                "{{taskId}}"
+              ]
+            },
+            "description": "Staff, or the customer who created it, reopen a resolved or closed ticket.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"open\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "response": []
         },
@@ -226,10 +582,78 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/tasks/{{taskId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "tasks", "{{taskId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks",
+                "{{taskId}}"
+              ]
             },
-            "description": "Delete a task"
+            "description": "204 No Content. Admin only; a manager only when the server has ALLOW_MANAGER_DELETE=true. 404 missing, 403 otherwise."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Task History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tasks/{{taskId}}/history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks",
+                "{{taskId}}",
+                "history"
+              ]
+            },
+            "description": "Audit trail, oldest first: {id, taskId, userId, action, field, oldValue, newValue, createdAt, user}."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Ticket Meta (create form)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tickets/meta",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tickets",
+                "meta"
+              ]
+            },
+            "description": "Pickers and permissions for the create form."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Ticket Meta (one ticket)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tickets/{{taskId}}/meta",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tickets",
+                "{{taskId}}",
+                "meta"
+              ]
+            },
+            "description": "allowedFields, allowedStatuses and allowedAssigneeTypes for this caller on this ticket."
           },
           "response": []
         }
@@ -245,10 +669,17 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/tasks/{{taskId}}/comments",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "tasks", "{{taskId}}", "comments"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks",
+                "{{taskId}}",
+                "comments"
+              ]
             },
-            "description": "Get all comments for a specific task"
+            "description": "Oldest first; each has a public user projection (customers see staff as id/name/picture only)."
           },
           "response": []
         },
@@ -262,16 +693,28 @@
                 "value": "application/json"
               }
             ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"content\": \"I'm working on this issue and will provide an update soon.\"\n}"
-            },
             "url": {
               "raw": "{{baseUrl}}/api/tasks/{{taskId}}/comments",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "tasks", "{{taskId}}", "comments"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks",
+                "{{taskId}}",
+                "comments"
+              ]
             },
-            "description": "Add a comment to a task"
+            "description": "Body is only content (trimmed, 1-10000 characters). 201.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Found the root cause.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "response": []
         }
@@ -287,8 +730,13 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/users",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "users"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users"
+              ]
             },
             "description": "Get all users in the system"
           },
@@ -306,8 +754,13 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/teams",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "teams"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "teams"
+              ]
             },
             "description": "Get all teams"
           },
@@ -320,8 +773,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/teams/my",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "teams", "my"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "teams",
+                "my"
+              ]
             },
             "description": "Get teams that the current user is a member of"
           },
@@ -334,8 +793,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/teams/{{teamId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "teams", "{{teamId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "teams",
+                "{{teamId}}"
+              ]
             },
             "description": "Get a specific team by its ID"
           },
@@ -357,10 +822,15 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/teams",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "teams"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "teams"
+              ]
             },
-            "description": "Create a new team"
+            "description": "Only an admin or the manager of the team department (403 otherwise). Department must exist and be active."
           },
           "response": []
         },
@@ -371,8 +841,15 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/teams/{{teamId}}/members",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "teams", "{{teamId}}", "members"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "teams",
+                "{{teamId}}",
+                "members"
+              ]
             },
             "description": "Get all members of a specific team"
           },
@@ -394,8 +871,16 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/teams/{{teamId}}/members/{{userId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "teams", "{{teamId}}", "members", "{{userId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "teams",
+                "{{teamId}}",
+                "members",
+                "{{userId}}"
+              ]
             },
             "description": "Update a team member's role (admin only)"
           },
@@ -413,8 +898,13 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/stats",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "stats"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "stats"
+              ]
             },
             "description": "Get task statistics for the current user"
           },
@@ -427,8 +917,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/stats/global",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "stats", "global"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "stats",
+                "global"
+              ]
             },
             "description": "Get global task statistics"
           },
@@ -446,8 +942,13 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/activity?limit=20",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "activity"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "activity"
+              ],
               "query": [
                 {
                   "key": "limit",
@@ -472,8 +973,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/admin/users",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "admin", "users"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users"
+              ]
             },
             "description": "Get all users with admin privileges (admin only)"
           },
@@ -486,8 +993,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/admin/stats",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "admin", "stats"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "stats"
+              ]
             },
             "description": "Get comprehensive system statistics (admin only)"
           },
@@ -509,10 +1022,17 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/admin/users/{{userId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "admin", "users", "{{userId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{userId}}"
+              ]
             },
-            "description": "Update a user's profile (admin only)"
+            "description": "Admin only. 409 last_admin when it would leave no active admin, 409 self_demotion for your own account, 400 invalid_role."
           },
           "response": []
         },
@@ -523,8 +1043,16 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/admin/users/{{userId}}/toggle-status",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "admin", "users", "{{userId}}", "toggle-status"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{userId}}",
+                "toggle-status"
+              ]
             },
             "description": "Toggle a user's active/inactive status (admin only)"
           },
@@ -546,10 +1074,18 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/admin/users/{{userId}}/assign-team",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "admin", "users", "{{userId}}", "assign-team"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{userId}}",
+                "assign-team"
+              ]
             },
-            "description": "Assign a user to a team (admin only)"
+            "description": "Only an admin or the manager of the team department (R12). Nobody can add themselves."
           },
           "response": []
         },
@@ -560,8 +1096,17 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/admin/users/{{userId}}/remove-team/{{teamId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "admin", "users", "{{userId}}", "remove-team", "{{teamId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{userId}}",
+                "remove-team",
+                "{{teamId}}"
+              ]
             },
             "description": "Remove a user from a team (admin only)"
           },
@@ -573,11 +1118,16 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/admin/departments",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "admin", "departments"]
+              "raw": "{{baseUrl}}/api/departments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "departments"
+              ]
             },
-            "description": "Get all departments (admin only)"
+            "description": "All signed-in users may list departments."
           },
           "response": []
         },
@@ -588,31 +1138,1187 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/admin/users/{{userId}}/reset-password",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "admin", "users", "{{userId}}", "reset-password"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{userId}}",
+                "reset-password"
+              ]
             },
-            "description": "Reset a user's password (admin only)"
+            "description": "Admin only, session only. Returns {tempPassword} once (Cache-Control: no-store); the user must change it at next sign-in and their sessions end. 409 no_local_password for SSO/system accounts."
           },
           "response": []
         }
       ]
-    }
-  ],
-  "variable": [
-    {
-      "key": "taskId",
-      "value": "1",
-      "description": "Sample task ID for testing"
     },
     {
-      "key": "teamId",
-      "value": "1",
-      "description": "Sample team ID for testing"
+      "name": "AI",
+      "item": [
+        {
+          "name": "Analyze Ticket (staff)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/ai/analyze-ticket",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "ai",
+                "analyze-ticket"
+              ]
+            },
+            "description": "Body is {ticketId}; the text is read from the database. 400 bad body, 404, 403 outside scope or not staff, 503 ai_not_configured, 429 quota_exceeded.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticketId\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Generate Response (staff)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/ai/generate-response",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "ai",
+                "generate-response"
+              ]
+            },
+            "description": "Body is {ticketId}. 400 ai_disabled when auto-response is off.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticketId\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Auto-Response",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tasks/{{taskId}}/auto-response",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks",
+                "{{taskId}}",
+                "auto-response"
+              ]
+            },
+            "description": "Staff: latest draft. Customer: latest applied response, else 404."
+          },
+          "response": []
+        },
+        {
+          "name": "Generate Auto-Response Draft (staff)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tasks/{{taskId}}/auto-response/generate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks",
+                "{{taskId}}",
+                "auto-response",
+                "generate"
+              ]
+            },
+            "description": "Stores one not-applied draft; posts no comment."
+          },
+          "response": []
+        },
+        {
+          "name": "Apply Auto-Response (staff)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tasks/{{taskId}}/auto-response/apply",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks",
+                "{{taskId}}",
+                "auto-response",
+                "apply"
+              ]
+            },
+            "description": "Posts the stored draft as a comment by the AI system user. Idempotent: {applied:true, alreadyApplied}."
+          },
+          "response": []
+        },
+        {
+          "name": "Auto-Response Feedback",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/tasks/{{taskId}}/auto-response/feedback",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks",
+                "{{taskId}}",
+                "auto-response",
+                "feedback"
+              ]
+            },
+            "description": "404 when the ticket has no auto-response.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"wasHelpful\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "AI Knowledge Search (staff)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/ai/knowledge-search?query=password%20reset&maxResults=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "ai",
+                "knowledge-search"
+              ],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "password%20reset"
+                },
+                {
+                  "key": "maxResults",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "query required, up to 500 characters."
+          },
+          "response": []
+        },
+        {
+          "name": "AI Status (staff)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/ai/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "ai",
+                "status"
+              ]
+            },
+            "description": "Which AI features are available."
+          },
+          "response": []
+        }
+      ],
+      "description": "AI routes that act on a ticket take {ticketId}. A cost-limit block is 429 {\"error\":\"quota_exceeded\"}."
     },
     {
-      "key": "userId",
-      "value": "user123",
-      "description": "Sample user ID for testing"
+      "name": "Help, Policies and Guides",
+      "item": [
+        {
+          "name": "List Help Documents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/help",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "help"
+              ]
+            },
+            "description": "Requires sign-in (401 anonymous)."
+          },
+          "response": []
+        },
+        {
+          "name": "Search Help Documents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/help/search?q=password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "help",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "password"
+                }
+              ]
+            },
+            "description": "Requires sign-in."
+          },
+          "response": []
+        },
+        {
+          "name": "List Company Policies",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/company-policies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "company-policies"
+              ]
+            },
+            "description": "Requires sign-in. Inactive policies are hidden from non-admins."
+          },
+          "response": []
+        },
+        {
+          "name": "List Guide Categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/guide-categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "guide-categories"
+              ]
+            },
+            "description": "Requires sign-in."
+          },
+          "response": []
+        },
+        {
+          "name": "List Guides",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/guides",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "guides"
+              ]
+            },
+            "description": "Requires sign-in. Customers see published guides only."
+          },
+          "response": []
+        },
+        {
+          "name": "Search Knowledge Base",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/knowledge/search?query=password&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "knowledge",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "query",
+                  "value": "password"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Published articles only."
+          },
+          "response": []
+        }
+      ],
+      "description": "These routes require a signed-in user."
+    },
+    {
+      "name": "API Keys (admin, session only)",
+      "item": [
+        {
+          "name": "Issue API Key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/api-keys",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "api-keys"
+              ]
+            },
+            "description": "201 returns plainKey ONCE (tfk_ prefix, only its sha256 is stored). permissions are set by the server (mcp:tickets). expiresInDays 1-365, default 90. A bearer request gets 403 session_required.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{userId}}\",\n  \"name\": \"reporting agent\",\n  \"expiresInDays\": 90\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List API Keys",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/api-keys",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "api-keys"
+              ]
+            },
+            "description": "Never returns the key or its hash; expired keys have expired:true."
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke API Key",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/api-keys/{{keyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "api-keys",
+                "{{keyId}}"
+              ]
+            },
+            "description": "204. 404 api_key_not_found."
+          },
+          "response": []
+        }
+      ],
+      "description": "Issued by an admin signed in with a session. A key cannot manage keys."
+    },
+    {
+      "name": "API key (bearer) requests",
+      "item": [
+        {
+          "name": "Current User via API Key",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/user",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "user"
+              ]
+            },
+            "description": "Acts as the key owner. No cookie is set."
+          },
+          "response": []
+        },
+        {
+          "name": "List Tickets via API Key",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/tasks?status=open&limit=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "open"
+                },
+                {
+                  "key": "limit",
+                  "value": "25"
+                }
+              ]
+            },
+            "description": "Scoped to the key owner. 401 invalid_token for a bad, expired or revoked key; the 11th bad bearer in a minute from one IP is 429."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Ticket via API Key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/tasks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "tasks"
+              ]
+            },
+            "description": "Same rules as a session request.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Created over the API\",\n  \"category\": \"support\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Authorization: Bearer {{apiKey}}. A JWT bearer works only when the server has BEARER_JWT_ENABLED=true.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{apiKey}}",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SSO and Email Settings (admin)",
+      "item": [
+        {
+          "name": "Get SSO Config",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sso/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sso",
+                "config"
+              ]
+            },
+            "description": "Returns {clientId, tenantId, hasClientSecret}; the secret is never returned."
+          },
+          "response": []
+        },
+        {
+          "name": "Save SSO Config",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/sso/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sso",
+                "config"
+              ]
+            },
+            "description": "Session only. A blank or absent clientSecret keeps the stored one.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": \"app-client-id\",\n  \"tenantId\": \"tenant-id\",\n  \"clientSecret\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "SSO Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/sso/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "sso",
+                "status"
+              ]
+            },
+            "description": "{configured: boolean}"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Email Settings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/company-settings/email",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "company-settings",
+                "email"
+              ]
+            },
+            "description": "Masked: hasAwsSecret, mailtrapHasToken, hasSmtpPassword."
+          },
+          "response": []
+        },
+        {
+          "name": "Save Email Settings",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/company-settings/email",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "company-settings",
+                "email"
+              ]
+            },
+            "description": "Session only. A blank secret keeps the stored one for the same provider only.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"provider\": \"aws-ses\",\n  \"fromEmail\": \"support@example.com\",\n  \"fromName\": \"Support\",\n  \"awsRegion\": \"us-east-1\",\n  \"awsAccessKeyId\": \"key-id\",\n  \"awsSecretAccessKey\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Secrets are masked in every response."
+    },
+    {
+      "name": "Teams Webhooks (admin)",
+      "item": [
+        {
+          "name": "Get Teams Webhook Settings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/teams-integration/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "teams-integration",
+                "settings"
+              ]
+            },
+            "description": "Admin only (403 others)."
+          },
+          "response": []
+        },
+        {
+          "name": "Save Teams Webhook Settings",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/teams-integration/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "teams-integration",
+                "settings"
+              ]
+            },
+            "description": "The webhook URL must be https on a *.webhook.office.com host, else 400 invalid_webhook_url.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true,\n  \"webhookUrl\": \"https://example.webhook.office.com/webhookb2/placeholder\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Send Teams Test",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/teams-integration/test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "teams-integration",
+                "test"
+              ]
+            },
+            "description": "A stored URL that is not allow-listed is refused with 400 before any request."
+          },
+          "response": []
+        },
+        {
+          "name": "Disable Teams Integration",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/teams-integration/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "teams-integration",
+                "settings"
+              ]
+            },
+            "description": "Disable."
+          },
+          "response": []
+        }
+      ],
+      "description": "Delivery refuses redirects and private addresses."
+    },
+    {
+      "name": "Inbound Email",
+      "item": [
+        {
+          "name": "SNS Inbound Notification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/email/inbound",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "email",
+                "inbound"
+              ]
+            },
+            "description": "Called by Amazon SNS, not by people: SNS-signed, no session. Customers with a DMARC PASS only. 503 inbound_email_not_configured without SNS_INBOUND_TOPIC_ARN, 403 for a bad signature or topic. This sample cannot pass verification; it shows the shape.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"Type\": \"Notification\",\n  \"MessageId\": \"message-id\",\n  \"TopicArn\": \"arn:aws:sns:us-east-1:000000000000:topic\",\n  \"Message\": \"{}\",\n  \"Timestamp\": \"2026-01-01T00:00:00.000Z\",\n  \"SignatureVersion\": \"2\",\n  \"Signature\": \"signature\",\n  \"SigningCertURL\": \"https://sns.us-east-1.amazonaws.com/cert.pem\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "POST /api/email/inbound"
+    },
+    {
+      "name": "MCP (POST /api/mcp)",
+      "item": [
+        {
+          "name": "tools/list",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "mcp"
+              ]
+            },
+            "description": "Lists the eight tools. Streamable HTTP, stateless; GET and DELETE are 405. Needs an API key with mcp:tickets (401 without one, 403 without the permission).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/list\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "create_ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "mcp"
+              ]
+            },
+            "description": "title and category required. Created as the key owner with status open.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 2,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"create_ticket\",\n    \"arguments\": {\n      \"title\": \"Created over MCP\",\n      \"category\": \"support\",\n      \"priority\": \"medium\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "get_ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "mcp"
+              ]
+            },
+            "description": "FORBIDDEN outside the key owner scope, NOT_FOUND for an unknown id.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 3,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"get_ticket\",\n    \"arguments\": {\n      \"id\": 1,\n      \"includeComments\": true\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "list_tickets",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "mcp"
+              ]
+            },
+            "description": "Returns {tickets, total, returned, limit, offset, hasMore}. limit 1-100. An invalid filter is VALIDATION, never an empty list.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 4,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"list_tickets\",\n    \"arguments\": {\n      \"status\": \"open\",\n      \"limit\": 25,\n      \"offset\": 0\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "update_ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "mcp"
+              ]
+            },
+            "description": "Returns {ticket, appliedFields, ignoredFields}. Status moves follow the workflow (INVALID_STATE for an illegal move).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 5,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"update_ticket\",\n    \"arguments\": {\n      \"id\": 1,\n      \"priority\": \"high\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "close_ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "mcp"
+              ]
+            },
+            "description": "Staff only. Closing a closed ticket is INVALID_STATE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 6,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"close_ticket\",\n    \"arguments\": {\n      \"id\": 1\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "reopen_ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "mcp"
+              ]
+            },
+            "description": "Staff, or the customer who created it.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 7,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"reopen_ticket\",\n    \"arguments\": {\n      \"id\": 1\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "delete_ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "mcp"
+              ]
+            },
+            "description": "Admin only (manager with ALLOW_MANAGER_DELETE=true). confirm must be the boolean true.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 8,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"delete_ticket\",\n    \"arguments\": {\n      \"id\": 1,\n      \"confirm\": true\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "add_comment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json, text/event-stream"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/mcp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "mcp"
+              ]
+            },
+            "description": "content 1-10000 characters.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 9,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"add_comment\",\n    \"arguments\": {\n      \"id\": 1,\n      \"content\": \"Comment from an agent\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Authorization: Bearer {{apiKey}} (an API key carrying mcp:tickets). Tool failures are results with isError:true and {code, message, details?}; code is VALIDATION, NOT_FOUND, FORBIDDEN, INVALID_STATE or INTERNAL.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{apiKey}}",
+            "type": "string"
+          }
+        ]
+      }
     }
   ]
 }
