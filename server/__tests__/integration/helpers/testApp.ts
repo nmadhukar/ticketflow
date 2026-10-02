@@ -1,5 +1,6 @@
 import express, { type Express } from "express";
 import { registerRoutes } from "../../../routes/index";
+import { closeAuth } from "../../../services/auth";
 import { closeDb } from "./testDb";
 
 /**
@@ -35,6 +36,7 @@ export async function createTestApp(): Promise<{
     app,
     async close() {
       server.close();
+      await closeAuth();
       await closeDb();
     },
   };

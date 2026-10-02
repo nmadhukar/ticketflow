@@ -1,9 +1,22 @@
-import { describe, it, expect, jest } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 
-// aiAutoResponse imports the database at module load; the helper under test is pure.
+// aiAutoResponse imports the database at module load; nothing here needs a real one.
 jest.mock('../../storage/db', () => ({ db: {}, pool: {} }));
+jest.mock('../../services/ai/knowledgeBase', () => ({ knowledgeBaseService: {} }));
+jest.mock('../../utils/systemUser', () => ({ getSystemUserId: jest.fn() }));
+jest.mock('../../services/ai/bedrockIntegration', () => ({
+  bedrockIntegration: {
+    analyzeTicket: jest.fn(),
+    generateResponse: jest.fn(),
+    calculateConfidence: jest.fn(),
+    updateKnowledgeBase: jest.fn(),
+  },
+}));
 
-import { calculateConfidence } from '../../services/ai/aiAutoResponse';
+import { calculateConfidence, AIAutoResponseService } from '../../services/ai/aiAutoResponse';
+import { bedrockIntegration } from '../../services/ai/bedrockIntegration';
+
+const bedrock = bedrockIntegration as unknown as Record<string, jest.Mock<any>>;
 
 const LONG_RESPONSE = 'Please reset your password using the link on the sign-in page, then try again.';
 
@@ -47,5 +60,76 @@ describe('calculateConfidence', () => {
   it('never leaves the 0..1 range', () => {
     expect(calculateConfidence(vagueTicket, '', [])).toBeGreaterThanOrEqual(0);
     expect(calculateConfidence(loginTicket, LONG_RESPONSE, new Array(50).fill({}))).toBeLessThanOrEqual(1);
+  });
+});
+
+
+describe('AIAutoResponseService.analyzeTicket', () => {
+  const ticket: any = { id: 7, title: 'Cannot login', description: 'invalid credentials', priority: 'high' };
+  const articles = [{ id: 11, title: 'Reset your password' }];
+  let service: AIAutoResponseService;
+  let storeAutoResponse: jest.Mock<any>;
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+    service = new AIAutoResponseService();
+    // Database-backed collaborators are stubbed; Bedrock is the unit boundary.
+    jest.spyOn(service as any, 'findSimilarResolvedTickets').mockResolvedValue([{ id: 1 }]);
+    jest.spyOn(service as any, 'searchKnowledgeBase').mockResolvedValue(articles);
+    storeAutoResponse = jest.spyOn(service as any, 'storeAutoResponse').mockResolvedValue(undefined) as any;
+    bedrock.analyzeTicket.mockResolvedValue({ complexityScore: 20 });
+    bedrock.generateResponse.mockResolvedValue({ response: 'Reset your password.', suggestedArticles: [11] });
+  });
+
+  it('returns the generated response and stores it as applied when confidence is high', async () => {
+    bedrock.calculateConfidence.mockResolvedValue({ confidenceScore: 0.9, shouldAutoRespond: true });
+
+    const result = await service.analyzeTicket(ticket);
+
+    expect(bedrock.generateResponse).toHaveBeenCalledWith(ticket, articles);
+    expect(bedrock.calculateConfidence).toHaveBeenCalledWith(ticket, articles.length, 20);
+    expect(result).toMatchObject({
+      autoResponse: 'Reset your password.',
+      confidence: 0.9,
+      complexity: 20,
+      shouldEscalate: false,
+    });
+    expect(result.factors.urgency).toBe(20); // high priority
+    expect(result.factors.historical).toBe(0); // a similar ticket exists
+    expect(storeAutoResponse).toHaveBeenCalledWith(7, expect.objectContaining({ applied: true, confidence: 0.9 }));
+  });
+
+  it('escalates when Bedrock says confidence is below its auto-respond threshold', async () => {
+    bedrock.calculateConfidence.mockResolvedValue({ confidenceScore: 0.3, shouldAutoRespond: false });
+
+    const result = await service.analyzeTicket(ticket);
+
+    expect(result.shouldEscalate).toBe(true);
+    expect(result.autoResponse).toBe('Reset your password.');
+    expect(storeAutoResponse).toHaveBeenCalledWith(7, expect.objectContaining({ applied: false }));
+  });
+
+  it('does not store a response when confidence is zero', async () => {
+    bedrock.calculateConfidence.mockResolvedValue({ confidenceScore: 0, shouldAutoRespond: false });
+
+    const result = await service.analyzeTicket(ticket);
+
+    expect(result.shouldEscalate).toBe(true);
+    expect(storeAutoResponse).not.toHaveBeenCalled();
+  });
+
+  it('falls back to an escalated, empty result when Bedrock fails', async () => {
+    bedrock.analyzeTicket.mockRejectedValue(new Error('Bedrock throttled'));
+
+    const result = await service.analyzeTicket(ticket);
+
+    expect(result).toEqual({
+      autoResponse: null,
+      confidence: 0,
+      complexity: 50,
+      factors: { keywords: 0, urgency: 0, technical: 0, historical: 0, sentiment: 0 },
+      shouldEscalate: true,
+    });
+    expect(storeAutoResponse).not.toHaveBeenCalled();
   });
 });

@@ -100,6 +100,18 @@ const resetPasswordSchema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters"),
 });
 
+let activeSessionStore: InstanceType<ReturnType<typeof connectPg>> | undefined;
+
+/**
+ * Closes the session store's own connection pool (created by setupAuth).
+ * Used by the test harness so Jest can exit without --forceExit.
+ */
+export async function closeAuth(): Promise<void> {
+  const store = activeSessionStore;
+  activeSessionStore = undefined;
+  await store?.close();
+}
+
 /**
  * Setup authentication middleware and routes
  */
@@ -116,6 +128,8 @@ export function setupAuth(app: Express) {
 
   const cookieSecure =
     (process.env.COOKIE_SECURE || "").toLowerCase() === "true";
+
+  activeSessionStore = sessionStore;
 
   const sessionSettings: session.SessionOptions = {
     secret:
