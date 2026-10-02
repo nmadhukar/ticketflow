@@ -3,6 +3,7 @@ import { registerRoutes } from "../../../routes/index";
 import { closeAuth } from "../../../services/auth";
 import { closeDb } from "./testDb";
 import { recordResponse } from "./noSecrets";
+import { installErrorHandling } from "../../../http/install";
 
 /**
  * Builds the real application (the production `registerRoutes`) without
@@ -43,6 +44,9 @@ export async function createTestApp(): Promise<{
   } finally {
     global.setInterval = realSetInterval;
   }
+
+  // Same /api 404 + JSON error handler production installs in server/index.ts.
+  installErrorHandling(app);
 
   return {
     app,

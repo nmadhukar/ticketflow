@@ -101,6 +101,7 @@ import { s3Service } from "../services/s3Service";
 import { DEFAULT_COMPANY, EMAIL_PROVIDERS } from "@shared/constants";
 import { getTicketMetaForUser } from "../permissions/tickets";
 import { registerTeamsRoutes } from "./teams";
+import { registerIdParams } from "../http/install";
 import { generateAutoResponseForTicket } from "server/services/ai/aiTicketAnalysis";
 import { PROMPT_TEMPLATES } from "server/services/ai/prompts";
 
@@ -158,6 +159,8 @@ const upload = multer({
  * @returns HTTP server with WebSocket support
  */
 export async function registerRoutes(app: Express): Promise<Server> {
+  registerIdParams(app);
+
   // Auth middleware
   setupAuth(app);
   setupMicrosoftAuth(app);
