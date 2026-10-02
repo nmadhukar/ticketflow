@@ -4,6 +4,7 @@
 -- UPDATE also runs at startup (server/seed/legacyRoleFixup.ts). Idempotent in every part.
 
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "must_change_password" boolean DEFAULT false NOT NULL;
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "password_changed_at" timestamp;
 
 UPDATE "users" SET "role" = 'agent' WHERE "role" = 'user';
 UPDATE "user_invitations" SET "role" = 'agent' WHERE "role" = 'user';

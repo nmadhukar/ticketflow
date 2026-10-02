@@ -293,7 +293,7 @@ export const securityAuditLog = (
   ];
 
   const isSensitive = sensitiveActions.some((path) =>
-    req.path.startsWith(path)
+    req.path.toLowerCase().startsWith(path)
   );
 
   if (isSensitive) {

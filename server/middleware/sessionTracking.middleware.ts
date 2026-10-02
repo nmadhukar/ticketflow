@@ -15,7 +15,9 @@ export function sessionTrackingMiddleware(
   res: Response,
   next: NextFunction
 ): void {
-  if (req.session) {
+  // Only for signed-in users: touching the session for anonymous requests would
+  // create a session row for every visitor.
+  if (req.session && req.isAuthenticated?.()) {
     // Update last active time
     (req.session as any).lastActive = new Date();
 

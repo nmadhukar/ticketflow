@@ -4,6 +4,7 @@ const FORBIDDEN = [
   "passwordResetExpires",
   "failedLoginAttempts",
   "lockedUntil",
+  "passwordChangedAt",
   "keyHash",
   "clientSecret",
   "awsSecretAccessKey",

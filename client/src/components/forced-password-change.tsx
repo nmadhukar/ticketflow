@@ -19,6 +19,14 @@ export function ForcedPasswordChange() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  async function signOut() {
+    try {
+      await apiRequest("POST", "/api/auth/logout");
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+    }
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -61,6 +69,9 @@ export function ForcedPasswordChange() {
             {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
             <Button type="submit" className="w-full" disabled={busy}>
               {busy ? "Saving..." : "Change password"}
+            </Button>
+            <Button type="button" variant="ghost" className="w-full" onClick={signOut}>
+              Sign out
             </Button>
           </form>
         </CardContent>

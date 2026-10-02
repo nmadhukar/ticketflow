@@ -160,4 +160,80 @@ describe("forced password change, session revocation, admin reset rules", () => 
     expect((await agent.get("/api/auth/user")).status).toBe(401);
     expect(await sessionCount(u.id)).toBe(0);
   });
+
+  it("the must-change check is not bypassed by changing the case of the path", async () => {
+    const target = await createUser({ role: "agent" });
+    const temp = (await adminReset(target.id)).body.tempPassword;
+    const agent = request.agent(ctx.app);
+    await agent.post("/api/auth/login").send({ email: target.email, password: temp });
+    for (const path of ["/API/tasks", "/Api/tasks", "/api/TASKS"]) {
+      const res = await agent.get(path);
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe("password_change_required");
+    }
+  });
+
+  describe("revocation does not depend on the session row staying deleted", () => {
+    const snapshot = async (userId: string) =>
+      (await db.execute(sql`SELECT sid, sess, expire FROM sessions WHERE sess->'passport'->>'user' = ${userId}`)).rows as any[];
+    const restore = async (rows: any[]) => {
+      for (const r of rows) {
+        await db.execute(
+          sql`INSERT INTO sessions (sid, sess, expire) VALUES (${r.sid}, ${JSON.stringify(r.sess)}::jsonb, ${r.expire}) ON CONFLICT (sid) DO NOTHING`
+        );
+      }
+    };
+
+    it("an in-flight request that re-saves the session after an admin reset does not revive it", async () => {
+      const target = await createUser({ role: "agent" });
+      const live = await loginAs(ctx.app, target);
+      const saved = await snapshot(target.id);
+      expect(saved).toHaveLength(1);
+      expect((await adminReset(target.id)).status).toBe(200);
+      expect(await sessionCount(target.id)).toBe(0);
+      await restore(saved); // what a request that loaded the session earlier does when it saves
+      expect(await sessionCount(target.id)).toBe(1);
+      const res = await live.get("/api/auth/user");
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBe("session_revoked");
+      expect(await sessionCount(target.id)).toBe(0);
+    });
+
+    it("a revived session of another device is rejected after a self change, the changer stays signed in", async () => {
+      const u = await createUser({ role: "agent" });
+      const mine = await loginAs(ctx.app, u);
+      const other = await loginAs(ctx.app, u);
+      const all = await snapshot(u.id);
+      expect(
+        (await mine.post("/api/auth/change-password").send({ currentPassword: DEFAULT_PASSWORD, password: "Another-pw-12345!" })).status
+      ).toBe(200);
+      await restore(all);
+      expect((await other.get("/api/auth/user")).status).toBe(401);
+      expect((await mine.get("/api/auth/user")).status).toBe(200);
+      expect((await mine.get("/api/tasks")).status).toBe(200);
+    });
+
+    it("a session created after the change is valid", async () => {
+      const target = await createUser({ role: "agent" });
+      await adminReset(target.id);
+      const row = (await db.select().from(users).where(eq(users.id, target.id)))[0];
+      expect(row.passwordChangedAt).toBeInstanceOf(Date);
+    });
+
+    it("passwordChangedAt is never sent to clients", async () => {
+      const u = await createUser({ role: "agent" });
+      const a = await loginAs(ctx.app, u);
+      await a.post("/api/auth/change-password").send({ currentPassword: DEFAULT_PASSWORD, password: "Another-pw-12345!" });
+      const me = await a.get("/api/auth/user");
+      expect(JSON.stringify(me.body)).not.toMatch(/passwordChangedAt/i);
+    });
+  });
+
+  it("anonymous requests create no session rows", async () => {
+    const before = (await db.execute(sql`SELECT 1 FROM sessions`)).rows.length;
+    await request(ctx.app).get("/api/tasks");
+    await request(ctx.app).get("/api/auth/user");
+    await request(ctx.app).post("/api/auth/login").send({ email: "nobody@example.test", password: "wrong-wrong-1" });
+    expect((await db.execute(sql`SELECT 1 FROM sessions`)).rows.length).toBe(before);
+  });
 });

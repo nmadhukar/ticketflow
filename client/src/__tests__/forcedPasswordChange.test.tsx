@@ -53,3 +53,16 @@ describe("ForcedPasswordChange", () => {
     expect((await screen.findByRole("alert")).textContent).toMatch(/Current password is incorrect/);
   });
 });
+
+describe("ForcedPasswordChange sign out", () => {
+  beforeEach(() => jest.clearAllMocks());
+  it("offers a sign-out that posts to /api/auth/logout and refreshes the user", async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => ({}) });
+    const invalidate = setup();
+    fireEvent.click(screen.getByRole("button", { name: /sign out/i }));
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["/api/auth/user"] }));
+    const [url, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toBe("/api/auth/logout");
+    expect(init.method).toBe("POST");
+  });
+});

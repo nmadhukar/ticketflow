@@ -253,6 +253,7 @@ export class DatabaseStorage implements IStorage {
         password: hashedPassword,
         // The user chose this password themselves.
         mustChangePassword: false,
+        passwordChangedAt: new Date(),
         updatedAt: new Date(),
       })
       .where(eq(users.id, userId));
@@ -271,6 +272,7 @@ export class DatabaseStorage implements IStorage {
       .set({
         password: hashedPassword,
         mustChangePassword: true,
+        passwordChangedAt: new Date(),
         failedLoginAttempts: 0,
         lockedUntil: null,
         passwordResetToken: null,

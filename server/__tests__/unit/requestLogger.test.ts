@@ -9,6 +9,9 @@ describe("redactLogPath", () => {
       "/api/invitations/[redacted]/accept"
     );
   });
+  it("redacts whatever the case of the path", () => {
+    expect(redactLogPath("/API/Invitations/abc123")).toBe("/API/Invitations/[redacted]");
+  });
   it("leaves ordinary paths alone", () => {
     expect(redactLogPath("/api/tasks/5")).toBe("/api/tasks/5");
     expect(redactLogPath("/api/invitations")).toBe("/api/invitations");

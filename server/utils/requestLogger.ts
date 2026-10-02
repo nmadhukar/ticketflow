@@ -6,8 +6,8 @@ import type { NextFunction, Request, Response } from "express";
  * keys in any other logged body are masked.
  */
 
-const TOKEN_PATH = /^(\/api\/invitations\/)[^/]+/;
-const NO_BODY_PATH = /^\/api\/(auth|invitations)(\/|$)/;
+const TOKEN_PATH = /^(\/api\/invitations\/)[^/]+/i;
+const NO_BODY_PATH = /^\/api\/(auth|invitations)(\/|$)/i;
 const SECRET_KEY = /pass(word)?|token|secret|key|hash|authorization|credential/i;
 
 export function redactLogPath(path: string): string {
@@ -31,7 +31,7 @@ export function requestLogger(log: (line: string) => void) {
     };
 
     res.on("finish", () => {
-      if (!path.startsWith("/api")) return;
+      if (!path.toLowerCase().startsWith("/api")) return;
       const duration = Date.now() - start;
       let line = `${req.method} ${redactLogPath(path)} ${res.statusCode} in ${duration}ms`;
       if (captured && !NO_BODY_PATH.test(path)) {

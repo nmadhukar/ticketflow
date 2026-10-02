@@ -172,14 +172,31 @@ export function setupAuth(app: Express) {
   app.use(passport.initialize());
   app.use(passport.session());
 
+  // A session that authenticated before the password last changed is dead, even if
+  // a request that loaded it earlier saved the row back after the revocation DELETE.
+  app.use((req, res, next) => {
+    const changedAt = req.user?.passwordChangedAt;
+    if (!req.user || !changedAt) return next();
+    const authAt = (req.session as any)?.authAt;
+    if (typeof authAt === "number" && authAt >= new Date(changedAt).getTime()) return next();
+    req.session.destroy(() => {
+      res.status(401).json({
+        error: "session_revoked",
+        message: "Your session ended because the password changed. Sign in again.",
+      });
+    });
+  });
+
   // After an admin reset the user must choose their own password first: until
   // then only reading who they are, signing out and changing the password work.
   app.use((req, res, next) => {
-    if (!req.user?.mustChangePassword || !req.path.startsWith("/api")) return next();
+    // Express routes case-insensitively, so compare the lower-cased path.
+    const path = req.path.toLowerCase();
+    if (!req.user?.mustChangePassword || !path.startsWith("/api")) return next();
     const allowed =
-      (req.method === "GET" && (req.path === "/api/auth/user" || req.path === "/api/logout")) ||
+      (req.method === "GET" && (path === "/api/auth/user" || path === "/api/logout")) ||
       (req.method === "POST" &&
-        (req.path === "/api/auth/logout" || req.path === "/api/auth/change-password"));
+        (path === "/api/auth/logout" || path === "/api/auth/change-password"));
     if (allowed) return next();
     return res.status(403).json({
       error: "password_change_required",
@@ -410,6 +427,8 @@ export function setupAuth(app: Express) {
               .status(500)
               .json({ message: "Failed to establish session" });
           }
+          // Stamped after login (which starts a fresh session) for the revocation check.
+          (req.session as any).authAt = Date.now();
 
           res.json({
             id: user.id,
@@ -678,6 +697,8 @@ export function setupAuth(app: Express) {
       }
       await storage.updateUserPassword(current.id, await hashPassword(body.password));
       // Other devices sign in again; this session stays.
+      // This session stays valid: re-stamp it after the password change.
+      (req.session as any).authAt = Date.now();
       await storage.revokeUserSessions(current.id, req.sessionID);
       res.json({ message: "Password changed" });
     } catch (error) {

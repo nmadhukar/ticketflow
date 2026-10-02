@@ -77,6 +77,9 @@ export const users = pgTable("users", {
   lockedUntil: timestamp("locked_until"),
   // Set by an admin reset; cleared when the user sets their own password.
   mustChangePassword: boolean("must_change_password").notNull().default(false),
+  // Sessions that authenticated before this instant are refused (server/services/auth).
+  // Never sent to clients.
+  passwordChangedAt: timestamp("password_changed_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
