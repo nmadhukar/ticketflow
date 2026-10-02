@@ -119,6 +119,7 @@ import {
 } from "../permissions/ticketAccess";
 import { LOCKOUT_MINUTES, MAX_FAILED_LOGINS } from "../services/auth/lockout";
 import { hashResetToken } from "../utils/resetToken";
+import { displayNameOf, displayNameSql } from "../utils/displayName";
 import { excludeSystemAccounts, isSystemAccountId } from "../utils/aiSystemUser";
 import { s3Service } from "../services/s3Service";
 import { PUBLIC_USER_FIELDS, type PublicUser } from "../utils/publicUser";
@@ -582,22 +583,24 @@ export class DatabaseStorage implements IStorage {
         tags: tasks.tags,
         createdAt: tasks.createdAt,
         updatedAt: tasks.updatedAt,
-        creatorName: sql<string>`COALESCE(creator.first_name || ' ' || creator.last_name, creator.email, 'Unknown')`,
-        assigneeName: sql<string>`CASE 
+        creatorName: sql<string>`CASE WHEN creator.id IS NULL THEN 'Unknown' ELSE ${displayNameSql("creator.first_name", "creator.last_name", "creator.role")} END`,
+        assigneeName: sql<string>`CASE
           WHEN ${tasks.assigneeType} = 'team' THEN ${teams.name}
-          ELSE COALESCE(assignee.first_name || ' ' || assignee.last_name, assignee.email)
+          WHEN assignee.id IS NULL THEN NULL
+          ELSE ${displayNameSql("assignee.first_name", "assignee.last_name", "assignee.role")}
         END`,
         // Fields used by frontend detail/list components
-        createdByName: sql<string>`COALESCE(creator.first_name || ' ' || creator.last_name, creator.email, 'Unknown')`,
-        assignedToName: sql<string>`CASE 
+        createdByName: sql<string>`CASE WHEN creator.id IS NULL THEN 'Unknown' ELSE ${displayNameSql("creator.first_name", "creator.last_name", "creator.role")} END`,
+        assignedToName: sql<string>`CASE
           WHEN ${tasks.assigneeType} = 'team' THEN NULL
-          ELSE COALESCE(assignee.first_name || ' ' || assignee.last_name, assignee.email)
+          WHEN assignee.id IS NULL THEN NULL
+          ELSE ${displayNameSql("assignee.first_name", "assignee.last_name", "assignee.role")}
         END`,
         teamName: sql<
           string | null
         >`CASE WHEN ${tasks.assigneeType} = 'team' THEN ${teams.name} ELSE NULL END`,
         lastUpdatedBy: sql<string>`(
-          SELECT COALESCE(u.first_name || ' ' || u.last_name, u.email)
+          SELECT ${displayNameSql("u.first_name", "u.last_name", "u.role")}
           FROM ${taskHistory} th
           LEFT JOIN ${users} u ON u.id = th.user_id
           WHERE th.task_id = ${tasks.id}
@@ -727,10 +730,7 @@ export class DatabaseStorage implements IStorage {
           .from(users)
           .where(eq(users.id, (task as any).createdBy));
         if (creator) {
-          creatorName =
-            (creator as any).firstName && (creator as any).lastName
-              ? `${(creator as any).firstName} ${(creator as any).lastName}`
-              : (creator as any).email || "Unknown";
+          creatorName = displayNameOf(creator);
         }
       }
       if (
@@ -748,10 +748,7 @@ export class DatabaseStorage implements IStorage {
           .from(users)
           .where(eq(users.id, (task as any).assigneeId));
         if (assignee) {
-          assigneeName =
-            (assignee as any).firstName && (assignee as any).lastName
-              ? `${(assignee as any).firstName} ${(assignee as any).lastName}`
-              : (assignee as any).email || "";
+          assigneeName = displayNameOf(assignee);
         }
       }
       const [lastHistory] = await db
@@ -767,10 +764,7 @@ export class DatabaseStorage implements IStorage {
           .from(users)
           .where(eq(users.id, lastHistory.userId));
         if (u) {
-          lastUpdatedBy =
-            (u as any).firstName && (u as any).lastName
-              ? `${(u as any).firstName} ${(u as any).lastName}`
-              : (u as any).email || "";
+          lastUpdatedBy = displayNameOf(u);
         }
       }
       enhancedTasks.push({ ...task, creatorName, assigneeName, lastUpdatedBy });
@@ -848,10 +842,7 @@ export class DatabaseStorage implements IStorage {
           .from(users)
           .where(eq(users.id, task.createdBy));
         if (creator) {
-          creatorName =
-            creator.firstName && creator.lastName
-              ? `${creator.firstName} ${creator.lastName}`
-              : creator.email || "Unknown";
+          creatorName = displayNameOf(creator);
         }
       }
 
@@ -870,10 +861,7 @@ export class DatabaseStorage implements IStorage {
           .from(users)
           .where(eq(users.id, task.assigneeId));
         if (assignee) {
-          assigneeName =
-            assignee.firstName && assignee.lastName
-              ? `${assignee.firstName} ${assignee.lastName}`
-              : assignee.email || "";
+          assigneeName = displayNameOf(assignee);
         }
       }
 
@@ -881,7 +869,7 @@ export class DatabaseStorage implements IStorage {
       let lastUpdatedBy = null;
       const [lastUpdate] = await db
         .select({
-          userName: sql<string>`COALESCE(${users.firstName} || ' ' || ${users.lastName}, ${users.email})`,
+          userName: sql<string>`${displayNameSql(sql`${users.firstName}`, sql`${users.lastName}`, sql`${users.role}`)}`,
         })
         .from(taskHistory)
         .leftJoin(users, eq(taskHistory.userId, users.id))
@@ -1746,7 +1734,7 @@ export class DatabaseStorage implements IStorage {
         newValue: taskHistory.newValue,
         createdAt: taskHistory.createdAt,
         taskTitle: tasks.title,
-        userName: sql<string>`COALESCE(${users.firstName} || ' ' || ${users.lastName}, ${users.email}, 'Unknown')`,
+        userName: sql<string>`${displayNameSql(sql`${users.firstName}`, sql`${users.lastName}`, sql`${users.role}`)}`,
       })
       .from(taskHistory)
       .leftJoin(tasks, eq(taskHistory.taskId, tasks.id))
@@ -3554,12 +3542,7 @@ export class DatabaseStorage implements IStorage {
 
             return {
               userId: member.user.id,
-              name:
-                `${member.user.firstName || ""} ${
-                  member.user.lastName || ""
-                }`.trim() ||
-                member.user.email ||
-                "Unknown",
+              name: displayNameOf(member.user),
               assigned,
               resolved,
               resolutionRate: memberResolutionRate,

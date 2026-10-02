@@ -441,4 +441,71 @@ describe("remaining API contract items", () => {
       expect((await storage.getUser("system"))?.role).toBe("admin");
     });
   });
+
+  describe("R19 display names are never emails", () => {
+    it("a customer sees no email in any name field, whatever the staff user's name data", async () => {
+      const { a: cust } = await as("customer");
+      const firstOnly = await createUser({ role: "agent", email: "firstonly.staff@example.test" });
+      const nameless = await createUser({ role: "admin", email: "nameless.staff@example.test" });
+      await db.update(users).set({ lastName: null }).where(eq(users.id, firstOnly.id));
+      await db.update(users).set({ firstName: null, lastName: null }).where(eq(users.id, nameless.id));
+      const t = await createTicketAs(cust);
+      const staffA = await loginAs(ctx.app, firstOnly);
+      const staffN = await loginAs(ctx.app, nameless);
+      await staffN
+        .patch(`/api/tasks/${t.body.id}`)
+        .send({ assigneeId: firstOnly.id })
+        .expect(200);
+      await staffA.patch(`/api/tasks/${t.body.id}`).send({ status: "in_progress" }).expect(200);
+      await staffN.patch(`/api/tasks/${t.body.id}`).send({ notes: "touched" }).expect(200);
+
+      const bodies = [
+        (await cust.get("/api/tasks")).body,
+        (await cust.get("/api/tasks/my")).body,
+        (await cust.get(`/api/tasks/${t.body.id}`)).body,
+      ];
+      for (const body of bodies) {
+        const raw = JSON.stringify(body);
+        expect(raw).not.toContain("firstonly.staff");
+        expect(raw).not.toContain("nameless.staff");
+        expect(raw).not.toMatch(/"(creatorName|assigneeName|assignedToName|createdByName|lastUpdatedBy)":"[^"]*@/);
+      }
+      const detail = bodies[2] as Record<string, string>;
+      expect(detail.assigneeName).toBe("agent");
+      expect(detail.lastUpdatedBy).toBe("Support agent");
+      const list = (bodies[0] as Array<Record<string, string>>)[0];
+      expect(list.assigneeName).toBe("agent");
+      expect(list.lastUpdatedBy).toBe("Support agent");
+    });
+  });
+
+  describe("last admin and self-demotion guards", () => {
+    it("the only active admin cannot be demoted or deactivated (409 last_admin)", async () => {
+      const { u, a } = await as("admin");
+      for (const body of [{ role: "agent" }, { isActive: false }]) {
+        const res = await a.patch(`/api/admin/users/${u.id}`).send(body);
+        expect(res.status).toBe(409);
+        expect(res.body.error).toBe("last_admin");
+      }
+      expect((await storage.getUser(u.id))?.role).toBe("admin");
+    });
+
+    it("an admin cannot demote or deactivate themselves even with another admin (409 self_demotion)", async () => {
+      const { u, a } = await as("admin");
+      await createUser({ role: "admin" });
+      for (const body of [{ role: "agent" }, { isActive: false }]) {
+        const res = await a.patch(`/api/admin/users/${u.id}`).send(body);
+        expect(res.status).toBe(409);
+        expect(res.body.error).toBe("self_demotion");
+      }
+      expect((await storage.getUser(u.id))?.isActive).toBe(true);
+    });
+
+    it("an admin can still demote another admin, and edit themselves without losing the role", async () => {
+      const { u, a } = await as("admin");
+      const other = await createUser({ role: "admin" });
+      expect((await a.patch(`/api/admin/users/${other.id}`).send({ role: "manager" })).status).toBe(200);
+      expect((await a.patch(`/api/admin/users/${u.id}`).send({ firstName: "Renamed" })).status).toBe(200);
+    });
+  });
 });

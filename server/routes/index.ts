@@ -88,6 +88,7 @@ import {
   sum,
   sql,
   inArray,
+  ne,
   getTableColumns,
 } from "drizzle-orm";
 import { teams, departments, users } from "@shared/schema";
@@ -1109,8 +1110,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Only these fields are read; anything else in the body is dropped.
         const updates = adminUserUpdateSchema.parse(req.body ?? {});
 
-        if (!(await storage.getUser(userId))) {
+        const target = await storage.getUser(userId);
+        if (!target) {
           throw new HttpError(404, "user_not_found", "User not found");
+        }
+
+        // An active admin must stay: never leave zero, and never let an admin
+        // demote or deactivate themselves.
+        const losesAdmin =
+          target.role === "admin" &&
+          target.isActive !== false &&
+          ((updates.role !== undefined && updates.role !== "admin") ||
+            updates.isActive === false);
+        if (losesAdmin) {
+          const [others] = await db
+            .select({ n: sql<number>`count(*)::int` })
+            .from(users)
+            .where(
+              and(
+                eq(users.role, "admin"),
+                eq(users.isActive, true),
+                ne(users.id, userId),
+                excludeSystemAccounts()
+              )
+            );
+          if (!others || others.n === 0) {
+            throw new HttpError(409, "last_admin", "This is the last active administrator");
+          }
+          if (userId === getUserId(req)) {
+            throw new HttpError(409, "self_demotion", "You cannot demote or deactivate your own account");
+          }
         }
 
         // updateUserProfile also drops the user's open sockets on a role change.
