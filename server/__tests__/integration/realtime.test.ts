@@ -230,9 +230,9 @@ describe("real-time updates over an authenticated WebSocket", () => {
         });
         raw.on("error", () => resolve());
       });
-      // Still alive and serving.
-      const res = await request(server).post("/api/auth/check-email").send({ email: "nobody@example.test" });
-      expect(res.status).toBe(200);
+      // Still alive and serving: an anonymous request gets its normal 401 answer.
+      const res = await request(server).get("/api/auth/user");
+      expect(res.status).toBe(401);
     });
 
     it("closes an authenticated socket that sends an oversized frame, and keeps serving", async () => {
@@ -243,7 +243,7 @@ describe("real-time updates over an authenticated WebSocket", () => {
       expect((await c.closed).code).toBe(1009);
       await quiet(150);
       expect(connectionCount()).toBe(0);
-      expect((await request(server).post("/api/auth/check-email").send({ email: "x@example.test" })).status).toBe(200);
+      expect((await request(server).get("/api/auth/user")).status).toBe(401);
     });
   });
 
