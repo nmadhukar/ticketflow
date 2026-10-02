@@ -29,6 +29,7 @@ import { EMAIL_PROVIDERS } from "@shared/constants";
 import { requireSecret } from "../../security/secrets";
 import { isAiSystemUserId } from "../../utils/aiSystemUserId";
 import { ServerResponse, type IncomingMessage } from "http";
+import { disconnectUser } from "../../realtime/connections";
 import { authRateLimit, authRequestRateLimit } from "../../security/rateLimiting";
 
 declare global {
@@ -145,10 +146,12 @@ export function isSessionRevoked(
  * Resolves the signed-in user of a raw HTTP request (a WebSocket upgrade) with the
  * same machinery an Express request goes through: the session cookie, the session
  * store and passport's deserializeUser (which refuses inactive, unapproved, AI and
- * unknown-role users). Returns null for no session, a revoked session, a user who
+ * unknown-role users). Returns the user and the session's authAt, or null for no session, a revoked session, a user who
  * must change their password first, or the AI system user.
  */
-export async function authenticateUpgrade(req: IncomingMessage): Promise<Express.User | null> {
+export async function authenticateUpgrade(
+  req: IncomingMessage
+): Promise<{ user: Express.User; authAt: unknown } | null> {
   const sessionMiddleware = activeSessionMiddleware;
   if (!sessionMiddleware) return null;
   const res = new ServerResponse(req);
@@ -168,7 +171,7 @@ export async function authenticateUpgrade(req: IncomingMessage): Promise<Express
   if (!user || isAiSystemUserId(user.id)) return null;
   if (isSessionRevoked(user, (req as any).session)) return null;
   if (user.mustChangePassword) return null;
-  return user;
+  return { user, authAt: (req as any).session?.authAt };
 }
 
 /**
@@ -716,6 +719,7 @@ export function setupAuth(app: Express) {
       await storage.clearPasswordResetToken(user.id);
       // Whoever held the old password (or this token) must sign in again.
       await storage.revokeUserSessions(user.id);
+      disconnectUser(user.id);
       // A token reset is the recovery path from a lockout.
       await storage.resetFailedLogins(user.id);
 
@@ -765,6 +769,10 @@ export function setupAuth(app: Express) {
       await storage.updateUserPassword(current.id, newHash, changedAt);
       (req.session as any).authAt = changedAt.getTime();
       await storage.revokeUserSessions(current.id, req.sessionID);
+      // Sockets of other devices must go (their sessions are revoked); this device's
+      // socket reconnects, so its new authAt must be stored before it does.
+      await new Promise<void>((resolve) => req.session.save(() => resolve()));
+      disconnectUser(current.id, 1012);
       res.json({ message: "Password changed" });
     } catch (error) {
       if (error instanceof z.ZodError) {

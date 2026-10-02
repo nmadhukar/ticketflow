@@ -914,6 +914,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // A reassignment clears the other assignee column (no stale scope).
       normalizeAssigneeUpdate(updates);
       await assertAssigneesExist(updates);
+      // A reassignment changes who can see the ticket: whoever could see it before
+      // must hear about it too, so their view refreshes (and drops it).
+      const reassigns = ["assigneeId", "assigneeType", "assigneeTeamId"].some((k) => k in updates);
+      const recipientsBefore = reassigns
+        ? await ticketRecipients(taskId).catch(() => [] as string[])
+        : [];
       // The write is conditional on the status the guard checked (409 if it changed meanwhile).
       const updatedTask = await storage.updateTask(
         taskId,
@@ -984,7 +990,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // WS: everyone connected who can see the ticket as it is now
-      await notifyTicket(taskId, "updated");
+      if (reassigns) {
+        const recipientsAfter = await ticketRecipients(taskId).catch(() => [] as string[]);
+        await notifyTicket(taskId, "updated", [...recipientsBefore, ...recipientsAfter]);
+      } else {
+        await notifyTicket(taskId, "updated");
+      }
 
       res.json(updatedTask);
     } catch (error) {
@@ -3312,7 +3323,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const department = await storage.createDepartment(req.body);
 
       // Broadcast department created event
-      notifyStaff("department:created", { ...department });
+      await notifyStaff("department:created", { ...department });
 
       res.json(department);
     } catch (error) {
@@ -3341,7 +3352,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const department = await storage.updateDepartment(id, req.body);
 
       // Broadcast department updated event
-      notifyStaff("department:updated", { ...department });
+      await notifyStaff("department:updated", { ...department });
 
       res.json(department);
     } catch (error) {
@@ -3366,7 +3377,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.deleteDepartment(id);
 
         // Broadcast department deleted event
-        notifyStaff("department:deleted", { id });
+        await notifyStaff("department:deleted", { id });
 
         res.json({ message: "Department deleted successfully" });
       } catch (error) {

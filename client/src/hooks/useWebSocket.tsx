@@ -21,7 +21,7 @@ function invalidateTicketQueries() {
 }
 
 export function useWebSocket() {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated } = useAuth();
   const { toast } = useToast();
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -207,112 +207,18 @@ export function useWebSocket() {
           queryClient.invalidateQueries({ queryKey: [`/api/tasks/${ticketId}/history`] });
         }
         invalidateTicketQueries();
+        // The event carries no team or department, so refresh every team's task list
+        // and the department stats (prefix match on the query keys).
+        queryClient.invalidateQueries({ queryKey: ["/api/teams"] });
+        queryClient.invalidateQueries({
+          queryKey: ["/api/departments"],
+          predicate: (query) => {
+            const key = query.queryKey as string[];
+            return key[0] === "/api/departments" && key[2] === "stats";
+          },
+        });
         break;
       }
-      case "ticket:created":
-        // Invalidate ticket queries to refresh the list
-        queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/stats/agent"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/stats/manager"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/activity"] });
-
-        // Invalidate team tasks if ticket is assigned to a team
-        if ((message as any).data?.assigneeTeamId) {
-          const teamId = (message as any).data.assigneeTeamId;
-          queryClient.invalidateQueries({
-            queryKey: ["/api/teams", teamId, "tasks"],
-          });
-          // If team belongs to a department, invalidate department stats
-          // Note: We'd need team data to get departmentId, but we can invalidate
-          // all department stats queries as a fallback
-          queryClient.invalidateQueries({
-            queryKey: ["/api/departments"],
-            exact: false,
-            predicate: (query) => {
-              const key = query.queryKey as string[];
-              return key[0] === "/api/departments" && key[2] === "stats";
-            },
-          });
-        }
-
-        // Show notification for new ticket
-        if (
-          (user as any)?.id &&
-          (message as any).data?.assigneeId === (user as any).id
-        ) {
-          toast({
-            title: "New ticket assigned",
-            description: `Ticket #${message.data.ticketNumber} has been assigned to you`,
-          });
-        }
-        break;
-
-      case "ticket:updated": {
-        // Invalidate specific ticket and list queries
-        queryClient.invalidateQueries({
-          queryKey: [`/api/tasks/${message.data.id}`],
-        });
-        queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/stats/agent"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/stats/manager"] });
-
-        // Invalidate team tasks if assignment changed to/from a team
-        const oldTeamId = message.data.changes?.assigneeTeamId?.old;
-        const newTeamId = message.data.changes?.assigneeTeamId?.new;
-        const currentTeamId = (message.data as any)?.assigneeTeamId;
-
-        // If team assignment changed, invalidate both old and new team's tasks
-        if (oldTeamId) {
-          queryClient.invalidateQueries({
-            queryKey: ["/api/teams", oldTeamId, "tasks"],
-          });
-        }
-        if (newTeamId || currentTeamId) {
-          const teamId = newTeamId || currentTeamId;
-          queryClient.invalidateQueries({
-            queryKey: ["/api/teams", teamId, "tasks"],
-          });
-        }
-        // Invalidate department stats if ticket is assigned to a team
-        if (oldTeamId || newTeamId || currentTeamId) {
-          queryClient.invalidateQueries({
-            queryKey: ["/api/departments"],
-            exact: false,
-            predicate: (query) => {
-              const key = query.queryKey as string[];
-              return key[0] === "/api/departments" && key[2] === "stats";
-            },
-          });
-        }
-
-        // Show notification for important updates
-        if (message.data.changes?.status === "resolved") {
-          toast({
-            title: "Ticket resolved",
-            description: `Ticket #${message.data.ticketNumber} has been resolved`,
-          });
-        }
-        break;
-      }
-
-      case "ticket:comment":
-        // Invalidate comment queries
-        queryClient.invalidateQueries({
-          queryKey: [`/api/tasks/${message.data.ticketId}/comments`],
-        });
-        queryClient.invalidateQueries({ queryKey: ["/api/activity"] });
-
-        // Show notification for new comments on assigned tickets
-        if (message.data.isReply) {
-          toast({
-            title: "New comment",
-            description: `New comment on ticket #${message.data.ticketNumber}`,
-          });
-        }
-        break;
-
       case "knowledge:created":
         // Invalidate knowledge base queries
         queryClient.invalidateQueries({ queryKey: ["/api/knowledge"] });
