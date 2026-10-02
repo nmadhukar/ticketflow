@@ -40,6 +40,7 @@ import { Client } from "@microsoft/microsoft-graph-client";
 import { ConfidentialClientApplication } from "@azure/msal-node";
 import { Task } from "@shared/schema";
 import { postWebhookJson } from "./webhookGuard";
+import { logRouteError } from "../http/errors";
 
 export class MicrosoftTeamsIntegration {
   private msalClient: ConfidentialClientApplication | null = null;
@@ -70,7 +71,7 @@ export class MicrosoftTeamsIntegration {
 
       return result?.accessToken || null;
     } catch (error) {
-      console.error("Error acquiring access token:", error);
+      logRouteError("Error acquiring access token", error);
       return null;
     }
   }
@@ -123,7 +124,7 @@ export class MicrosoftTeamsIntegration {
 
       return true;
     } catch (error) {
-      console.error("Error sending Teams notification:", error);
+      logRouteError("Error sending Teams notification", error);
       return false;
     }
   }
@@ -219,7 +220,7 @@ export class MicrosoftTeamsIntegration {
               })),
             };
           } catch (error) {
-            console.error(`Error fetching channels for team ${team.id}:`, error);
+            logRouteError(`Error fetching channels for team ${team.id}`, error);
             return {
               id: team.id,
               displayName: team.displayName,
@@ -232,7 +233,7 @@ export class MicrosoftTeamsIntegration {
 
       return teamsWithChannels;
     } catch (error) {
-      console.error("Error listing teams and channels:", error);
+      logRouteError("Error listing teams and channels", error);
       return [];
     }
   }
@@ -257,7 +258,7 @@ export class MicrosoftTeamsIntegration {
       // Return instructions for manual webhook creation
       return null;
     } catch (error) {
-      console.error("Error creating webhook:", error);
+      logRouteError("Error creating webhook", error);
       return null;
     }
   }

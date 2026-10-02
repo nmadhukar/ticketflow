@@ -162,6 +162,11 @@ const ROUTES: RouteSpec[] = [
     name: "POST /api/tasks/:id/auto-response/feedback",
     call: (a, id) => a.post(`/api/tasks/${id}/auto-response/feedback`).send({ wasHelpful: true }),
     allowed: [200],
+    // Feedback on a ticket with no auto-response is 404 (Task 17), so give each fixture ticket one.
+    prepare: async (id) => {
+      await db.delete(ticketAutoResponses).where(eq(ticketAutoResponses.ticketId, id));
+      await db.insert(ticketAutoResponses).values({ ticketId: id, aiResponse: "draft", confidenceScore: "0.5", wasApplied: false });
+    },
   },
   {
     // Fixture tickets are never resolved: the gate passes, then 400.

@@ -403,15 +403,15 @@ export class AIAutoResponseService {
   async updateResponseEffectiveness(
     ticketId: number,
     wasHelpful: boolean
-  ): Promise<void> {
-    try {
-      await db
-        .update(ticketAutoResponses)
-        .set({ wasHelpful })
-        .where(eq(ticketAutoResponses.ticketId, ticketId));
-    } catch (error) {
-      console.error("Error updating response effectiveness:", describeAIError(error));
-    }
+  ): Promise<number> {
+    // Returns how many auto-responses were marked; 0 means the ticket has none.
+    // A database failure propagates so the caller can answer it honestly.
+    const rows = await db
+      .update(ticketAutoResponses)
+      .set({ wasHelpful })
+      .where(eq(ticketAutoResponses.ticketId, ticketId))
+      .returning({ id: ticketAutoResponses.id });
+    return rows.length;
   }
 }
 

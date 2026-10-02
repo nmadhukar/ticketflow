@@ -104,3 +104,28 @@ export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
 
 /** Fields only staff may set (ruling R3). */
 export const STAFF_ONLY_TICKET_FIELDS = ["estimatedHours", "actualHours"] as const;
+
+/** A blank query value ("?status=") is the same as leaving the parameter out. */
+const blankIsAbsent = (v: unknown) => (v === "" ? undefined : v);
+
+const queryId = z.preprocess(blankIsAbsent, z.coerce.number().int().positive().max(2147483647).optional());
+
+/**
+ * Query string of the ticket lists (GET /api/tasks, /my, /my-groups). Statuses,
+ * priorities and categories are closed sets: a value outside them is a 400,
+ * never a silent zero-row list. limit and offset are bounded integers.
+ */
+export const ticketListQuerySchema = z.object({
+  status: z.preprocess(blankIsAbsent, z.enum(TICKET_STATUSES).optional()),
+  priority: z.preprocess(blankIsAbsent, z.enum(TICKET_PRIORITIES).optional()),
+  category: z.preprocess(blankIsAbsent, z.enum(TICKET_CATEGORIES).optional()),
+  assigneeId: z.preprocess(blankIsAbsent, z.string().max(128).optional()),
+  teamId: queryId,
+  departmentId: queryId,
+  mine: z.preprocess(blankIsAbsent, z.enum(["true", "false"]).optional()),
+  search: z.preprocess(blankIsAbsent, z.string().max(200).optional()),
+  limit: z.preprocess(blankIsAbsent, z.coerce.number().int().min(1).max(500).optional()),
+  offset: z.preprocess(blankIsAbsent, z.coerce.number().int().min(0).max(1000000).optional()),
+});
+
+export type TicketListQuery = z.infer<typeof ticketListQuerySchema>;

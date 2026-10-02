@@ -11,6 +11,7 @@ import { getSession } from ".";
 import { loginBlockReason } from "./accountStatus";
 import { AI_SYSTEM_USER_EMAIL } from "../../utils/aiSystemUserId";
 import { randomBytes } from "crypto";
+import { fail } from "../../http/errors";
 
 interface MicrosoftProfile {
   sub: string;
@@ -77,28 +78,28 @@ export async function setupMicrosoftAuth(app: Express) {
         latestConfig?.tenantId
       ) {
         // Config now exists, restart server would be needed
-        res.status(503).json({
-          message:
-            "Microsoft authentication configuration has been updated. Please restart the server to apply changes.",
-        });
+        fail(
+          res,
+          503,
+          "Microsoft authentication configuration has been updated. Please restart the server to apply changes.",
+          { code: "sso_restart_required" }
+        );
       } else {
-        res.status(503).json({
-          message:
-            "Microsoft authentication is not configured. Please contact your administrator to set up Microsoft 365 SSO.",
-        });
+        fail(
+          res,
+          503,
+          "Microsoft authentication is not configured. Please contact your administrator to set up Microsoft 365 SSO.",
+          { code: "sso_not_configured" }
+        );
       }
     });
 
     app.get("/api/auth/microsoft/callback", (req, res) => {
-      res.status(503).json({
-        message: "Microsoft authentication is not configured.",
-      });
+      fail(res, 503, "Microsoft authentication is not configured.", { code: "sso_not_configured" });
     });
 
     app.post("/api/auth/microsoft/callback", (req, res) => {
-      res.status(503).json({
-        message: "Microsoft authentication is not configured.",
-      });
+      fail(res, 503, "Microsoft authentication is not configured.", { code: "sso_not_configured" });
     });
 
     return;

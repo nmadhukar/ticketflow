@@ -8,6 +8,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { storage } from "../storage";
 import { USER_ROLES } from "@shared/constants";
+import { fail, logRouteError } from "../http/errors";
 
 const ADMIN_ROLE = USER_ROLES.ADMIN;
 
@@ -23,13 +24,13 @@ export const isAdmin = async (
   try {
     const userId = getUserId(req);
     if (!userId) {
-      res.status(401).json({ message: "Authentication required" });
+      fail(res, 401, "Authentication required");
       return;
     }
 
     const user = await storage.getUser(userId);
     if (!user || user.role !== ADMIN_ROLE) {
-      res.status(403).json({ message: "Admin access required" });
+      fail(res, 403, "Admin access required");
       return;
     }
 
@@ -37,8 +38,8 @@ export const isAdmin = async (
     (req as any).adminUser = user;
     next();
   } catch (error) {
-    console.error("Error in isAdmin middleware:", error);
-    res.status(500).json({ message: "Failed to verify admin access" });
+    logRouteError("Error in isAdmin middleware", error);
+    fail(res, 500, "Failed to verify admin access");
   }
 };
 
@@ -48,13 +49,13 @@ export const requireAdmin = async (
 ): Promise<boolean> => {
   const userId = getUserId(req);
   if (!userId) {
-    res.status(401).json({ message: "Authentication required" });
+    fail(res, 401, "Authentication required");
     return false;
   }
 
   const user = await storage.getUser(userId);
   if (!user || user.role !== ADMIN_ROLE) {
-    res.status(403).json({ message: "Admin access required" });
+    fail(res, 403, "Admin access required");
     return false;
   }
 

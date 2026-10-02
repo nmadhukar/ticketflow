@@ -18,7 +18,7 @@ import {
 } from "server/permissions/teams";
 import { storage } from "server/storage";
 import { assertTaskAccess, type AccessUser } from "server/permissions/ticketAccess";
-import { HttpError } from "server/http/errors";
+import { HttpError, fail, logRouteError } from "server/http/errors";
 import type { TaskAssignmentBinding } from "server/storage/storage.inteface";
 import { z } from "zod";
 
@@ -55,9 +55,7 @@ export function registerTeamsRoutes(app: Express): void {
 
       // Customers cannot access teams
       if (user?.role === "customer") {
-        return res
-          .status(403)
-          .json({ message: "Customers cannot access teams" });
+        return fail(res, 403, "Customers cannot access teams");
       }
 
       if (["admin", "customer"].includes(user?.role)) {
@@ -130,10 +128,10 @@ export function registerTeamsRoutes(app: Express): void {
       }
 
       // Agents/Users: forbid listing all teams; use /api/teams/my
-      return res.status(403).json({ message: "Forbidden" });
+      return fail(res, 403, "Forbidden");
     } catch (error) {
-      console.error("Error fetching teams:", error);
-      res.status(500).json({ message: "Failed to fetch teams" });
+      logRouteError("Error fetching teams", error);
+      fail(res, 500, "Failed to fetch teams");
     }
   });
 
@@ -143,9 +141,7 @@ export function registerTeamsRoutes(app: Express): void {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
       if (user?.role === "customer") {
-        return res
-          .status(403)
-          .json({ message: "Customers cannot access teams" });
+        return fail(res, 403, "Customers cannot access teams");
       }
 
       // For managers, return teams created by them
@@ -162,8 +158,8 @@ export function registerTeamsRoutes(app: Express): void {
       const userTeams = await storage.getUserTeams(userId);
       res.json(userTeams);
     } catch (error) {
-      console.error("Error fetching user teams:", error);
-      res.status(500).json({ message: "Failed to fetch user teams" });
+      logRouteError("Error fetching user teams", error);
+      fail(res, 500, "Failed to fetch user teams");
     }
   });
 
@@ -185,11 +181,11 @@ export function registerTeamsRoutes(app: Express): void {
         .limit(1);
 
       if (!department) {
-        return res.status(400).json({ message: "Department not found" });
+        return fail(res, 400, "Department not found");
       }
 
       if (!department.isActive) {
-        return res.status(400).json({ message: "Department is not active" });
+        return fail(res, 400, "Department is not active");
       }
 
       // R12: only an admin, or the manager of this department, may create a team in it.
@@ -205,13 +201,11 @@ export function registerTeamsRoutes(app: Express): void {
       res.status(201).json(team);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res
-          .status(400)
-          .json({ message: "Invalid team data", errors: error.errors });
+        return fail(res, 400, "Invalid team data", { details: error.flatten() });
       }
       if (error instanceof HttpError) return next(error);
-      console.error("Error creating team:", error);
-      res.status(500).json({ message: "Failed to create team" });
+      logRouteError("Error creating team", error);
+      fail(res, 500, "Failed to create team");
     }
   });
 
@@ -250,8 +244,8 @@ export function registerTeamsRoutes(app: Express): void {
       // Agents/customers: return empty array
       return res.json([]);
     } catch (error) {
-      console.error("Error fetching departments for team creation:", error);
-      res.status(500).json({ message: "Failed to fetch departments" });
+      logRouteError("Error fetching departments for team creation", error);
+      fail(res, 500, "Failed to fetch departments");
     }
   });
 
@@ -259,16 +253,16 @@ export function registerTeamsRoutes(app: Express): void {
     try {
       const teamId = parseInt(req.params.id);
       if (isNaN(teamId)) {
-        return res.status(400).json({ message: "Invalid team ID" });
+        return fail(res, 400, "Invalid team ID", { code: "invalid_id" });
       }
       const team = await storage.getTeam(teamId);
       if (!team) {
-        return res.status(404).json({ message: "Team not found" });
+        return fail(res, 404, "Team not found");
       }
       res.json(team);
     } catch (error) {
-      console.error("Error fetching team:", error);
-      res.status(500).json({ message: "Failed to fetch team" });
+      logRouteError("Error fetching team", error);
+      fail(res, 500, "Failed to fetch team");
     }
   });
 
@@ -277,21 +271,19 @@ export function registerTeamsRoutes(app: Express): void {
     try {
       const teamId = parseInt(req.params.id);
       if (isNaN(teamId)) {
-        return res.status(400).json({ message: "Invalid team ID" });
+        return fail(res, 400, "Invalid team ID", { code: "invalid_id" });
       }
 
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
 
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        return fail(res, 404, "User not found", { code: "user_not_found" });
       }
 
       // Check if user has permission to view team members
       if (user.role === "customer") {
-        return res
-          .status(403)
-          .json({ message: "Customers cannot access team members" });
+        return fail(res, 403, "Customers cannot access team members");
       }
 
       // For agents, check if they're a member of the team
@@ -299,9 +291,7 @@ export function registerTeamsRoutes(app: Express): void {
         const userTeams = await storage.getUserTeams(userId);
         const isMember = userTeams.some((team) => team.id === teamId);
         if (!isMember) {
-          return res.status(403).json({
-            message: "You can only view members of teams you belong to",
-          });
+          return fail(res, 403, "You can only view members of teams you belong to");
         }
       }
 
@@ -319,9 +309,7 @@ export function registerTeamsRoutes(app: Express): void {
               )
             );
           if (departmentResults.length === 0) {
-            return res.status(403).json({
-              message: "You can only view members of teams in your departments",
-            });
+            return fail(res, 403, "You can only view members of teams in your departments");
           }
         }
       }
@@ -367,8 +355,8 @@ export function registerTeamsRoutes(app: Express): void {
       res.json(membersWithAdminFlag);
     } catch (error) {
       if (error instanceof HttpError) return next(error);
-      console.error("Error fetching team members:", error);
-      res.status(500).json({ message: "Failed to fetch team members" });
+      logRouteError("Error fetching team members", error);
+      fail(res, 500, "Failed to fetch team members");
     }
   });
 
@@ -377,7 +365,7 @@ export function registerTeamsRoutes(app: Express): void {
     try {
       const teamId = parseInt(req.params.id);
       if (isNaN(teamId)) {
-        return res.status(400).json({ message: "Invalid team ID" });
+        return fail(res, 400, "Invalid team ID", { code: "invalid_id" });
       }
 
       const userId = getUserId(req);
@@ -385,16 +373,14 @@ export function registerTeamsRoutes(app: Express): void {
       // Check if user can manage the team
       const canManage = await canManageTeam(storage, userId, teamId);
       if (!canManage) {
-        return res.status(403).json({
-          message: "You don't have permission to view team admins",
-        });
+        return fail(res, 403, "You don't have permission to view team admins");
       }
 
       const admins = await storage.getTeamAdmins(teamId);
       res.json(admins);
     } catch (error) {
-      console.error("Error fetching team admins:", error);
-      res.status(500).json({ message: "Failed to fetch team admins" });
+      logRouteError("Error fetching team admins", error);
+      fail(res, 500, "Failed to fetch team admins");
     }
   });
 
@@ -403,49 +389,40 @@ export function registerTeamsRoutes(app: Express): void {
     try {
       const teamId = parseInt(req.params.id);
       if (isNaN(teamId)) {
-        return res.status(400).json({ message: "Invalid team ID" });
+        return fail(res, 400, "Invalid team ID", { code: "invalid_id" });
       }
 
       const userId = getUserId(req);
       const { memberId } = req.body;
 
       if (!memberId) {
-        return res.status(400).json({ message: "memberId is required" });
+        return fail(res, 400, "memberId is required");
       }
 
       // Check if user can grant team admin status
       const canGrant = await canGrantTeamAdmin(storage, userId, teamId);
       if (!canGrant) {
-        return res.status(403).json({
-          message: "You don't have permission to grant team admin status",
-        });
+        return fail(res, 403, "You don't have permission to grant team admin status");
       }
 
       // Validate that the member is actually a team member
       const members = await storage.getTeamMembers(teamId);
       const isMember = members.some((m) => m.userId === memberId);
       if (!isMember) {
-        return res.status(400).json({
-          message:
-            "User must be a team member before being granted admin status",
-        });
+        return fail(res, 400, "User must be a team member before being granted admin status");
       }
 
       // Check if user is already a team admin
       const alreadyAdmin = await storage.isTeamAdmin(memberId, teamId);
       if (alreadyAdmin) {
-        return res.status(400).json({
-          message: "User is already a team admin",
-        });
+        return fail(res, 400, "User is already a team admin");
       }
 
       const admin = await storage.addTeamAdmin(memberId, teamId, userId);
       res.status(201).json(admin);
     } catch (error) {
-      console.error("Error granting team admin status:", error);
-      res.status(500).json({
-        message: "Failed to grant team admin status",
-      });
+      logRouteError("Error granting team admin status", error);
+      fail(res, 500, "Failed to grant team admin status");
     }
   });
 
@@ -459,9 +436,7 @@ export function registerTeamsRoutes(app: Express): void {
         const adminId = req.params.adminId;
 
         if (isNaN(teamId) || !adminId) {
-          return res
-            .status(400)
-            .json({ message: "Invalid team ID or admin ID" });
+          return fail(res, 400, "Invalid team ID or admin ID", { code: "invalid_id" });
         }
 
         const userId = getUserId(req);
@@ -469,25 +444,19 @@ export function registerTeamsRoutes(app: Express): void {
         // Check if user can manage the team
         const canManage = await canManageTeam(storage, userId, teamId);
         if (!canManage) {
-          return res.status(403).json({
-            message: "You don't have permission to remove team admin status",
-          });
+          return fail(res, 403, "You don't have permission to remove team admin status");
         }
 
         // Optional: Prevent removing yourself (safety check)
         if (adminId === userId) {
-          return res.status(400).json({
-            message: "You cannot remove your own admin status",
-          });
+          return fail(res, 400, "You cannot remove your own admin status");
         }
 
         await storage.removeTeamAdmin(adminId, teamId);
         res.json({ message: "Team admin status removed successfully" });
       } catch (error) {
-        console.error("Error removing team admin status:", error);
-        res.status(500).json({
-          message: "Failed to remove team admin status",
-        });
+        logRouteError("Error removing team admin status", error);
+        fail(res, 500, "Failed to remove team admin status");
       }
     }
   );
@@ -500,14 +469,14 @@ export function registerTeamsRoutes(app: Express): void {
       try {
         const teamId = parseInt(req.params.id);
         if (isNaN(teamId)) {
-          return res.status(400).json({ message: "Invalid team ID" });
+          return fail(res, 400, "Invalid team ID", { code: "invalid_id" });
         }
 
         const userId = getUserId(req);
         const team = await storage.getTeam(teamId);
 
         if (!team) {
-          return res.status(404).json({ message: "Team not found" });
+          return fail(res, 404, "Team not found");
         }
 
         const canManage = await canManageTeam(storage, userId, teamId);
@@ -520,8 +489,8 @@ export function registerTeamsRoutes(app: Express): void {
           isTeamCreator: isCreator,
         });
       } catch (error) {
-        console.error("Error fetching team permissions:", error);
-        res.status(500).json({ message: "Failed to fetch team permissions" });
+        logRouteError("Error fetching team permissions", error);
+        fail(res, 500, "Failed to fetch team permissions");
       }
     }
   );
@@ -531,14 +500,14 @@ export function registerTeamsRoutes(app: Express): void {
     try {
       const teamId = parseInt(req.params.id);
       if (isNaN(teamId)) {
-        return res.status(400).json({ message: "Invalid team ID" });
+        return fail(res, 400, "Invalid team ID", { code: "invalid_id" });
       }
 
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
 
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        return fail(res, 404, "User not found", { code: "user_not_found" });
       }
 
       // Check access: team members, team admins, team creator, managers.
@@ -547,7 +516,7 @@ export function registerTeamsRoutes(app: Express): void {
       const viewer = { id: userId, role: req.user?.role };
       const team = await storage.getTeam(teamId);
       if (!team) {
-        return res.status(404).json({ message: "Team not found" });
+        return fail(res, 404, "Team not found");
       }
 
       // System admins can always access
@@ -595,12 +564,10 @@ export function registerTeamsRoutes(app: Express): void {
         return res.json(tasks);
       }
 
-      return res.status(403).json({
-        message: "You don't have permission to view team tasks",
-      });
+      return fail(res, 403, "You don't have permission to view team tasks");
     } catch (error) {
-      console.error("Error fetching team tasks:", error);
-      res.status(500).json({ message: "Failed to fetch team tasks" });
+      logRouteError("Error fetching team tasks", error);
+      fail(res, 500, "Failed to fetch team tasks");
     }
   });
 
@@ -614,22 +581,20 @@ export function registerTeamsRoutes(app: Express): void {
         const taskId = parseInt(req.params.taskId);
 
         if (isNaN(teamId) || isNaN(taskId)) {
-          return res
-            .status(400)
-            .json({ message: "Invalid team ID or task ID" });
+          return fail(res, 400, "Invalid team ID or task ID", { code: "invalid_id" });
         }
 
         const userId = getUserId(req);
         const user = await storage.getUser(userId);
 
         if (!user) {
-          return res.status(404).json({ message: "User not found" });
+          return fail(res, 404, "User not found", { code: "user_not_found" });
         }
 
         // Check access: team members, team admins, team creator, managers
         const team = await storage.getTeam(teamId);
         if (!team) {
-          return res.status(404).json({ message: "Team not found" });
+          return fail(res, 404, "Team not found");
         }
 
         // The ticket itself must be inside the user's scope (404 / 403),
@@ -643,9 +608,7 @@ export function registerTeamsRoutes(app: Express): void {
         }
 
         if (task.assigneeType !== "team" || task.assigneeTeamId !== teamId) {
-          return res.status(400).json({
-            message: "Task is not assigned to this team",
-          });
+          return fail(res, 400, "Task is not assigned to this team");
         }
 
         // System admins can always access
@@ -696,13 +659,11 @@ export function registerTeamsRoutes(app: Express): void {
           return res.json(assignments);
         }
 
-        return res.status(403).json({
-          message: "You don't have permission to view task assignments",
-        });
+        return fail(res, 403, "You don't have permission to view task assignments");
       } catch (error) {
         if (error instanceof HttpError) return next(error);
-        console.error("Error fetching task assignments:", error);
-        res.status(500).json({ message: "Failed to fetch task assignments" });
+        logRouteError("Error fetching task assignments", error);
+        fail(res, 500, "Failed to fetch task assignments");
       }
     }
   );
@@ -717,16 +678,14 @@ export function registerTeamsRoutes(app: Express): void {
         const taskId = parseInt(req.params.taskId);
 
         if (isNaN(teamId) || isNaN(taskId)) {
-          return res
-            .status(400)
-            .json({ message: "Invalid team ID or task ID" });
+          return fail(res, 400, "Invalid team ID or task ID", { code: "invalid_id" });
         }
 
         const userId = getUserId(req);
         const { userId: assignedUserId, notes, priority } = req.body;
 
         if (!assignedUserId) {
-          return res.status(400).json({ message: "userId is required" });
+          return fail(res, 400, "userId is required");
         }
 
         // The ticket must be inside the user's scope (404 / 403) ...
@@ -748,18 +707,14 @@ export function registerTeamsRoutes(app: Express): void {
         }
 
         if (task.assigneeType !== "team" || task.assigneeTeamId !== teamId) {
-          return res.status(400).json({
-            message: "Task is not assigned to this team",
-          });
+          return fail(res, 400, "Task is not assigned to this team");
         }
 
         // Validate that assigned user is a team member
         const members = await storage.getTeamMembers(teamId);
         const isMember = members.some((m) => m.userId === assignedUserId);
         if (!isMember) {
-          return res.status(400).json({
-            message: "User must be a team member before being assigned a task",
-          });
+          return fail(res, 400, "User must be a team member before being assigned a task");
         }
 
         const assignment = await storage.createTaskAssignment({
@@ -775,8 +730,8 @@ export function registerTeamsRoutes(app: Express): void {
         res.status(201).json(assignment);
       } catch (error) {
         if (error instanceof HttpError) return next(error);
-        console.error("Error creating task assignment:", error);
-        res.status(500).json({ message: "Failed to create task assignment" });
+        logRouteError("Error creating task assignment", error);
+        fail(res, 500, "Failed to create task assignment");
       }
     }
   );
@@ -792,8 +747,8 @@ export function registerTeamsRoutes(app: Express): void {
         const assignmentId = parseInt(req.params.assignmentId);
 
         if (isNaN(teamId) || isNaN(taskId) || isNaN(assignmentId)) {
-          return res.status(400).json({
-            message: "Invalid team ID, task ID, or assignment ID",
+          return fail(res, 400, "Invalid team ID, task ID, or assignment ID", {
+            code: "invalid_id",
           });
         }
 
@@ -807,7 +762,7 @@ export function registerTeamsRoutes(app: Express): void {
         if (priority !== undefined) updates.priority = priority;
 
         if (Object.keys(updates).length === 0) {
-          return res.status(400).json({ message: "No updates provided" });
+          return fail(res, 400, "No updates provided");
         }
 
         // The WHERE also binds task and team, so the write cannot reach another row.
@@ -819,8 +774,8 @@ export function registerTeamsRoutes(app: Express): void {
         res.json(updatedAssignment);
       } catch (error) {
         if (error instanceof HttpError) return next(error);
-        console.error("Error updating task assignment:", error);
-        res.status(500).json({ message: "Failed to update task assignment" });
+        logRouteError("Error updating task assignment", error);
+        fail(res, 500, "Failed to update task assignment");
       }
     }
   );
@@ -836,8 +791,8 @@ export function registerTeamsRoutes(app: Express): void {
         const assignmentId = parseInt(req.params.assignmentId);
 
         if (isNaN(teamId) || isNaN(taskId) || isNaN(assignmentId)) {
-          return res.status(400).json({
-            message: "Invalid team ID, task ID, or assignment ID",
+          return fail(res, 400, "Invalid team ID, task ID, or assignment ID", {
+            code: "invalid_id",
           });
         }
 
@@ -851,8 +806,8 @@ export function registerTeamsRoutes(app: Express): void {
         res.json({ message: "Task assignment deleted successfully" });
       } catch (error) {
         if (error instanceof HttpError) return next(error);
-        console.error("Error deleting task assignment:", error);
-        res.status(500).json({ message: "Failed to delete task assignment" });
+        logRouteError("Error deleting task assignment", error);
+        fail(res, 500, "Failed to delete task assignment");
       }
     }
   );
@@ -865,7 +820,7 @@ export function registerTeamsRoutes(app: Express): void {
       try {
         const teamId = parseInt(req.params.teamId);
         if (isNaN(teamId)) {
-          return res.status(400).json({ message: "Invalid team ID" });
+          return fail(res, 400, "Invalid team ID", { code: "invalid_id" });
         }
 
         const userId = getUserId(req);
@@ -873,9 +828,7 @@ export function registerTeamsRoutes(app: Express): void {
         // Check if user can manage the team
         const canManage = await canManageTeam(storage, userId, teamId);
         if (!canManage) {
-          return res.status(403).json({
-            message: "You don't have permission to update team members",
-          });
+          return fail(res, 403, "You don't have permission to update team members");
         }
 
         // Role update functionality removed - this endpoint is kept for backward compatibility
@@ -883,13 +836,13 @@ export function registerTeamsRoutes(app: Express): void {
         const members = await storage.getTeamMembers(teamId);
         const member = members.find((m) => m.userId === req.params.userId);
         if (!member) {
-          return res.status(404).json({ message: "Team member not found" });
+          return fail(res, 404, "Team member not found");
         }
 
         res.json(member);
       } catch (error) {
-        console.error("Error updating team member:", error);
-        res.status(500).json({ message: "Failed to update team member" });
+        logRouteError("Error updating team member", error);
+        fail(res, 500, "Failed to update team member");
       }
     }
   );
@@ -904,8 +857,8 @@ export function registerTeamsRoutes(app: Express): void {
         const status = await storage.getUserTeamAdminStatus(userId);
         res.json(status);
       } catch (error) {
-        console.error("Error fetching user team admin status:", error);
-        res.status(500).json({ message: "Failed to fetch team admin status" });
+        logRouteError("Error fetching user team admin status", error);
+        fail(res, 500, "Failed to fetch team admin status");
       }
     }
   );

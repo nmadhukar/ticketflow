@@ -10,7 +10,7 @@ import { z } from "zod";
 import { isAuthenticated } from "../services/auth";
 import { getUserId, requireAdmin } from "../middleware/admin.middleware";
 import { storage } from "../storage";
-import { HttpError } from "../http/errors";
+import { HttpError, fail, logRouteError } from "../http/errors";
 import type { SsoConfiguration } from "@shared/schema";
 
 /** What an admin may see of the SSO config: the secret is only ever reported as set or not. */
@@ -42,8 +42,8 @@ export function registerSettingsRoutes(app: Express): void {
       const config = await storage.getSsoConfiguration();
       res.json(toPublicSsoConfig(config));
     } catch (error) {
-      console.error("Error fetching SSO configuration:", error);
-      res.status(500).json({ message: "Failed to fetch SSO configuration" });
+      logRouteError("Error fetching SSO configuration", error);
+      fail(res, 500, "Failed to fetch SSO configuration");
     }
   });
 
@@ -58,8 +58,8 @@ export function registerSettingsRoutes(app: Express): void {
       );
       res.json({ configured: isConfigured });
     } catch (error) {
-      console.error("Error checking SSO status:", error);
-      res.status(500).json({ message: "Failed to check SSO status" });
+      logRouteError("Error checking SSO status", error);
+      fail(res, 500, "Failed to check SSO status");
     }
   });
 
@@ -99,7 +99,7 @@ export function registerSettingsRoutes(app: Express): void {
 
       const config = await storage.getSsoConfiguration();
       if (!config?.clientId || !config?.clientSecret || !config?.tenantId) {
-        return res.status(400).json({ message: "SSO not configured" });
+        return fail(res, 400, "SSO not configured", { code: "sso_not_configured" });
       }
 
       // Test the configuration by trying to fetch the OpenID configuration
@@ -108,9 +108,8 @@ export function registerSettingsRoutes(app: Express): void {
       try {
         const response = await fetch(metadataUrl);
         if (!response.ok) {
-          return res.status(400).json({
-            message: "Invalid tenant ID or Azure AD configuration",
-            details: `Failed to fetch metadata from ${metadataUrl}`,
+          return fail(res, 400, "Invalid tenant ID or Azure AD configuration", {
+            code: "sso_test_failed",
           });
         }
 
@@ -120,16 +119,13 @@ export function registerSettingsRoutes(app: Express): void {
           message: "SSO configuration is valid",
           issuer: metadata.issuer,
         });
-      } catch (fetchError: any) {
-        console.error("Error testing SSO config:", fetchError);
-        res.status(400).json({
-          message: "Failed to connect to Azure AD",
-          details: fetchError.message,
-        });
+      } catch (fetchError: unknown) {
+        logRouteError("Error testing SSO config", fetchError);
+        fail(res, 400, "Failed to connect to Azure AD", { code: "sso_test_failed" });
       }
     } catch (error) {
-      console.error("Error testing SSO configuration:", error);
-      res.status(500).json({ message: "Failed to test SSO configuration" });
+      logRouteError("Error testing SSO configuration", error);
+      fail(res, 500, "Failed to test SSO configuration");
     }
   });
 }

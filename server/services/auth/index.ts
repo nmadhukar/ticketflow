@@ -30,6 +30,7 @@ import { requireSecret } from "../../security/secrets";
 import { isAiSystemUserId } from "../../utils/aiSystemUserId";
 import { ServerResponse, type IncomingMessage } from "http";
 import { disconnectUser } from "../../realtime/connections";
+import { fail, logRouteError } from "../../http/errors";
 import { authRateLimit, authRequestRateLimit } from "../../security/rateLimiting";
 import {
   bearerAuth,
@@ -458,13 +459,10 @@ export function setupAuth(app: Express) {
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({
-          message: "Validation error",
-          errors: error.errors,
-        });
+        return fail(res, 400, "Validation error", { details: error.flatten() });
       }
-      console.error("Registration error:", error);
-      res.status(500).json({ message: "Failed to register user" });
+      logRouteError("Registration error", error);
+      fail(res, 500, "Failed to register user");
     }
   });
 
@@ -478,8 +476,8 @@ export function setupAuth(app: Express) {
 
       passport.authenticate("local", (err: any, user: any, info: any) => {
         if (err) {
-          console.error("Authentication error:", err);
-          return res.status(500).json({ message: "Authentication error" });
+          logRouteError("Authentication error", err);
+          return fail(res, 500, "Authentication error");
         }
 
         if (!user) {
@@ -488,9 +486,9 @@ export function setupAuth(app: Express) {
               .status(423)
               .json({ error: "account_locked", message: info.message });
           }
-          return res
-            .status(401)
-            .json({ message: info?.message || "Invalid credentials" });
+          return fail(res, 401, info?.message || "Invalid credentials", {
+            code: "invalid_credentials",
+          });
         }
 
         // An unknown role never gets a session.
@@ -503,9 +501,7 @@ export function setupAuth(app: Express) {
 
         req.login(user, (err) => {
           if (err) {
-            return res
-              .status(500)
-              .json({ message: "Failed to establish session" });
+            return fail(res, 500, "Failed to establish session");
           }
           // Stamped after login (which starts a fresh session) for the revocation check.
           (req.session as any).authAt = authStartedAt;
@@ -522,12 +518,9 @@ export function setupAuth(app: Express) {
       })(req, res, next);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({
-          message: "Validation error",
-          errors: error.errors,
-        });
+        return fail(res, 400, "Validation error", { details: error.flatten() });
       }
-      res.status(500).json({ message: "Login failed" });
+      fail(res, 500, "Login failed");
     }
   });
 
@@ -535,7 +528,7 @@ export function setupAuth(app: Express) {
   app.post("/api/auth/logout", (req, res) => {
     req.logout((err) => {
       if (err) {
-        return res.status(500).json({ message: "Failed to logout" });
+        return fail(res, 500, "Failed to logout");
       }
       res.json({ message: "Logged out successfully" });
     });
@@ -554,7 +547,7 @@ export function setupAuth(app: Express) {
   // Get current user
   app.get("/api/auth/user", (req, res) => {
     if (!req.isAuthenticated() || !req.user) {
-      return res.status(401).json({ message: "Not authenticated" });
+      return fail(res, 401, "Not authenticated");
     }
 
     const user = req.user;
@@ -702,13 +695,10 @@ export function setupAuth(app: Express) {
       res.json({ message: "If the email exists, a reset link has been sent" });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({
-          message: "Validation error",
-          errors: error.errors,
-        });
+        return fail(res, 400, "Validation error", { details: error.flatten() });
       }
-      console.error("Forgot password error:", error);
-      res.status(500).json({ message: "Failed to process request" });
+      logRouteError("Forgot password error", error);
+      fail(res, 500, "Failed to process request");
     }
   });
 
@@ -720,9 +710,7 @@ export function setupAuth(app: Express) {
       // Find user by reset token
       const user = await storage.getUserByResetToken(validatedData.token);
       if (!user) {
-        return res
-          .status(400)
-          .json({ message: "Invalid or expired reset token" });
+        return fail(res, 400, "Invalid or expired reset token", { code: "invalid_reset_token" });
       }
 
       // Hash new password
@@ -740,13 +728,10 @@ export function setupAuth(app: Express) {
       res.json({ message: "Password reset successfully" });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({
-          message: "Validation error",
-          errors: error.errors,
-        });
+        return fail(res, 400, "Validation error", { details: error.flatten() });
       }
-      console.error("Reset password error:", error);
-      res.status(500).json({ message: "Failed to reset password" });
+      logRouteError("Reset password error", error);
+      fail(res, 500, "Failed to reset password");
     }
   });
 
@@ -754,7 +739,7 @@ export function setupAuth(app: Express) {
   app.post("/api/auth/change-password", async (req, res) => {
     try {
       if (!req.isAuthenticated() || !req.user) {
-        return res.status(401).json({ message: "Not authenticated" });
+        return fail(res, 401, "Not authenticated");
       }
       const body = changePasswordSchema.parse(req.body);
       const current = await storage.getUser(req.user.id);
@@ -790,10 +775,10 @@ export function setupAuth(app: Express) {
       res.json({ message: "Password changed" });
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Validation error", errors: error.errors });
+        return fail(res, 400, "Validation error", { details: error.flatten() });
       }
-      console.error("Change password error:", error instanceof Error ? error.message : "unknown");
-      res.status(500).json({ message: "Failed to change password" });
+      logRouteError("Change password error", error);
+      fail(res, 500, "Failed to change password");
     }
   });
 
@@ -808,7 +793,7 @@ export const isAuthenticated: RequestHandler = (req, res, next) => {
   if (req.isAuthenticated()) {
     return next();
   }
-  res.status(401).json({ message: "Unauthorized" });
+  fail(res, 401, "Unauthorized");
 };
 
 /**
@@ -817,12 +802,12 @@ export const isAuthenticated: RequestHandler = (req, res, next) => {
 export function requireRole(...roles: string[]): RequestHandler {
   return (req, res, next) => {
     if (!req.isAuthenticated() || !req.user) {
-      return res.status(401).json({ message: "Unauthorized" });
+      return fail(res, 401, "Unauthorized");
     }
 
     const userRole = normalizeRole(req.user.role);
     if (!userRole || !roles.includes(userRole)) {
-      return res.status(403).json({ message: "Forbidden" });
+      return fail(res, 403, "Forbidden");
     }
 
     next();
