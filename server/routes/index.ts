@@ -169,6 +169,10 @@ const upload = multer({
  * @param app - Express application instance
  * @returns HTTP server with WebSocket support
  */
+const commentBodySchema = z.object({
+  content: z.string().trim().min(1).max(10000),
+});
+
 export async function registerRoutes(app: Express): Promise<Server> {
   registerIdParams(app);
 
@@ -1032,7 +1036,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res) => {
+  app.delete("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res, next) => {
     try {
       const taskId = parseInt(req.params.id);
       const user = req.user;
@@ -1048,8 +1052,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteTask(taskId);
       res.status(204).send();
     } catch (error) {
-      console.error("Error deleting task:", error);
-      res.status(500).json({ message: "Failed to delete task" });
+      next(error);
+    }
+  });
+
+  // Ticket history (same access rule as GET /api/tasks/:id), oldest first.
+  app.get("/api/tasks/:id/history", isAuthenticated, requireTaskAccess(), async (req: any, res, next) => {
+    try {
+      res.json(await storage.getTaskHistory(parseInt(req.params.id)));
+    } catch (error) {
+      next(error);
     }
   });
 
@@ -1069,13 +1081,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     "/api/tasks/:id/comments",
     isAuthenticated,
     requireTaskAccess(),
-    async (req: any, res) => {
+    async (req: any, res, next) => {
       try {
         const taskId = parseInt(req.params.id);
         const userId = getUserId(req);
 
+        // The body is only `content`; ticket and author come from the request,
+        // never from the client. Trimmed, 1..10000 characters.
+        const { content } = commentBodySchema.parse(req.body ?? {});
         const commentData = insertTaskCommentSchema.parse({
-          ...req.body,
+          content,
           taskId,
           userId,
         });
@@ -1096,13 +1111,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         res.status(201).json(comment);
       } catch (error) {
-        if (error instanceof z.ZodError) {
-          return res
-            .status(400)
-            .json({ message: "Invalid comment data", errors: error.errors });
-        }
-        console.error("Error creating comment:", error);
-        res.status(500).json({ message: "Failed to create comment" });
+        // ZodError and HttpError go to the shared error contract (400 / its status).
+        next(error);
       }
     }
   );
@@ -3102,101 +3112,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
-  // Get all user guides (filtered by query params)
-  app.get("/api/guides", isAuthenticated, async (req, res) => {
-    try {
-      const { category, type, published } = req.query;
-      const guides = await storage.getUserGuides({
-        category: category as string,
-        type: type as string,
-        isPublished: published !== undefined ? published === "true" : undefined,
-      });
-      res.json(guides);
-    } catch (error) {
-      console.error("Error fetching guides:", error);
-      res.status(500).json({ message: "Failed to fetch guides" });
-    }
-  });
-
-  // Get single user guide
-  app.get("/api/guides/:id", isAuthenticated, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const guide = await storage.getUserGuideById(id);
-
-      if (!guide) {
-        return res.status(404).json({ message: "Guide not found" });
-      }
-
-      // Increment view count
-      await storage.incrementGuideViewCount(id);
-
-      res.json(guide);
-    } catch (error) {
-      console.error("Error fetching guide:", error);
-      res.status(500).json({ message: "Failed to fetch guide" });
-    }
-  });
-
-  // Create user guide (admin only)
-  app.post("/api/admin/guides", isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-
-      if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
-      }
-
-      const guide = await storage.createUserGuide({
-        ...req.body,
-        createdBy: userId,
-      });
-      res.json(guide);
-    } catch (error) {
-      console.error("Error creating guide:", error);
-      res.status(500).json({ message: "Failed to create guide" });
-    }
-  });
-
-  // Update user guide (admin only)
-  app.put("/api/admin/guides/:id", isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-
-      if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
-      }
-
-      const id = parseInt(req.params.id);
-      const guide = await storage.updateUserGuide(id, req.body);
-      res.json(guide);
-    } catch (error) {
-      console.error("Error updating guide:", error);
-      res.status(500).json({ message: "Failed to update guide" });
-    }
-  });
-
-  // Delete user guide (admin only)
-  app.delete("/api/admin/guides/:id", isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-
-      if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
-      }
-
-      const id = parseInt(req.params.id);
-      await storage.deleteUserGuide(id);
-      res.json({ message: "Guide deleted successfully" });
-    } catch (error) {
-      console.error("Error deleting guide:", error);
-      res.status(500).json({ message: "Failed to delete guide" });
-    }
-  });
-
   // Cancel user invitation (admin only)
   app.delete(
     "/api/admin/invitations/:id",
@@ -4398,10 +4313,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
 
-      const { category, published } = req.query;
+      // status and source filters ported from the removed shadowed copy: the
+      // knowledge-base page sends them and the served copy silently ignored them.
+      const { category, status, source, published } = req.query as any;
       const filters: any = {};
       if (category) filters.category = category as string;
-      if (published !== undefined) filters.isPublished = published === "true";
+      if (status) filters.status = status as string;
+      if (source) filters.source = source as string;
+      if (published !== undefined && published !== "all") {
+        filters.isPublished = published === "true" || published === "published";
+      }
 
       const articles = await storage.getAllKnowledgeArticles(filters);
       res.json(articles);
@@ -4421,12 +4342,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
 
-      const articleData = {
-        ...req.body,
-        createdBy: userId,
-      };
+      // Ported from the removed shadowed copy: required fields and a field
+      // whitelist instead of spreading the whole body into the insert.
+      const { title, summary, content, category, tags, isPublished } = req.body;
+      if (!title || !content) {
+        return res
+          .status(400)
+          .json({ message: "Title and content are required" });
+      }
 
-      const article = await storage.createKnowledgeArticle(articleData);
+      const article = await storage.createKnowledgeArticle({
+        title,
+        summary: summary || null,
+        content,
+        category: category || "general",
+        tags: tags || [],
+        isPublished: isPublished || false,
+        createdBy: userId,
+        source: "manual",
+      });
       res.status(201).json(article);
     } catch (error) {
       console.error("Error creating knowledge article:", error);
@@ -4446,9 +4380,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const articleId = parseInt(req.params.id);
+        // Protected fields ported from the removed shadowed copy.
+        const updates = { ...req.body };
+        delete updates.id;
+        delete updates.createdAt;
+        delete updates.usageCount;
+        delete updates.createdBy;
+
         const article = await storage.updateKnowledgeArticle(
           articleId,
-          req.body
+          updates
         );
         res.json(article);
       } catch (error) {
@@ -4493,14 +4434,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const articleId = parseInt(req.params.id);
         const { isPublished } = req.body;
 
-        const { knowledgeBaseService } = await import(
-          "../services/ai/knowledgeBase"
+        // Sets status together with isPublished (the shadowed copy's fix); the
+        // old service calls left `status` stale.
+        await storage.setKnowledgeArticleStatus(
+          articleId,
+          isPublished ? "published" : "draft"
         );
-        if (isPublished) {
-          await knowledgeBaseService.publishArticle(articleId);
-        } else {
-          await knowledgeBaseService.unpublishArticle(articleId);
-        }
 
         res.json({ message: "Article updated" });
       } catch (error) {
@@ -5531,69 +5470,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Knowledge Base Management Routes (admin only)
 
-  // Get all knowledge articles with filtering
-  app.get("/api/admin/knowledge", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-
-      if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
-      }
-
-      const { category, status, source, published } = req.query as any;
-      const filters: any = {};
-      if (category) filters.category = category as string;
-      if (status) filters.status = status as string;
-      if (source) filters.source = source as string;
-      if (published !== undefined && published !== "all") {
-        filters.isPublished = published === "true" || published === "published";
-      }
-
-      const articles = await storage.getAllKnowledgeArticles(filters);
-      res.json(articles);
-    } catch (error) {
-      console.error("Error fetching knowledge articles:", error);
-      res.status(500).json({ message: "Failed to fetch knowledge articles" });
-    }
-  });
-
-  // Create a new knowledge article
-  app.post("/api/admin/knowledge", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-
-      if (user?.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
-      }
-
-      const { title, summary, content, category, tags, isPublished } = req.body;
-
-      if (!title || !content) {
-        return res
-          .status(400)
-          .json({ message: "Title and content are required" });
-      }
-
-      const article = await storage.createKnowledgeArticle({
-        title,
-        summary: summary || null,
-        content,
-        category: category || "general",
-        tags: tags || [],
-        isPublished: isPublished || false,
-        createdBy: userId,
-        source: "manual",
-      });
-
-      res.status(201).json(article);
-    } catch (error) {
-      console.error("Error creating knowledge article:", error);
-      res.status(500).json({ message: "Failed to create knowledge article" });
-    }
-  });
-
   // Get a specific knowledge article
   app.get(
     "/api/admin/knowledge/:id",
@@ -5624,83 +5500,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
-  // Update a knowledge article
-  app.put(
-    "/api/admin/knowledge/:id",
-    isAuthenticated,
-    async (req: any, res) => {
-      try {
-        const userId = getUserId(req);
-        const user = await storage.getUser(userId);
-
-        if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
-        }
-
-        const id = parseInt(req.params.id);
-        const updates = req.body;
-
-        // Ensure we don't update protected fields
-        delete updates.id;
-        delete updates.createdAt;
-        delete updates.usageCount;
-        delete updates.createdBy;
-
-        const article = await storage.updateKnowledgeArticle(id, updates);
-        res.json(article);
-      } catch (error) {
-        console.error("Error updating knowledge article:", error);
-        res.status(500).json({ message: "Failed to update knowledge article" });
-      }
-    }
-  );
-
-  // Delete a knowledge article
-  app.delete(
-    "/api/admin/knowledge/:id",
-    isAuthenticated,
-    async (req: any, res) => {
-      try {
-        const userId = getUserId(req);
-        const user = await storage.getUser(userId);
-
-        if (user?.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
-        }
-
-        const id = parseInt(req.params.id);
-        await storage.deleteKnowledgeArticle(id);
-        res.json({ message: "Knowledge article deleted successfully" });
-      } catch (error) {
-        console.error("Error deleting knowledge article:", error);
-        res.status(500).json({ message: "Failed to delete knowledge article" });
-      }
-    }
-  );
-
-  // Publish / Unpublish / Archive / Unarchive endpoints
-  app.patch(
-    "/api/admin/knowledge/:id/publish",
-    isAuthenticated,
-    async (req: any, res) => {
-      try {
-        const userId = getUserId(req);
-        const user = await storage.getUser(userId);
-        if (user?.role !== "admin")
-          return res.status(403).json({ message: "Admin access required" });
-        const id = parseInt(req.params.id);
-        const article = await storage.setKnowledgeArticleStatus(
-          id,
-          "published"
-        );
-        res.json(article);
-      } catch (error) {
-        console.error("Error publishing article:", error);
-        res.status(500).json({ message: "Failed to publish article" });
-      }
-    }
-  );
-
+  // Unpublish / Archive / Unarchive endpoints (publish is registered with the
+  // other admin knowledge routes above)
   app.patch(
     "/api/admin/knowledge/:id/unpublish",
     isAuthenticated,
@@ -5757,26 +5558,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
   );
-
-  // Public knowledge base search (for all users)
-  app.get("/api/knowledge/search", isAuthenticated, async (req: any, res) => {
-    try {
-      const { q: query, category } = req.query;
-
-      if (!query) {
-        return res.status(400).json({ message: "Search query is required" });
-      }
-
-      const articles = await storage.searchKnowledgeBase(
-        query as string,
-        category as string
-      );
-      res.json(articles);
-    } catch (error) {
-      console.error("Error searching knowledge base:", error);
-      res.status(500).json({ message: "Failed to search knowledge base" });
-    }
-  });
 
   // Get published knowledge articles (for all users)
   app.get("/api/knowledge/articles", isAuthenticated, async (req: any, res) => {

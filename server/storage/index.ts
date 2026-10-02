@@ -82,6 +82,9 @@ import {
   type BedrockSettings,
   type InsertBedrockSettings,
   aiUsage,
+  aiFeedback,
+  ticketAutoResponses,
+  ticketComplexityScores,
   type AIUsage,
   type InsertAIUsage,
   TeamTaskAssignment,
@@ -91,6 +94,7 @@ import { db } from "./db";
 import {
   eq,
   desc,
+  asc,
   and,
   or,
   like,
@@ -113,6 +117,7 @@ import {
 } from "../permissions/ticketAccess";
 import { LOCKOUT_MINUTES, MAX_FAILED_LOGINS } from "../services/auth/lockout";
 import { hashResetToken } from "../utils/resetToken";
+import { s3Service } from "../services/s3Service";
 import { PUBLIC_USER_FIELDS, type PublicUser } from "../utils/publicUser";
 
 /**
@@ -949,19 +954,30 @@ export class DatabaseStorage implements IStorage {
       )
       .returning();
     if (!updatedTask) {
+      // A conditional status write that finds another status is a conflict; a
+      // plain update that touches no row means the ticket was deleted mid-request.
+      if (opts.expectedStatus === undefined) {
+        throw new HttpError(404, "not_found", "Ticket not found");
+      }
       throw new HttpError(409, "invalid_transition", "The ticket changed while you were editing it; reload and try again");
     }
 
-    // Add history entries for changes
+    // Add history entries for changes. null, 0, false and "" are real values
+    // and are recorded as such (null stays SQL NULL, never an empty string).
+    const asHistoryValue = (v: unknown): string | null =>
+      v === null || v === undefined ? null : v instanceof Date ? v.toISOString() : String(v);
     for (const [field, newValue] of Object.entries(updates)) {
-      if (newValue !== undefined && newValue !== (currentTask as any)[field]) {
+      if (newValue === undefined) continue;
+      const oldText = asHistoryValue((currentTask as any)[field]);
+      const newText = asHistoryValue(newValue);
+      if (newText !== oldText) {
         await db.insert(taskHistory).values({
           taskId: id,
           userId,
           action: "updated",
           field,
-          oldValue: String((currentTask as any)[field] || ""),
-          newValue: String(newValue),
+          oldValue: oldText,
+          newValue: newText,
         });
       }
     }
@@ -969,8 +985,81 @@ export class DatabaseStorage implements IStorage {
     return updatedTask;
   }
 
+  /**
+   * Deletes a ticket and everything that hangs off it in ONE transaction.
+   * AI cost rows (ai_usage, ai_feedback) are kept: their ticket_id is set to
+   * NULL. S3 objects are removed only after the commit; a failure there is
+   * logged (key and error message only) and never undoes the delete.
+   */
   async deleteTask(id: number): Promise<void> {
-    await db.delete(tasks).where(eq(tasks.id, id));
+    const s3Keys: string[] = await db.transaction(async (tx) => {
+      const attachments = await tx
+        .select({ fileUrl: taskAttachments.fileUrl })
+        .from(taskAttachments)
+        .where(eq(taskAttachments.taskId, id));
+
+      await tx.update(aiUsage).set({ ticketId: null }).where(eq(aiUsage.ticketId, id));
+      await tx.update(aiFeedback).set({ ticketId: null }).where(eq(aiFeedback.ticketId, id));
+      await tx.delete(taskComments).where(eq(taskComments.taskId, id));
+      await tx.delete(taskHistory).where(eq(taskHistory.taskId, id));
+      await tx.delete(taskAttachments).where(eq(taskAttachments.taskId, id));
+      await tx.delete(ticketAutoResponses).where(eq(ticketAutoResponses.ticketId, id));
+      await tx.delete(ticketComplexityScores).where(eq(ticketComplexityScores.ticketId, id));
+      await tx.delete(learningQueue).where(eq(learningQueue.ticketId, id));
+      await tx.delete(teamTaskAssignments).where(eq(teamTaskAssignments.taskId, id));
+      const deleted = await tx.delete(tasks).where(eq(tasks.id, id)).returning({ id: tasks.id });
+      if (deleted.length === 0) {
+        throw new HttpError(404, "not_found", "Ticket not found");
+      }
+      return attachments
+        .map((a) => a.fileUrl)
+        .filter((u): u is string => !!u && !u.startsWith("data:"))
+        .map((u) => s3Service.extractKeyFromUrl(u));
+    });
+
+    for (const key of s3Keys) {
+      try {
+        await s3Service.deleteFile(key);
+      } catch (error) {
+        console.error(
+          `Failed to delete S3 object "${key}" after ticket ${id} was deleted:`,
+          error instanceof Error ? error.message : "unknown error"
+        );
+      }
+    }
+  }
+
+  /** A ticket's history, oldest first, each entry with the actor as a public user. */
+  async getTaskHistory(taskId: number): Promise<
+    Array<{
+      id: number;
+      taskId: number;
+      userId: string;
+      action: string;
+      field: string | null;
+      oldValue: string | null;
+      newValue: string | null;
+      createdAt: Date | null;
+      user?: PublicUser;
+    }>
+  > {
+    const rows = await db
+      .select({
+        id: taskHistory.id,
+        taskId: taskHistory.taskId,
+        userId: taskHistory.userId,
+        action: taskHistory.action,
+        field: taskHistory.field,
+        oldValue: taskHistory.oldValue,
+        newValue: taskHistory.newValue,
+        createdAt: taskHistory.createdAt,
+        user: publicUserColumns,
+      })
+      .from(taskHistory)
+      .leftJoin(users, eq(taskHistory.userId, users.id))
+      .where(eq(taskHistory.taskId, taskId))
+      .orderBy(asc(taskHistory.createdAt), asc(taskHistory.id));
+    return rows.map((r) => ({ ...r, user: r.user || undefined }));
   }
 
   // Team operations

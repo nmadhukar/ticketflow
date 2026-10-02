@@ -162,11 +162,16 @@ export function setupAuth(app: Express) {
 
   app.set("trust proxy", 1);
   // Auth rate limits (every environment), registered before the handlers.
-  app.post("/api/auth/login", authRateLimit);
-  app.post("/api/auth/forgot-password", authRequestRateLimit);
-  app.post("/api/auth/reset-password", authRequestRateLimit);
-
-  app.post("/api/auth/change-password", authRequestRateLimit);
+  // Mounted with app.use (POST only), not as a second app.post route, so the route
+  // table keeps exactly one registration per method + path (noDuplicateRoutes).
+  const limitPost = (path: string, limiter: RequestHandler) =>
+    app.use(path, (req, res, next) =>
+      req.method === "POST" ? limiter(req, res, next) : next()
+    );
+  limitPost("/api/auth/login", authRateLimit);
+  limitPost("/api/auth/forgot-password", authRequestRateLimit);
+  limitPost("/api/auth/reset-password", authRequestRateLimit);
+  limitPost("/api/auth/change-password", authRequestRateLimit);
 
   app.use(session(sessionSettings));
   app.use(passport.initialize());

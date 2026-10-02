@@ -180,6 +180,19 @@ export interface IStorage {
     opts?: { expectedStatus?: string }
   ): Promise<Task>;
   deleteTask(id: number): Promise<void>;
+  getTaskHistory(taskId: number): Promise<
+    Array<{
+      id: number;
+      taskId: number;
+      userId: string;
+      action: string;
+      field: string | null;
+      oldValue: string | null;
+      newValue: string | null;
+      createdAt: Date | null;
+      user?: PublicUser;
+    }>
+  >;
 
   // Team operations
   createTeam(team: InsertTeam): Promise<Team>;

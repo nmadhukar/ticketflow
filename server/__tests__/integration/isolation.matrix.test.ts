@@ -98,6 +98,7 @@ const ROUTES: RouteSpec[] = [
     call: (a, id) => a.post(`/api/tasks/${id}/comments`).send({ content: "matrix comment" }),
     allowed: [201],
   },
+  { name: "GET /api/tasks/:id/history", call: (a, id) => a.get(`/api/tasks/${id}/history`), allowed: [200] },
   { name: "GET /api/tasks/:id/attachments", call: (a, id) => a.get(`/api/tasks/${id}/attachments`), allowed: [200] },
   {
     // No file and no S3 in the test env: the gate passes, then 503 (storage off) or 400 (no file).
