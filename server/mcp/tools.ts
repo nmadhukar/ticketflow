@@ -133,7 +133,10 @@ export function registerTicketTools(server: McpServer, user: User): void {
     {
       description:
         "Permanently delete a ticket and its comments, history and attachments. Administrators only. Pass confirm: true.",
-      inputSchema: z.object({ id, confirm: z.boolean().describe("Must be true to delete").optional() }),
+      inputSchema: z.object({ id, confirm: z
+          .union([z.boolean(), z.string()])
+          .describe("Must be the boolean true to delete; anything else is a VALIDATION error")
+          .optional() }),
     },
     (args) => runTool(() => deleteTicket(user, args.id, args.confirm === true))
   );
