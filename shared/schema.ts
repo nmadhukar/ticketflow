@@ -218,6 +218,14 @@ export const ticketNumberCounters = pgTable(
   (table) => [primaryKey({ columns: [table.prefix, table.year] })]
 );
 
+// SNS MessageIds already handled by POST /api/email/inbound. SNS delivers at least once,
+// so the endpoint claims the id first (INSERT ... ON CONFLICT DO NOTHING); a duplicate
+// delivery finds the row and does nothing. See migrations/0018_sns_message_dedupe.sql.
+export const snsMessageDedupe = pgTable("sns_message_dedupe", {
+  messageId: varchar("message_id", { length: 200 }).primaryKey(),
+  receivedAt: timestamp("received_at").defaultNow().notNull(),
+});
+
 // Tasks table
 export const tasks = pgTable("tasks", {
   id: serial("id").primaryKey(),

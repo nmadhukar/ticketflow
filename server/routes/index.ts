@@ -91,7 +91,6 @@ import {
 } from "drizzle-orm";
 import { teams, departments, users } from "@shared/schema";
 import { excludeAiSystemUser, ensureAiSystemUser } from "../utils/aiSystemUser";
-import { runCreateTimeAutoResponse } from "../services/ai/createTimeAutoResponse";
 import { describeAIError, isQuotaBlocked, sendQuotaExceeded } from "../services/ai/aiErrors";
 import { requireStaff, isStaffRole } from "../permissions/staff";
 import { loadAiTicket } from "../services/ai/aiTicketGate";
@@ -114,6 +113,13 @@ import {
 } from "../permissions/ticketAccess";
 import { HttpError, asyncHandler } from "../http/errors";
 import { createTicketSchema, STAFF_ONLY_TICKET_FIELDS } from "../services/tickets/schemas";
+import { commentBodySchema } from "../services/tickets/commentSchema";
+import {
+  createTicketRecord,
+  runTicketCreatedHooks,
+  setTicketCreatedBroadcaster,
+} from "../services/tickets/create";
+import { registerEmailRoutes } from "./email";
 import { assertAgentMayAssign, assertAssigneesExist } from "../services/tickets/assignees";
 import { parseIdParam } from "../http/params";
 import { registerTeamsRoutes } from "./teams";
@@ -171,9 +177,6 @@ const upload = multer({
   },
 });
 
-const commentBodySchema = z.object({
-  content: z.string().trim().min(1).max(10000),
-});
 
 /**
  * Registers all application routes and returns HTTP server instance
@@ -190,6 +193,10 @@ const knowledgeSearchQuery = z.object({
 
 export async function registerRoutes(app: Express): Promise<Server> {
   registerIdParams(app);
+
+  // SNS calls this without a session: its signature is the only authentication. Mounted
+  // before setupAuth so no session or auth middleware can touch it.
+  registerEmailRoutes(app);
 
   // Auth middleware
   setupAuth(app);
@@ -779,11 +786,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const finalBody: Record<string, unknown> = { ...createTicketSchema.parse(req.body) };
         if (isCustomer) await checkAssignment(finalBody);
         else normalizeAssigneeUpdate(finalBody);
-        const taskData = insertTaskSchema.parse({
-          ...finalBody,
-          createdBy: userId,
-        });
-        const task = await storage.createTask(taskData);
+        const task = await createTicketRecord(finalBody, userId);
 
         // 4. Create attachment records (if files provided)
         const attachmentErrors: string[] = [];
@@ -808,58 +811,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
 
-        // AI auto-response: reads the settings now, authored by the AI system
-        // user, never fails the create (logs type/status only).
-        await runCreateTimeAutoResponse(task);
-
-        // WS: notify creator and, if team routed, team members (placeholder selection)
-        try {
-          const creatorMsg = envelope("ticket:created", {
-            id: task.id,
-            ticketNumber: (task as any).ticketNumber,
-            title: task.title,
-            assigneeType: task.assigneeType,
-            assigneeId: task.assigneeId,
-            assigneeTeamId: (task as any).assigneeTeamId,
-          });
-          // Notify creator
-          const creatorId = userId;
-          broadcastToMany([creatorId], creatorMsg);
-        } catch (e) {
-          console.error("WS notify ticket:created error:", e);
-        }
-
-        // Send Teams notification for new task
-        try {
-          const user = await storage.getUser(userId);
-          const allUsers = await storage.getAllUsers();
-          const notificationPromises = allUsers.map(async (notifyUser) => {
-            const settings = await storage.getTeamsIntegrationSettings(
-              notifyUser.id
-            );
-            if (
-              settings?.enabled &&
-              settings.notificationTypes?.includes("ticket_created")
-            ) {
-              const actionUrl = `${req.protocol}://${req.get("host")}/my-tasks`;
-              const message = `New ticket created by ${
-                user?.email || "a user"
-              }`;
-
-              if (settings.webhookUrl) {
-                await teamsIntegration.sendWebhookNotification(
-                  settings.webhookUrl,
-                  task,
-                  message,
-                  actionUrl
-                );
-              }
-            }
-          });
-          await Promise.allSettled(notificationPromises);
-        } catch (error) {
-          console.error("Error sending Teams notifications:", error);
-        }
+        // After-create effects shared with inbound email: AI auto-response (settings,
+        // never fails the create), realtime broadcast to the creator, Teams webhooks.
+        await runTicketCreatedHooks(task, userId, `${req.protocol}://${req.get("host")}`);
 
         // Return task with warning if some attachments failed
         if (attachmentErrors.length > 0) {
@@ -5210,6 +5164,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (c && c.readyState === WebSocket.OPEN) send(c, message);
     }
   }
+
+  // Inbound email creates tickets outside this file; it broadcasts through the same sockets.
+  setTicketCreatedBroadcaster((task, creatorId) => {
+    broadcastToMany(
+      [creatorId],
+      envelope("ticket:created", {
+        id: task.id,
+        ticketNumber: task.ticketNumber,
+        title: task.title,
+        assigneeType: task.assigneeType,
+        assigneeId: task.assigneeId,
+        assigneeTeamId: task.assigneeTeamId,
+      })
+    );
+  });
 
   wss.on("connection", (ws, _req) => {
     console.log("WebSocket client connected");
