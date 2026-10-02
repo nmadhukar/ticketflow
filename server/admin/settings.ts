@@ -6,22 +6,41 @@
  */
 
 import type { Express } from "express";
+import { z } from "zod";
 import { isAuthenticated } from "../services/auth";
 import { getUserId, requireAdmin } from "../middleware/admin.middleware";
 import { storage } from "../storage";
+import { HttpError } from "../http/errors";
+import type { SsoConfiguration } from "@shared/schema";
+
+/** What an admin may see of the SSO config: the secret is only ever reported as set or not. */
+function toPublicSsoConfig(config: SsoConfiguration | undefined) {
+  return {
+    clientId: config?.clientId ?? "",
+    tenantId: config?.tenantId ?? "",
+    hasClientSecret: !!config?.clientSecret,
+  };
+}
+
+const ssoConfigBody = z.object({
+  clientId: z.string().trim().max(255).optional().nullable(),
+  tenantId: z.string().trim().max(255).optional().nullable(),
+  // Absent, null or blank keeps the stored secret; a non-empty value replaces it.
+  clientSecret: z.string().max(1024).optional().nullable(),
+});
 
 /**
  * Register company settings and branding routes
  */
 export function registerSettingsRoutes(app: Express): void {
   // SSO Configuration Routes
-  // GET /api/sso/config - Get SSO configuration (admin only)
+  // GET /api/sso/config - Get SSO configuration (admin only). Never returns clientSecret.
   app.get("/api/sso/config", isAuthenticated, async (req: any, res) => {
     try {
       if (!(await requireAdmin(req, res))) return;
 
       const config = await storage.getSsoConfiguration();
-      res.json(config || { clientId: "", clientSecret: "", tenantId: "" });
+      res.json(toPublicSsoConfig(config));
     } catch (error) {
       console.error("Error fetching SSO configuration:", error);
       res.status(500).json({ message: "Failed to fetch SSO configuration" });
@@ -45,19 +64,31 @@ export function registerSettingsRoutes(app: Express): void {
   });
 
   // POST /api/sso/config - Update SSO configuration (admin only)
-  app.post("/api/sso/config", isAuthenticated, async (req: any, res) => {
+  app.post("/api/sso/config", isAuthenticated, async (req: any, res, next) => {
     try {
       if (!(await requireAdmin(req, res))) return;
 
-      const userId = getUserId(req);
+      const parsed = ssoConfigBody.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        throw new HttpError(
+          400,
+          "validation_failed",
+          "Invalid input",
+          parsed.error.flatten()
+        );
+      }
+      const body = parsed.data;
+      const current = await storage.getSsoConfiguration();
+      const submitted = body.clientSecret?.trim();
       const config = await storage.upsertSsoConfiguration({
-        ...req.body,
-        updatedBy: userId,
+        clientId: body.clientId ?? current?.clientId ?? null,
+        tenantId: body.tenantId ?? current?.tenantId ?? null,
+        clientSecret: submitted ? submitted : current?.clientSecret ?? null,
+        updatedBy: getUserId(req),
       });
-      res.json(config);
+      res.json(toPublicSsoConfig(config));
     } catch (error) {
-      console.error("Error updating SSO configuration:", error);
-      res.status(500).json({ message: "Failed to update SSO configuration" });
+      next(error);
     }
   });
 

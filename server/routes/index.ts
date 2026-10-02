@@ -56,7 +56,6 @@ import {
   insertTaskSchema,
   insertTaskCommentSchema,
   insertTaskAttachmentSchema,
-  insertApiKeySchema,
   ticketAutoResponses,
   ticketComplexityScores,
   knowledgeArticles,
@@ -193,7 +192,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Auth middleware
   setupAuth(app);
-  setupMicrosoftAuth(app);
+  setupMicrosoftAuth(app).catch(() => {
+    console.error("Microsoft auth setup failed; SSO is unavailable.");
+  });
 
   registerAdminRoutes(app);
   registerTeamsRoutes(app);
@@ -1649,137 +1650,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Company settings routes moved to server/admin/settings.ts
-
-  // API key routes
-  app.get("/api/api-keys", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const apiKeys = await storage.getApiKeys(userId);
-      // Don't send the actual key hashes to the client
-      const sanitizedKeys = apiKeys.map((key) => ({
-        ...key,
-        keyHash: undefined,
-      }));
-      res.json(sanitizedKeys);
-    } catch (error) {
-      console.error("Error fetching API keys:", error);
-      res.status(500).json({ message: "Failed to fetch API keys" });
-    }
-  });
-
-  app.post("/api/api-keys", isAuthenticated, async (req: any, res) => {
-    try {
-      const userId = getUserId(req);
-      const apiKeyData = insertApiKeySchema.parse({
-        ...req.body,
-        userId,
-      });
-      const { apiKey, plainKey } = await storage.createApiKey(apiKeyData);
-      res.status(201).json({
-        ...apiKey,
-        keyHash: undefined,
-        plainKey, // Only sent once on creation
-      });
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res
-          .status(400)
-          .json({ message: "Invalid API key data", errors: error.errors });
-      }
-      console.error("Error creating API key:", error);
-      res.status(500).json({ message: "Failed to create API key" });
-    }
-  });
-
-  app.delete("/api/api-keys/:id", isAuthenticated, async (req: any, res) => {
-    try {
-      const keyId = parseInt(req.params.id);
-      const userId = getUserId(req);
-
-      // Verify the key belongs to the user
-      const apiKeys = await storage.getApiKeys(userId);
-      const keyExists = apiKeys.some((key) => key.id === keyId);
-
-      if (!keyExists) {
-        return res.status(404).json({ message: "API key not found" });
-      }
-
-      await storage.revokeApiKey(keyId);
-      res.status(204).send();
-    } catch (error) {
-      console.error("Error revoking API key:", error);
-      res.status(500).json({ message: "Failed to revoke API key" });
-    }
-  });
-
-  // Save Perplexity API key
-  app.post("/api/api-keys/perplexity", isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const user = await storage.getUser(userId);
-
-      if (!user || user.role !== "admin") {
-        return res.status(403).json({ message: "Admin access required" });
-      }
-
-      const { apiKey } = req.body;
-      if (!apiKey) {
-        return res.status(400).json({ message: "API key is required" });
-      }
-
-      // Check if Perplexity key already exists
-      const existingKeys = await storage.getApiKeys("system");
-      const perplexityKey = existingKeys.find(
-        (key) => key.name === "Perplexity API Key"
-      );
-
-      if (perplexityKey) {
-        // Update existing key
-        await storage.updateApiKey(perplexityKey.id, { keyHash: apiKey });
-      } else {
-        // Create new key
-        await storage.createApiKey({
-          userId: "system",
-          name: "Perplexity API Key",
-          // keyHash: apiKey,
-          // keyPrefix: apiKey.substring(0, 8),
-          permissions: ["ai_chat"],
-          isActive: true,
-        });
-      }
-
-      res.json({ message: "Perplexity API key saved successfully" });
-    } catch (error) {
-      console.error("Error saving Perplexity API key:", error);
-      res.status(500).json({ message: "Failed to save Perplexity API key" });
-    }
-  });
-
-  // Get Perplexity API key status
-  app.get(
-    "/api/api-keys/perplexity/status",
-    isAuthenticated,
-    async (req, res) => {
-      try {
-        const userId = getUserId(req);
-        const user = await storage.getUser(userId);
-
-        if (!user || user.role !== "admin") {
-          return res.status(403).json({ message: "Admin access required" });
-        }
-
-        const apiKeys = await storage.getApiKeys("system");
-        const perplexityKey = apiKeys.find(
-          (key) => key.name === "Perplexity API Key" && key.isActive
-        );
-
-        res.json({ exists: !!perplexityKey });
-      } catch (error) {
-        console.error("Error checking Perplexity API key:", error);
-        res.status(500).json({ message: "Failed to check Perplexity API key" });
-      }
-    }
-  );
 
   // Bedrock settings routes (admin only)
   app.get("/api/bedrock/settings", isAuthenticated, async (req: any, res) => {

@@ -14,6 +14,8 @@ export interface SeederSet {
   migrateLegacyRoles?(): Promise<unknown>;
   /** Startup data fix-up: consistent assignee columns on tickets. Runs right after the role fix-up. */
   migrateAssigneeTypes?(): Promise<unknown>;
+  /** Startup data fix-up: API keys stored without a hash are switched off. Runs right after the other fix-ups. */
+  deactivateLegacyApiKeys?(): Promise<unknown>;
   systemUser(): Promise<void>;
   /** The "ai-assistant" account AI comments are authored by. Runs always (not behind SEED_DEMO_DATA). */
   aiSystemUser(): Promise<unknown>;
@@ -36,11 +38,13 @@ async function defaultSeeders(): Promise<SeederSet> {
   const { deactivateDemoAccounts } = await import("./deactivateDemoAccounts");
   const { migrateLegacyRoles } = await import("./legacyRoleFixup");
   const { migrateAssigneeTypes } = await import("./assigneeTypeFixup");
+  const { deactivateLegacyApiKeys } = await import("./legacyApiKeyFixup");
   const { ensureAiSystemUser } = await import("../utils/aiSystemUser");
   return {
     aiSystemUser: ensureAiSystemUser,
     migrateLegacyRoles,
     migrateAssigneeTypes,
+    deactivateLegacyApiKeys,
     systemUser: seedSystemUser,
     deactivateDemoAccounts,
     bootstrapAdmin: seedBootstrapAdmin,
@@ -65,6 +69,7 @@ export async function runSeeders(
   // Role data fix-up first, before anything reads roles.
   await s.migrateLegacyRoles?.();
   await s.migrateAssigneeTypes?.();
+  await s.deactivateLegacyApiKeys?.();
   await s.systemUser();
   await s.aiSystemUser();
   await s.emailTemplates();

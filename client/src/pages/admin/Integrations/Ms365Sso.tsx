@@ -32,11 +32,16 @@ const Ms365Sso = () => {
     retry: false,
   });
 
+  // The server never sends the secret, only whether one is stored. The field
+  // stays empty; leaving it empty on save keeps the stored secret.
+  const hasStoredSecret = !!(ssoConfigData as any)?.hasClientSecret;
+  const secretReady = !!ssoConfig.clientSecret || hasStoredSecret;
+
   useEffect(() => {
     if (ssoConfigData) {
       setSsoConfig({
         clientId: (ssoConfigData as any).clientId || "",
-        clientSecret: (ssoConfigData as any).clientSecret || "",
+        clientSecret: "",
         tenantId: (ssoConfigData as any).tenantId || "",
       });
     }
@@ -44,7 +49,11 @@ const Ms365Sso = () => {
 
   const saveSsoConfigMutation = useMutation({
     mutationFn: async (config: typeof ssoConfig) => {
-      return await apiRequest("POST", "/api/sso/config", config);
+      const { clientSecret, ...rest } = config;
+      return await apiRequest("POST", "/api/sso/config", {
+        ...rest,
+        ...(clientSecret ? { clientSecret } : {}),
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/sso/config"] });
@@ -97,7 +106,12 @@ const Ms365Sso = () => {
             <Input
               id="client-secret"
               type="password"
-              placeholder="Enter your Microsoft App Client Secret"
+              autoComplete="new-password"
+              placeholder={
+                hasStoredSecret
+                  ? "Secret set (leave blank to keep it)"
+                  : "Enter your Microsoft App Client Secret"
+              }
               value={ssoConfig.clientSecret}
               onChange={(e) =>
                 setSsoConfig({
@@ -107,7 +121,9 @@ const Ms365Sso = () => {
               }
             />
             <p className="text-sm text-muted-foreground">
-              The client secret value from your Azure AD app registration
+              {hasStoredSecret
+                ? "A client secret is set. Enter a new value only to replace it."
+                : "The client secret value from your Azure AD app registration"}
             </p>
           </div>
 
@@ -160,23 +176,19 @@ const Ms365Sso = () => {
           <div className="flex items-center space-x-2">
             <div
               className={`w-3 h-3 rounded-full ${
-                ssoConfig.clientId &&
-                ssoConfig.clientSecret &&
-                ssoConfig.tenantId
+                ssoConfig.clientId && secretReady && ssoConfig.tenantId
                   ? "bg-green-500"
                   : "bg-red-500"
               }`}
             ></div>
             <span className="text-sm">
-              {ssoConfig.clientId &&
-              ssoConfig.clientSecret &&
-              ssoConfig.tenantId
+              {ssoConfig.clientId && secretReady && ssoConfig.tenantId
                 ? "Microsoft 365 SSO is configured"
                 : "Microsoft 365 SSO is not configured"}
             </span>
           </div>
           <p className="text-sm text-muted-foreground mt-2">
-            {ssoConfig.clientId && ssoConfig.clientSecret && ssoConfig.tenantId
+            {ssoConfig.clientId && secretReady && ssoConfig.tenantId
               ? "Users can now sign in with their Microsoft 365 accounts"
               : "Configure the settings above to enable Microsoft 365 SSO"}
           </p>
@@ -186,11 +198,7 @@ const Ms365Sso = () => {
           <Button
             variant="outline"
             onClick={async () => {
-              if (
-                !ssoConfig.clientId ||
-                !ssoConfig.clientSecret ||
-                !ssoConfig.tenantId
-              ) {
+              if (!ssoConfig.clientId || !secretReady || !ssoConfig.tenantId) {
                 toast({
                   title: "Missing Configuration",
                   description: "Please fill in all fields before testing",
@@ -205,11 +213,9 @@ const Ms365Sso = () => {
                   description: "Checking Microsoft 365 configuration...",
                 });
 
-                const response: any = await apiRequest(
-                  "POST",
-                  "/api/sso/test",
-                  {}
-                );
+                const response: any = await (
+                  await apiRequest("POST", "/api/sso/test", {})
+                ).json();
 
                 if (response.success) {
                   toast({

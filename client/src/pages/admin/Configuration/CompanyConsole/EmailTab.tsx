@@ -88,7 +88,8 @@ const EmailTab = () => {
         awsRegion: data.awsRegion || "us-east-1",
         fromEmail: data.fromEmail || "noreply@dsigsoftware.com",
         fromName: data.fromName || "TicketFlow",
-        mtToken: data.mtToken || "",
+        // The server never returns the token; an empty field keeps the stored one.
+        mtToken: "",
       });
     }
   }, [smtpSettingsData]);
@@ -371,7 +372,11 @@ const EmailTab = () => {
                       <Input
                         id="mt-token"
                         type="password"
-                        placeholder="Paste your Mailtrap token"
+                        placeholder={
+                          (smtpSettingsData as any)?.mailtrapHasToken
+                            ? "Token set (leave blank to keep it)"
+                            : "Paste your Mailtrap token"
+                        }
                         value={emailSettings?.mtToken || ""}
                         onChange={(e) =>
                           setEmailSettings({

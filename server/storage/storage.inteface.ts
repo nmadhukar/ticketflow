@@ -340,10 +340,11 @@ export interface IStorage {
   ): Promise<CompanySettings>;
 
   // API key operations
-  createApiKey(
-    apiKey: InsertApiKey
-  ): Promise<{ apiKey: ApiKey; plainKey: string }>;
+  /** Stores an already-hashed key; hash and prefix come from issueApiKey. */
+  createApiKey(apiKey: InsertApiKey): Promise<ApiKey>;
   getApiKeys(userId: string): Promise<ApiKey[]>;
+  getAllApiKeys(): Promise<ApiKey[]>;
+  getApiKey(id: number): Promise<ApiKey | undefined>;
   getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined>;
   updateApiKeyLastUsed(id: number): Promise<void>;
   revokeApiKey(id: number): Promise<void>;

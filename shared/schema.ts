@@ -41,11 +41,12 @@ import {
   boolean,
   decimal,
   unique,
+  uniqueIndex,
   primaryKey,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import "./constants";
 
 // Session storage table for Replit Auth
@@ -315,20 +316,31 @@ export const companySettings = pgTable("company_settings", {
 });
 
 // API keys for third-party integrations
-export const apiKeys = pgTable("api_keys", {
-  id: serial("id").primaryKey(),
-  userId: varchar("user_id")
-    .references(() => users.id)
-    .notNull(),
-  name: varchar("name", { length: 255 }).notNull(),
-  keyHash: varchar("key_hash", { length: 255 }).notNull(), // hashed API key
-  keyPrefix: varchar("key_prefix", { length: 10 }).notNull(), // first few chars for identification
-  permissions: text("permissions").array().default([]), // array of permission strings
-  lastUsedAt: timestamp("last_used_at"),
-  expiresAt: timestamp("expires_at"),
-  isActive: boolean("is_active").default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: serial("id").primaryKey(),
+    userId: varchar("user_id")
+      .references(() => users.id)
+      .notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    keyHash: varchar("key_hash", { length: 255 }).notNull(), // "sha256:" + hex of the key; never the key
+    keyPrefix: varchar("key_prefix", { length: 10 }).notNull(), // first few chars for identification
+    permissions: text("permissions").array().default([]), // array of permission strings
+    lastUsedAt: timestamp("last_used_at"),
+    expiresAt: timestamp("expires_at"),
+    isActive: boolean("is_active").default(true),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    // Partial on purpose: `drizzle-kit push` applies this to databases that still
+    // hold legacy rows (key_hash = plaintext, possibly duplicated), and a full
+    // unique index would fail on them. Legacy values never start with "sha256:".
+    uniqueIndex("api_keys_key_hash_sha256_uniq")
+      .on(table.keyHash)
+      .where(sql`${table.keyHash} LIKE 'sha256:%'`),
+  ]
+);
 
 // AWS Bedrock settings for AI features (consolidated - includes credentials, cost limits, and AI settings)
 export const bedrockSettings = pgTable("bedrock_settings", {
@@ -618,18 +630,6 @@ export const insertCompanySettingsSchema = createInsertSchema(
   updatedAt: true,
 });
 
-export const insertApiKeySchema = createInsertSchema(apiKeys)
-  .omit({
-    id: true,
-    createdAt: true,
-    lastUsedAt: true,
-    keyHash: true,
-    keyPrefix: true,
-  })
-  .extend({
-    expiresAt: z.string().datetime().nullable().optional(),
-  });
-
 export const insertBedrockSettingsSchema = createInsertSchema(
   bedrockSettings
 ).omit({
@@ -818,7 +818,9 @@ export type InsertTaskAttachment = z.infer<typeof insertTaskAttachmentSchema>;
 export type CompanySettings = typeof companySettings.$inferSelect;
 export type InsertCompanySettings = z.infer<typeof insertCompanySettingsSchema>;
 export type ApiKey = typeof apiKeys.$inferSelect;
-export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
+// No zod insert schema on purpose: a key row is built by the server only
+// (server/services/auth/apiKeys.ts), never parsed from a request body.
+export type InsertApiKey = typeof apiKeys.$inferInsert;
 export type BedrockSettings = typeof bedrockSettings.$inferSelect;
 export type InsertBedrockSettings = z.infer<typeof insertBedrockSettingsSchema>;
 export type EmailTemplate = typeof emailTemplates.$inferSelect;

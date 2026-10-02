@@ -7,30 +7,54 @@ import { FaqCacheManager } from "@/components/faq-cache-manager";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { Copy, Eye, EyeOff, Key, Trash2 } from "lucide-react";
+import { Copy, Key, Trash2 } from "lucide-react";
+
+interface KeyOwner {
+  id: string;
+  email: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  isActive?: boolean | null;
+  isApproved?: boolean | null;
+}
+
+const ownerLabel = (u: KeyOwner) =>
+  `${[u.firstName, u.lastName].filter(Boolean).join(" ") || u.email} (${u.email})`;
 
 const DeveloperResources = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // API Keys state
+  // API Keys state. The plaintext key lives only in this state: it is never
+  // stored in the browser and is gone once dismissed or the page is left.
   const [newApiKeyName, setNewApiKeyName] = useState("");
+  const [ownerId, setOwnerId] = useState("");
   const [showApiKey, setShowApiKey] = useState<string | null>(null);
-  const [apiKeyVisibility, setApiKeyVisibility] = useState<
-    Record<number, boolean>
-  >({});
 
   const { data: apiKeys } = useQuery({
     queryKey: ["/api/api-keys"],
     refetchOnMount: "always",
   });
 
+  const { data: allUsers } = useQuery<KeyOwner[]>({
+    queryKey: ["/api/admin/users"],
+  });
+  const owners = (allUsers ?? []).filter(
+    (u) =>
+      u.isActive &&
+      u.isApproved &&
+      u.id !== "system" &&
+      u.id !== "ai-assistant"
+  );
+  const ownerById = new Map((allUsers ?? []).map((u) => [u.id, u]));
+
   // API Key mutations
   const createApiKeyMutation = useMutation({
-    mutationFn: async (name: string) => {
-      return await apiRequest("POST", "/api/api-keys", { name });
+    mutationFn: async (input: { userId: string; name: string }) => {
+      const res = await apiRequest("POST", "/api/api-keys", input);
+      return (await res.json()) as { plainKey: string };
     },
-    onSuccess: (data: any) => {
+    onSuccess: (data) => {
       setShowApiKey(data.plainKey);
       queryClient.invalidateQueries({ queryKey: ["/api/api-keys"] });
       setNewApiKeyName("");
@@ -39,10 +63,10 @@ const DeveloperResources = () => {
         description: "API key created successfully",
       });
     },
-    onError: () => {
+    onError: (error: Error) => {
       toast({
         title: "Error",
-        description: "Failed to create API key",
+        description: error.message || "Failed to create API key",
         variant: "destructive",
       });
     },
@@ -77,15 +101,28 @@ const DeveloperResources = () => {
       });
       return;
     }
-    createApiKeyMutation.mutate(newApiKeyName);
+    if (!ownerId) {
+      toast({
+        title: "Error",
+        description: "Choose the user this key is for",
+        variant: "destructive",
+      });
+      return;
+    }
+    createApiKeyMutation.mutate({ userId: ownerId, name: newApiKeyName.trim() });
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast({
-      title: "Success",
-      description: "Copied to clipboard",
-    });
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({ title: "Success", description: "Copied to clipboard" });
+    } catch {
+      toast({
+        title: "Could not copy",
+        description: "Select the key and copy it by hand.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -99,7 +136,24 @@ const DeveloperResources = () => {
         {/* Create New API Key */}
         <div className="space-y-4">
           <h4 className="text-sm font-medium">Create New API Key</h4>
-          <div className="flex gap-2">
+          <p className="text-xs text-muted-foreground">
+            A key acts as the user you choose, with ticket access only, and
+            expires after 90 days. Only an admin can create or revoke keys.
+          </p>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <select
+              aria-label="User the key is for"
+              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+              value={ownerId}
+              onChange={(e) => setOwnerId(e.target.value)}
+            >
+              <option value="">Choose a user...</option>
+              {owners.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {ownerLabel(u)}
+                </option>
+              ))}
+            </select>
             <Input
               placeholder="API Key Name (e.g., Mobile App, CI/CD Pipeline)"
               value={newApiKeyName}
@@ -125,18 +179,23 @@ const DeveloperResources = () => {
               Copy this key now. For security reasons, it won't be shown again.
             </p>
             <div className="flex items-center gap-2">
-              <code className="flex-1 p-2 bg-white border rounded text-sm font-mono">
+              <code className="flex-1 p-2 bg-white border rounded text-sm font-mono break-all">
                 {showApiKey}
               </code>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  copyToClipboard(showApiKey);
-                  setShowApiKey(null);
-                }}
+                aria-label="Copy API key"
+                onClick={() => copyToClipboard(showApiKey)}
               >
                 <Copy className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowApiKey(null)}
+              >
+                Done
               </Button>
             </div>
           </div>
@@ -156,6 +215,12 @@ const DeveloperResources = () => {
                 >
                   <div className="flex-1">
                     <p className="font-medium">{apiKey.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      For:{" "}
+                      {ownerById.get(apiKey.userId)
+                        ? ownerLabel(ownerById.get(apiKey.userId)!)
+                        : apiKey.userId}
+                    </p>
                     <div className="flex items-center gap-4 mt-1">
                       <p className="text-xs text-muted-foreground">
                         Created:{" "}
@@ -163,8 +228,8 @@ const DeveloperResources = () => {
                       </p>
                       <p className="text-xs text-muted-foreground">
                         Last used:{" "}
-                        {apiKey.lastUsed
-                          ? new Date(apiKey.lastUsed).toLocaleDateString()
+                        {apiKey.lastUsedAt
+                          ? new Date(apiKey.lastUsedAt).toLocaleDateString()
                           : "Never"}
                       </p>
                       {apiKey.expiresAt && (
@@ -177,26 +242,12 @@ const DeveloperResources = () => {
                   </div>
                   <div className="flex items-center gap-2">
                     <code className="text-xs font-mono bg-muted px-2 py-1 rounded">
-                      {apiKey.key ? apiKey.key.substring(0, 8) + "..." : "N/A"}
+                      {apiKey.keyPrefix}...
                     </code>
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => {
-                        const visibility = { ...apiKeyVisibility };
-                        visibility[apiKey.id] = !visibility[apiKey.id];
-                        setApiKeyVisibility(visibility);
-                      }}
-                    >
-                      {apiKeyVisibility[apiKey.id] ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
+                      aria-label={`Revoke ${apiKey.name}`}
                       onClick={() => deleteApiKeyMutation.mutate(apiKey.id)}
                       disabled={deleteApiKeyMutation.isPending}
                     >

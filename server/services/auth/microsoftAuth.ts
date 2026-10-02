@@ -30,8 +30,21 @@ export async function setupMicrosoftAuth(app: Express) {
     app.set("microsoftAuthConfigured", true);
   }
 
-  // First check database for SSO configuration
-  const ssoConfig = await storage.getSsoConfiguration();
+  // First check database for SSO configuration. This runs at startup without
+  // being awaited, so a rejection here (database unreachable) would be an
+  // unhandled rejection. Log one line (never the error text, which may echo a
+  // connection string) and carry on with SSO off unless env vars configure it.
+  let ssoConfig: Awaited<ReturnType<typeof storage.getSsoConfiguration>>;
+  let loadFailed = false;
+  try {
+    ssoConfig = await storage.getSsoConfiguration();
+  } catch {
+    ssoConfig = undefined;
+    loadFailed = true;
+    console.error(
+      "SSO configuration could not be loaded; Microsoft SSO stays disabled until it can."
+    );
+  }
 
   // Use database config if available, otherwise fall back to environment variables
   const clientId = ssoConfig?.clientId || process.env.MICROSOFT_CLIENT_ID;
@@ -39,10 +52,11 @@ export async function setupMicrosoftAuth(app: Express) {
     ssoConfig?.clientSecret || process.env.MICROSOFT_CLIENT_SECRET;
   const tenantId = ssoConfig?.tenantId || process.env.MICROSOFT_TENANT_ID;
 
-  const isMicrosoftConfigured = clientId && clientSecret && tenantId;
+  const isMicrosoftConfigured =
+    !loadFailed && clientId && clientSecret && tenantId;
 
   if (!isMicrosoftConfigured) {
-    if (!ssoConfig) {
+    if (!ssoConfig && !loadFailed) {
       console.log(
         "Microsoft authentication not configured. Configure in Admin Panel or set environment variables."
       );
@@ -51,7 +65,12 @@ export async function setupMicrosoftAuth(app: Express) {
     // Register routes that return configuration error
     app.get("/api/auth/microsoft", async (req, res) => {
       // Re-check database in case config was added after server start
-      const latestConfig = await storage.getSsoConfiguration();
+      let latestConfig: typeof ssoConfig;
+      try {
+        latestConfig = await storage.getSsoConfiguration();
+      } catch {
+        latestConfig = undefined;
+      }
       if (
         latestConfig?.clientId &&
         latestConfig?.clientSecret &&
