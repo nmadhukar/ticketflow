@@ -2327,7 +2327,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   );
 
   // Create guide (admin only)
-  app.post("/api/admin/guides", isAuthenticated, async (req, res) => {
+  app.post("/api/admin/guides", isAuthenticated, async (req, res, next) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
@@ -2336,13 +2336,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
 
+      // content is required and must be text: without it the insert would
+      // fail on the NOT NULL column as a 500.
+      const { content } = z
+        .object({ content: z.string().min(1) })
+        .passthrough()
+        .parse(req.body ?? {});
+
       const guide = await storage.createUserGuide({
         ...req.body,
-        content: sanitizeRichHtml(req.body?.content),
+        content: sanitizeRichHtml(content),
         createdBy: userId,
       });
       res.json(publicGuide(guide));
     } catch (error) {
+      if (error instanceof z.ZodError) return next(error);
       console.error("Error creating guide:", error);
       res.status(500).json({ message: "Failed to create guide" });
     }

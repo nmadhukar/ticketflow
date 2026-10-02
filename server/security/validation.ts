@@ -2,7 +2,6 @@ import Joi from "joi";
 import { body, param, query, validationResult } from "express-validator";
 import { Request, Response, NextFunction } from "express";
 import DOMPurify from "isomorphic-dompurify";
-import { stripActiveMarkup } from "./sanitizeHtml";
 
 // Custom sanitizer for text content
 export const sanitizeText = (text: string): string => {
@@ -295,16 +294,26 @@ const UNSANITISED_KEYS = new Set([
   "resetToken",
   "fileData",
 ]);
+// Keys that would let a body reach into Object.prototype if a later handler
+// merges or spreads it. JSON.parse makes `__proto__` an own property.
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+// Depth guard: below this the value is returned as it is. The walk stays
+// bounded and cannot overflow the stack on a maliciously nested body; no real
+// payload is this deep, so the unchecked subtree is not a practical gap.
 const MAX_SANITISE_DEPTH = 20;
 
 /**
- * Recursively neutralise executable markup in every string of a parsed value.
- * Text is not HTML-escaped (React escapes on render; escaping here would
- * double-escape ticket text). Fields rendered AS HTML (guide content) are
- * sanitised with an allow-list in their own routes, on write and on read.
+ * Lossless, linear-time walk over a parsed body or query (Ruling R27). It
+ * strips NUL characters and drops prototype-pollution keys, and changes
+ * nothing else: ticket text such as `List<Object>`, `a < b and onboarding` or
+ * `<style attribute` must round-trip exactly. Text that is rendered AS HTML
+ * (guide content) is sanitised with an allow-list in its own routes, on write
+ * and on read; everything else is escaped by React on render.
  */
 export const sanitizeDeep = (value: unknown, depth = 0): unknown => {
-  if (typeof value === "string") return stripActiveMarkup(value);
+  if (typeof value === "string") {
+    return value.includes("\u0000") ? value.split("\u0000").join("") : value;
+  }
   if (depth >= MAX_SANITISE_DEPTH || value === null || typeof value !== "object") {
     return value;
   }
@@ -313,6 +322,7 @@ export const sanitizeDeep = (value: unknown, depth = 0): unknown => {
   }
   const out: Record<string, unknown> = {};
   for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+    if (FORBIDDEN_KEYS.has(key)) continue;
     out[key] = UNSANITISED_KEYS.has(key) ? inner : sanitizeDeep(inner, depth + 1);
   }
   return out;

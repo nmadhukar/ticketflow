@@ -4,6 +4,7 @@ import { registerRoutes } from "./routes/index";
 import { installErrorHandling } from "./http/install";
 import { setupVite, serveStatic, log } from "./vite";
 import { requestLogger } from "./utils/requestLogger";
+import { isDevelopmentEnv } from "./env";
 import {
   applySecurity,
   applyRouteSpecificSecurity,
@@ -68,7 +69,7 @@ app.use(requestLogger(log));
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
+  if (isDevelopmentEnv()) {
     await setupVite(app, server);
   } else {
     serveStatic(app);

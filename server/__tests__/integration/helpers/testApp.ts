@@ -1,4 +1,5 @@
 import express, { type Express } from "express";
+import { installRequestPipeline } from "../../../security/pipeline";
 import { registerRoutes } from "../../../routes/index";
 import { closeAuth } from "../../../services/auth";
 import { closeDb } from "./testDb";
@@ -15,8 +16,10 @@ export async function createTestApp(): Promise<{
 }> {
   const app = express();
   app.set("trust proxy", 1);
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ extended: true }));
+  // The production pipeline (helmet + CSP, body parsers, input sanitiser), so
+  // integration tests see exactly what production requests see. The general
+  // rate limit is not installed: production enables it only with NODE_ENV=production.
+  installRequestPipeline(app, { bodyLimit: "50mb", sanitize: true });
 
   // Test-only: record every JSON body so the integration-wide afterEach hook
   // (helpers/secretsHook.ts) can fail on password/token fields in any response.

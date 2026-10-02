@@ -1,7 +1,15 @@
 import { randomUUID } from "crypto";
 import { eq } from "drizzle-orm";
 import request from "supertest";
-import { companyPolicies, helpDocuments, knowledgeArticles, tasks, userGuides, users } from "@shared/schema";
+import {
+  companyPolicies,
+  helpDocuments,
+  knowledgeArticles,
+  taskComments,
+  tasks,
+  userGuides,
+  users,
+} from "@shared/schema";
 import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
 import { createUser, createTicketAs, loginAs, DEFAULT_PASSWORD } from "./helpers/fixtures";
@@ -202,6 +210,73 @@ describe("help, policies and guides access", () => {
       const { customer } = await actors();
       const res = await customer.post("/api/admin/guides").send({ title: "x", category: "c", type: "html", content: DIRTY });
       expect(res.status).toBe(403);
+    });
+  });
+
+  describe("global input sanitiser is lossless (R27)", () => {
+    const TEXTS = [
+      "The <style attribute is not applied and here is the rest",
+      "We use List<Object> in the API",
+      "if count < 5 and onboarding = done then close",
+      "Footer shows <script>track()</script> twice",
+    ];
+
+    it("ticket title/description and comment text round-trip byte for byte", async () => {
+      const { agent } = await actors();
+      for (const text of TEXTS) {
+        const created = await createTicketAs(agent, { title: text, description: `${text} (details)` });
+        expect([text, created.status]).toEqual([text, 201]);
+        const [row] = await db.select().from(tasks).where(eq(tasks.id, created.body.id));
+        expect(row.title).toBe(text);
+        expect(row.description).toBe(`${text} (details)`);
+
+        const comment = await agent.post(`/api/tasks/${created.body.id}/comments`).send({ content: text });
+        expect([text, comment.status]).toEqual([text, 201]);
+        const rows = await db.select().from(taskComments).where(eq(taskComments.taskId, created.body.id));
+        expect(rows.map((c) => c.content)).toEqual([text]);
+      }
+    });
+
+    it("an admin's email template keeps its <style> block", async () => {
+      const { admin } = await actors();
+      const body = "<html><head><style>p{color:red}</style></head><body><p>Hi {{name}}</p></body></html>";
+      const res = await admin.put("/api/email-templates/welcome").send({ subject: "S", body });
+      expect(res.status).toBe(200);
+      expect(res.body.body).toBe(body);
+    });
+
+    it("integration requests run through the production CSP (script-src 'self')", async () => {
+      const { customer } = await actors();
+      const res = await customer.get("/api/help");
+      const csp = String(res.headers["content-security-policy"]);
+      expect(csp.split(";").map((d) => d.trim())).toContain("script-src 'self'");
+      expect(csp).not.toMatch(/script-src[^;]*unsafe-inline/);
+    });
+  });
+
+  describe("new 404s match the existing not-found answers", () => {
+    it("draft guide and inactive policy answer byte for byte like a missing id", async () => {
+      const { adminUser, customer } = await actors();
+      const draft = await seedGuide(adminUser.id, { isPublished: false });
+      const retired = await seedPolicy(adminUser.id, { isActive: false });
+      const same = async (real: string, missing: string) => {
+        const a = await customer.get(real);
+        const b = await customer.get(missing);
+        expect([real, a.status]).toEqual([real, 404]);
+        expect(a.text).toBe(b.text);
+      };
+      await same(`/api/guides/${draft.id}`, "/api/guides/999999");
+      await same(`/api/company-policies/${retired.id}`, "/api/company-policies/999999");
+      await same(`/api/company-policies/${retired.id}/download`, "/api/company-policies/999999/download");
+    });
+
+    it("creating a guide without content is 400 validation_failed and stores nothing", async () => {
+      const { admin } = await actors();
+      for (const body of [{ title: "G", category: "c", type: "html" }, { title: "G", category: "c", type: "html", content: 5 }]) {
+        const res = await admin.post("/api/admin/guides").send(body);
+        expect([JSON.stringify(body), res.status, res.body.error]).toEqual([JSON.stringify(body), 400, "validation_failed"]);
+      }
+      expect(await db.select().from(userGuides)).toHaveLength(0);
     });
   });
 

@@ -35,27 +35,3 @@ export function sanitizeRichHtml(html: unknown): string {
   if (typeof html !== "string") return "";
   return sanitizeHtml(html, RICH_OPTIONS);
 }
-
-/**
- * Neutralise executable markup in free text WITHOUT escaping it. Ticket text is
- * stored raw and rendered by React (which escapes), so entities must not be
- * added here or the text would be escaped twice. Only constructs that execute
- * are removed: script/style/iframe/object/embed blocks, event-handler
- * attributes and javascript: URLs. Idempotent; a string with no `<` is
- * returned untouched.
- */
-export function stripActiveMarkup(text: string): string {
-  if (!text.includes("<")) return text;
-  let current = text;
-  // Repeat until stable so `<scr<script></script>ipt>` cannot reassemble.
-  for (let i = 0; i < 10; i++) {
-    const next = current
-      .replace(/<\s*(script|style|iframe|object|embed)\b[\s\S]*?<\s*\/\s*\1\s*>/gi, "")
-      .replace(/<\s*\/?\s*(script|style|iframe|object|embed)\b[^>]*>?/gi, "")
-      .replace(/(<[^>]*?)\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]*)/gi, "$1")
-      .replace(/(<[^>]*?\b(?:href|src|action|formaction)\s*=\s*["']?)\s*javascript:/gi, "$1blocked:");
-    if (next === current) return next;
-    current = next;
-  }
-  return current;
-}

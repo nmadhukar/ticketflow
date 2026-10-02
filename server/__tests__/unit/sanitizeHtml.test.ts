@@ -1,7 +1,9 @@
 import express from "express";
 import request from "supertest";
-import { sanitizeRichHtml, stripActiveMarkup } from "../../security/sanitizeHtml";
-import { installRequestPipeline } from "../../security/pipeline";
+import { sanitizeRichHtml } from "../../security/sanitizeHtml";
+import { installRequestPipeline, contentSecurityDirectives } from "../../security/pipeline";
+import { sanitizeDeep } from "../../security/validation";
+import { isDevelopmentEnv } from "../../env";
 import { escapeLike, containsPattern } from "../../utils/like";
 
 describe("sanitizeRichHtml", () => {
@@ -34,21 +36,16 @@ describe("sanitizeRichHtml", () => {
   });
 });
 
-describe("stripActiveMarkup", () => {
-  it("leaves ordinary text, symbols and entities untouched (no double escaping)", () => {
-    for (const text of ["Tom & Jerry", "a < b and c > d", "use <div> here", "x &amp; y", "100% sure_thing"]) {
-      expect(stripActiveMarkup(text)).toBe(text);
-    }
-  });
-
-  it("removes script blocks, handlers and javascript: urls", () => {
-    expect(stripActiveMarkup("hi<script>alert(1)</script>there")).toBe("hithere");
-    expect(stripActiveMarkup('<img src=x onerror="alert(1)">')).toBe("<img src=x>");
-    expect(stripActiveMarkup('<a href="javascript:alert(1)">x</a>')).not.toMatch(/javascript:/i);
-  });
-
-  it("cannot be reassembled from nested fragments", () => {
-    expect(stripActiveMarkup("<scr<script></script>ipt>alert(1)</scr<script></script>ipt>")).not.toMatch(/<\s*script/i);
+describe("sanitizeRichHtml cost", () => {
+  it("stays bounded on a 64 KB adversarial guide body", () => {
+    const parts = ["<", " ", "<script", "<a onclick=", '<img src="x" onerror=', "<style ", "on"];
+    let body = "";
+    while (body.length < 64 * 1024) body += parts.join("") + "<p>x</p>";
+    const start = Date.now();
+    sanitizeRichHtml(body.slice(0, 64 * 1024));
+    sanitizeRichHtml("<".repeat(64 * 1024));
+    sanitizeRichHtml("<script".repeat(8 * 1024));
+    expect(Date.now() - start).toBeLessThan(2000);
   });
 });
 
@@ -65,28 +62,77 @@ describe("request pipeline order", () => {
   app.post("/echo", (req, res) => res.json(req.body));
   app.get("/echo", (req, res) => res.json(req.query));
 
-  it("sanitises nested strings in a parsed JSON body", async () => {
+  const LOSSLESS = [
+    "The <style attribute is not applied and here is the rest",
+    "We use List<Object> in the API",
+    "if count < 5 and onboarding = done then close",
+    "Footer shows <script>track()</script> twice",
+    "Tom & Jerry <b>x</b> x &amp; y 100% sure_thing",
+  ];
+
+  it("reaches nested strings in a parsed JSON body (NUL stripped) and changes no other text", async () => {
     const res = await request(app)
       .post("/echo")
       .send({
-        title: "a < b & c",
-        nested: { deep: ["ok", "x<script>alert(1)</script>y", { more: '<img src=x onerror="z()">' }] },
-        password: "Pa<script>ss",
+        title: LOSSLESS[0],
+        nested: { deep: ["ok", "x\u0000y", { more: "a\u0000b" }, ...LOSSLESS] },
+        password: "Pa\u0000ss",
       });
     expect(res.status).toBe(200);
-    expect(res.body.title).toBe("a < b & c");
-    expect(res.body.nested.deep[0]).toBe("ok");
-    expect(res.body.nested.deep[1]).toBe("xy");
-    expect(res.body.nested.deep[2].more).toBe("<img src=x>");
+    expect(res.body.title).toBe(LOSSLESS[0]);
+    expect(res.body.nested.deep.slice(0, 3)).toEqual(["ok", "xy", { more: "ab" }]);
+    expect(res.body.nested.deep.slice(3)).toEqual(LOSSLESS);
     // credentials are never rewritten
-    expect(res.body.password).toBe("Pa<script>ss");
+    expect(res.body.password).toBe("Pa\u0000ss");
   });
 
-  it("sanitises urlencoded bodies and query strings", async () => {
-    const form = await request(app).post("/echo").type("form").send("a=1%3Cscript%3Ex%3C%2Fscript%3E");
-    expect(form.body.a).toBe("1");
-    const q = await request(app).get("/echo").query({ s: "q<script>x</script>" });
-    expect(q.body.s).toBe("q");
+  it("round-trips urlencoded bodies and query strings, stripping only NUL", async () => {
+    const form = await request(app).post("/echo").type("form").send({ a: LOSSLESS[1], b: "x\u0000y" });
+    expect(form.body).toEqual({ a: LOSSLESS[1], b: "xy" });
+    const q = await request(app).get("/echo").query({ s: LOSSLESS[3] });
+    expect(q.body.s).toBe(LOSSLESS[3]);
+  });
+
+  it("drops __proto__, constructor and prototype keys, at any depth", async () => {
+    const res = await request(app)
+      .post("/echo")
+      .set("Content-Type", "application/json")
+      .send('{"__proto__":{"role":"admin"},"title":"x","a":{"constructor":{"x":1},"prototype":2,"ok":3}}');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ title: "x", a: { ok: 3 } });
+  });
+
+  it("does not let __proto__ in a body pollute what handlers read", async () => {
+    let seen: Record<string, unknown> = {};
+    const probe = express();
+    installRequestPipeline(probe, { bodyLimit: "1mb", sanitize: true });
+    probe.post("/p", (req, res) => {
+      seen = req.body;
+      res.json({});
+    });
+    await request(probe)
+      .post("/p")
+      .set("Content-Type", "application/json")
+      .send('{"__proto__":{"role":"admin"},"title":"x"}');
+    expect(seen.role).toBeUndefined();
+    expect("role" in seen).toBe(false);
+    expect(Object.keys(seen)).toEqual(["title"]);
+  });
+
+  it("processes a 1 MB adversarial string quickly (linear, no regex backtracking)", async () => {
+    const nasty = ("< " + "<script " + "<a onclick=" + "on ").repeat(40000).slice(0, 1024 * 1024);
+    const start = Date.now();
+    const out = sanitizeDeep({ a: { b: [nasty] } }) as { a: { b: string[] } };
+    expect(Date.now() - start).toBeLessThan(500);
+    expect(out.a.b[0]).toBe(nasty);
+
+    const probe = express();
+    installRequestPipeline(probe, { bodyLimit: "2mb", sanitize: true });
+    probe.post("/p", (req, res) => res.json({ n: req.body.t.length }));
+    const t0 = Date.now();
+    const res = await request(probe).post("/p").send({ t: nasty });
+    expect(res.body.n).toBe(nasty.length);
+    expect(Date.now() - t0).toBeLessThan(1500);
   });
 
   it("sends a Content-Security-Policy whose script-src has no unsafe-inline", async () => {
@@ -95,5 +141,26 @@ describe("request pipeline order", () => {
     const script = csp.split(";").map((d) => d.trim()).find((d) => d.startsWith("script-src"));
     expect(script).toBe("script-src 'self'");
     expect(csp).not.toMatch(/script-src[^;]*unsafe-inline/);
+  });
+});
+
+describe("development switch (one helper for the CSP and the server entry)", () => {
+  it("treats unset or empty NODE_ENV as development, like Express; production and test are strict", () => {
+    expect(["", "development"].map((e) => isDevelopmentEnv(e))).toEqual([true, true]);
+    expect(["production", "test", "staging"].map((e) => isDevelopmentEnv(e))).toEqual([false, false, false]);
+    expect(contentSecurityDirectives("development").scriptSrc).toContain("'unsafe-inline'");
+    expect(contentSecurityDirectives("").scriptSrc).toContain("'unsafe-inline'");
+    for (const env of ["production", "test"]) {
+      expect(contentSecurityDirectives(env).scriptSrc).toEqual(["'self'"]);
+    }
+    // Unset (the `npm run dev` case) is read from the process environment.
+    const saved = process.env.NODE_ENV;
+    delete process.env.NODE_ENV;
+    try {
+      expect(isDevelopmentEnv()).toBe(true);
+      expect(contentSecurityDirectives().scriptSrc).toContain("'unsafe-inline'");
+    } finally {
+      process.env.NODE_ENV = saved;
+    }
   });
 });

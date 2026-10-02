@@ -1,6 +1,7 @@
 import express, { type Express, type RequestHandler } from "express";
 import helmet from "helmet";
 import { preventXSS, sanitizeInput } from "./validation";
+import { isDevelopmentEnv } from "../env";
 
 /**
  * Content-Security-Policy. `script-src 'self'` only: no inline scripts, so an
@@ -9,13 +10,13 @@ import { preventXSS, sanitizeInput } from "./validation";
  * React-refresh preamble, so only there is `'unsafe-inline'` added to scripts;
  * production and test never get it.
  */
-export function contentSecurityDirectives(nodeEnv = process.env.NODE_ENV) {
+export function contentSecurityDirectives(nodeEnv: string | undefined = process.env.NODE_ENV) {
   return {
     defaultSrc: ["'self'"],
     styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
     fontSrc: ["'self'", "https://fonts.gstatic.com"],
     imgSrc: ["'self'", "data:", "https:"],
-    scriptSrc: nodeEnv === "development" ? ["'self'", "'unsafe-inline'"] : ["'self'"],
+    scriptSrc: isDevelopmentEnv(nodeEnv) ? ["'self'", "'unsafe-inline'"] : ["'self'"],
     connectSrc: ["'self'", "https:"],
     frameSrc: ["'none'"],
     objectSrc: ["'none'"],
