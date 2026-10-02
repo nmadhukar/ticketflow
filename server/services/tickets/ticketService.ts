@@ -7,6 +7,7 @@ import { storage } from "../../storage";
 import { assertTaskAccess, assignedToUserSql, ticketVisibilityWhere } from "../../permissions/ticketAccess";
 import { canDeleteTicket, canUpdateTicket, normalizeAssigneeUpdate } from "../../permissions/tickets";
 import { containsPattern } from "../../utils/like";
+import { projectUserForViewer } from "../../utils/publicUser";
 import { assertAgentMayAssign, assertAssigneesExist } from "./assignees";
 import { commentBodySchema } from "./commentSchema";
 import { createTicketRecord, runTicketCreatedHooks } from "./create";
@@ -119,7 +120,14 @@ export async function getTicket(
     if (!task) throw new TicketError("NOT_FOUND", "Ticket not found");
     if (!opts.includeComments) return toTicketDTO(task);
     const comments = await storage.getTaskComments(id);
-    return toTicketDTO({ ...task, comments });
+    // R19: the commenter is shown to this viewer the way GET .../comments shows them.
+    return toTicketDTO({
+      ...task,
+      comments: comments.map((c) => ({
+        ...c,
+        user: c.user ? projectUserForViewer(user.role, c.user) : undefined,
+      })),
+    });
   });
 }
 
@@ -271,14 +279,27 @@ export async function updateTicket(
   });
 }
 
-/** Staff close a ticket (the workflow decides which moves are legal). Closing a closed ticket changes nothing. */
+/**
+ * A status move asked for by name (close, reopen). Access and the workflow are updateTicket's verdict
+ * (FORBIDDEN for a customer closing, 409 for an illegal staff move); a ticket already in the target
+ * status is not a no-op success but INVALID_STATE, so a caller that closes twice is told.
+ */
+async function moveStatus(user: User, id: number, status: "closed" | "open", ctx: WriteContext): Promise<TicketDTO> {
+  const { ticket, appliedFields } = await updateTicket(user, id, { status }, ctx);
+  if (!appliedFields.includes("status")) {
+    throw new TicketError("INVALID_STATE", `Ticket is already ${status}`);
+  }
+  return ticket;
+}
+
+/** Staff close a ticket (the workflow decides which moves are legal). Closing a closed ticket is INVALID_STATE. */
 export async function closeTicket(user: User, id: number, ctx: WriteContext = {}): Promise<TicketDTO> {
-  return (await updateTicket(user, id, { status: "closed" }, ctx)).ticket;
+  return moveStatus(user, id, "closed", ctx);
 }
 
 /** Staff, or the customer who created it, reopen a resolved or closed ticket (back to open). */
 export async function reopenTicket(user: User, id: number, ctx: WriteContext = {}): Promise<TicketDTO> {
-  return (await updateTicket(user, id, { status: "open" }, ctx)).ticket;
+  return moveStatus(user, id, "open", ctx);
 }
 
 /** Admin only (manager only with ALLOW_MANAGER_DELETE). `confirm` must be literally true. */

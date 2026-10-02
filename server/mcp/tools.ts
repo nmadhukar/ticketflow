@@ -115,7 +115,7 @@ export function registerTicketTools(server: McpServer, user: User): void {
 
   server.registerTool(
     "close_ticket",
-    { description: "Close a ticket (staff only). Closing an already closed ticket changes nothing.", inputSchema: byId },
+    { description: "Close a ticket (staff only). Closing an already closed ticket is an INVALID_STATE error.", inputSchema: byId },
     (args) => runTool(() => closeTicket(user, args.id, mcpWriteContext(user)))
   );
 
@@ -133,7 +133,10 @@ export function registerTicketTools(server: McpServer, user: User): void {
     {
       description:
         "Permanently delete a ticket and its comments, history and attachments. Administrators only. Pass confirm: true.",
-      inputSchema: z.object({ id, confirm: z.boolean().describe("Must be true to delete").optional() }),
+      inputSchema: z.object({ id, confirm: z
+          .union([z.boolean(), z.string()])
+          .describe("Must be the boolean true to delete; anything else is a VALIDATION error")
+          .optional() }),
     },
     (args) => runTool(() => deleteTicket(user, args.id, args.confirm === true))
   );
