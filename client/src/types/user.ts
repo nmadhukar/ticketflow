@@ -12,6 +12,7 @@ export interface User {
   updatedAt?: string | Date | null;
   isActive?: boolean;
   isApproved?: boolean;
+  mustChangePassword?: boolean;
 }
 
 export interface UserPreferences {

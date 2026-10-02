@@ -7,6 +7,7 @@
  * Documentation: https://api-docs.mailtrap.io/
  */
 
+import { safeErrorSummary } from "../../utils/safeError";
 import { MailtrapClient } from "mailtrap";
 import type { EmailTemplate } from "@shared/schema";
 
@@ -67,7 +68,7 @@ export async function sendEmail(params: EmailParams): Promise<boolean> {
     console.log(`Mailtrap email sent successfully to ${params.to}`);
     return true;
   } catch (error: any) {
-    console.error("Mailtrap email error:", error);
+    console.error("Mailtrap email error:", safeErrorSummary(error));
     return false;
   }
 }
@@ -168,7 +169,7 @@ export async function sendTestEmail(
     console.log(`Mailtrap test email sent successfully to ${toEmail}`);
     return true;
   } catch (error: any) {
-    console.error("Mailtrap test email error:", error);
+    console.error("Mailtrap test email error:", safeErrorSummary(error));
     return false;
   }
 }

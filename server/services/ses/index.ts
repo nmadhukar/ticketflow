@@ -1,4 +1,5 @@
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { safeErrorSummary } from "../../utils/safeError";
 import type { EmailTemplate } from "@shared/schema";
 
 interface EmailParams {
@@ -75,7 +76,7 @@ export async function sendEmail(params: EmailParams): Promise<boolean> {
     console.log(`Email sent successfully to ${params.to}`);
     return true;
   } catch (error) {
-    console.error('AWS SES email error:', error);
+    console.error('AWS SES email error:', safeErrorSummary(error));
     return false;
   }
 }
@@ -190,7 +191,7 @@ export async function sendTestEmail(
     console.log(`Test email sent successfully to ${toEmail}`);
     return true;
   } catch (error) {
-    console.error('Test email error:', error);
+    console.error('Test email error:', safeErrorSummary(error));
     return false;
   }
 }

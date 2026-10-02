@@ -270,6 +270,7 @@ export interface IStorage {
     role: string
   ): Promise<TeamMember>;
   setTemporaryPassword(userId: string, hashedPassword: string): Promise<boolean>;
+  revokeUserSessions(userId: string, exceptSid?: string): Promise<number>;
   createUserClaimingInvitation(
     user: InsertUser,
     invitationId: number

@@ -106,6 +106,11 @@ const resetPasswordSchema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters"),
 });
 
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Current password is required"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+});
+
 let activeSessionStore: InstanceType<ReturnType<typeof connectPg>> | undefined;
 
 /**
@@ -161,9 +166,26 @@ export function setupAuth(app: Express) {
   app.post("/api/auth/forgot-password", authRequestRateLimit);
   app.post("/api/auth/reset-password", authRequestRateLimit);
 
+  app.post("/api/auth/change-password", authRequestRateLimit);
+
   app.use(session(sessionSettings));
   app.use(passport.initialize());
   app.use(passport.session());
+
+  // After an admin reset the user must choose their own password first: until
+  // then only reading who they are, signing out and changing the password work.
+  app.use((req, res, next) => {
+    if (!req.user?.mustChangePassword || !req.path.startsWith("/api")) return next();
+    const allowed =
+      (req.method === "GET" && (req.path === "/api/auth/user" || req.path === "/api/logout")) ||
+      (req.method === "POST" &&
+        (req.path === "/api/auth/logout" || req.path === "/api/auth/change-password"));
+    if (allowed) return next();
+    return res.status(403).json({
+      error: "password_change_required",
+      message: "You must change your password before continuing.",
+    });
+  });
 
   // Passport local strategy
   passport.use(
@@ -372,6 +394,14 @@ export function setupAuth(app: Express) {
           return res
             .status(401)
             .json({ message: info?.message || "Invalid credentials" });
+        }
+
+        // An unknown role never gets a session.
+        if (!normalizeRole(user.role)) {
+          return res.status(403).json({
+            error: "invalid_role",
+            message: "This account has no valid role. Contact an administrator.",
+          });
         }
 
         req.login(user, (err) => {
@@ -602,6 +632,8 @@ export function setupAuth(app: Express) {
       // Update password and clear reset token
       await storage.updateUserPassword(user.id, hashedPassword);
       await storage.clearPasswordResetToken(user.id);
+      // Whoever held the old password (or this token) must sign in again.
+      await storage.revokeUserSessions(user.id);
       // A token reset is the recovery path from a lockout.
       await storage.resetFailedLogins(user.id);
 
@@ -615,6 +647,45 @@ export function setupAuth(app: Express) {
       }
       console.error("Reset password error:", error);
       res.status(500).json({ message: "Failed to reset password" });
+    }
+  });
+
+  // Signed-in password change (also how a forced change from an admin reset ends).
+  app.post("/api/auth/change-password", async (req, res) => {
+    try {
+      if (!req.isAuthenticated() || !req.user) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+      const body = changePasswordSchema.parse(req.body);
+      const current = await storage.getUser(req.user.id);
+      if (!current?.password) {
+        return res.status(409).json({
+          error: "no_local_password",
+          message: "This account signs in with single sign-on and has no local password.",
+        });
+      }
+      if (!(await comparePasswords(body.currentPassword, current.password))) {
+        return res.status(400).json({
+          error: "invalid_current_password",
+          message: "Current password is incorrect",
+        });
+      }
+      if (body.currentPassword === body.password) {
+        return res.status(400).json({
+          error: "password_unchanged",
+          message: "Choose a password different from the current one.",
+        });
+      }
+      await storage.updateUserPassword(current.id, await hashPassword(body.password));
+      // Other devices sign in again; this session stays.
+      await storage.revokeUserSessions(current.id, req.sessionID);
+      res.json({ message: "Password changed" });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Validation error", errors: error.errors });
+      }
+      console.error("Change password error:", error instanceof Error ? error.message : "unknown");
+      res.status(500).json({ message: "Failed to change password" });
     }
   });
 

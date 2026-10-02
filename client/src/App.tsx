@@ -47,6 +47,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Layout } from "@/components/layout";
 import { AiChatBot } from "@/components/AiChatBot";
 import { ProtectedRoute } from "@/components/protected-route";
+import { ForcedPasswordChange } from "@/components/forced-password-change";
 import { StatsDrawer } from "@/components/stats-drawer";
 import { ActivityDrawer } from "@/components/activity-drawer";
 import NotFound from "@/pages/not-found";
@@ -84,6 +85,11 @@ function Router() {
 
   if (isLoading) {
     return null; // or a loading spinner
+  }
+
+  // An admin reset the password: nothing else works until the user picks their own.
+  if (isAuthenticated && (user as any)?.mustChangePassword) {
+    return <ForcedPasswordChange />;
   }
 
   return (

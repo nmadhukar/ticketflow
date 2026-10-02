@@ -1,3 +1,4 @@
+import { jest } from "@jest/globals";
 import { eq } from "drizzle-orm";
 import { users } from "@shared/schema";
 import { createTestApp } from "./helpers/testApp";
@@ -100,5 +101,22 @@ describe("leftover demo accounts on an existing deployment", () => {
     const text = error.mock.calls.map((c: unknown[]) => c.map(String).join(" ")).join("\n");
     expect(text).toContain("admin@ticketflow.local");
     expect(text).not.toContain("not-a-valid-hash");
+  });
+
+  it("a failed lookup for one account does not abort the loop", async () => {
+    await insertDemo("agent1@ticketflow.local", DEMO_PASSWORD, "agent");
+    const realSelect = db.select.bind(db);
+    let calls = 0;
+    const spy = jest.spyOn(db, "select").mockImplementation(((...args: unknown[]) => {
+      calls += 1;
+      if (calls === 1) throw new Error("lookup failed");
+      return (realSelect as any)(...args);
+    }) as any);
+    try {
+      const done = await deactivateDemoAccounts({});
+      expect(done).toContain("agent1@ticketflow.local");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

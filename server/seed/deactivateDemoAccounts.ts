@@ -18,18 +18,18 @@ export async function deactivateDemoAccounts(
 
   const deactivated: string[] = [];
   for (const demo of DEMO_ACCOUNTS) {
-    const [row] = await db
-      .select()
-      .from(users)
-      .where(sql`lower(${users.email}) = ${demo.email}`)
-      .limit(1);
-    if (!row || !row.isActive || !row.password) continue;
     try {
+      const [row] = await db
+        .select()
+        .from(users)
+        .where(sql`lower(${users.email}) = ${demo.email}`)
+        .limit(1);
+      if (!row || !row.isActive || !row.password) continue;
       if (!(await comparePasswords(demo.password, row.password))) continue;
       await db.update(users).set({ isActive: false }).where(eq(users.id, row.id));
       deactivated.push(demo.email);
     } catch (error) {
-      // One bad row (e.g. a malformed stored hash) must not stop the rest.
+      // One bad row (e.g. a malformed stored hash) or a failed lookup must not stop the rest.
       console.error(
         `Could not check demo account ${demo.email}; skipping it:`,
         error instanceof Error ? error.message : String(error)

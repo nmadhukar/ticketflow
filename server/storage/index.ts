@@ -279,7 +279,23 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(users.id, userId))
       .returning({ id: users.id });
-    return rows.length > 0;
+    if (rows.length === 0) return false;
+    // The old password may be in someone else's hands: end every session.
+    await this.revokeUserSessions(userId);
+    return true;
+  }
+
+  /**
+   * Deletes the user's rows from the connect-pg-simple sessions table, all of
+   * them or all except `exceptSid` (the session making a self password change).
+   */
+  async revokeUserSessions(userId: string, exceptSid?: string): Promise<number> {
+    const result = await db.execute(
+      exceptSid
+        ? sql`DELETE FROM sessions WHERE sess->'passport'->>'user' = ${userId} AND sid <> ${exceptSid}`
+        : sql`DELETE FROM sessions WHERE sess->'passport'->>'user' = ${userId}`
+    );
+    return result.rowCount ?? 0;
   }
 
   /**

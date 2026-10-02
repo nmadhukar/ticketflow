@@ -1514,6 +1514,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const { userId } = req.params;
+        const target = await storage.getUser(userId);
+        if (!target) {
+          return res
+            .status(404)
+            .json({ error: "user_not_found", message: "User not found" });
+        }
+        // SSO and the system user have no local password: never give them one.
+        if (!target.password) {
+          return res.status(409).json({
+            error: "no_local_password",
+            message:
+              "This account has no local password (single sign-on or system account).",
+          });
+        }
         // Strong random temporary password, hashed with the login routine,
         // shown to the admin once; the user must change it at next sign-in.
         const tempPassword = randomBytes(15).toString("base64url");
@@ -1526,6 +1540,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .status(404)
             .json({ error: "user_not_found", message: "User not found" });
         }
+        logSecurityEvent(
+          req,
+          "admin_reset_password",
+          "user",
+          true,
+          { adminId: getUserId(req), targetUserId: userId }
+        );
+        res.set("Cache-Control", "no-store");
         res.json({ tempPassword });
       } catch (error) {
         console.error("Error resetting password:", error);
