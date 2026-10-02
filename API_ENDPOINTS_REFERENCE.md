@@ -28,6 +28,12 @@
 }
 ```
 
+**Email already registered (400)**, the same for password and single sign-on accounts:
+```json
+{ "error": "email_registered", "message": "Email already registered" }
+```
+There is no `check-email` endpoint (removed: it allowed account enumeration).
+
 **cURL Example**:
 ```bash
 curl -X POST https://your-domain.com/api/register \

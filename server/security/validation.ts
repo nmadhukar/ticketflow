@@ -283,30 +283,66 @@ export const checkValidationResult = (
   next();
 };
 
-// Sanitization middleware
+// Values that are credentials, tokens or opaque payloads: never rewritten.
+const UNSANITISED_KEYS = new Set([
+  "password",
+  "currentPassword",
+  "newPassword",
+  "confirmPassword",
+  "token",
+  "inviteToken",
+  "resetToken",
+  "fileData",
+]);
+// Keys that would let a body reach into Object.prototype if a later handler
+// merges or spreads it. JSON.parse makes `__proto__` an own property.
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+// Depth guard: below this the value is returned as it is. The walk stays
+// bounded and cannot overflow the stack on a maliciously nested body; no real
+// payload is this deep, so the unchecked subtree is not a practical gap.
+const MAX_SANITISE_DEPTH = 20;
+
+/**
+ * Lossless, linear-time walk over a parsed body or query (Ruling R27). It
+ * strips NUL characters and drops prototype-pollution keys, and changes
+ * nothing else: ticket text such as `List<Object>`, `a < b and onboarding` or
+ * `<style attribute` must round-trip exactly. Text that is rendered AS HTML
+ * (guide content) is sanitised with an allow-list in its own routes, on write
+ * and on read; everything else is escaped by React on render.
+ */
+export const sanitizeDeep = (value: unknown, depth = 0): unknown => {
+  if (typeof value === "string") {
+    return value.includes("\u0000") ? value.split("\u0000").join("") : value;
+  }
+  if (depth >= MAX_SANITISE_DEPTH || value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeDeep(item, depth + 1));
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+    if (FORBIDDEN_KEYS.has(key)) continue;
+    out[key] = UNSANITISED_KEYS.has(key) ? inner : sanitizeDeep(inner, depth + 1);
+  }
+  return out;
+};
+
+// Sanitization middleware. Mount it AFTER the body parsers (see pipeline.ts).
 export const sanitizeInput = (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
-  // Sanitize string fields in request body
   if (req.body && typeof req.body === "object") {
-    for (const [key, value] of Object.entries(req.body)) {
-      if (typeof value === "string") {
-        req.body[key] = sanitizeText(value);
-      }
-    }
+    req.body = sanitizeDeep(req.body);
   }
-
-  // Sanitize query parameters
   if (req.query && typeof req.query === "object") {
-    for (const [key, value] of Object.entries(req.query)) {
-      if (typeof value === "string") {
-        req.query[key] = sanitizeText(value);
-      }
+    const cleaned = sanitizeDeep(req.query) as Record<string, unknown>;
+    for (const key of Object.keys(req.query)) {
+      (req.query as Record<string, unknown>)[key] = cleaned[key];
     }
   }
-
   next();
 };
 
@@ -358,13 +394,6 @@ export const preventXSS = (req: Request, res: Response, next: NextFunction) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("X-XSS-Protection", "1; mode=block");
-  res.setHeader(
-    "Content-Security-Policy",
-    "default-src 'self'; " +
-      "script-src 'self' 'unsafe-inline'; " +
-      "style-src 'self' 'unsafe-inline'; " +
-      "img-src 'self' data: https:; " +
-      "font-src 'self' https://fonts.gstatic.com"
-  );
+  // The Content-Security-Policy is set once, by helmet (security/pipeline.ts).
   next();
 };

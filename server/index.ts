@@ -4,6 +4,7 @@ import { registerRoutes } from "./routes/index";
 import { installErrorHandling } from "./http/install";
 import { setupVite, serveStatic, log } from "./vite";
 import { requestLogger } from "./utils/requestLogger";
+import { isDevelopmentEnv } from "./env";
 import {
   applySecurity,
   applyRouteSpecificSecurity,
@@ -15,15 +16,10 @@ const app = express();
 // Trust Nginx/reverse proxy so req.ip uses the real client IP via X-Forwarded-For
 app.set("trust proxy", 1);
 
-// Apply security middleware first
+// Security headers, rate limit, body parsers (MAX_REQUEST_SIZE_MB, default
+// 50MB, for base64 uploads) and then the input sanitiser: the sanitiser must
+// run after the parsers, so all of it is installed together, in order.
 applySecurity(app);
-
-// Increase JSON body parser limit to handle base64 file uploads (logo, etc.)
-// Increased to support file uploads with task creation
-// Uses MAX_REQUEST_SIZE_MB env variable, defaults to 50MB
-const maxRequestSizeMB = parseInt(process.env.MAX_REQUEST_SIZE_MB || "50", 10);
-app.use(express.json({ limit: `${maxRequestSizeMB}mb` }));
-app.use(express.urlencoded({ extended: true, limit: `${maxRequestSizeMB}mb` }));
 
 // Request log: token path segments redacted, no auth/invitation bodies.
 app.use(requestLogger(log));
@@ -73,7 +69,7 @@ app.use(requestLogger(log));
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
+  if (isDevelopmentEnv()) {
     await setupVite(app, server);
   } else {
     serveStatic(app);

@@ -122,6 +122,7 @@ import { hashResetToken } from "../utils/resetToken";
 import { excludeAiSystemUser, isAiSystemUserId } from "../utils/aiSystemUser";
 import { s3Service } from "../services/s3Service";
 import { PUBLIC_USER_FIELDS, type PublicUser } from "../utils/publicUser";
+import { containsPattern } from "../utils/like";
 
 /**
  * Explicit column projection for every query that returns users to a caller
@@ -231,11 +232,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    // Case-insensitive email lookup
+    // Exact, case-insensitive equality. Not ILIKE: `%` and `_` in the input
+    // would act as wildcards and match other people's accounts.
     const [user] = await db
       .select()
       .from(users)
-      .where(ilike(users.email, email));
+      .where(sql`lower(${users.email}) = lower(${email})`);
     return user;
   }
 
@@ -657,8 +659,8 @@ export class DatabaseStorage implements IStorage {
     if (search)
       filters.push(
         or(
-          ilike(tasks.title, `%${search}%`),
-          ilike(tasks.description, `%${search}%`)
+          ilike(tasks.title, containsPattern(search)),
+          ilike(tasks.description, containsPattern(search))
         )!
       );
     // Like the rule, assignee_id counts only on user tickets and
@@ -804,8 +806,8 @@ export class DatabaseStorage implements IStorage {
     if (filters.search) {
       conditions.push(
         or(
-          ilike(tasks.title, `%${filters.search}%`),
-          ilike(tasks.description, `%${filters.search}%`)
+          ilike(tasks.title, containsPattern(filters.search)),
+          ilike(tasks.description, containsPattern(filters.search))
         )
       );
     }
@@ -2223,7 +2225,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async searchHelpDocuments(query: string): Promise<HelpDocument[]> {
-    const searchTerm = `%${query.toLowerCase()}%`;
+    const searchTerm = containsPattern(query.toLowerCase());
     return await db
       .select()
       .from(helpDocuments)
@@ -2827,9 +2829,9 @@ export class DatabaseStorage implements IStorage {
     if (searchTerms.length > 0) {
       const searchConditions = searchTerms.map((term) =>
         or(
-          ilike(knowledgeArticles.title, `%${term}%`),
-          ilike(knowledgeArticles.content, `%${term}%`),
-          ilike(knowledgeArticles.summary, `%${term}%`)
+          ilike(knowledgeArticles.title, containsPattern(term)),
+          ilike(knowledgeArticles.content, containsPattern(term)),
+          ilike(knowledgeArticles.summary, containsPattern(term))
         )
       );
       conditions.push(or(...searchConditions));
@@ -2857,7 +2859,7 @@ export class DatabaseStorage implements IStorage {
     if (words.length === 0) return undefined;
 
     const conditions = words.map((word) =>
-      ilike(knowledgeArticles.title, `%${word}%`)
+      ilike(knowledgeArticles.title, containsPattern(word))
     );
 
     const [article] = await db

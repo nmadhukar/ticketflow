@@ -199,7 +199,7 @@ describe("invitations, registration and SSO accounts", () => {
     expect(res.body.invitationToken).not.toBe(a.invitationToken);
   });
 
-  it("(h) registering over an SSO account (no password) is a 409 and changes nothing", async () => {
+  it("(h) registering over an SSO account (no password) is refused like any taken email (400) and changes nothing", async () => {
     const id = randomUUID();
     await db.insert(users).values({
       id,
@@ -216,7 +216,10 @@ describe("invitations, registration and SSO accounts", () => {
       { email: "sso@example.test", inviteToken: inv.invitationToken },
     ]) {
       const res = await register(body);
-      expect(res.status).toBe(409);
+      // Same status and message as a password account: it must not reveal
+      // that this one signs in with single sign-on (Task 13).
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe("Email already registered");
     }
     const [row] = await db.select().from(users).where(eq(users.id, id));
     expect(row.password).toBeNull();

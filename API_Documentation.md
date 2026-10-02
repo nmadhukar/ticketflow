@@ -47,6 +47,11 @@ Creates a new user account. Users require admin approval unless invited.
   }
 }
 ```
+**Email already registered:** `400 Bad Request`, identical for every kind of existing account (password or single sign-on), so the response does not reveal which:
+```json
+{ "error": "email_registered", "message": "Email already registered" }
+```
+There is no "is this email available" endpoint (`/api/auth/check-email` was removed because it allowed account enumeration).
 
 #### Login
 Authenticates a user and creates a session.
