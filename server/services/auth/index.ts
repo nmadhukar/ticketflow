@@ -27,10 +27,6 @@ import * as client from "openid-client";
 import { EMAIL_PROVIDERS } from "@shared/constants";
 import { requireSecret } from "../../security/secrets";
 import { authRateLimit, authRequestRateLimit } from "../../security/rateLimiting";
-import {
-  isLocked,
-  lockExpired,
-} from "./lockout";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace -- Express type augmentation requires a namespace
@@ -61,7 +57,7 @@ export async function hashPassword(password: string): Promise<string> {
  * Extracts salt from stored hash and compares using timing-safe comparison
  * Prevents timing attacks by using crypto.timingSafeEqual
  */
-async function comparePasswords(
+export async function comparePasswords(
   supplied: string,
   stored: string
 ): Promise<boolean> {
@@ -186,31 +182,24 @@ export function setupAuth(app: Express) {
             return done(null, false, { message: "Password not set" });
           }
 
-          const now = new Date();
-          if (isLocked(user, now)) {
-            // Refused before the password is checked, so a guess made while
-            // locked tells the attacker nothing.
+          // Claim the attempt atomically BEFORE comparing: at most five
+          // comparisons can happen per lock window, however many requests
+          // arrive in parallel.
+          const attempt = await storage.claimLoginAttempt(user.id, new Date());
+          if (attempt === null) {
             return done(null, false, {
               message:
                 "Too many failed login attempts. Try again in a few minutes.",
               code: "account_locked",
             } as any);
           }
-          if (lockExpired(user, now)) {
-            // The lock ran out: start counting from zero.
-            await storage.resetFailedLogins(user.id);
-            user.failedLoginAttempts = 0;
-          }
 
           const isValid = await comparePasswords(password, user.password);
           if (!isValid) {
-            await storage.recordFailedLogin(user.id, now);
             return done(null, false, { message: "Invalid email or password" });
           }
 
-          if (user.failedLoginAttempts > 0) {
-            await storage.resetFailedLogins(user.id);
-          }
+          await storage.resetFailedLogins(user.id);
 
           if (!user.isActive) {
             return done(null, false, { message: "Account is deactivated" });
@@ -589,6 +578,8 @@ export function setupAuth(app: Express) {
       // Update password and clear reset token
       await storage.updateUserPassword(user.id, hashedPassword);
       await storage.clearPasswordResetToken(user.id);
+      // A token reset is the recovery path from a lockout.
+      await storage.resetFailedLogins(user.id);
 
       res.json({ message: "Password reset successfully" });
     } catch (error) {

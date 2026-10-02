@@ -5,7 +5,7 @@ import { db } from "../storage/db";
 import { hashPassword } from "../services/auth";
 
 /**
- * First-run admin. When no admin who can actually log in exists (the
+ * First-run admin. When no ACTIVE admin who can log in exists (the
  * passwordless "system" user does not count), create one from ADMIN_EMAIL and
  * ADMIN_PASSWORD. With either unset nothing is created. The password is never
  * logged.
@@ -16,7 +16,13 @@ export async function seedBootstrapAdmin(
   const [existing] = await db
     .select({ id: users.id })
     .from(users)
-    .where(and(eq(users.role, "admin"), isNotNull(users.password)))
+    .where(
+      and(
+        eq(users.role, "admin"),
+        eq(users.isActive, true),
+        isNotNull(users.password)
+      )
+    )
     .limit(1);
   if (existing) return;
 

@@ -8,6 +8,7 @@ import {
 } from "@azure/msal-node";
 import { storage } from "../../storage";
 import { getSession } from ".";
+import { loginBlockReason } from "./accountStatus";
 import { randomBytes } from "crypto";
 
 interface MicrosoftProfile {
@@ -234,6 +235,12 @@ export async function setupMicrosoftAuth(app: Express) {
       };
 
       const user = await storage.upsertUser(userData);
+
+      // No session for a deactivated or not-yet-approved account.
+      const blocked = loginBlockReason(user);
+      if (blocked) {
+        return res.redirect(`/auth?error=${blocked}`);
+      }
 
       // Create session user object compatible with Passport
       const sessionUser = {

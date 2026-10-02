@@ -18,13 +18,27 @@ export const generalRateLimit = rateLimit({
   keyGenerator: (req) => ipKeyGenerator(req.ip ?? ""),
 });
 
+/**
+ * Auth limit settings. The overrides exist for the test suite only: they are
+ * honoured when NODE_ENV=test, so a stray environment variable cannot loosen
+ * the limit in production.
+ */
+export function authRateLimitMax(env: NodeJS.ProcessEnv = process.env): number {
+  const override = Number(env.AUTH_RATE_LIMIT_MAX);
+  return env.NODE_ENV === "test" && override > 0 ? override : 10;
+}
+export function authRateLimitWindowMs(env: NodeJS.ProcessEnv = process.env): number {
+  const override = Number(env.AUTH_RATE_LIMIT_WINDOW_MS);
+  return env.NODE_ENV === "test" && override > 0 ? override : 60 * 1000;
+}
+
 // Auth endpoints (login, forgot-password, reset-password): per IP, always on
 // (every environment). Window and limit are read per request so tests can
 // raise them via AUTH_RATE_LIMIT_MAX; the limiter cannot be switched off.
 function authLimiter(skipSuccessfulRequests: boolean) {
   return rateLimit({
-    windowMs: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS) || 60 * 1000,
-    max: () => Number(process.env.AUTH_RATE_LIMIT_MAX) || 10,
+    windowMs: authRateLimitWindowMs(),
+    max: () => authRateLimitMax(),
     message: {
       error: "too_many_requests",
       message: "Too many attempts, please try again later.",

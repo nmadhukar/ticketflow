@@ -8,13 +8,13 @@ import type { NextFunction, Request, Response } from "express";
 
 const TOKEN_PATH = /^(\/api\/invitations\/)[^/]+/;
 const NO_BODY_PATH = /^\/api\/(auth|invitations)(\/|$)/;
-const SECRET_KEY = /pass(word)?|token|secret|api[-_]?key|authorization|credential/i;
+const SECRET_KEY = /pass(word)?|token|secret|key|hash|authorization|credential/i;
 
 export function redactLogPath(path: string): string {
   return path.replace(TOKEN_PATH, "$1[redacted]");
 }
 
-function maskSecrets(_key: string, value: unknown): unknown {
+export function maskSecrets(_key: string, value: unknown): unknown {
   return SECRET_KEY.test(_key) ? "[redacted]" : value;
 }
 

@@ -1,3 +1,4 @@
+import { jest } from "@jest/globals";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { users } from "@shared/schema";
@@ -5,6 +6,7 @@ import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
 import { createUser, DEFAULT_PASSWORD } from "./helpers/fixtures";
 import { db } from "../../storage/db";
+import { storage } from "../../storage";
 
 describe("login lockout", () => {
   let ctx: Awaited<ReturnType<typeof createTestApp>>;
@@ -91,5 +93,46 @@ describe("login lockout", () => {
     const res = await login(u.email!, DEFAULT_PASSWORD);
     expect(res.status).toBe(200);
     expect(JSON.stringify(res.body)).not.toMatch(/failedLoginAttempts|lockedUntil/);
+  });
+
+  it("10 parallel wrong logins (different IPs) allow at most 5 password comparisons and leave the account locked", async () => {
+    const u = await createUser({ role: "agent" });
+    const claim = jest.spyOn(storage, "claimLoginAttempt");
+    const results = await Promise.all(
+      Array.from({ length: 10 }, (_, i) =>
+        request(ctx.app)
+          .post("/api/auth/login")
+          .set("X-Forwarded-For", `192.0.2.${i + 1}`)
+          .send({ email: u.email, password: "wrong-password" })
+      )
+    );
+    const claimed = await Promise.all(claim.mock.results.map((r) => r.value));
+    claim.mockRestore();
+    // A comparison happens only after a successful claim.
+    expect(claimed.filter((a) => a !== null).length).toBeLessThanOrEqual(5);
+    expect(results.filter((r) => r.status === 401)).toHaveLength(5);
+    expect(results.filter((r) => r.status === 423)).toHaveLength(5);
+    const r = await row(u.id);
+    expect(r.failedLoginAttempts).toBe(5);
+    expect(r.lockedUntil!.getTime()).toBeGreaterThan(Date.now());
+    // and the right password is refused while locked
+    expect((await login(u.email!, DEFAULT_PASSWORD)).status).toBe(423);
+  });
+
+  it("a token password reset clears the lock so the user can sign in with the new password", async () => {
+    const u = await createUser({ role: "agent" });
+    for (let i = 0; i < 5; i++) await login(u.email!, "wrong-password");
+    expect((await login(u.email!, DEFAULT_PASSWORD)).status).toBe(423);
+
+    await storage.setPasswordResetToken(u.id, "reset-token-for-test", new Date(Date.now() + 3600000));
+    const reset = await request(ctx.app)
+      .post("/api/auth/reset-password")
+      .send({ token: "reset-token-for-test", password: "Brand-new-pw-77!" });
+    expect(reset.status).toBe(200);
+
+    const r = await row(u.id);
+    expect(r.failedLoginAttempts).toBe(0);
+    expect(r.lockedUntil).toBeNull();
+    expect((await login(u.email!, "Brand-new-pw-77!")).status).toBe(200);
   });
 });

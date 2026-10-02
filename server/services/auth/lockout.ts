@@ -1,21 +1,10 @@
 /**
- * Login lockout rules. Pure functions only; the counter itself is updated by
- * storage.recordFailedLogin / storage.resetFailedLogins.
+ * Login lockout rules. The attempt counter is claimed atomically in
+ * storage.claimLoginAttempt (before the password is compared) and cleared by
+ * storage.resetFailedLogins.
  */
 
-/** Wrong passwords allowed before the account locks. */
+/** Attempts allowed per lock window; the 5th claim starts the lock. */
 export const MAX_FAILED_LOGINS = 5;
 /** How long a locked account stays locked. */
 export const LOCKOUT_MINUTES = 15;
-
-type LockState = { failedLoginAttempts?: number | null; lockedUntil?: Date | null };
-
-/** True while the account is inside its lockout window. */
-export function isLocked(user: LockState, now: Date = new Date()): boolean {
-  return !!user.lockedUntil && user.lockedUntil.getTime() > now.getTime();
-}
-
-/** True when a lock has run out and the old failures should be forgotten. */
-export function lockExpired(user: LockState, now: Date = new Date()): boolean {
-  return !!user.lockedUntil && user.lockedUntil.getTime() <= now.getTime();
-}

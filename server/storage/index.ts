@@ -170,18 +170,30 @@ export class DatabaseStorage implements IStorage {
   }
 
   /**
-   * Counts one wrong password. Increment and lock decision are a single
-   * UPDATE so concurrent guesses cannot slip past the limit.
+   * Claims one password attempt BEFORE the password is compared. A single
+   * UPDATE counts the attempt, starts the lock on the 5th, and only matches
+   * while the account is not locked, so concurrent requests are serialised by
+   * the row lock: at most MAX_FAILED_LOGINS comparisons happen per lock window.
+   * Returns the attempt number, or null when the account is locked.
    */
-  async recordFailedLogin(userId: string, now: Date = new Date()): Promise<void> {
+  async claimLoginAttempt(userId: string, now: Date = new Date()): Promise<number | null> {
+    const nowTs = sql`${now.toISOString()}::timestamp`;
     const lockUntil = new Date(now.getTime() + LOCKOUT_MINUTES * 60 * 1000);
-    await db
+    const next = sql`(CASE WHEN ${users.lockedUntil} IS NOT NULL AND ${users.lockedUntil} <= ${nowTs} THEN 1 ELSE ${users.failedLoginAttempts} + 1 END)`;
+    const rows = await db
       .update(users)
       .set({
-        failedLoginAttempts: sql`${users.failedLoginAttempts} + 1`,
-        lockedUntil: sql`CASE WHEN ${users.failedLoginAttempts} + 1 >= ${MAX_FAILED_LOGINS} THEN ${lockUntil.toISOString()}::timestamp ELSE ${users.lockedUntil} END`,
+        failedLoginAttempts: next,
+        lockedUntil: sql`CASE WHEN ${next} >= ${MAX_FAILED_LOGINS} THEN ${lockUntil.toISOString()}::timestamp ELSE NULL END`,
       })
-      .where(eq(users.id, userId));
+      .where(
+        and(
+          eq(users.id, userId),
+          sql`(${users.lockedUntil} IS NULL OR ${users.lockedUntil} <= ${nowTs})`
+        )
+      )
+      .returning({ attempts: users.failedLoginAttempts });
+    return rows.length ? rows[0].attempts : null;
   }
 
   /** Forgets earlier failures (successful login, or an expired lock). */

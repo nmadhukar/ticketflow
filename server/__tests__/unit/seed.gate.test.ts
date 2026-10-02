@@ -4,6 +4,7 @@ import { runSeeders, type SeederSet } from "../../seed/runSeeders";
 function fakeSeeders() {
   return {
     systemUser: jest.fn(async () => {}),
+    deactivateDemoAccounts: jest.fn(async (_env: NodeJS.ProcessEnv) => []),
     bootstrapAdmin: jest.fn(async (_env: NodeJS.ProcessEnv) => {}),
     emailTemplates: jest.fn(async () => {}),
     demoUsers: jest.fn(async () => {}),
@@ -75,5 +76,23 @@ describe("seeding gate", () => {
     const s = fakeSeeders();
     s.bootstrapAdmin.mockRejectedValueOnce(new Error("no db") as never);
     await expect(runSeeders({}, asSet(s))).rejects.toThrow("no db");
+  });
+});
+
+describe("leftover demo logins", () => {
+  it("are deactivated before the bootstrap admin check, with the env", async () => {
+    const order: string[] = [];
+    const s = fakeSeeders();
+    s.deactivateDemoAccounts.mockImplementation(async () => {
+      order.push("deactivate");
+      return [];
+    });
+    s.bootstrapAdmin.mockImplementation(async () => {
+      order.push("bootstrap");
+    });
+    const env = { NODE_ENV: "production" };
+    await runSeeders(env, asSet(s));
+    expect(order).toEqual(["deactivate", "bootstrap"]);
+    expect(s.deactivateDemoAccounts).toHaveBeenCalledWith(env);
   });
 });

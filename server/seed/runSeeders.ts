@@ -2,7 +2,7 @@
  * Startup seeding with a demo gate.
  *
  * Always (every environment): the passwordless system user, the default email
- * templates, and the bootstrap admin (only if no admin exists and
+ * templates, deactivation of leftover demo logins, and the bootstrap admin (only if no admin exists and
  * ADMIN_EMAIL/ADMIN_PASSWORD are set).
  *
  * Only when SEED_DEMO_DATA === "true": demo users with fixed passwords,
@@ -11,6 +11,7 @@
  */
 export interface SeederSet {
   systemUser(): Promise<void>;
+  deactivateDemoAccounts(env: NodeJS.ProcessEnv): Promise<unknown>;
   bootstrapAdmin(env: NodeJS.ProcessEnv): Promise<void>;
   emailTemplates(): Promise<void>;
   demoUsers(): Promise<void>;
@@ -26,8 +27,10 @@ async function defaultSeeders(): Promise<SeederSet> {
   const seed = await import("./index");
   const { seedSystemUser } = await import("./seedUsers");
   const { seedBootstrapAdmin } = await import("./bootstrapAdmin");
+  const { deactivateDemoAccounts } = await import("./deactivateDemoAccounts");
   return {
     systemUser: seedSystemUser,
+    deactivateDemoAccounts,
     bootstrapAdmin: seedBootstrapAdmin,
     emailTemplates: seed.seedEmailTemplates,
     demoUsers: seed.seedUsers,
@@ -49,6 +52,8 @@ export async function runSeeders(
   // Required for the app to work: a failure here stops startup.
   await s.systemUser();
   await s.emailTemplates();
+  // Old demo logins must be off before the "is there an admin?" check.
+  await s.deactivateDemoAccounts(env);
   await s.bootstrapAdmin(env);
 
   if (env.SEED_DEMO_DATA !== "true") return;

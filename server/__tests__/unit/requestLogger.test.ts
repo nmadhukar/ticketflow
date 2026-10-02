@@ -1,6 +1,6 @@
 import express from "express";
 import request from "supertest";
-import { requestLogger, redactLogPath } from "../../utils/requestLogger";
+import { requestLogger, redactLogPath, maskSecrets } from "../../utils/requestLogger";
 
 describe("redactLogPath", () => {
   it("hides the invitation token but keeps the shape of the route", () => {
@@ -25,7 +25,9 @@ describe("requestLogger", () => {
   app.post("/api/auth/login", (_req, res) => res.json({ accessToken: TOKEN }));
   app.post("/api/auth/reset-password", (_req, res) => res.json({ token: TOKEN }));
   app.get("/api/ok", (_req, res) => res.json({ a: 1 }));
-  app.get("/api/leaky", (_req, res) => res.json({ a: 1, password: TOKEN, nested: { apiKey: TOKEN } }));
+  app.get("/api/leaky", (_req, res) =>
+    res.json({ a: 1, password: TOKEN, plainKey: TOKEN, keyHash: TOKEN, nested: { apiKey: TOKEN, clientSecret: TOKEN } })
+  );
 
   beforeEach(() => {
     lines.length = 0;
@@ -55,5 +57,21 @@ describe("requestLogger", () => {
     await flush();
     expect(lines[0]).toContain('{"a":1}');
     expect(lines[1]).not.toContain(TOKEN);
+    expect(lines[1]).toContain("[redacted]");
+  });
+});
+
+describe("maskSecrets", () => {
+  it("masks key-bearing field names, including plainKey from POST /api/api-keys", () => {
+    const out = JSON.parse(
+      JSON.stringify(
+        { plainKey: "k1", apiKey: "k2", keyHash: "k3", token: "k4", secret: "k5", accessToken: "k6", password: "k7", name: "ok" },
+        maskSecrets
+      )
+    );
+    expect(out.name).toBe("ok");
+    for (const k of ["plainKey", "apiKey", "keyHash", "token", "secret", "accessToken", "password"]) {
+      expect(out[k]).toBe("[redacted]");
+    }
   });
 });

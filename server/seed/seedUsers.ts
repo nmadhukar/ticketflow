@@ -1,6 +1,7 @@
 import { db } from "../storage/db";
 import { users, userInvitations } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { DEMO_ADMIN_PASSWORD, DEMO_PASSWORD } from "./demoAccounts";
 import { scrypt, randomBytes, randomUUID } from "crypto";
 import { promisify } from "util";
 
@@ -8,7 +9,7 @@ const scryptAsync = promisify(scrypt);
 
 const DEFAULT_ADMIN = {
   email: "admin@ticketflow.local",
-  password: "Admin123!",
+  password: DEMO_ADMIN_PASSWORD,
   firstName: "System",
   lastName: "Administrator",
   role: "admin" as const,
@@ -158,14 +159,14 @@ export async function seedUsers() {
     }> = [
       {
         email: "manager@ticketflow.local",
-        password: "Password123!",
+        password: DEMO_PASSWORD,
         firstName: "Default",
         lastName: "Manager",
         role: "manager",
       },
       {
         email: "agent@ticketflow.local",
-        password: "Password123!",
+        password: DEMO_PASSWORD,
         firstName: "Default",
         lastName: "Agent",
         role: "agent",
@@ -173,7 +174,7 @@ export async function seedUsers() {
 
       {
         email: "customer@ticketflow.local",
-        password: "Password123!",
+        password: DEMO_PASSWORD,
         firstName: "Default",
         lastName: "Customer",
         role: "customer",
@@ -198,7 +199,7 @@ export async function seedUsers() {
           .limit(1);
         if (exists.length === 0) {
           const userId = randomUUID();
-          const hashed = await hashPassword("Password123!");
+          const hashed = await hashPassword(DEMO_PASSWORD);
           const firstName = `(${role.charAt(0).toUpperCase() + role.slice(1)})`;
           const lastName = i === 1 ? "Taylor" : i === 2 ? "Jordan" : "Morgan";
 

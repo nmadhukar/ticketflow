@@ -73,6 +73,9 @@ export default function AuthPage() {
   const getErrorMessage = (err: string | null) => {
     if (!err) return null;
     if (err === "login_failed") return "Login failed. Please try again.";
+    if (err === "pending_approval")
+      return "Your account is pending admin approval.";
+    if (err === "account_inactive") return "Your account is deactivated.";
     return null;
   };
 
