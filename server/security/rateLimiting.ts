@@ -35,8 +35,12 @@ export function authRateLimitWindowMs(env: NodeJS.ProcessEnv = process.env): num
 // Auth endpoints (login, forgot-password, reset-password): per IP, always on
 // (every environment). Window and limit are read per request so tests can
 // raise them via AUTH_RATE_LIMIT_MAX; the limiter cannot be switched off.
-function authLimiter(skipSuccessfulRequests: boolean) {
+function authLimiter(
+  skipSuccessfulRequests: boolean,
+  requestWasSuccessful?: (req: Request, res: import("express").Response) => boolean
+) {
   return rateLimit({
+    ...(requestWasSuccessful ? { requestWasSuccessful } : {}),
     windowMs: authRateLimitWindowMs(),
     max: () => authRateLimitMax(),
     message: {
@@ -54,6 +58,17 @@ function authLimiter(skipSuccessfulRequests: boolean) {
 export const authRateLimit = authLimiter(true);
 /** forgot-password / reset-password answer 200 even for unknown emails, so every request counts. */
 export const authRequestRateLimit = authLimiter(false);
+
+/**
+ * Bearer credentials (API keys, JWTs): per IP, same limit and window as login.
+ * Only requests whose bearer was rejected (the bearer middleware sets
+ * `res.locals.bearerRejected`) stay counted, so key guessing is throttled and
+ * legitimate bearer traffic is not.
+ */
+export const bearerFailureRateLimit = authLimiter(
+  true,
+  (_req, res) => !res.locals.bearerRejected
+);
 
 // Password reset rate limiting
 export const passwordResetRateLimit = rateLimit({
