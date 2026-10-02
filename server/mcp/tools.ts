@@ -10,8 +10,24 @@ import {
   listTickets,
   reopenTicket,
   updateTicket,
+  type WriteContext,
 } from "../services/tickets/ticketService";
+import { logSecurityEvent } from "../security/rbac";
 import { runTool } from "./errors";
+
+/** Audit a refused status change like REST does, without an HTTP request. */
+function mcpWriteContext(user: User): WriteContext {
+  return {
+    onStatusRefusal: ({ from, to, taskId }) =>
+      logSecurityEvent(
+        { user: { userId: user.id, role: user.role }, ip: "mcp", get: () => undefined } as never,
+        "change_status",
+        "ticket",
+        false,
+        { userId: user.id, from, to, taskId, channel: "mcp" }
+      ),
+  };
+}
 
 /**
  * The ticket tools. Each is a thin adapter over ticketService, which owns every
@@ -93,14 +109,14 @@ export function registerTicketTools(server: McpServer, user: User): void {
     },
     (args) => {
       const { id: ticketId, ...patch } = args;
-      return runTool(() => updateTicket(user, ticketId, patch));
+      return runTool(() => updateTicket(user, ticketId, patch, mcpWriteContext(user)));
     }
   );
 
   server.registerTool(
     "close_ticket",
     { description: "Close a ticket (staff only). Closing an already closed ticket changes nothing.", inputSchema: byId },
-    (args) => runTool(() => closeTicket(user, args.id))
+    (args) => runTool(() => closeTicket(user, args.id, mcpWriteContext(user)))
   );
 
   server.registerTool(
@@ -109,7 +125,7 @@ export function registerTicketTools(server: McpServer, user: User): void {
       description: "Reopen a resolved or closed ticket (back to open). Staff, or the customer who created it.",
       inputSchema: byId,
     },
-    (args) => runTool(() => reopenTicket(user, args.id))
+    (args) => runTool(() => reopenTicket(user, args.id, mcpWriteContext(user)))
   );
 
   server.registerTool(

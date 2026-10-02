@@ -179,3 +179,42 @@ describe("POST /api/mcp authentication", () => {
     expect((await storage.getTask(created.id))?.title).toBe("via mcp");
   });
 });
+
+describe("MCP status-change audit", () => {
+  it("a customer's refused close_ticket is FORBIDDEN and writes a change_status SECURITY_AUDIT line", async () => {
+    const customer = await createUser({ role: "customer" });
+    const task = await storage.createTask({
+      title: "mine",
+      category: "support",
+      createdBy: customer.id,
+    } as never);
+    const { plaintext } = await issueApiKey({ userId: customer.id, name: "k" });
+    const spy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    let res;
+    let calls: unknown[][];
+    try {
+      res = await mcp(plaintext, {
+        jsonrpc: "2.0",
+        id: 9,
+        method: "tools/call",
+        params: { name: "close_ticket", arguments: { id: task.id } },
+      });
+    } finally {
+      calls = [...spy.mock.calls];
+      spy.mockRestore();
+    }
+    expect(res.body.result.isError).toBe(true);
+    expect(JSON.parse(res.body.result.content[0].text).code).toBe("FORBIDDEN");
+    const lines = calls
+      .filter((c) => c[0] === "SECURITY_AUDIT:")
+      .map((c) => JSON.parse(String(c[1])));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      action: "change_status",
+      resource: "ticket",
+      success: false,
+      details: { userId: customer.id, from: "open", to: "closed", taskId: task.id, channel: "mcp" },
+    });
+    expect((await storage.getTask(task.id))?.status).toBe("open");
+  });
+});

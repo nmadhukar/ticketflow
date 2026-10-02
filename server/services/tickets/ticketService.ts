@@ -43,7 +43,7 @@ export interface WriteContext {
   /** Site origin for links in Teams messages; null means no link. */
   actionBaseUrl?: string | null;
   /** Called when a requested status change is refused (403 or 409), for the security audit log. */
-  onStatusRefusal?: (info: { from: string; to: unknown }) => void;
+  onStatusRefusal?: (info: { from: string; to: unknown; taskId: number }) => void;
 }
 
 function assertId(id: unknown): asserts id is number {
@@ -211,7 +211,7 @@ export async function updateTicket(
     const refused = (to: unknown) => {
       if (payload.status === undefined) return;
       try {
-        ctx.onStatusRefusal?.({ from: task.status, to });
+        ctx.onStatusRefusal?.({ from: task.status, to, taskId: id });
       } catch {
         /* best-effort: audit logging must not mask the refusal */
       }
