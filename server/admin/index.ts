@@ -8,6 +8,7 @@
 import type { Express } from "express";
 import { registerSettingsRoutes } from "./settings";
 import { registerCompanySettingsRoutes } from "./companySettings";
+import { registerApiKeysRoutes } from "./apiKeys";
 // Import other route modules as they are created
 // import { registerUsersRoutes } from "./users";
 // import { registerKnowledgeRoutes } from "./knowledge";
@@ -27,6 +28,9 @@ export function registerAdminRoutes(app: Express): void {
   // Register remaining settings routes (SSO, email templates, etc.)
   registerSettingsRoutes(app);
 
+  // API keys (admin-issued, hashed)
+  registerApiKeysRoutes(app);
+
   // Register other admin route modules here as they are created:
   // registerUsersRoutes(app);
   // registerKnowledgeRoutes(app);
@@ -35,5 +39,4 @@ export function registerAdminRoutes(app: Express): void {
   // registerDepartmentsRoutes(app);
   // registerEscalationRoutes(app);
   // registerLearningQueueRoutes(app);
-  // registerApiKeysRoutes(app);
 }

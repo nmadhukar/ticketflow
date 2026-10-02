@@ -1926,30 +1926,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // API key operations
-  async createApiKey(
-    apiKey: InsertApiKey
-  ): Promise<{ apiKey: ApiKey; plainKey: string }> {
-    // Generate a secure API key
-    const plainKey = `tfk_${Math.random()
-      .toString(36)
-      .substring(2)}${Date.now().toString(36)}`;
-    const keyPrefix = plainKey.substring(0, 8);
-
-    // In production, you'd hash the key before storing
-    const keyHash = plainKey; // TODO: Use bcrypt or similar
-
-    const { expiresAt, ...restApiKey } = apiKey as any;
-    const [newApiKey] = await db
-      .insert(apiKeys)
-      .values({
-        ...(restApiKey as any),
-        expiresAt: expiresAt ? new Date(expiresAt as any) : null,
-        keyHash: keyHash,
-        keyPrefix: keyPrefix,
-      })
-      .returning();
-
-    return { apiKey: newApiKey, plainKey };
+  // Stores an already-hashed key (see server/services/auth/apiKeys.ts, issueApiKey).
+  async createApiKey(apiKey: InsertApiKey): Promise<ApiKey> {
+    const [row] = await db.insert(apiKeys).values(apiKey).returning();
+    return row;
   }
 
   async getApiKeys(userId: string): Promise<ApiKey[]> {
@@ -1958,6 +1938,19 @@ export class DatabaseStorage implements IStorage {
       .from(apiKeys)
       .where(and(eq(apiKeys.userId, userId), eq(apiKeys.isActive, true)))
       .orderBy(desc(apiKeys.createdAt));
+  }
+
+  async getAllApiKeys(): Promise<ApiKey[]> {
+    return await db
+      .select()
+      .from(apiKeys)
+      .where(eq(apiKeys.isActive, true))
+      .orderBy(desc(apiKeys.createdAt));
+  }
+
+  async getApiKey(id: number): Promise<ApiKey | undefined> {
+    const [row] = await db.select().from(apiKeys).where(eq(apiKeys.id, id));
+    return row;
   }
 
   async getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined> {
@@ -1977,13 +1970,6 @@ export class DatabaseStorage implements IStorage {
 
   async revokeApiKey(id: number): Promise<void> {
     await db.update(apiKeys).set({ isActive: false }).where(eq(apiKeys.id, id));
-  }
-
-  async updateApiKey(
-    id: number,
-    updates: { keyHash?: string; isActive?: boolean }
-  ): Promise<void> {
-    await db.update(apiKeys).set(updates).where(eq(apiKeys.id, id));
   }
 
   // Bedrock settings operations

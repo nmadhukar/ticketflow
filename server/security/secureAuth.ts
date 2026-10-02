@@ -1,5 +1,6 @@
 // Enhanced Authentication System with JWT and Security Features
 import bcrypt from "bcryptjs";
+import { randomBytes } from "crypto";
 import { generateTokens, verifyToken, JWTPayload } from "./jwt";
 import { storage } from "../storage";
 // Security audit logging functions
@@ -403,15 +404,8 @@ export const resetPassword = async (
 };
 
 // Generate secure password reset token
-const generatePasswordResetToken = (): string => {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let token = "";
-  for (let i = 0; i < 32; i++) {
-    token += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return token;
-};
+const generatePasswordResetToken = (): string =>
+  randomBytes(32).toString("base64url");
 
 // Validate JWT token and get user
 export const validateToken = async (

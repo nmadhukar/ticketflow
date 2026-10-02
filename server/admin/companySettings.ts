@@ -11,6 +11,20 @@ import { getUserId, isAdmin } from "../middleware/admin.middleware";
 import { isAuthenticated } from "../services/auth";
 import { s3Service } from "../services/s3Service";
 
+/** The submitted secret if non-blank, else the stored one if any, as a metadata fragment. */
+function secretOrKept(
+  field: string,
+  submitted: unknown,
+  stored: Record<string, any>
+): Record<string, string> {
+  if (typeof submitted === "string" && submitted.trim() !== "") {
+    return { [field]: submitted };
+  }
+  return typeof stored[field] === "string" && stored[field]
+    ? { [field]: stored[field] }
+    : {};
+}
+
 export function registerCompanySettingsRoutes(app: Express): void {
   // GET /api/company-settings/branding - scoped fetch
   app.get(
@@ -306,8 +320,8 @@ export function registerCompanySettingsRoutes(app: Express): void {
           awsRegion: meta.awsRegion || "",
           hasAwsSecret: !!meta.awsSecretAccessKey,
           mailtrapHasToken,
-          // Return Mailtrap token if stored (for UI display)
-          mtToken: meta.mailtrapToken || "",
+          // Secrets are never returned: only whether one is stored.
+          hasSmtpPassword: !!meta.password,
         });
       } catch (error) {
         console.error("Error fetching email provider:", error);
@@ -332,6 +346,41 @@ export function registerCompanySettingsRoutes(app: Express): void {
         const userId = getUserId(req);
         const data = parsed.data;
 
+        // A blank secret keeps the stored one, but only for the same provider:
+        // a secret must never follow an admin from one provider to another.
+        const active: any = await storage.getActiveEmailProvider();
+        const prev: Record<string, any> =
+          active && active.provider === data.provider
+            ? active.metadata || {}
+            : {};
+
+        // A stored secret is only kept while the identifier it belongs to is
+        // unchanged. Changing the identifier with a blank secret is refused
+        // rather than silently pairing the old secret with a new identity.
+        const blank = (v: unknown) => typeof v !== "string" || v.trim() === "";
+        const secretRequired = (field: string) =>
+          res.status(400).json({
+            error: "validation_failed",
+            message: `${field} is required when the account identifier changes`,
+            details: { required: [field] },
+          });
+        if (
+          data.provider === EMAIL_PROVIDERS.AWS &&
+          blank(data.awsSecretAccessKey) &&
+          prev.awsSecretAccessKey &&
+          prev.awsAccessKeyId !== data.awsAccessKeyId
+        ) {
+          return secretRequired("awsSecretAccessKey");
+        }
+        if (
+          data.provider === EMAIL_PROVIDERS.SMTP &&
+          blank(data.password) &&
+          prev.password &&
+          (prev.host !== data.host || prev.username !== data.username)
+        ) {
+          return secretRequired("password");
+        }
+
         const saved = await storage.upsertEmailProvider(
           {
             provider: data.provider,
@@ -341,16 +390,20 @@ export function registerCompanySettingsRoutes(app: Express): void {
               switch (data.provider) {
                 case EMAIL_PROVIDERS.MAILTRAP:
                   return {
-                    ...((data as any).token
-                      ? { mailtrapToken: (data as any).token }
-                      : {}),
+                    ...secretOrKept(
+                      "mailtrapToken",
+                      (data as any).token,
+                      prev
+                    ),
                   };
                 case EMAIL_PROVIDERS.AWS:
                   return {
                     awsAccessKeyId: data.awsAccessKeyId,
-                    ...(data.awsSecretAccessKey
-                      ? { awsSecretAccessKey: data.awsSecretAccessKey }
-                      : {}),
+                    ...secretOrKept(
+                      "awsSecretAccessKey",
+                      data.awsSecretAccessKey,
+                      prev
+                    ),
                     awsRegion: data.awsRegion,
                   };
                 case EMAIL_PROVIDERS.SMTP:
@@ -358,7 +411,7 @@ export function registerCompanySettingsRoutes(app: Express): void {
                     host: data.host,
                     port: data.port,
                     username: data.username,
-                    ...(data.password ? { password: data.password } : {}),
+                    ...secretOrKept("password", data.password, prev),
                     encryption: data.encryption,
                   };
                 case EMAIL_PROVIDERS.MAILGUN:

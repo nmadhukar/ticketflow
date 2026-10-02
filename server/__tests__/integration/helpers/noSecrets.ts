@@ -8,6 +8,9 @@ const FORBIDDEN = [
   "keyHash",
   "clientSecret",
   "awsSecretAccessKey",
+  "bedrockSecretAccessKey",
+  "mailtrapToken",
+  "mtToken",
 ];
 
 /** Returns the JSON path of every forbidden key found anywhere in `body`. */
