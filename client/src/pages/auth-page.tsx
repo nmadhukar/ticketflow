@@ -203,6 +203,7 @@ export default function AuthPage() {
         password: data.password,
         firstName: data.firstName,
         lastName: data.lastName,
+        ...(invitationToken ? { inviteToken: invitationToken } : {}),
       });
       return res.json();
     },

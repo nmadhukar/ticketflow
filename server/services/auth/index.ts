@@ -86,6 +86,7 @@ const registerSchema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters"),
   firstName: z.string().min(1, "First name is required"),
   lastName: z.string().min(1, "Last name is required"),
+  inviteToken: z.string().min(1).optional(),
 });
 
 const loginSchema = z.object({
@@ -217,57 +218,39 @@ export function setupAuth(app: Express) {
       // Check if user already exists
       const existingUser = await storage.getUserByEmail(validatedData.email);
 
-      // Check if this email has a pending invitation
-      const invitations = await storage.getUserInvitations({
-        status: "pending",
-      });
-      const invitation = invitations.find(
-        (inv) =>
-          inv.email === validatedData.email &&
-          new Date(inv.expiresAt) > new Date()
-      );
-
-      // Handle existing user with invitation
-      if (existingUser && invitation) {
-        // If user exists but has no password (e.g., created through SSO), allow password setup
-        if (!existingUser.password) {
-          const hashedPassword = await hashPassword(validatedData.password);
-
-          await storage.upsertUser({
-            id: existingUser.id,
-            email: existingUser.email,
-            password: hashedPassword,
-            firstName: validatedData.firstName,
-            lastName: validatedData.lastName,
-            role: invitation.role,
-            isApproved: true,
-            isActive: existingUser.isActive,
-          });
-
-          await storage.markInvitationAccepted(invitation.id);
-
-          return res.status(201).json({
-            message:
-              "Account activated successfully! You can now log in with your credentials.",
-            user: {
-              id: existingUser.id,
-              email: existingUser.email,
-              firstName: validatedData.firstName,
-              lastName: validatedData.lastName,
-              role: invitation.role,
-              isApproved: true,
-            },
-          });
-        } else {
+      // An invitation is applied only when its secret token is presented
+      // AND it was issued for this very email, is still pending and unexpired.
+      let invitation: Awaited<
+        ReturnType<typeof storage.getUserInvitationByToken>
+      > = undefined;
+      if (validatedData.inviteToken) {
+        const candidate = await storage.getUserInvitationByToken(
+          validatedData.inviteToken
+        );
+        if (
+          !candidate ||
+          candidate.status !== "pending" ||
+          new Date(candidate.expiresAt) <= new Date() ||
+          candidate.email.toLowerCase() !== validatedData.email.toLowerCase()
+        ) {
           return res.status(400).json({
-            message:
-              "This email is already registered. Please sign in with your existing password.",
+            error: "invalid_invitation",
+            message: "This invitation is invalid, expired or not for this email.",
           });
         }
+        invitation = candidate;
       }
 
-      // Check if user exists without invitation
+      // Never let a registration take over an existing account, including
+      // a password-less (SSO) one.
       if (existingUser) {
+        if (!existingUser.password) {
+          return res.status(409).json({
+            error: "account_exists",
+            message:
+              "An account for this email already exists. Sign in with your single sign-on provider.",
+          });
+        }
         return res.status(400).json({ message: "Email already registered" });
       }
 

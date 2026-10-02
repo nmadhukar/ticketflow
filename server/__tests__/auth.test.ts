@@ -14,6 +14,7 @@ jest.mock('../storage', () => ({
     getCompanySettings: jest.fn(),
     getActiveEmailProvider: jest.fn(),
     getUserInvitations: jest.fn(),
+    getUserInvitationByToken: jest.fn(),
     markInvitationAccepted: jest.fn(),
   }
 }));
@@ -56,7 +57,7 @@ describe('Auth Routes', () => {
     });
 
     it('should reject registration with existing email', async () => {
-      (storage.getUserByEmail as jest.Mock).mockResolvedValue({ id: '123' });
+      (storage.getUserByEmail as jest.Mock).mockResolvedValue({ id: '123', password: 'hashed' });
 
       const response = await request(app)
         .post('/api/auth/register')
@@ -68,13 +69,14 @@ describe('Auth Routes', () => {
 
     it('should auto-approve invited users', async () => {
       (storage.getUserByEmail as jest.Mock).mockResolvedValue(null);
-      (storage.getUserInvitations as jest.Mock).mockResolvedValue([{
+      (storage.getUserInvitationByToken as jest.Mock).mockResolvedValue({
         id: 1,
         email: validUser.email,
         role: 'user',
+        status: 'pending',
         expiresAt: new Date(Date.now() + 86400000),
         departmentId: 1
-      }]);
+      });
       (storage.createUser as jest.Mock).mockResolvedValue({
         id: '123',
         ...validUser,
@@ -85,37 +87,26 @@ describe('Auth Routes', () => {
 
       const response = await request(app)
         .post('/api/auth/register')
-        .send(validUser);
+        .send({ ...validUser, inviteToken: 'valid-token' });
 
       expect(response.status).toBe(201);
       expect(response.body.message).toContain('You can now log in');
       expect(storage.markInvitationAccepted).toHaveBeenCalledWith(1);
     });
 
-    it('should allow password setup for existing SSO users with invitation', async () => {
-      const existingUser = {
+    it('should refuse to set a password on an existing SSO account', async () => {
+      (storage.getUserByEmail as jest.Mock).mockResolvedValue({
         id: '123',
         email: validUser.email,
         password: null // No password set (SSO user)
-      };
-
-      (storage.getUserByEmail as jest.Mock).mockResolvedValue(existingUser);
-      (storage.getUserInvitations as jest.Mock).mockResolvedValue([{
-        id: 1,
-        email: validUser.email,
-        role: 'user',
-        expiresAt: new Date(Date.now() + 86400000)
-      }]);
-      (storage.upsertUser as jest.Mock).mockResolvedValue(undefined);
-      (storage.markInvitationAccepted as jest.Mock).mockResolvedValue(undefined);
+      });
 
       const response = await request(app)
         .post('/api/auth/register')
         .send(validUser);
 
-      expect(response.status).toBe(201);
-      expect(response.body.message).toContain('Account activated successfully');
-      expect(storage.upsertUser).toHaveBeenCalled();
+      expect(response.status).toBe(409);
+      expect(storage.upsertUser).not.toHaveBeenCalled();
     });
   });
 

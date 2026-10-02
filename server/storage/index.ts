@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import {
   users,
   tasks,
@@ -2193,8 +2194,7 @@ export class DatabaseStorage implements IStorage {
   async createUserInvitation(
     invitation: InsertUserInvitation
   ): Promise<UserInvitation> {
-    const token =
-      Math.random().toString(36).substring(2) + Date.now().toString(36);
+    const token = randomBytes(32).toString("base64url");
     const { expiresAt, ...rest } = invitation as any;
     const [created] = await db
       .insert(userInvitations)

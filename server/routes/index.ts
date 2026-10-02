@@ -3957,11 +3957,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Whitelist fields: the caller may not set status, token, etc.
+      let expiresAt: Date | undefined;
+      if (
+        req.body.expiresAt !== undefined &&
+        req.body.expiresAt !== null &&
+        req.body.expiresAt !== ""
+      ) {
+        expiresAt = new Date(req.body.expiresAt);
+        if (Number.isNaN(expiresAt.getTime())) {
+          return res.status(400).json({
+            error: "invalid_expiry",
+            message: "expiresAt must be a valid date",
+          });
+        }
+      }
       const invitation = await storage.createUserInvitation({
-        ...req.body,
-        expiresAt: new Date(req.body.expiresAt),
+        email: req.body.email,
+        role: req.body.role,
+        firstName: req.body.firstName,
+        lastName: req.body.lastName,
+        department: req.body.department,
+        departmentId: req.body.departmentId,
+        ...(expiresAt ? { expiresAt } : {}),
         invitedBy: userId,
-      });
+      } as any);
 
       // Send invitation email using the template
       const emailTemplate = await storage.getEmailTemplate("user_invitation");
@@ -4056,7 +4076,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      res.json(invitation);
+      res.status(201).json(invitation);
     } catch (error) {
       console.error("Error creating invitation:", error);
       res.status(500).json({ message: "Failed to create invitation" });
@@ -4116,25 +4136,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
-  // Public route to accept invitation
+  // Public route to look up an invitation by its secret token
   app.get("/api/invitations/:token", async (req, res) => {
     try {
       const invitation = await storage.getUserInvitationByToken(
         req.params.token
       );
 
-      if (!invitation) {
-        return res.status(404).json({ message: "Invalid invitation token" });
+      // A cancelled token is indistinguishable from an unknown one.
+      if (!invitation || invitation.status === "cancelled") {
+        return res.status(404).json({
+          error: "invitation_not_found",
+          message: "Invalid invitation token",
+        });
       }
 
-      if (invitation.status === "accepted") {
-        return res
-          .status(400)
-          .json({ message: "Invitation has already been accepted" });
+      if (invitation.status !== "pending") {
+        return res.status(400).json({
+          error: "invitation_used",
+          message: "Invitation has already been accepted",
+        });
       }
 
-      if (new Date(invitation.expiresAt) < new Date()) {
-        return res.status(400).json({ message: "Invitation has expired" });
+      if (new Date(invitation.expiresAt) <= new Date()) {
+        return res.status(400).json({
+          error: "invitation_expired",
+          message: "Invitation has expired",
+        });
       }
 
       res.json({
@@ -4148,31 +4176,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/invitations/:token/accept", async (req, res) => {
+  // Accept an invitation. Only a signed-in user whose email matches the
+  // invitation gets the role. An anonymous caller creates nothing and is
+  // told to register with the token (an account needs a password).
+  app.post("/api/invitations/:token/accept", async (req: any, res) => {
     try {
       const invitation = await storage.getUserInvitationByToken(
         req.params.token
       );
 
       if (!invitation) {
-        return res.status(404).json({ message: "Invalid invitation token" });
+        return res.status(404).json({
+          error: "invitation_not_found",
+          message: "Invalid invitation token",
+        });
       }
 
-      if (invitation.status === "accepted") {
-        return res
-          .status(400)
-          .json({ message: "Invitation has already been accepted" });
+      if (invitation.status !== "pending") {
+        return res.status(400).json({
+          error: "invitation_unavailable",
+          message:
+            invitation.status === "accepted"
+              ? "Invitation has already been accepted"
+              : "Invitation is no longer valid",
+        });
       }
 
-      if (new Date(invitation.expiresAt) < new Date()) {
-        return res.status(400).json({ message: "Invitation has expired" });
+      if (new Date(invitation.expiresAt) <= new Date()) {
+        return res.status(400).json({
+          error: "invitation_expired",
+          message: "Invitation has expired",
+        });
       }
 
-      // Mark invitation as accepted
+      const sessionUserId =
+        req.isAuthenticated && req.isAuthenticated()
+          ? getUserId(req)
+          : undefined;
+      const current = sessionUserId
+        ? await storage.getUser(sessionUserId)
+        : undefined;
+
+      if (!current) {
+        return res.json({
+          registrationRequired: true,
+          email: invitation.email,
+          registerPath: `/auth?mode=register&email=${encodeURIComponent(
+            invitation.email
+          )}&token=${encodeURIComponent(invitation.invitationToken)}`,
+          message: "Create an account with this invitation to continue.",
+        });
+      }
+
+      if ((current.email ?? "").toLowerCase() !== invitation.email.toLowerCase()) {
+        return res.status(403).json({
+          error: "invitation_email_mismatch",
+          message: "This invitation was issued for a different email address.",
+        });
+      }
+
+      await storage.upsertUser({
+        id: current.id,
+        email: current.email,
+        role: invitation.role,
+        isApproved: true,
+      } as any);
       await storage.markInvitationAccepted(invitation.id);
 
-      // Redirect to login page
-      res.json({ message: "Invitation accepted. Please log in to continue." });
+      res.json({ message: "Invitation accepted. Your role has been updated." });
     } catch (error) {
       console.error("Error accepting invitation:", error);
       res.status(500).json({ message: "Failed to accept invitation" });
