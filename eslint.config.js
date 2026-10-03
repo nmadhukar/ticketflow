@@ -29,6 +29,12 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.node, ...globals.jest } },
   },
   {
+    // Preloaded by node (NODE_OPTIONS=--require) as plain CommonJS.
+    files: ["e2e/**/*.cjs"],
+    languageOptions: { globals: globals.node },
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+  {
     // Jest runs this file untransformed as CommonJS (package.json is "type": "module").
     files: ["jest.setup.js"],
     rules: { "@typescript-eslint/no-require-imports": "off" },

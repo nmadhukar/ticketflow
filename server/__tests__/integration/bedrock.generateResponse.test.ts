@@ -44,6 +44,7 @@ describe("bedrockIntegration.generateResponse", () => {
     );
   });
   afterAll(async () => {
+    await resetDb(); // drop the fake Bedrock settings
     await closeDb();
   });
   beforeEach(() => {

@@ -47,7 +47,6 @@ import {
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations, sql } from "drizzle-orm";
-import "./constants";
 
 // Session storage table for Replit Auth
 export const sessions = pgTable(

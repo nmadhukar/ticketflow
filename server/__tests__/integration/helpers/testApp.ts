@@ -2,7 +2,7 @@ import express, { type Express } from "express";
 import { installRequestPipeline } from "../../../security/pipeline";
 import { registerRoutes } from "../../../routes/index";
 import { closeAuth } from "../../../services/auth";
-import { closeDb } from "./testDb";
+import { closeDb, resetDb } from "./testDb";
 import { recordResponse } from "./noSecrets";
 import { installErrorHandling } from "../../../http/install";
 import { registerHealthRoutes } from "../../../http/health";
@@ -60,6 +60,9 @@ export async function createTestApp(): Promise<{
     async close() {
       server.close();
       await closeAuth();
+      // Leave the shared test DB empty: tests write fake Bedrock/email/Teams
+      // settings, and e2e runs against the same database.
+      await resetDb();
       await closeDb();
     },
   };

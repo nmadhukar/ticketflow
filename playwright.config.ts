@@ -1,8 +1,13 @@
 import { randomBytes } from "node:crypto";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 
 // E2E_PORT lets parallel checkouts run side by side; 5055 is the default.
 const PORT = Number(process.env.E2E_PORT ?? 5055);
+if (!Number.isInteger(PORT) || PORT < 1024 || PORT > 65535) {
+  throw new Error(`E2E_PORT must be an integer from 1024 to 65535 (got "${process.env.E2E_PORT}").`);
+}
 const BASE_URL = `http://localhost:${PORT}`;
 
 // The e2e database is whatever TEST_DATABASE_URL names. Refuse anything that is
@@ -27,10 +32,45 @@ for (const name of [
   process.env[name] ??= secret();
 }
 
+// Outbound-call guard: the app server preloads e2e/no-egress.cjs, which refuses
+// every non-loopback connection and records it in this file; global-teardown
+// fails the run if the file has anything in it. Generated once per run and
+// inherited by the workers, like the secrets above.
+process.env.E2E_EGRESS_LOG ??= `${tmpdir()}/ticketflow-e2e-egress-${randomBytes(6).toString("hex")}.log`.replace(/\\/g, "/");
+const NO_EGRESS = resolve("e2e/no-egress.cjs").replace(/\\/g, "/");
+
+// Cloud and mail credentials the server reads from the environment (dotenv fills
+// only MISSING keys, so an empty string beats a developer's .env or shell).
+const BLANKED_ENV = Object.fromEntries(
+  [
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_PROFILE",
+    "AWS_REGION",
+    "AWS_S3_BUCKET_NAME",
+    "MAILTRAP_TOKEN",
+    "MICROSOFT_CLIENT_ID",
+    "MICROSOFT_CLIENT_SECRET",
+    "MICROSOFT_REDIRECT_URL",
+    "MICROSOFT_TENANT_ID",
+    "SNS_INBOUND_TOPIC_ARN",
+    "BEDROCK_ACCESS_KEY_ID",
+    "BEDROCK_SECRET_ACCESS_KEY",
+    "SMTP_HOST",
+    "SMTP_USER",
+    "SMTP_PASS",
+    "SES_ACCESS_KEY_ID",
+    "SES_SECRET_ACCESS_KEY",
+    "TEAMS_WEBHOOK_URL",
+  ].map((name) => [name, ""])
+);
+
 export default defineConfig({
   testDir: "./e2e",
   testMatch: "**/*.spec.ts",
   globalSetup: "./e2e/global-setup.ts",
+  globalTeardown: "./e2e/global-teardown.ts",
   // The flows share one database and one ticket per spec file; run them in order.
   workers: 1,
   fullyParallel: false,
@@ -55,6 +95,9 @@ export default defineConfig({
     timeout: 300_000,
     reuseExistingServer: false,
     env: {
+      ...BLANKED_ENV,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require "${NO_EGRESS}"`.trim(),
+      E2E_EGRESS_LOG: process.env.E2E_EGRESS_LOG!,
       NODE_ENV: "production",
       // Production refuses to boot without it (Ruling R34): links are built from it.
       APP_BASE_URL: BASE_URL,

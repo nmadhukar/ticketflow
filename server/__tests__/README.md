@@ -20,9 +20,7 @@ server/__tests__/
 ├── mocks/                   # Mock implementations and test data
 │   └── aws-bedrock.mock.ts         # AWS Bedrock service mocks
 └── utils/                   # Testing utilities and helpers
-    ├── snsTestSigner.ts            # Signs SNS messages for the inbound-email tests
-    ├── test-reporter.ts            # Comprehensive test reporting
-    └── test-runner.ts              # Automated test execution
+    └── snsTestSigner.ts            # Signs SNS messages for the inbound-email tests
 ```
 
 ## 🚀 Running Tests
@@ -63,19 +61,6 @@ npm test -- --testPathPattern=e2e
 
 # All tests with coverage
 npm test -- --coverage
-```
-
-### Automated Test Runner
-
-```bash
-# Run complete test suite with reporting
-node server/__tests__/utils/test-runner.js all
-
-# Run only AI quality assessment
-node server/__tests__/utils/test-runner.js ai-quality
-
-# Run performance benchmarks
-node server/__tests__/utils/test-runner.js performance
 ```
 
 ## 📊 Test Categories
@@ -162,27 +147,6 @@ expect(bedrockMock.totalCalls()).toBe(0);            // prompts seen: bedrockMoc
 ```
 
 Store `bedrockModelId: MOCK_MODEL_ID` in the Bedrock settings so the Claude reply format is used. See `integration/ai.routes.test.ts`.
-
-### Test Reporter
-
-Generates comprehensive HTML and JSON reports:
-
-```typescript
-import { testReporter } from './utils/test-reporter';
-
-// Add test results
-testReporter.addTestResult({
-  testName: 'AI Response Accuracy',
-  suiteName: 'AI Quality',
-  status: 'passed',
-  duration: 1250
-});
-
-// Generate reports
-testReporter.generateHTMLReport();
-testReporter.generateJSONReport();
-testReporter.printSummary();
-```
 
 ## 📈 Test Metrics and Reporting
 
