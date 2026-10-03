@@ -1671,7 +1671,7 @@ export class DatabaseStorage implements IStorage {
     return updatedUser;
   }
 
-  async approveUser(userId: string): Promise<PublicUser> {
+  async approveUser(userId: string): Promise<PublicUser | undefined> {
     const [updatedUser] = await db
       .update(users)
       .set({

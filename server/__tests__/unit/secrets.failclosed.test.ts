@@ -26,7 +26,8 @@ function trackedSampleFiles(): string[] {
       if (["node_modules", ".git", "dist", "coverage"].includes(entry)) continue;
       const full = join(dir, entry);
       if (statSync(full).isDirectory()) walk(full);
-      else if (/\.(md|example)$|docker-compose.*\.yml$|\.env/.test(entry)) found.push(relative(REPO_ROOT, full));
+      // Example and doc files only: never a real `.env` (or `.env.local`) a developer keeps here.
+      else if (/\.(md|example)$|docker-compose.*\.yml$|^\.env\..*example/.test(entry)) found.push(relative(REPO_ROOT, full));
     }
   };
   walk(REPO_ROOT);

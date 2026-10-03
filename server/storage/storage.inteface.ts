@@ -292,7 +292,7 @@ export interface IStorage {
     }
   ): Promise<PublicUser>;
   toggleUserStatus(userId: string): Promise<PublicUser>;
-  approveUser(userId: string): Promise<PublicUser>;
+  approveUser(userId: string): Promise<PublicUser | undefined>;
   assignUserToTeam(
     userId: string,
     teamId: number,

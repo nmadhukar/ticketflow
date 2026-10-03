@@ -308,8 +308,7 @@ export default function Invitations() {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <div className="flex justify-between items-center">
-                      <div className="text-sm text-muted-foreground" />
+                    <div className="flex justify-end items-center">
                       {invitation.status === "pending" &&
                         new Date(invitation.expiresAt) > new Date() && (
                           <div className="flex gap-2">

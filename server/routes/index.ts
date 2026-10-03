@@ -2872,6 +2872,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
               fromName,
               ...awsCredentials,
             });
+          } else {
+            // R58: a stored SMTP, Mailgun, SendGrid or Custom row has no adapter.
+            console.warn(
+              `Invitation email not sent: email provider ${emailProvider.provider} is not implemented`
+            );
           }
         }
 
@@ -3412,6 +3417,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             fromName,
             ...awsCredentials,
           });
+        } else {
+          // R58: a stored SMTP, Mailgun, SendGrid or Custom row has no adapter.
+          console.warn(
+            `Invitation email not sent: email provider ${emailProvider.provider} is not implemented`
+          );
         }
       }
 

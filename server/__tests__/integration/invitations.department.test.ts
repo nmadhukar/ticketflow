@@ -6,6 +6,7 @@ import { createUser, loginAs } from "./helpers/fixtures";
 import { storage } from "../../storage";
 import { db } from "../../storage/db";
 import { departments, emailProviders, emailTemplates } from "@shared/schema";
+import { seedEmailTemplates } from "../../seed/seedEmailTemplates";
 
 // Capture what Mailtrap would send, so the test reads the real rendered email.
 jest.mock("mailtrap", () => {
@@ -53,7 +54,8 @@ describe("invitations: no department (R43)", () => {
     await db.insert(emailTemplates).values({
       name: "user_invitation",
       subject: "Invited as {{role}}",
-      body: "<p>Role: {{role}}</p><p>Department: [{{department}}]</p><a href=\"{{registrationUrl}}\">go</a>",
+      // A template an admin stored before R43 may still carry the old variable.
+      body: "<p>Role: {{role}}</p><p>Old slot: [{{department}}]</p><a href=\"{{registrationUrl}}\">go</a>",
     });
   });
 
@@ -80,7 +82,7 @@ describe("invitations: no department (R43)", () => {
 
     expect(sentEmails).toHaveLength(1);
     const html = sentEmails[0].html;
-    expect(html).toContain("Department: []");
+    expect(html).toContain("Old slot: []");
     expect(html).not.toContain(DEPT_NAME);
     expect(html).not.toContain("Free text department");
     expect(html).not.toContain("Not assigned");
@@ -120,8 +122,60 @@ describe("invitations: no department (R43)", () => {
     const res = await agent.post(`/api/admin/invitations/${legacy.id}/resend`);
     expect(res.status).toBe(200);
     expect(sentEmails).toHaveLength(1);
-    expect(sentEmails[0].html).toContain("Department: []");
+    expect(sentEmails[0].html).toContain("Old slot: []");
     expect(sentEmails[0].html).not.toContain(DEPT_NAME);
     expect(sentEmails[0].html).not.toContain("{{");
+  });
+
+  it("the shipped default user_invitation template has no department text at all", async () => {
+    await db.delete(emailTemplates);
+    await seedEmailTemplates();
+    const admin = await createUser({ role: "admin" });
+    const agent = await loginAs(ctx.app, admin);
+    const res = await agent
+      .post("/api/admin/invitations")
+      .send({ email: "defaults@example.test", role: "agent", departmentId: deptId });
+    expect(res.status).toBe(201);
+    expect(sentEmails).toHaveLength(1);
+    expect(sentEmails[0].html).toContain("Role: Agent");
+    expect(sentEmails[0].html).not.toMatch(/department/i);
+    expect(sentEmails[0].html).not.toContain("{{");
+    expect(sentEmails[0].subject).not.toMatch(/department/i);
+    const stored = (await storage.getEmailTemplate("user_invitation"))!;
+    expect(stored.variables ?? []).not.toContain("department");
+  });
+
+  describe("R58: a stored provider with no adapter", () => {
+    const notSentLines = () =>
+      (console.warn as unknown as jest.Mock).mock.calls
+        .map((c: unknown[]) => c.map(String).join(" "))
+        .filter((l: string) => l.includes("Invitation email not sent") && l.includes("is not implemented"));
+
+    it.each(["smtp", "mailgun", "sendgrid", "custom"])(
+      "%s: create and resend answer normally, send nothing, and log one line each",
+      async (provider) => {
+        await db.delete(emailProviders);
+        await db.insert(emailProviders).values({
+          provider,
+          fromEmail: "from@example.test",
+          fromName: "TF",
+          metadata: { host: "smtp.example.test" },
+          isActive: true,
+        });
+        const admin = await createUser({ role: "admin" });
+        const agent = await loginAs(ctx.app, admin);
+        (console.warn as unknown as jest.Mock).mockClear();
+
+        const created = await agent.post("/api/admin/invitations").send({ email: `${provider}@example.test`, role: "agent" });
+        expect(created.status).toBe(201);
+        expect(sentEmails).toHaveLength(0);
+        expect(notSentLines()).toEqual([`Invitation email not sent: email provider ${provider} is not implemented`]);
+
+        const resent = await agent.post(`/api/admin/invitations/${created.body.id}/resend`);
+        expect(resent.status).toBe(200);
+        expect(sentEmails).toHaveLength(0);
+        expect(notSentLines()).toHaveLength(2);
+      }
+    );
   });
 });
