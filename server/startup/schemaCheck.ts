@@ -46,6 +46,8 @@ export const REQUIRED_TABLES: RequiredTable[] = [
   { table: "sns_message_dedupe", columns: ["message_id", "status", "received_at"] },
   // 0014 hashed API keys (the hash column predates the program; the index below does not).
   { table: "api_keys", columns: ["key_hash", "is_active"] },
+  // 0021 AI analytics: the time a draft was applied.
+  { table: "ticket_auto_responses", columns: ["applied_at"] },
 ];
 
 /** 0014: unique partial index over hashed keys. */

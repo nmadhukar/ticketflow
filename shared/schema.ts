@@ -1014,6 +1014,9 @@ export const ticketAutoResponses = pgTable("ticket_auto_responses", {
   }).notNull(),
   wasHelpful: boolean("was_helpful"),
   wasApplied: boolean("was_applied").default(false),
+  // R48: when the draft was applied (0021). NULL for a draft never applied and for a row applied
+  // before the column existed.
+  appliedAt: timestamp("applied_at"),
   respondedBy: varchar("responded_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow(),
 });

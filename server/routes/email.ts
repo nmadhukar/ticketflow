@@ -2,7 +2,7 @@ import express, { type Express, type Request, type Response } from "express";
 import https from "https";
 import { and, eq, sql } from "drizzle-orm";
 import { snsMessageDedupe } from "@shared/schema";
-import { db } from "../storage/db";
+import { db, type DbTx } from "../storage/db";
 import {
   SnsVerificationError,
   fetchCertOverHttps,
@@ -22,6 +22,7 @@ import { inboundEmailRateLimit } from "../security/rateLimiting";
  * Environment (names only):
  *  - SNS_INBOUND_TOPIC_ARN  the one topic accepted (required; unset refuses everything)
  *  - INBOUND_EMAIL_CATEGORY, APP_BASE_URL  see services/email/inbound.ts
+ *  - INBOUND_EMAIL_MAX_HEADER_BYTES  optional header-block cap, default 65536, max 262144 (mime.ts)
  * The signing-certificate and confirmation-URL host must be sns.<region>.amazonaws.com
  * with <region> taken from the topic ARN.
  */
@@ -110,8 +111,8 @@ const ownedBy = (messageId: string, token: string) =>
   and(eq(snsMessageDedupe.messageId, messageId), sql`${snsMessageDedupe.receivedAt} = ${token}::timestamp`);
 
 /** Makes the holder's own claim final. False when the claim is no longer this holder's. */
-export async function markMessageDone(messageId: string, token: string): Promise<boolean> {
-  const rows = await db
+export async function markMessageDone(messageId: string, token: string, conn: DbTx = db): Promise<boolean> {
+  const rows = await conn
     .update(snsMessageDedupe)
     .set({ status: "done" })
     .where(ownedBy(messageId, token))
@@ -119,11 +120,21 @@ export async function markMessageDone(messageId: string, token: string): Promise
   return rows.length > 0;
 }
 
+/** Thrown inside the write transaction when the claim is no longer this holder's: it rolls back. */
+class ClaimLostError extends Error {
+  constructor() {
+    super("claim lost");
+    this.name = "ClaimLostError";
+  }
+}
+
 /** Gives up the holder's own claim so a retry can take it. Never touches another holder's claim. */
 export async function releaseMessageClaim(messageId: string, token: string): Promise<boolean> {
   const rows = await db
     .delete(snsMessageDedupe)
-    .where(ownedBy(messageId, token))
+    // Only a 'processing' row: after an ambiguous COMMIT (the done mark committed but the answer
+    // was lost) the row is 'done' and must never be deleted, or a retry would duplicate.
+    .where(and(ownedBy(messageId, token), eq(snsMessageDedupe.status, "processing")))
     .returning({ id: snsMessageDedupe.messageId });
   return rows.length > 0;
 }
@@ -192,8 +203,20 @@ async function handleInbound(req: Request, res: Response) {
     } catch {
       inner = null;
     }
-    result = await processSesNotification(inner);
+    // R46: the ticket or comment and the 'done' mark commit in ONE transaction (the mark is the
+    // transaction's last statement). A message that writes nothing (ignored) is marked below.
+    result = await processSesNotification(inner, async (tx) => {
+      if (!(await markMessageDone(messageId, claim.token, tx))) throw new ClaimLostError();
+    });
   } catch (error) {
+    if (error instanceof ClaimLostError) {
+      // A newer delivery took the claim over while this one was working. Everything this one
+      // wrote has rolled back (nothing to duplicate); the newer holder owns the message. Its claim
+      // is left alone, and SNS is told to retry, which finds the message done or still busy.
+      console.warn("inbound email: claim was taken over by a newer delivery; this attempt wrote nothing");
+      res.setHeader("Retry-After", "20");
+      return json(res, 503, "in_progress", "This message is being processed");
+    }
     // Nothing was committed to the caller as done: release the claim so SNS's retry processes
     // the message again, and answer 500 (the error type is logged, never message content).
     await releaseMessageClaim(messageId, claim.token).catch(() => undefined);
@@ -201,23 +224,20 @@ async function handleInbound(req: Request, res: Response) {
     return json(res, 500, "internal_error", "Internal server error");
   }
 
-  // (The 'done' mark is a separate statement, not part of the ticket/comment transaction, and
-  // that is a decision, not an oversight: storage.createTask retries once on a ticket-number
-  // clash (a unique violation aborts a transaction, so the retry would need savepoints), and
-  // it and addTaskComment write through the shared connection, so sharing one transaction
-  // means threading `tx` through the ticket-number counter, the create path, history and every
-  // other caller. The claim fence stays instead: a crash between the two statements leaves a
-  // stale 'processing' claim, which the next delivery takes over, and that delivery can then
-  // create the ticket a second time. The window is two statements wide.)
-  // The ticket or comment is committed: make the claim final, answer SNS, and only then run the
-  // non-essential effects (AI auto-response, realtime, Teams). None of them can change the answer.
-  try {
-    if (!(await markMessageDone(messageId, claim.token))) {
-      console.warn("inbound email: claim was taken over by a newer delivery before this one finished");
+  // A ticket or comment was written together with its 'done' mark (result.finalized), so there is
+  // no window between them. Only a message that wrote nothing (ignored) is marked here, on its own;
+  // if that fails the claim stays 'processing', turns stale, and the retry ignores it again.
+  // Answer SNS, and only then run the non-essential effects (AI auto-response, realtime, Teams).
+  // None of them can change the answer.
+  if (!result.finalized) {
+    try {
+      if (!(await markMessageDone(messageId, claim.token))) {
+        console.warn("inbound email: claim was taken over by a newer delivery before this one finished");
+      }
+    } catch (error) {
+      // The claim stays 'processing' and turns stale; SNS must still be told the message was handled.
+      console.error(`inbound email: could not mark message done: ${error instanceof Error ? error.name : "error"}`);
     }
-  } catch (error) {
-    // The claim stays 'processing' and turns stale; SNS must still be told the message was handled.
-    console.error(`inbound email: could not mark message done: ${error instanceof Error ? error.name : "error"}`);
   }
   if (result.outcome.status === "ignored") console.warn(`inbound email ignored: ${result.outcome.reason}`);
   res.status(200).json(result.outcome);
