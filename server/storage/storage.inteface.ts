@@ -103,7 +103,10 @@ export interface IStorage {
    * @param user - User data to insert or update
    * @returns Updated user object
    */
-  upsertUser(user: UpsertUser): Promise<User>;
+  upsertUser(
+    user: UpsertUser,
+    onInsert?: Partial<Pick<UpsertUser, "role" | "isApproved">>
+  ): Promise<User>;
 
   /**
    * Retrieves all users in the system

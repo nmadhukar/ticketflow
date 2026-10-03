@@ -80,6 +80,8 @@ services:
       MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
       MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
       MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-}
+      # Role of a NEW SSO account: customer (default) or agent. It stays pending approval.
+      SSO_DEFAULT_ROLE: ${SSO_DEFAULT_ROLE:-}
 
       # AWS credentials from the environment (fallbacks; the admin panel's Bedrock/SES settings take precedence).
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}

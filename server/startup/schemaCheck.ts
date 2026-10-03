@@ -24,8 +24,14 @@ export interface RequiredTable {
 export const REQUIRED_TABLES: RequiredTable[] = [
   {
     table: "users",
-    // 0010 login lockout, 0011 forced password change, session revocation.
-    columns: ["failed_login_attempts", "locked_until", "must_change_password", "password_changed_at"],
+    // 0010 login lockout, 0011 forced password change, session revocation, 0022 lockout decay.
+    columns: [
+      "failed_login_attempts",
+      "locked_until",
+      "must_change_password",
+      "password_changed_at",
+      "last_failed_login_at",
+    ],
   },
   // connect-pg-simple runs with createTableIfMissing: false.
   { table: "sessions", columns: ["sid", "sess", "expire"] },

@@ -247,15 +247,19 @@ const EmailTab = () => {
                       Mailtrap
                     </SelectItem>
                     <SelectItem value={EMAIL_PROVIDERS.AWS}>AWS SES</SelectItem>
-                    <SelectItem value={EMAIL_PROVIDERS.SMTP}>SMTP</SelectItem>
-                    <SelectItem value={EMAIL_PROVIDERS.MAILGUN}>
-                      Mailgun
+                    {/* No sending adapter exists for these four (the server answers 400
+                        provider_not_supported), so they cannot be chosen. */}
+                    <SelectItem value={EMAIL_PROVIDERS.SMTP} disabled>
+                      SMTP (not available)
                     </SelectItem>
-                    <SelectItem value={EMAIL_PROVIDERS.SENDGRID}>
-                      SendGrid
+                    <SelectItem value={EMAIL_PROVIDERS.MAILGUN} disabled>
+                      Mailgun (not available)
                     </SelectItem>
-                    <SelectItem value={EMAIL_PROVIDERS.CUSTOM}>
-                      Custom
+                    <SelectItem value={EMAIL_PROVIDERS.SENDGRID} disabled>
+                      SendGrid (not available)
+                    </SelectItem>
+                    <SelectItem value={EMAIL_PROVIDERS.CUSTOM} disabled>
+                      Custom (not available)
                     </SelectItem>
                   </SelectContent>
                 </Select>

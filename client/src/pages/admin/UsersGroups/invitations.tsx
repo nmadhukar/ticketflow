@@ -41,12 +41,11 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Loader2, Mail, Calendar, UserPlus, Clock, Check, X, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
-import type { UserInvitation, Department } from "@shared/schema";
+import type { UserInvitation } from "@shared/schema";
 
 const invitationSchema = z.object({
   email: z.string().email("Invalid email address"),
   role: z.enum(["admin", "manager", "agent", "customer"]),
-  departmentId: z.string().optional(),
   expiresAt: z.string().datetime(),
 });
 
@@ -59,10 +58,6 @@ export default function Invitations() {
 
   const { data: invitations, isLoading } = useQuery<UserInvitation[]>({
     queryKey: ["/api/admin/invitations"],
-  });
-
-  const { data: departments } = useQuery<Department[]>({
-    queryKey: ["/api/departments"],
   });
 
   const { data: users } = useQuery<Array<{ email: string }>>({
@@ -87,7 +82,6 @@ export default function Invitations() {
     defaultValues: {
       email: "",
       role: "agent",
-      departmentId: "none",
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days from now
     },
   });
@@ -106,13 +100,7 @@ export default function Invitations() {
 
   const createMutation = useMutation({
     mutationFn: async (data: InvitationFormData) => {
-      await apiRequest("POST", "/api/admin/invitations", {
-        ...data,
-        departmentId:
-          data.departmentId && data.departmentId !== "none"
-            ? parseInt(data.departmentId)
-            : null,
-      });
+      await apiRequest("POST", "/api/admin/invitations", data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/invitations"] });
@@ -289,9 +277,6 @@ export default function Invitations() {
             </Card>
           ) : (
             invitations?.map((invitation: UserInvitation) => {
-              const department = departments?.find(
-                (d: Department) => d.id === invitation.departmentId
-              );
               return (
                 <Card key={invitation.id}>
                   <CardHeader>
@@ -324,11 +309,7 @@ export default function Invitations() {
                   </CardHeader>
                   <CardContent>
                     <div className="flex justify-between items-center">
-                      <div className="text-sm text-muted-foreground">
-                        {department && (
-                          <span>Department: {department.name}</span>
-                        )}
-                      </div>
+                      <div className="text-sm text-muted-foreground" />
                       {invitation.status === "pending" &&
                         new Date(invitation.expiresAt) > new Date() && (
                           <div className="flex gap-2">
@@ -455,31 +436,6 @@ export default function Invitations() {
                     <FormDescription>
                       Choose the role for the invited user
                     </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="departmentId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Department (Optional)</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a department" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="none">No Department</SelectItem>
-                        {departments?.map((dept: Department) => (
-                          <SelectItem key={dept.id} value={dept.id.toString()}>
-                            {dept.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
