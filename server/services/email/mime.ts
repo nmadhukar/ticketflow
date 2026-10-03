@@ -24,7 +24,12 @@ export interface ParsedEmail {
 const MAX_DEPTH = 6;
 /** From and Subject are cut off or refused beyond this many characters. */
 export const MAX_HEADER_VALUE = 2048;
-/** The top-level header block may be this long; a longer one is refused, never truncated. */
+/**
+ * The top-level header block may be this long; a longer one is refused, never truncated.
+ * A DOCUMENTED LIMIT, kept on purpose: a message with very long Received or ARC chains
+ * could exceed it and be ignored (logged as the refusal reason, never ticketed). Check
+ * real header sizes after deploy before raising it; the cap is what bounds parse cost.
+ */
 export const MAX_HEADER_BLOCK = 64 * 1024;
 
 function splitHeadBody(raw: string): { head: string; body: string } {

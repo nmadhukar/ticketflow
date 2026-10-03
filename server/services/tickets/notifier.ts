@@ -2,6 +2,7 @@ import type { Task } from "@shared/schema";
 import { storage } from "../../storage";
 import { notifyTicket, ticketRecipients } from "../../realtime/ws";
 import { notifyTicketWebhooks } from "../teamsNotifications";
+import { logRouteError } from "../../http/errors";
 
 /**
  * Everything that follows a ticket write besides the write itself: realtime
@@ -44,7 +45,7 @@ export async function afterTicketUpdated(args: {
       }
       console.log(`Knowledge base learning triggered for resolved ticket ${updatedTask.ticketNumber}`);
     } catch (error) {
-      console.error("Error in knowledge base learning:", error);
+      logRouteError("Error in knowledge base learning", error);
     }
   }
 

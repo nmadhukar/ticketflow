@@ -113,6 +113,7 @@ import {
   ticketVisibilityWhere,
 } from "../permissions/ticketAccess";
 import { HttpError, asyncHandler, fail, logRouteError } from "../http/errors";
+import { autoResponseCommentBody, autoResponseCommentExists } from "../services/ai/autoResponseComment";
 import { projectUserForViewer } from "../utils/publicUser";
 import { toPublicInvitation } from "../utils/publicInvitation";
 import { publicBaseUrl } from "../utils/appBaseUrl";
@@ -787,10 +788,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               });
             } catch (error) {
               attachmentErrors.push(file.fileName);
-              console.error(
-                `Failed to create attachment record for ${file.fileName}:`,
-                error
-              );
+              logRouteError("Failed to create attachment record", error);
             }
           }
         }
@@ -1262,10 +1260,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 fileUrl: presignedUrl, // Replace S3 key with presigned URL
               };
             } catch (error) {
-              console.error(
-                `Failed to generate presigned URL for attachment ${attachment.id}:`,
-                error
-              );
+              logRouteError(`Failed to generate presigned URL for attachment ${attachment.id}`, error);
               // Return attachment with original fileUrl if presigned URL generation fails
               return attachment;
             }
@@ -1476,7 +1471,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const s3Key = s3Service.extractKeyFromUrl(attachment.fileUrl);
           await s3Service.deleteFile(s3Key);
         } catch (error) {
-          console.warn("Failed to delete file from S3:", error);
+          logRouteError("Failed to delete file from S3", error);
           // Continue with database deletion even if S3 delete fails
         }
       }
@@ -3888,11 +3883,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (claimed.length === 0) return res.json({ applied: true, alreadyApplied: true });
 
       try {
-        const pct = (Number(draft.confidenceScore ?? 0) * 100).toFixed(0);
+        // The create path may have posted this comment and then failed to mark the draft
+        // applied; posting again would duplicate it. The claim above already marked it applied.
+        if (await autoResponseCommentExists(taskId, aiUserId, draft.aiResponse)) {
+          return res.json({ applied: true, alreadyApplied: true });
+        }
         await storage.addTaskComment({
           taskId,
           userId: aiUserId,
-          content: `AI Auto-Response (confidence ${pct}%): ${draft.aiResponse}`,
+          content: autoResponseCommentBody(Number(draft.confidenceScore ?? 0), draft.aiResponse),
         } as any);
       } catch (error) {
         // Release the claim so the draft can be applied again. If that fails too, log
@@ -4894,8 +4893,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .from(ticketAutoResponses)
         .where(eq(ticketAutoResponses.wasApplied, true));
 
-      // Tickets resolved by AI: DISTINCT tickets that are resolved/closed and whose applied
-      // auto-response was posted before that resolved/closed time.
+      // Tickets resolved by AI: DISTINCT tickets that are resolved/closed now and whose applied
+      // auto-response was posted before the LATEST resolve/close (GREATEST, not COALESCE: after
+      // a reopen and a second resolve, resolvedAt alone is stale). "Posted" is the AI comment's
+      // time (the applied time; the draft's createdAt is when it was generated), falling back to
+      // the draft's createdAt for a row whose comment cannot be found.
       const [ticketsResolvedByAIResult] = await db
         .select({ count: sql<number>`count(DISTINCT ${ticketAutoResponses.ticketId})::int` })
         .from(ticketAutoResponses)
@@ -4904,7 +4906,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           and(
             eq(ticketAutoResponses.wasApplied, true),
             inArray(tasks.status, ["resolved", "closed"]),
-            sql`COALESCE(${tasks.resolvedAt}, ${tasks.closedAt}) >= ${ticketAutoResponses.createdAt}`
+            sql`GREATEST(${tasks.resolvedAt}, ${tasks.closedAt}) >= COALESCE(
+              (SELECT MIN(c.created_at) FROM task_comments c
+                WHERE c.task_id = ${ticketAutoResponses.ticketId}
+                  AND c.user_id = ${ticketAutoResponses.respondedBy}
+                  AND c.content LIKE 'AI Auto-Response (confidence %'
+                  AND c.created_at >= ${ticketAutoResponses.createdAt}),
+              ${ticketAutoResponses.createdAt})`
           )
         );
 
@@ -4939,7 +4947,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
 
   // Real-time updates: the WebSocket lives in ../realtime/ws (session-authenticated upgrade).
-  attachRealtime(httpServer);
+  attachRealtime(httpServer, { trustProxy: Boolean(app.get("trust proxy")) });
 
   // Inbound email creates tickets outside this file; its "created" event goes to the
   // same recipients as POST /api/tasks (everyone connected who can see the ticket).

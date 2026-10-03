@@ -201,10 +201,14 @@ async function handleInbound(req: Request, res: Response) {
     return json(res, 500, "internal_error", "Internal server error");
   }
 
-  // (The 'done' mark is a separate statement, not part of the ticket/comment transaction:
-  // storage.createTask and addTaskComment use the shared connection and take no transaction,
-  // so sharing one would mean threading it through the create path. A crash between the two
-  // leaves a stale 'processing' claim, which the next delivery takes over.)
+  // (The 'done' mark is a separate statement, not part of the ticket/comment transaction, and
+  // that is a decision, not an oversight: storage.createTask retries once on a ticket-number
+  // clash (a unique violation aborts a transaction, so the retry would need savepoints), and
+  // it and addTaskComment write through the shared connection, so sharing one transaction
+  // means threading `tx` through the ticket-number counter, the create path, history and every
+  // other caller. The claim fence stays instead: a crash between the two statements leaves a
+  // stale 'processing' claim, which the next delivery takes over, and that delivery can then
+  // create the ticket a second time. The window is two statements wide.)
   // The ticket or comment is committed: make the claim final, answer SNS, and only then run the
   // non-essential effects (AI auto-response, realtime, Teams). None of them can change the answer.
   try {

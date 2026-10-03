@@ -129,7 +129,8 @@ describe("update_ticket (M6)", () => {
     const t = await ticket();
     const res = await mcp.agent.call("update_ticket", { id: t.id, status: "Waiting for Review" });
     expect(res.isError).toBe(true);
-    expect(["VALIDATION", "INVALID_STATE"]).toContain(res.data.code);
+    expect(res.data.code).toBe("VALIDATION");
+    expect(res.data.details.fieldErrors.status).toBeDefined();
     expect((await row(t.id)).status).toBe("open");
   });
 

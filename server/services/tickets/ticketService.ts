@@ -37,6 +37,13 @@ export interface ListQuery {
 }
 
 export const LIST_DEFAULT_LIMIT = 25;
+/**
+ * Page cap 100, deliberately below REST's 500. This list serves MCP callers, which are
+ * models: one tool result of 500 full tickets (descriptions included) would fill a
+ * context window, and each row costs a storage.getTask. hasMore/offset make paging
+ * cheap, so the lower cap costs a caller a few more calls and nothing else. Raise it
+ * only together with a joined list query (release notes, M9).
+ */
 export const LIST_MAX_LIMIT = 100;
 
 /** Context only REST has (the request origin, the audit log); MCP passes nothing. */
