@@ -28,6 +28,7 @@ import { db } from "../storage/db";
 import { authenticateUpgrade, isSessionRevoked } from "../services/auth";
 import { usersWhoCanAccessTask, type AccessUser } from "../permissions/ticketAccess";
 import { normalizeRole } from "../permissions/roles";
+import { logRouteError } from "../http/errors";
 import { isAiSystemUserId } from "../utils/aiSystemUserId";
 import {
   addConnection,
@@ -301,7 +302,7 @@ export async function notifyTicket(
     const to = recipients ?? (await ticketRecipients(ticketId));
     sendTo(Array.from(new Set(to)), ticketMessage(ticketId, reason));
   } catch (error) {
-    console.error("WS notify ticket error:", error instanceof Error ? error.message : "unknown");
+    logRouteError("WS notify ticket error", error);
   }
 }
 
@@ -317,6 +318,6 @@ export async function notifyStaff(type: string, data: unknown): Promise<void> {
       .map((u) => u.id);
     sendTo(ids, message);
   } catch (error) {
-    console.error("WS notify staff error:", error instanceof Error ? error.message : "unknown");
+    logRouteError("WS notify staff error", error);
   }
 }

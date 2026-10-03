@@ -87,7 +87,7 @@ const ROUTES: Array<[string, string]> = [
 ];
 
 const NUMERIC = ["id", "taskId", "teamId", "assignmentId"];
-const BAD = ["abc", "-1", "0", "1.5"];
+const BAD = ["abc", "-1", "0", "1.5", "2147483648"]; // the last is above int4: it would reach the database as a 500
 
 function fill(path: string, bad: string | null, target: string | null) {
   return path.replace(/:([a-zA-Z]+)/g, (_m, name: string) =>

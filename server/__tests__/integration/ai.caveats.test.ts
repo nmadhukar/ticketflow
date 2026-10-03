@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process";
+import path from "node:path";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { aiUsage, knowledgeArticles, tasks, ticketComplexityScores } from "@shared/schema";
@@ -113,6 +115,41 @@ describe("AI caveats (I1, I7, I9)", () => {
         expect([role, (await a.get("/api/bedrock/cost-statistics")).status]).toEqual([role, 403]);
       }
       expect((await request(ctx.app).get("/api/bedrock/cost-statistics")).status).toBe(401);
+    });
+
+    it("C15: dailyUsage covers the UTC calendar day, whatever the host time zone", async () => {
+      const user = await createUser({ role: "agent" });
+      const day = new Date().toISOString().slice(0, 10); // today, UTC
+      const midnight = Date.parse(`${day}T00:00:00.000Z`);
+      const row = (timestamp: Date) =>
+        db.insert(aiUsage).values({ modelId: MOCK_MODEL_ID, inputTokens: 10, outputTokens: 5, estimatedCost: "0.010000", operation: "chat", userId: user.id, timestamp });
+      await row(new Date(midnight)); // first instant of the day: in
+      await row(new Date(midnight + 12 * 3600_000)); // midday UTC: in (but outside a Los Angeles-local window)
+      await row(new Date(midnight + 86_399_000)); // 23:59:59Z: in
+      await row(new Date(midnight - 1000)); // yesterday 23:59:59Z: out (but inside a Los Angeles-local window)
+      await row(new Date(midnight + 86_400_000)); // tomorrow 00:00:00Z: out
+
+      // The test process cannot change its own time zone (jest hands tests a copy of process.env),
+      // so getDailyUsage runs in a child process pinned to a zone west of UTC. That proves the UTC
+      // window on any host: with local-time bounds (setHours) the window sits on the previous
+      // local day and today's rows read as 0.
+      const script =
+        'import("./server/services/ai/costMonitoring").then(async (m) => {' +
+        'const d = await m.getDailyUsage();' +
+        'console.log("RESULT " + JSON.stringify({ offset: new Date("2026-01-15T12:00:00Z").getTimezoneOffset(), date: d.date, requestCount: d.requestCount, input: d.totalInputTokens }));' +
+        "process.exit(0);" +
+        '}).catch(() => process.exit(2));';
+      const root = path.resolve(__dirname, "../../..");
+      const res = spawnSync(process.execPath, [path.join(root, "node_modules/tsx/dist/cli.mjs"), "-e", script], {
+        cwd: root,
+        encoding: "utf8",
+        env: { ...process.env, TZ: "America/Los_Angeles" },
+        timeout: 60000,
+      });
+      expect(res.status).toBe(0);
+      const out = JSON.parse(/RESULT (.*)/.exec(res.stdout)![1]);
+      expect(out.offset).toBe(480); // the child really ran in Los Angeles (January: UTC-8)
+      expect(out).toMatchObject({ date: day, requestCount: 3, input: 30 });
     });
 
     it("/api/bedrock/usage lists the caller's own rows with their totals; only an admin may name another user", async () => {

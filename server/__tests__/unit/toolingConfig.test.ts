@@ -174,9 +174,11 @@ describe("tooling config", () => {
     expect(pattern.test("a-ts")).toBe(false);
   });
 
-  it("the Dockerfile CMD and the docker-compose app command run the same three steps in the same order (R66)", () => {
+  it("the Dockerfile CMD and the docker-compose app command run the same three steps in the same order, and exec the server so node is PID 1 (R66)", () => {
     const steps = (command: string) => command.split("&&").map((s) => s.trim());
-    const expected = ["npm run db:migrate-sql", "npm run db:push", "node dist/index.js"];
+    // `exec` replaces the shell with node: node is PID 1 and receives SIGTERM from `docker stop`
+    // (a plain `node ...` as the last step leaves `sh` as PID 1, which does not forward signals).
+    const expected = ["npm run db:migrate-sql", "npm run db:push", "exec node dist/index.js"];
 
     // CMD ["sh", "-c", "..."] is a JSON array; take the last CMD instruction.
     const cmdLines = read("Dockerfile").split(/\r?\n/).filter((l) => /^\s*CMD\s/.test(l));

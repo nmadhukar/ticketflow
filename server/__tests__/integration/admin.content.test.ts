@@ -76,6 +76,16 @@ describe("admin content routes (K1, K5, K6, E2)", () => {
       expect((await a.delete(`/api/admin/knowledge/${row.id}`)).status).toBe(200);
       expect((await a.delete(`/api/admin/knowledge/${row.id}`)).status).toBe(404);
     });
+
+    it("a malformed id is 400 invalid_id and touches nothing: non-numeric, signed, decimal, and above the int4 range (which would otherwise reach the database)", async () => {
+      const a = await admin();
+      const row = await seed();
+      for (const bad of ["abc", "-1", "0", "1.5", "1e3", "2147483648", "9999999999"]) {
+        const res = await a.delete(`/api/admin/knowledge/${encodeURIComponent(bad)}`);
+        expect([bad, res.status, res.body.error]).toEqual([bad, 400, "invalid_id"]);
+      }
+      expect(await exists(row.id)).toBe(true);
+    });
   });
 
   describe("K5: help documents (admin)", () => {

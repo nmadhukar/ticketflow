@@ -211,7 +211,9 @@ describe("FU5: built server with NODE_ENV unset", () => {
         return spawnSync(process.execPath, [outfile], {
           cwd: tmpdir(),
           encoding: "utf8",
-          env: { ...process.env, NODE_ENV: "" },
+          // A malformed APP_BASE_URL is refused by the NEXT guard (assertStartupConfig) in any
+          // environment, so the output tells which guard stopped the process.
+          env: { ...process.env, NODE_ENV: "", APP_BASE_URL: "not a url" },
           timeout: 60000,
         });
       } finally {
@@ -222,10 +224,15 @@ describe("FU5: built server with NODE_ENV unset", () => {
       const res = bundleAndRun("dist");
       expect(res.status).toBe(1);
       expect(res.stderr).toContain("Refusing to start: NODE_ENV is not set");
+      // It stopped at the first guard: the next one never ran.
+      expect(res.stderr).not.toContain("Startup refused");
     });
-    it("the same module in a directory not named dist (server/) is not refused by this guard", () => {
+    it("the same module in a directory not named dist (server/) passes this guard and reaches the next one", () => {
       const res = bundleAndRun("server");
       expect(res.stderr).not.toContain("Refusing to start: NODE_ENV is not set");
+      // assertStartupConfig ran and refused the malformed APP_BASE_URL: one line, exit 1.
+      expect(res.stderr).toContain("Startup refused: APP_BASE_URL is not a valid URL");
+      expect(res.status).toBe(1);
     });
   });
 });

@@ -45,29 +45,31 @@ function mcpWriteContext(user: User, ip?: string): WriteContext {
  */
 
 /**
- * A number OR a string in the schema, on purpose: with `z.number()` the SDK rejects a
- * non-numeric id itself, with a plain-text protocol error and no code. Accepting both lets
- * the value reach the service, whose assertId answers a coded VALIDATION
- * (`fieldErrors.id`) for anything that is not a positive integer.
+ * `id`, `limit` and `offset` are `z.unknown()` in the schema, on purpose: any narrower schema
+ * (`z.number()`, a number-or-string union) makes the SDK reject a value of another type (null,
+ * true, an array, an object) itself, with a plain-text protocol error and no code. With
+ * `z.unknown()` every value reaches the handler, which converts what it can and leaves the rest
+ * for the service, whose assertId and listQuerySchema answer a coded VALIDATION
+ * (`fieldErrors.id`, `.limit`, `.offset`). The `.describe()` text is what the model reads.
  *
  * R47: a model often sends the id as a string, so a string of plain digits (no sign, space,
- * leading zero or decimal point) up to 2147483647 is that number. Everything else, "abc", "1.5",
- * "", " 12", stays a VALIDATION. `ticketId` narrows the type for the service, which re-checks
- * it at run time.
+ * leading zero or decimal point) up to 2147483647 (int4, the largest id the database holds) is
+ * that number. Everything else, "abc", "1.5", "", " 12", a number above int4, stays a VALIDATION.
+ * `ticketId` narrows the type for the service, which re-checks it at run time.
  */
 const id = z
-  .union([z.number(), z.string()])
+  .unknown()
   .describe('Ticket id: a positive integer, as a number or a string of digits such as "12"');
 
 const MAX_INT = 2147483647;
 const ID_PATTERN = /^[1-9][0-9]{0,9}$/;
-const ticketId = (v: string | number): number => {
+const ticketId = (v: unknown): number => {
   if (typeof v === "string" && ID_PATTERN.test(v) && Number(v) <= MAX_INT) return Number(v);
   return v as number;
 };
 
 /** limit/offset: a number, or a string of plain digits that is that number; anything else is left for the service to refuse. */
-const pagingValue = (v: string | number | undefined): string | number | undefined =>
+const pagingValue = (v: unknown): unknown =>
   typeof v === "string" && /^(0|[1-9][0-9]{0,9})$/.test(v) && Number(v) <= MAX_INT ? Number(v) : v;
 
 const ticketFields = {
@@ -101,11 +103,11 @@ const listArgs = z
     assigneeId: z.string().describe("Only tickets assigned to this user id").optional(),
     search: z.string().describe("Text to find in the title or description").optional(),
     limit: z
-      .union([z.number(), z.string()])
+      .unknown()
       .describe('Page size, 1-100 (default 25); a number or a numeric string such as "10"')
       .optional(),
     offset: z
-      .union([z.number(), z.string()])
+      .unknown()
       .describe('Rows to skip, 0 or more (default 0); a number or a numeric string')
       .optional(),
   })

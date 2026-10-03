@@ -396,13 +396,15 @@ NODE_ENV=production npm start
 ### Docker and compose (the supported production path)
 
 The image is built on Node 24 (`node:24-alpine`; `package.json` requires Node >= 22.12). Deploy
-with `docker-compose.yml` (Coolify must use the compose file): the Dockerfile `CMD` alone runs
-neither schema step, and the server then refuses to boot on an unmigrated database. The compose
-command is:
+with `docker-compose.yml` or the Dockerfile alone: both run the same three steps in the same order
+(a unit test keeps them identical), so a deploy always migrates before it serves, and the server
+refuses to boot if a required schema object is still missing. The command is:
 
 ```bash
-npm run db:migrate-sql && npm run db:push && node dist/index.js
+npm run db:migrate-sql && npm run db:push && exec node dist/index.js
 ```
+
+`exec` makes node PID 1, so it receives SIGTERM from `docker stop`.
 
 ### Environment Configuration
 
@@ -414,6 +416,17 @@ Ensure all production environment variables are set:
 - `APP_BASE_URL` (public origin, e.g. `https://tickets.example.com`; the server refuses to boot without it in production)
 - Enable HTTPS and configure proper CORS origins
 - Use production database credentials
+
+Optional, with their defaults:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RATE_LIMIT_MAX_REQUESTS` | `600` | General per-IP limit on `/api` per `RATE_LIMIT_WINDOW_MS` (15 minutes). |
+| `TRUST_PROXY_HOPS` | `1` | Reverse proxies in front of the app (Express `trust proxy`). Set `2` behind Coolify/Traefik plus nginx. |
+| `TEAMS_WEBHOOKS_ENABLED` | off | Teams webhooks send only when this is exactly `true`. |
+| `SSO_DEFAULT_ROLE` | `customer` | Role of a new Microsoft SSO account: `customer` or `agent`. It always waits for admin approval. |
+| `INBOUND_EMAIL_MAX_HEADER_BYTES` | `65536` | Largest accepted inbound email header block, 1 to 262144. |
+| `PG_POOL_MAX` | `10` | Database connection pool size. |
 
 ### Database Migrations
 

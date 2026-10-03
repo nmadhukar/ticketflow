@@ -210,7 +210,7 @@ export async function authenticateUpgrade(
     await run(passport.initialize());
     await run(passport.session());
   } catch (error) {
-    console.error("WebSocket auth error:", error instanceof Error ? error.message : "unknown");
+    logRouteError("WebSocket auth error", error);
     return null;
   }
   const user = (req as any).user as Express.User | undefined;
