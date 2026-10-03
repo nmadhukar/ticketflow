@@ -112,6 +112,17 @@ describe("POST /api/mcp authentication", () => {
     expect(await ticketCount()).toBe(before);
   });
 
+  it("a key whose permissions column is NULL is refused (403), not an error (R50: the column has no database default)", async () => {
+    const owner = await createUser({ role: "agent" });
+    const { plaintext, apiKey } = await issueApiKey({ userId: owner.id, name: "k" });
+    await db.update(apiKeys).set({ permissions: null }).where(eq(apiKeys.id, apiKey.id));
+    const before = await ticketCount();
+    const res = await mcp(plaintext, CREATE_CALL);
+    expect(res.status).toBe(403);
+    expect(res.headers["www-authenticate"]).toMatch(/insufficient_scope/);
+    expect(await ticketCount()).toBe(before);
+  });
+
   it("a session cookie alone is refused for MCP (401 + Bearer)", async () => {
     const owner = await createUser({ role: "admin" });
     const agent = await loginAs(ctx.app, owner);

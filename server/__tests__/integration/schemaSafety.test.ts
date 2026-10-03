@@ -140,6 +140,12 @@ describe("schema safety on deploy (R32)", () => {
   it(
     "R50: drizzle-kit push is idempotent after the SQL migrations: every push reports no changes and issues no SQL",
     () => {
+      // Independent of test order: build the state a deploy leaves (push, then the SQL files) here.
+      // On the database an earlier test already built, both steps change nothing; on a scratch
+      // database that is still empty (this test run alone with -t) they create it. Without this
+      // the first push below would create every table and fail the "no statements" assertion.
+      pushSchema();
+      expect(applyMigrations().status).toBe(0);
       for (const attempt of [1, 2]) {
         const r = spawnSync("npx", ["drizzle-kit", "push", "--verbose", "--force"], {
           cwd: ROOT,

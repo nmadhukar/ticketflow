@@ -56,11 +56,15 @@ export interface WriteContext {
   onStatusRefusal?: (info: { from: string; to: unknown; taskId: number }) => void;
 }
 
+/** The largest ticket id: tasks.id is an int4 column. */
+const MAX_TICKET_ID = 2147483647;
+
 function assertId(id: unknown): asserts id is number {
-  if (typeof id !== "number" || !Number.isInteger(id) || id <= 0) {
+  // Above int4 the id cannot exist and would reach the database as an out-of-range parameter.
+  if (typeof id !== "number" || !Number.isInteger(id) || id <= 0 || id > MAX_TICKET_ID) {
     throw new TicketError("VALIDATION", "id must be a positive integer", {
       formErrors: [],
-      fieldErrors: { id: ["Must be a positive integer"] },
+      fieldErrors: { id: [`Must be a positive integer, at most ${MAX_TICKET_ID}`] },
     });
   }
 }

@@ -110,6 +110,13 @@ describe("list_tickets paging", () => {
       [{ offset: "-1" }, "offset"],
       [{ offset: " 3" }, "offset"],
       [{ offset: 1.5 }, "offset"],
+      // Other types reach the service too (the schema is z.unknown), not an SDK rejection.
+      [{ limit: true }, "limit"],
+      [{ limit: {} }, "limit"],
+      [{ limit: [10] }, "limit"],
+      [{ offset: false }, "offset"],
+      [{ offset: {} }, "offset"],
+      [{ offset: [0] }, "offset"],
     ];
     for (const [args, field] of cases) {
       const res = await call("list_tickets", args);

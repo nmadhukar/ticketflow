@@ -349,7 +349,7 @@ export const apiKeys = pgTable(
     name: varchar("name", { length: 255 }).notNull(),
     keyHash: varchar("key_hash", { length: 255 }).notNull(), // "sha256:" + hex of the key; never the key
     keyPrefix: varchar("key_prefix", { length: 10 }).notNull(), // first few chars for identification
-    permissions: text("permissions").array().$defaultFn(() => []), // array of permission strings; R50: no DB default (see note at teamAdmins) // array of permission strings
+    permissions: text("permissions").array().$defaultFn(() => []), // array of permission strings; R50: no DB default (see note at teamAdmins)
     lastUsedAt: timestamp("last_used_at"),
     expiresAt: timestamp("expires_at"),
     isActive: boolean("is_active").default(true),

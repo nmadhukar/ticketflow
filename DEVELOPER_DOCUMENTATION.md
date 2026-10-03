@@ -115,10 +115,16 @@ async updateTask(id: number, updates: Partial<Task>): Promise<Task>
 async getTasksByUser(userId: string): Promise<Task[]>
 
 // Team Management
-async createTeam(team: InsertTeam): Promise<Team>
+async createTeam(team: InsertTeam): Promise<Team>   // inserts only the team row (R61)
 async addUserToTeam(teamId: number, userId: string, role: string): Promise<void>
 async getTeamMembers(teamId: number): Promise<TeamMember[]>
 ```
+
+**Team creation (R61)**: `storage.createTeam` inserts only the team row. `POST /api/teams` is what
+enrols the creator as team admin: it inserts the team and the creator's `team_members` row
+(`role: "admin"`) in ONE database transaction, so a team never exists without its first admin and
+a failed membership insert leaves no team behind. A new caller of `createTeam` that wants the
+creator enrolled must add the member row itself, in the same transaction.
 
 **Error Handling**: All methods use try-catch blocks with detailed error logging
 
@@ -512,8 +518,32 @@ SENDGRID_API_KEY=SG.xxx
 
 # Rate Limiting
 RATE_LIMIT_WINDOW_MS=900000
-RATE_LIMIT_MAX_REQUESTS=100
+RATE_LIMIT_MAX_REQUESTS=600      # general per-IP /api limit per window (default 600)
+
+# Reverse proxies in front of the app (R49): integer >= 0, default 1; 2 behind Coolify/Traefik + nginx
+TRUST_PROXY_HOPS=1
+
+# Microsoft Teams webhooks are OFF unless this is exactly "true" (R84)
+TEAMS_WEBHOOKS_ENABLED=true
+
+# Role of a NEW Microsoft SSO account: customer (default) or agent; always pending approval (R42)
+SSO_DEFAULT_ROLE=customer
+
+# Largest inbound email header block in bytes: 1..262144, default 65536 (R52)
+INBOUND_EMAIL_MAX_HEADER_BYTES=65536
+
+# Database connection pool size, default 10; a wait for a connection fails after 10 s
+PG_POOL_MAX=10
 ```
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RATE_LIMIT_MAX_REQUESTS` | `600` | General per-IP limit on `/api` per `RATE_LIMIT_WINDOW_MS` (900000 ms). Was 100. |
+| `TRUST_PROXY_HOPS` | `1` | Express `trust proxy`: how many reverse proxies sit in front. Set `2` behind Coolify/Traefik plus nginx; `0` trusts no proxy header. One place sets it (`server/index.ts`). |
+| `TEAMS_WEBHOOKS_ENABLED` | off | Teams webhooks send only when this is exactly `true`. Off: ticket events send nothing, the test route answers 503 and saving settings answers 409 `teams_webhooks_disabled`. |
+| `SSO_DEFAULT_ROLE` | `customer` | Role of a new SSO account (`customer` or `agent`). Any other value, `admin` included, is logged once and read as `customer`. Set only when the account is created. |
+| `INBOUND_EMAIL_MAX_HEADER_BYTES` | `65536` | Largest accepted inbound email header block (1 to 262144). Junk or out-of-range values log one line and use the default. |
+| `PG_POOL_MAX` | `10` | Database pool size. An invalid value logs one line and uses the default. |
 
 ### Configuration Files
 
@@ -579,8 +609,9 @@ export default defineConfig({
 
 #### Production start and required environment
 - Deploy with `docker-compose.yml`. Its command is
-  `npm run db:migrate-sql && npm run db:push && node dist/index.js`; the Dockerfile `CMD` alone
-  skips both schema steps and the server then refuses to boot (fails safe).
+  `npm run db:migrate-sql && npm run db:push && exec node dist/index.js`. The Dockerfile `CMD` runs the
+  same three steps (R66; a unit test keeps them identical), so a Dockerfile-only deploy migrates too.
+  The last step is `exec node ...` so node is PID 1 and receives SIGTERM from `docker stop`.
 - Required: `NODE_ENV=production` (the built server refuses to start when it is unset; `npm run dev`
   is unaffected), `DATABASE_URL`, `SESSION_SECRET`, `JWT_SECRET`, and `APP_BASE_URL` in production.
 - `scripts/apply-sql-migrations.mjs` re-runs every `migrations/0007+` file on each deploy, so each must

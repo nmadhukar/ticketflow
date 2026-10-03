@@ -3,6 +3,7 @@
  * both can call disconnectUser without an import cycle (ws.ts imports auth).
  */
 import { WebSocket } from "ws";
+import { logRouteError } from "../http/errors";
 
 export interface ConnectionUser {
   id: string;
@@ -90,7 +91,7 @@ export function sendTo(userIds: string[], message: unknown): void {
       try {
         c.ws.send(payload);
       } catch (error) {
-        console.error("WS send error:", error instanceof Error ? error.message : "unknown");
+        logRouteError("WS send error", error);
       }
     }
   }

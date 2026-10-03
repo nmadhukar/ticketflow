@@ -49,3 +49,5 @@ DOCKER_USAGE.md
 # Playwright output
 test-results/
 playwright-report/
+# bootGuard wiring test scratch bundles (server/__tests__/unit/sanitizeHtml.test.ts)
+.tmp-bootguard-*
