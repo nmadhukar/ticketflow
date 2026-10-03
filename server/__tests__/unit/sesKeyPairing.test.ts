@@ -34,6 +34,13 @@ describe("SES sender never pairs a stored key id with the server's own secret", 
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("refuses a stored secret with no stored key id when the environment has a key id to pair it with", async () => {
+    const { sendEmail } = await import("../../services/ses");
+    expect(await sendEmail({ ...base, awsSecretAccessKey: "stored-secret" })).toBe(false);
+    expect(clients).toHaveLength(0);
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("sends with the environment pair when the stored key id is the environment's own", async () => {
     const { sendEmail } = await import("../../services/ses");
     expect(await sendEmail({ ...base, awsAccessKeyId: "AKIAENVIRONMENT" })).toBe(true);

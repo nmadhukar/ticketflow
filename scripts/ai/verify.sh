@@ -88,7 +88,7 @@ in_tree() {
     -v "${PREFIX}_reports:/gate-reports" -w /work \
     -e GATE_NONCE="${GATE_NONCE:-local}" -e CI=true \
     -e DATABASE_URL -e TEST_DATABASE_URL -e SESSION_SECRET -e JWT_SECRET \
-    "$image" sh -c 'tar -C /src --exclude=./node_modules --exclude=./.git --exclude=./dist -cf - . | tar -C /work -xf - && exec "$@"' sh "$@"
+    "$image" sh -c 'tar -C /src --exclude=./node_modules --exclude=./.git --exclude=./dist --exclude=./.env --exclude='./.env.*' -cf - . | tar -C /work -xf - && exec "$@"' sh "$@"
 }
 run_node() { in_tree "$NODE_IMAGE" "${PREFIX}_deps" "$@"; }
 app_curl() { compose exec -T app curl -fsS "$@"; }
@@ -244,6 +244,7 @@ fi
 COUNTS="$(run_node node -e '
 const fs=require("fs");let r;try{r=JSON.parse(fs.readFileSync("/gate-reports/jest.json","utf8"))}catch(e){console.error(`no valid Jest JSON: ${e.message}`);process.exit(1)}
 for(const k of ["numPassedTests","numPendingTests","numFailedTests","numTotalTests"]){if(!Number.isSafeInteger(r[k])||r[k]<0)throw Error(`invalid ${k}`)}
+if(!(r.numPassedTests>0&&r.numFailedTests===0))throw Error("no passing tests or failing tests present");
 if(r.numPassedTests+r.numPendingTests+r.numFailedTests+(r.numTodoTests||0)!==r.numTotalTests)throw Error("inconsistent runner counts");
 console.log(`${r.numPassedTests} ${r.numPendingTests}`);
 ')" && REPORT_VALID=1

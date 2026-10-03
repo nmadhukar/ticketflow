@@ -92,12 +92,12 @@ describe("documented contract vs the running API (P3)", () => {
       expect(missing).toEqual([]);
     });
 
-    it("the two routes the walk cannot see are real: POST /api/mcp answers 401 without a key, and the health probe is in server/index.ts", async () => {
+    it("the two routes the walk cannot see are real: POST /api/mcp answers 401 without a key, and GET /api/security/health answers 200", async () => {
       const request = (await import("supertest")).default;
       const mcp = await request(ctx.app).post("/api/mcp").send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
       expect(mcp.status).toBe(401); // a mounted route that needs credentials, not a 404
-      const source = fs.readFileSync(path.join(ROOT, "server/index.ts"), "utf8");
-      expect(source).toContain('app.get("/api/security/health"');
+      const health = await request(ctx.app).get("/api/security/health"); // registered by createTestApp, as in server/index.ts
+      expect(health.status).toBe(200);
     });
 
     it("every METHOD /api/path in API_ENDPOINTS_REFERENCE.md is a registered method + path", () => {

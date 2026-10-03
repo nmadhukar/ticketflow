@@ -43,6 +43,36 @@ describe("e2e guards", () => {
     }
   });
 
+  it("the no-egress preload allows exactly the DATABASE_URL host:port and refuses any other non-loopback peer", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "egress-"));
+    const log = path.join(dir, "egress.log");
+    try {
+      const script = `
+        const net = require("node:net");
+        const attempt = (host, port) => {
+          try { const s = net.connect(port, host); s.on("error", () => {}); s.destroy(); return "ALLOWED"; }
+          catch (e) { return /E2E_EGRESS_BLOCKED/.test(String(e)) ? "BLOCKED" : "OTHER"; }
+        };
+        console.log("db=" + attempt("db.egress-test.invalid", 5432));
+        console.log("otherPort=" + attempt("db.egress-test.invalid", 5433));
+        console.log("otherHost=" + attempt("bedrock-runtime.us-east-1.amazonaws.com", 443));
+      `;
+      const res = spawnSync(process.execPath, ["--require", preload, "-e", script], {
+        encoding: "utf8",
+        env: { ...process.env, E2E_EGRESS_LOG: log, DATABASE_URL: "postgres://u:p@db.egress-test.invalid:5432/ticketflow_test" },
+        timeout: 20000,
+      });
+      expect(res.stdout).toContain("db=ALLOWED");
+      expect(res.stdout).toContain("otherPort=BLOCKED");
+      expect(res.stdout).toContain("otherHost=BLOCKED");
+      const logged = readFileSync(log, "utf8");
+      expect(logged).not.toContain("db.egress-test.invalid:5432");
+      expect(logged).toContain("E2E_EGRESS_BLOCKED bedrock-runtime.us-east-1.amazonaws.com:443");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("the playwright config rejects an invalid E2E_PORT with a clear message", () => {
     for (const bad of ["80", "70000", "abc", "5055.5"]) {
       const res = spawnSync("npx", ["playwright", "test", "--list"], {

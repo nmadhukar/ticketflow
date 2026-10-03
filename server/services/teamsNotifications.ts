@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { teamsIntegrationSettings, users, type Task } from "@shared/schema";
 import { validateWebhookUrl } from "./webhookGuard";
@@ -86,7 +86,7 @@ export async function notifyTicketWebhooks(event: TicketWebhookEvent): Promise<v
         and(
           eq(teamsIntegrationSettings.enabled, true),
           isNotNull(teamsIntegrationSettings.webhookUrl),
-          sql`${users.isActive} IS NOT FALSE`
+          eq(users.isActive, true)
         )
       );
 

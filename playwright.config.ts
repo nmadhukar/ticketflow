@@ -90,13 +90,15 @@ export default defineConfig({
   ],
   webServer: {
     // The BUILT app, in production mode, so the strict CSP is what loads.
-    command: "npm run build && npm start",
+    // The no-egress guard is preloaded into the app process ONLY (not via NODE_OPTIONS, which would
+    // also reach npm and the build, and npm's update check would trip it).
+    command: `npm run build && node --require "${NO_EGRESS}" dist/index.js`,
     url: `${BASE_URL}/health`,
     timeout: 300_000,
     reuseExistingServer: false,
     env: {
       ...BLANKED_ENV,
-      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require "${NO_EGRESS}"`.trim(),
+      npm_config_update_notifier: "false",
       E2E_EGRESS_LOG: process.env.E2E_EGRESS_LOG!,
       NODE_ENV: "production",
       // Production refuses to boot without it (Ruling R34): links are built from it.

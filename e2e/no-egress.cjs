@@ -1,5 +1,5 @@
-// Preloaded into the e2e app server (NODE_OPTIONS=--require). Refuses every TCP
-// connection whose host is not loopback, and records each refusal to
+// Preloaded into the e2e app server (`node --require`). Refuses every TCP
+// connection whose host is not loopback or the DATABASE_URL host:port, and records each refusal to
 // E2E_EGRESS_LOG so global-teardown can fail the run. This catches AWS,
 // Microsoft, Mailtrap and any other outbound call regardless of the HTTP
 // client (SDK, fetch, node:https), which an HTTP(S)_PROXY setting would not:
@@ -8,6 +8,25 @@ const net = require("node:net");
 const fs = require("node:fs");
 
 const LOG = process.env.E2E_EGRESS_LOG;
+
+// The app's own database is the one non-loopback peer it may reach: exactly the host:port in
+// DATABASE_URL, read once here. (Under scripts/ai/verify.sh that is `postgres:5432` on the
+// compose network; locally it is loopback anyway.) Any other host, or another port on that
+// host, is still refused.
+const ALLOWED = (() => {
+  try {
+    const u = new URL(process.env.DATABASE_URL || "");
+    if (!u.hostname) return null;
+    return { host: u.hostname.replace(/^[|]$/g, "").toLowerCase(), port: Number(u.port || 5432) };
+  } catch {
+    return null;
+  }
+})();
+const isAllowedPeer = (t) =>
+  ALLOWED !== null &&
+  typeof t.host === "string" &&
+  t.host.replace(/^[|]$/g, "").toLowerCase() === ALLOWED.host &&
+  Number(t.port) === ALLOWED.port;
 const isLoopback = (host) =>
   host === undefined ||
   host === null ||
@@ -32,7 +51,7 @@ function targetOf(args) {
 const realConnect = net.Socket.prototype.connect;
 net.Socket.prototype.connect = function (...args) {
   const t = targetOf(args);
-  if (!t.local && !isLoopback(t.host)) {
+  if (!t.local && !isLoopback(t.host) && !isAllowedPeer(t)) {
     const line = `E2E_EGRESS_BLOCKED ${t.host}:${t.port}`;
     try {
       if (LOG) fs.appendFileSync(LOG, line + "\n");

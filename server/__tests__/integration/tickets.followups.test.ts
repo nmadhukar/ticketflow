@@ -86,6 +86,18 @@ describe("R36: DEFAULT_TRIAGE_TEAM_ID", () => {
     expect((await outsiderAgent.get(`/api/tasks/${res.body.id}`)).status).toBe(403);
   });
 
+  it("set, then the team is deleted: the customer ticket is created unassigned (201), not a 500", async () => {
+    process.env.DEFAULT_TRIAGE_TEAM_ID = String(teamId);
+    const { defaultTriageAssignment } = await import("../../services/tickets/triage");
+    expect(await defaultTriageAssignment()).not.toBeNull(); // primes the cached verdict
+    const schema = await import("@shared/schema");
+    await db.delete(schema.teamMembers).where(eq(schema.teamMembers.teamId, teamId));
+    await db.delete(schema.teams).where(eq(schema.teams.id, teamId));
+    const res = await createTicketAs(cust, {});
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ assigneeTeamId: null, assigneeId: null });
+  });
+
   it("set: a customer ticket routed to a department only (no team, no user) is queued to the team too", async () => {
     process.env.DEFAULT_TRIAGE_TEAM_ID = String(teamId);
     const [t] = await db.select().from((await import("@shared/schema")).teams);
@@ -409,6 +421,25 @@ describe("M9: one joined query per page", () => {
     }
     expect(seen).toHaveLength(30);
     expect(new Set(seen).size).toBe(30);
+  });
+});
+
+describe("toggle-status flips inside the lock", () => {
+  it("two concurrent toggles flip twice: the user ends where it started", async () => {
+    await resetDb();
+    const admin = await createUser({ role: "admin" });
+    await createUser({ role: "admin" });
+    const target = await createUser({ role: "agent" });
+    const a = await loginAs(ctx.app, admin);
+    const before = (await db.select().from(usersTable).where(eq(usersTable.id, target.id)))[0].isActive;
+    const [r1, r2] = await Promise.all([
+      a.post(`/api/admin/users/${target.id}/toggle-status`),
+      a.post(`/api/admin/users/${target.id}/toggle-status`),
+    ]);
+    expect([r1.status, r2.status]).toEqual([200, 200]);
+    expect(r1.body.isActive).not.toBe(r2.body.isActive);
+    const after = (await db.select().from(usersTable).where(eq(usersTable.id, target.id)))[0].isActive;
+    expect(after).toBe(before);
   });
 });
 

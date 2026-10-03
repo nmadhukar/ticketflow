@@ -48,7 +48,15 @@ export async function initDefaultTriageTeam(
 export async function defaultTriageAssignment(): Promise<TriageAssignment | null> {
   if (!state.ready) await initDefaultTriageTeam();
   const teamId = state.ready ? state.teamId : null;
-  return teamId === null ? null : { assigneeType: "team", assigneeTeamId: teamId };
+  if (teamId === null) return null;
+  // The id was validated at startup; the team may have been deleted since. Check it is still
+  // there, so a ticket is created unassigned rather than failing on the foreign key.
+  const [team] = await db.select({ id: teams.id }).from(teams).where(eq(teams.id, teamId)).limit(1);
+  if (!team) {
+    console.error(`DEFAULT_TRIAGE_TEAM_ID=${teamId} no longer names a team; ticket created unassigned`);
+    return null;
+  }
+  return { assigneeType: "team", assigneeTeamId: teamId };
 }
 
 /** Forget the cached verdict (tests that change the environment). */

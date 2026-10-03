@@ -937,11 +937,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!target) {
           throw new HttpError(404, "user_not_found", "User not found");
         }
-        // The same last-admin rule as PATCH (NULL isActive reads as inactive, so a toggle activates it).
+        // The same last-admin rule as PATCH. is_active is NOT NULL (0020).
         const updatedUser = await storage.updateUserKeepingAnAdmin(
           userId,
-          { isActive: target.isActive !== true },
-          getUserId(req)
+          {},
+          getUserId(req),
+          { flipActive: true } // flipped inside the locked transaction, not from the read above
         );
         res.json(updatedUser);
       } catch (error) {

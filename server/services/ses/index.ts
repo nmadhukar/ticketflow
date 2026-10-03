@@ -38,6 +38,12 @@ export async function sendEmail(params: EmailParams): Promise<boolean> {
     return false;
   }
 
+  // The mirror image: a stored secret with no stored key id never borrows the server's key id.
+  if (params.awsSecretAccessKey && !params.awsAccessKeyId && process.env.AWS_ACCESS_KEY_ID) {
+    console.error("AWS SES not used: the stored secret has no access key id to pair with");
+    return false;
+  }
+
   if (!accessKeyId || !secretAccessKey) {
     console.error('AWS credentials not configured');
     return false;

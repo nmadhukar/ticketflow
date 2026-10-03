@@ -1590,15 +1590,18 @@ export class DatabaseStorage implements IStorage {
    * updateUserProfile for an admin acting on a user, keeping at least one active administrator.
    * The check and the write run in ONE transaction that first locks every active admin row
    * (FOR UPDATE, in id order), so two demotions at once cannot both see "another admin
-   * remains". isActive NULL counts as inactive everywhere (target and the others alike).
+   * remains". users.is_active is NOT NULL (0020), so there is no third state.
    * 404 user_not_found; 409 last_admin; 409 self_demotion (an admin cannot demote or
    * deactivate their own account).
    */
   async updateUserKeepingAnAdmin(
     userId: string,
     updates: Parameters<DatabaseStorage["updateUserProfile"]>[1],
-    actorId: string
+    actorId: string,
+    // flipActive: derive isActive from the locked row (a toggle), ignoring updates.isActive.
+    opts: { flipActive?: boolean } = {}
   ): Promise<PublicUser> {
+    let effective = updates;
     const updated = await db.transaction(async (tx) => {
       const activeAdmins = await tx
         .select({ id: users.id })
@@ -1612,6 +1615,8 @@ export class DatabaseStorage implements IStorage {
         .where(eq(users.id, userId))
         .for("update");
       if (!target) throw new HttpError(404, "user_not_found", "User not found");
+      if (opts.flipActive) effective = { ...updates, isActive: target.isActive !== true };
+      updates = effective;
 
       const losesAdmin =
         target.role === "admin" &&
@@ -1628,8 +1633,8 @@ export class DatabaseStorage implements IStorage {
       return this.updateUserProfile(userId, updates, tx);
     });
     // After the commit: drop open sockets that must not outlive the old state.
-    if (updates.isActive === false) disconnectUser(userId);
-    else if (updates.role !== undefined) disconnectUser(userId, 1012);
+    if (effective.isActive === false) disconnectUser(userId);
+    else if (effective.role !== undefined) disconnectUser(userId, 1012);
     return updated;
   }
 

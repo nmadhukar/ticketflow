@@ -1,3 +1,5 @@
+import { spawnSync } from "node:child_process";
+import path from "node:path";
 import express from "express";
 import request from "supertest";
 import { sanitizeRichHtml } from "../../security/sanitizeHtml";
@@ -181,6 +183,29 @@ describe("FU5: built server with NODE_ENV unset", () => {
     for (const env of ["production", "development", "test"]) {
       expect(unsetNodeEnvBootProblem(env, "/app/dist/index.js", dist)).toBeNull();
     }
+  });
+});
+
+describe("boot guard: a bad JWT_SECRET is a one-line refusal, not a stack trace", () => {
+  it("production with a short JWT_SECRET exits 1 with one 'Startup refused' line", () => {
+    const root = path.resolve(__dirname, "../../..");
+    const res = spawnSync(process.execPath, [path.join(root, "node_modules/tsx/dist/cli.mjs"), "-e", 'import "./server/bootGuard"; import "./server/security/jwt"; console.log("LOADED");'], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        NODE_ENV: "production",
+        APP_BASE_URL: "https://tickets.example.test",
+        SESSION_SECRET: "k3Jx9mQ2vR8sT5wY1zB7nC4dF6gH0aLp",
+        JWT_SECRET: "short-but-random-x7Qp",
+      },
+      timeout: 60000,
+    });
+    expect(res.status).toBe(1);
+    expect(res.stdout).not.toContain("LOADED");
+    expect(res.stderr).toContain("Startup refused");
+    expect(res.stderr).toContain("JWT_SECRET is too short");
+    expect(res.stderr).not.toMatch(/\n\s+at /);
   });
 });
 
