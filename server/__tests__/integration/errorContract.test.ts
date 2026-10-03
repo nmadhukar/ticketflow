@@ -59,6 +59,30 @@ describe("errorMiddleware", () => {
     }
   });
 
+  it("M7: logs an unhandled error by type and code only, in one line, never the object or its message", async () => {
+    const pgLike = Object.assign(new Error("duplicate key: email=alice@example.test token=tfk_live_secret"), {
+      name: "DatabaseError",
+      code: "23505",
+      detail: "Key (email)=(alice@example.test)",
+    });
+    const local = express();
+    local.get("/pg", () => {
+      throw pgLike;
+    });
+    installErrorHandling(local);
+    const spy = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    spy.mockClear(); // console.error is already a mock (setup.ts) holding earlier tests' calls
+    try {
+      expect((await request(local).get("/pg")).status).toBe(500);
+      expect((await request(app).get("/boom")).status).toBe(500);
+      expect(spy.mock.calls).toEqual([["Unhandled error [DatabaseError 23505]"], ["Unhandled error [Error]"]]);
+      const logged = JSON.stringify(spy.mock.calls);
+      for (const secret of ["alice@example.test", "tfk_live_secret", "secret internals"]) expect(logged).not.toContain(secret);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("HttpError keeps status, code and details", async () => {
     const res = await request(app).get("/http");
     expect(res.status).toBe(409);

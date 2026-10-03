@@ -5,6 +5,7 @@ import { installErrorHandling } from "./http/install";
 import { setupVite, serveStatic, log } from "./vite";
 import { requestLogger } from "./utils/requestLogger";
 import { isDevelopmentEnv } from "./env";
+import { describeError } from "./http/errors";
 import {
   applySecurity,
   applyRouteSpecificSecurity,
@@ -42,15 +43,18 @@ app.use(requestLogger(log));
     const { assertSchemaReady } = await import("./startup/schemaCheck");
     if (!(await assertSchemaReady({ db: pool }))) return;
 
-    // Required seed data always; demo data only with SEED_DEMO_DATA=true
+    // Required startup steps (demo-login deactivation first, the data fix-ups, the
+    // system and AI users, the bootstrap admin) stop startup with one line when they
+    // fail (M8); demo data (SEED_DEMO_DATA=true only) and default templates are best effort.
+    const { runSeeders, startupFailureLine } = await import("./seed/runSeeders");
     try {
-      const { runSeeders } = await import("./seed/runSeeders");
       await runSeeders();
     } catch (error) {
-      console.error("Failed to run seeders:", error);
+      console.error(startupFailureLine(error));
+      process.exit(1);
     }
   } catch (error) {
-    console.error("Startup error:", error);
+    console.error(`Startup error [${describeError(error)}]`);
     process.exit(1);
   }
 

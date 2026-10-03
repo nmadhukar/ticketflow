@@ -127,6 +127,7 @@ import {
   updateTicket,
 } from "../services/tickets/ticketService";
 import { TicketError, ticketErrorToHttp } from "../services/tickets/ticketError";
+import { notifyCommentAdded } from "../services/tickets/notifier";
 import { createMcpRouter } from "../mcp/router";
 import {
   runTicketCreatedHooks,
@@ -3910,6 +3911,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         throw error;
       }
+      // The realtime event the REST comment route sends (ticketService.addComment). Never throws.
+      await notifyCommentAdded(taskId);
       res.json({ applied: true, alreadyApplied: false });
     })
   );

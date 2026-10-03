@@ -1,5 +1,5 @@
 import { jest } from "@jest/globals";
-import { runSeeders, type SeederSet } from "../../seed/runSeeders";
+import { runSeeders, startupFailureLine, StartupStepError, type SeederSet } from "../../seed/runSeeders";
 
 function fakeSeeders() {
   return {
@@ -87,8 +87,87 @@ describe("seeding gate", () => {
 
   it("a failing bootstrap step propagates (startup must not continue without its admin)", async () => {
     const s = fakeSeeders();
-    s.bootstrapAdmin.mockRejectedValueOnce(new Error("no db") as never);
-    await expect(runSeeders({}, asSet(s))).rejects.toThrow("no db");
+    const cause = new Error("no db");
+    s.bootstrapAdmin.mockRejectedValueOnce(cause as never);
+    const err = (await runSeeders({}, asSet(s)).catch((e: unknown) => e)) as StartupStepError;
+    expect(err).toBeInstanceOf(StartupStepError);
+    expect(err.step).toBe("bootstrap admin");
+    expect(err.cause).toBe(cause);
+  });
+});
+
+describe("M8: order and fail-fast", () => {
+  function recording() {
+    const order: string[] = [];
+    const s = fakeSeeders();
+    const steps = {
+      ...s,
+      migrateLegacyRoles: jest.fn(async () => {}),
+      migrateAssigneeTypes: jest.fn(async () => {}),
+      deactivateLegacyApiKeys: jest.fn(async () => {}),
+    };
+    for (const [name, fn] of Object.entries(steps)) {
+      (fn as jest.Mock).mockImplementation(async () => {
+        order.push(name);
+      });
+    }
+    return { order, steps };
+  }
+
+  it("demo-login deactivation runs first, then the fix-ups, the system users, templates and the admin", async () => {
+    const { order, steps } = recording();
+    await runSeeders({ NODE_ENV: "production" }, steps as unknown as SeederSet);
+    expect(order).toEqual([
+      "deactivateDemoAccounts",
+      "migrateLegacyRoles",
+      "migrateAssigneeTypes",
+      "deactivateLegacyApiKeys",
+      "systemUser",
+      "aiSystemUser",
+      "emailTemplates",
+      "bootstrapAdmin",
+    ]);
+  });
+
+  for (const [step, label] of [
+    ["deactivateDemoAccounts", "demo account deactivation"],
+    ["migrateLegacyRoles", "legacy role fix-up"],
+    ["deactivateLegacyApiKeys", "legacy API key fix-up"],
+    ["aiSystemUser", "AI system user"],
+  ] as const) {
+    it(`a failing security step (${step}) stops startup with one line naming it; nothing after it runs`, async () => {
+      const { order, steps } = recording();
+      (steps[step] as jest.Mock).mockImplementation(async () => {
+        order.push(step);
+        throw Object.assign(new Error("connection to postgres://u:secret@db failed"), { code: "ECONNREFUSED" });
+      });
+      const err = await runSeeders({}, steps as unknown as SeederSet).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(StartupStepError);
+      const line = startupFailureLine(err);
+      expect(line).toBe(`Startup refused: required step "${label}" failed [Error ECONNREFUSED]`);
+      expect(line).not.toContain("secret");
+      expect(line).not.toContain("\n");
+      expect(order[order.length - 1]).toBe(step);
+      expect(order).not.toContain("bootstrapAdmin");
+    });
+  }
+
+  it("the default email templates are best effort: a failure is one logged line and startup continues", async () => {
+    const { order, steps } = recording();
+    (steps.emailTemplates as jest.Mock).mockImplementation(async () => {
+      throw new Error("template table locked");
+    });
+    const errSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    await runSeeders({}, steps as unknown as SeederSet);
+    expect(order).toContain("bootstrapAdmin");
+    expect(errSpy).toHaveBeenCalledWith('Startup step "default email templates" failed; continuing without it [Error]');
+    errSpy.mockRestore();
+  });
+
+  it("anything else thrown while seeding is also one line, by type only", () => {
+    expect(startupFailureLine(Object.assign(new TypeError("boom secret"), { code: 42 }))).toBe(
+      "Startup refused: seeding failed [TypeError 42]"
+    );
   });
 });
 

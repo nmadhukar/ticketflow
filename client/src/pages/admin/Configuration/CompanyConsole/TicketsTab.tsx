@@ -104,6 +104,8 @@ const TicketsTab = () => {
     const errors: Record<string, string> = {};
     const ticketPrefix = String(companySettingsLocal.ticketPrefix || "").trim();
     if (!ticketPrefix) errors.ticketPrefix = "Ticket prefix is required";
+    else if (!/^[A-Za-z0-9]{1,6}$/.test(ticketPrefix))
+      errors.ticketPrefix = "Use 1 to 6 letters or digits";
     const days = companySettingsLocal.autoCloseDays;
     if (days !== null && days !== undefined) {
       if (isNaN(Number(days)) || Number(days) < 1 || Number(days) > 365)
@@ -113,6 +115,7 @@ const TicketsTab = () => {
       errors.defaultTicketPriority = "Default priority is required";
     if (Object.keys(errors).length > 0) {
       setValidationErrors(errors);
+      return;
     }
     updateCompanySettingsMutation.mutate({
       ticketPrefix,
@@ -142,13 +145,13 @@ const TicketsTab = () => {
               onTicketPrefixChange(e.target.value)
             }
             placeholder="TKT"
-            maxLength={10}
+            maxLength={6}
             className={
               validationErrors?.ticketPrefix ? "border-destructive" : ""
             }
           />
           <p className="text-sm text-muted-foreground">
-            Prefix used for generating ticket numbers (max 10 characters,
+            Prefix used for generating ticket numbers (1 to 6 characters,
             letters and numbers only)
           </p>
           {validationErrors?.ticketPrefix && (

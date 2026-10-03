@@ -18,6 +18,7 @@ import sesReceived from "../fixtures/ses/ses-received.json";
 import snsConfirmation from "../fixtures/ses/sns-subscription-confirmation.json";
 import sesQuotedName from "../fixtures/ses/ses-received-quoted-name.json";
 import * as mime from "../../services/email/mime";
+import * as realtime from "../../realtime/ws";
 
 const TOPIC = "arn:aws:sns:us-east-1:111122223333:ticketflow-inbound-test";
 const CERT_URL = "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-integration.pem";
@@ -178,6 +179,27 @@ describe("POST /api/email/inbound", () => {
     expect(comments).toHaveLength(1);
     expect(comments[0]).toMatchObject({ taskId: ticket.id, userId: sender.id, content: "More detail." });
     expect(await countTickets()).toBe(1);
+  });
+
+  it("M1: an emailed reply sends the realtime comment event a REST comment sends", async () => {
+    const sender = await customer("ann.customer@example.test");
+    const ticket = await storage.createTask({ title: "Existing", category: "support", createdBy: sender.id } as never);
+    const notify = jest.spyOn(realtime, "notifyTicket");
+    const res = await post(
+      notification(sesBody({ from: "ann.customer@example.test", subject: `Re: [${ticket.ticketNumber}]`, body: "Ping." }))
+    );
+    expect(res.body).toEqual({ status: "commented", ticketId: ticket.id });
+    await eventually(() => expect(notify).toHaveBeenCalledWith(ticket.id, "comment"));
+
+    // A refused reply (no access) writes nothing and sends nothing.
+    notify.mockClear();
+    await customer("other.customer@example.test");
+    const refused = await post(
+      notification(sesBody({ from: "other.customer@example.test", subject: `Re: [${ticket.ticketNumber}]`, body: "x" }))
+    );
+    expect(refused.body.status).toBe("ignored");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("a reply to a ticket the sender cannot access writes nothing", async () => {

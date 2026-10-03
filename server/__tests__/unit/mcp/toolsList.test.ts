@@ -50,6 +50,17 @@ describe("MCP tools/list", () => {
     }
   });
 
+  it("M3: create_ticket and update_ticket say notes are visible to the customer, never 'internal' only", async () => {
+    const { client } = await connect();
+    const { tools } = await client.listTools();
+    for (const name of ["create_ticket", "update_ticket"]) {
+      const notes = (tools.find((t) => t.name === name)?.inputSchema.properties as Record<string, { description?: string }>)
+        .notes;
+      expect(notes.description).toMatch(/customer/i);
+      expect(notes.description).toMatch(/NOT internal/);
+    }
+  });
+
   it("turns a TicketError into an isError result with code and message, never a stack", async () => {
     (service.getTicket as jest.Mock).mockRejectedValueOnce(new TicketError("NOT_FOUND", "Ticket not found"));
     const { client } = await connect();

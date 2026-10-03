@@ -104,7 +104,7 @@ describe("leftover demo accounts on an existing deployment", () => {
     expect(text).not.toContain("not-a-valid-hash");
   });
 
-  it("a failed lookup for one account does not abort the loop", async () => {
+  it("a failed lookup for one account does not abort the loop, and then fails the step (M8)", async () => {
     await insertDemo("agent1@ticketflow.local", DEMO_PASSWORD, "agent");
     const realSelect = db.select.bind(db);
     let calls = 0;
@@ -114,10 +114,35 @@ describe("leftover demo accounts on an existing deployment", () => {
       return (realSelect as any)(...args);
     }) as any);
     try {
-      const done = await deactivateDemoAccounts({});
-      expect(done).toContain("agent1@ticketflow.local");
+      // The first account (admin@ticketflow.local) could not be checked: it may still be live.
+      await expect(deactivateDemoAccounts({})).rejects.toThrow(
+        "Demo account check failed for 1 account(s): admin@ticketflow.local"
+      );
+      // ...but every other account was still checked and switched off.
+      expect(await active("agent1@ticketflow.local")).toBe(false);
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it("M8: a failed demo check stops runSeeders before anything else runs", async () => {
+    const steps: string[] = [];
+    const failing = {
+      ...seeders,
+      deactivateDemoAccounts: async () => {
+        throw new Error("db down: postgres://user:secret@host/db");
+      },
+      migrateLegacyRoles: async () => {
+        steps.push("roles");
+      },
+      bootstrapAdmin: async () => {
+        steps.push("admin");
+      },
+    } as SeederSet;
+    const err = (await runSeeders({}, failing).catch((e: unknown) => e)) as Error;
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe('Startup refused: required step "demo account deactivation" failed [Error]');
+    expect(err.message).not.toContain("secret");
+    expect(steps).toEqual([]);
   });
 });

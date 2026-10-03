@@ -12,6 +12,9 @@ import { isAuthenticated } from "../services/auth";
 import { s3Service } from "../services/s3Service";
 import { fail, logRouteError } from "../http/errors";
 
+/** The company ticket prefix: 1 to 6 ASCII letters or digits. */
+export const TICKET_PREFIX_PATTERN = /^[A-Za-z0-9]{1,6}$/;
+
 /** The submitted secret if non-blank, else the stored one if any, as a metadata fragment. */
 function secretOrKept(
   field: string,
@@ -133,6 +136,17 @@ export function registerCompanySettingsRoutes(app: Express): void {
     isAdmin,
     async (req: any, res) => {
       try {
+        // M5: ticket numbers are PREFIX-YYYY-NNNN, matched by the inbound-email tag and
+        // the counter's backfill as [A-Za-z0-9]+; anything else would make numbers that
+        // no reply can reference.
+        if (
+          req.body.ticketPrefix !== undefined &&
+          (typeof req.body.ticketPrefix !== "string" || !TICKET_PREFIX_PATTERN.test(req.body.ticketPrefix))
+        ) {
+          return fail(res, 400, "ticketPrefix must be 1 to 6 letters or digits", {
+            details: { formErrors: [], fieldErrors: { ticketPrefix: ["1 to 6 letters or digits"] } },
+          });
+        }
         if (req.body.defaultTicketPriority) {
           if (!TICKET_PRIORITIES.includes(req.body.defaultTicketPriority)) {
             return fail(

@@ -33,7 +33,7 @@ export function defaultErrorCode(status: number): string {
     case 413:
       return "payload_too_large";
     case 429:
-      return "rate_limited";
+      return "too_many_requests";
     case 503:
       return "unavailable";
     default:
@@ -68,10 +68,15 @@ export function fail(
  * parameters. Use instead of `console.error(label, error)` in handlers.
  */
 export function logRouteError(label: string, error: unknown): void {
+  console.error(`${label} [${describeError(error)}]`);
+}
+
+/** An error's type and code (`Error`, `PostgresError 23505`), never its message: the text logRouteError prints. */
+export function describeError(error: unknown): string {
   const e = error as { name?: unknown; code?: unknown } | null;
   const name = typeof e?.name === "string" ? e.name : typeof error;
   const code = typeof e?.code === "string" || typeof e?.code === "number" ? ` ${e.code}` : "";
-  console.error(`${label} [${name}${code}]`);
+  return `${name}${code}`;
 }
 
 /** Express 4 does not forward rejected promises; wrap async handlers with this. */
@@ -105,7 +110,9 @@ export function errorMiddleware(err: unknown, _req: Request, res: Response, _nex
     }
     return res.status(status).json({ error: "bad_request", message: "Bad request" });
   }
-  console.error(err);
+  // Type and code only (M7): the object or its message can carry request bodies,
+  // emails, tokens or SQL parameters.
+  logRouteError("Unhandled error", err);
   return res.status(500).json({ error: "internal_error", message: "Internal server error" });
 }
 

@@ -18,6 +18,7 @@ import { db } from "../../storage/db";
 import { AI_SYSTEM_USER_EMAIL, AI_SYSTEM_USER_ID, AI_SYSTEM_USERNAME, ensureAiSystemUser } from "../../utils/aiSystemUser";
 import { isTicketForeignKeyViolation, recordUsage } from "../../services/ai/costMonitoring";
 import { aiAutoResponseService } from "../../services/ai/aiAutoResponse";
+import * as realtime from "../../realtime/ws";
 
 const KEY_ID = "AKIAFAKEFAKEFAKE"; // the 16-character key id configured below
 const SECRET = "fake-secret-for-tests";
@@ -402,9 +403,13 @@ describe("AI routes honour settings, access and authorship", () => {
     it("apply posts the stored draft as the AI user, marks the row applied, and is idempotent", async () => {
       const { id, adminA } = await ticketWithDraft();
       const [draft] = await rowsOf(id);
+      const notify = jest.spyOn(realtime, "notifyTicket");
       const first = await adminA.post(`/api/tasks/${id}/auto-response/apply`);
       expect(first.status).toBe(200);
       expect(first.body).toEqual({ applied: true, alreadyApplied: false });
+      // M1: the same realtime event a REST comment sends.
+      expect(notify).toHaveBeenCalledWith(id, "comment");
+      notify.mockClear();
       const comments = await commentsOf(id);
       expect(comments).toHaveLength(1);
       expect(comments[0].userId).toBe(AI_SYSTEM_USER_ID);
@@ -415,6 +420,9 @@ describe("AI routes honour settings, access and authorship", () => {
       expect(second.status).toBe(200);
       expect(second.body.alreadyApplied).toBe(true);
       expect(await commentsOf(id)).toHaveLength(1);
+      // No comment, no event.
+      expect(notify).not.toHaveBeenCalled();
+      notify.mockRestore();
     });
 
     it("two simultaneous applies post one comment", async () => {

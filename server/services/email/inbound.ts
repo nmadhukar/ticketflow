@@ -11,6 +11,7 @@ import { SYSTEM_USER_ID } from "../../utils/systemUser";
 import { createTicketSchema } from "../tickets/schemas";
 import { COMMENT_MAX_LENGTH, commentBodySchema } from "../tickets/commentSchema";
 import { createTicketRecord, runTicketCreatedHooks } from "../tickets/create";
+import { notifyCommentAdded } from "../tickets/notifier";
 import { parseEmail, parseSingleMailbox } from "./mime";
 import { publicBaseUrl } from "../../utils/appBaseUrl";
 
@@ -158,7 +159,11 @@ export async function processSesNotification(input: unknown): Promise<InboundRes
     await storage.addTaskComment(
       insertTaskCommentSchema.parse({ content: parsed.data.content, taskId: ticket.id, userId: sender.id })
     );
-    return { outcome: { status: "commented", ticketId: ticket.id } };
+    // The realtime event the REST comment route sends (ticketService.addComment), after SNS is answered.
+    return {
+      outcome: { status: "commented", ticketId: ticket.id },
+      after: () => notifyCommentAdded(ticket.id),
+    };
   }
 
   // A new ticket takes the same validation as POST /api/tasks.

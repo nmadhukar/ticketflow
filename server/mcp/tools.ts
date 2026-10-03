@@ -45,7 +45,11 @@ const ticketFields = {
   category: z.string().describe("Ticket category, e.g. support").optional(),
   priority: z.string().describe("low, medium, high or urgent").optional(),
   severity: z.string().describe("Severity of the problem").optional(),
-  notes: z.string().nullable().describe("Internal notes").optional(),
+  notes: z
+    .string()
+    .nullable()
+    .describe("Progress notes on the ticket. NOT internal: everyone who can see the ticket, the customer included, can read them")
+    .optional(),
   assigneeId: z.string().nullable().describe("User id to assign the ticket to").optional(),
   assigneeType: z.string().describe("user or team").optional(),
   assigneeTeamId: z.number().nullable().describe("Team id to queue the ticket to").optional(),

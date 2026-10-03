@@ -1,16 +1,59 @@
+import { describeError } from "../http/errors";
+
 /**
  * Startup seeding with a demo gate.
  *
- * Always (every environment): the passwordless system user, the default email
- * templates, deactivation of leftover demo logins, and the bootstrap admin (only if no admin exists and
- * ADMIN_EMAIL/ADMIN_PASSWORD are set).
+ * Always (every environment), in this order (M8):
+ *  1. deactivation of leftover demo logins (first: nothing may run while a
+ *     published demo password still signs in);
+ *  2. the data fix-ups: legacy role "user" -> agent, assignee columns, legacy
+ *     API keys;
+ *  3. the passwordless system user and the AI system user;
+ *  4. the default email templates (best effort);
+ *  5. the bootstrap admin (only if no admin exists and ADMIN_EMAIL/ADMIN_PASSWORD are set).
+ * A failure in any step but 4 stops startup (StartupStepError, one line).
  *
- * Only when SEED_DEMO_DATA === "true": demo users with fixed passwords,
- * sample departments, teams, tickets, knowledge articles, help documents and
- * learning tickets.
+ * Only when SEED_DEMO_DATA === "true", best effort: demo users with fixed
+ * passwords, sample departments, teams, tickets, knowledge articles, help
+ * documents and learning tickets.
  */
+
+/** A required startup step failed: the server must not start. The message is one log line. */
+export class StartupStepError extends Error {
+  constructor(
+    public readonly step: string,
+    cause: unknown
+  ) {
+    super(`Startup refused: required step "${step}" failed [${describeError(cause)}]`, { cause });
+    this.name = "StartupStepError";
+  }
+}
+
+/** The one log line server/index.ts prints before exiting when seeding throws. */
+export function startupFailureLine(error: unknown): string {
+  return error instanceof StartupStepError
+    ? error.message
+    : `Startup refused: seeding failed [${describeError(error)}]`;
+}
+
+async function required(step: string, run: () => Promise<unknown>): Promise<void> {
+  try {
+    await run();
+  } catch (error) {
+    throw new StartupStepError(step, error);
+  }
+}
+
+async function bestEffort(step: string, run: () => Promise<unknown>): Promise<void> {
+  try {
+    await run();
+  } catch (error) {
+    console.error(`Startup step "${step}" failed; continuing without it [${describeError(error)}]`);
+  }
+}
+
 export interface SeederSet {
-  /** Startup data fix-up: legacy role "user" becomes "agent". Runs first. */
+  /** Startup data fix-up: legacy role "user" becomes "agent". Runs right after the demo deactivation. */
   migrateLegacyRoles?(): Promise<unknown>;
   /** Startup data fix-up: consistent assignee columns on tickets. Runs right after the role fix-up. */
   migrateAssigneeTypes?(): Promise<unknown>;
@@ -65,17 +108,18 @@ export async function runSeeders(
 ): Promise<void> {
   const s = seeders ?? (await defaultSeeders());
 
-  // Required for the app to work: a failure here stops startup.
-  // Role data fix-up first, before anything reads roles.
-  await s.migrateLegacyRoles?.();
-  await s.migrateAssigneeTypes?.();
-  await s.deactivateLegacyApiKeys?.();
-  await s.systemUser();
-  await s.aiSystemUser();
-  await s.emailTemplates();
-  // Old demo logins must be off before the "is there an admin?" check.
-  await s.deactivateDemoAccounts(env);
-  await s.bootstrapAdmin(env);
+  // Security first (M8): old demo logins off before anything else runs, and in
+  // particular before the "is there an admin?" check.
+  await required("demo account deactivation", () => s.deactivateDemoAccounts(env));
+  // Data fix-ups, before anything reads roles, assignees or keys.
+  if (s.migrateLegacyRoles) await required("legacy role fix-up", s.migrateLegacyRoles);
+  if (s.migrateAssigneeTypes) await required("assignee type fix-up", s.migrateAssigneeTypes);
+  if (s.deactivateLegacyApiKeys) await required("legacy API key fix-up", s.deactivateLegacyApiKeys);
+  await required("system user", s.systemUser);
+  await required("AI system user", s.aiSystemUser);
+  // Default templates are data, not security: a failure is logged and startup goes on.
+  await bestEffort("default email templates", s.emailTemplates);
+  await required("bootstrap admin", () => s.bootstrapAdmin(env));
 
   if (env.SEED_DEMO_DATA !== "true") return;
 
@@ -89,11 +133,5 @@ export async function runSeeders(
     ["help and docs", s.helpAndDocs],
     ["knowledge learning", s.knowledgeLearning],
   ];
-  for (const [name, run] of demo) {
-    try {
-      await run();
-    } catch (error) {
-      console.error(`Failed to seed demo ${name}:`, error);
-    }
-  }
+  for (const [name, run] of demo) await bestEffort(`demo ${name}`, run);
 }

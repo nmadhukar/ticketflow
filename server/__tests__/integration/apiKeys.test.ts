@@ -1,4 +1,5 @@
 import { jest } from "@jest/globals";
+import { createHash } from "crypto";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { apiKeys, users } from "@shared/schema";
@@ -354,6 +355,40 @@ describe("legacy API key fix-up", () => {
     expect(await deactivateLegacyApiKeys()).toBe(0);
   });
 
+  it("M6: replaces a stored plaintext with legacy-revoked:<sha256 hex>, idempotently, and never touches sha256: rows", async () => {
+    const owner = await createUser({ role: "customer" });
+    const good = await seedKey(owner.id);
+    const [goodRow] = await db.select().from(apiKeys);
+    const base = { userId: owner.id, keyPrefix: "tfk_legc" } as const;
+    const sha = (v: string) => createHash("sha256").update(v, "utf8").digest("hex");
+    await db.insert(apiKeys).values([
+      { ...base, name: "legacy-1", keyHash: "tfk_plaintextvalue", isActive: true },
+      { ...base, name: "legacy-2", keyHash: "tfk_plaintextvalue", isActive: false },
+      { ...base, name: "unicode", keyHash: "clé-ünïcode", isActive: true },
+      // Already scrubbed but somehow active again: deactivated, value kept as is.
+      { ...base, name: "revoked", keyHash: `legacy-revoked:${sha("old")}`, isActive: true },
+    ]);
+
+    await deactivateLegacyApiKeys();
+    const after = async () =>
+      Object.fromEntries((await db.select().from(apiKeys)).map((r) => [r.name, r]));
+    const first = await after();
+    expect(first["legacy-1"].keyHash).toBe(`legacy-revoked:${sha("tfk_plaintextvalue")}`);
+    expect(first["legacy-2"].keyHash).toBe(`legacy-revoked:${sha("tfk_plaintextvalue")}`);
+    expect(first["unicode"].keyHash).toBe(`legacy-revoked:${sha("clé-ünïcode")}`);
+    expect(first["revoked"].keyHash).toBe(`legacy-revoked:${sha("old")}`);
+    for (const name of ["legacy-1", "legacy-2", "unicode", "revoked"]) expect(first[name].isActive).toBe(false);
+    expect(first[goodRow.name]).toEqual(goodRow); // the sha256: row is untouched, byte for byte
+    expect(JSON.stringify(Object.values(first))).not.toContain("tfk_plaintextvalue");
+    expect(loggedText()).not.toContain("tfk_plaintextvalue");
+
+    // Idempotent: a second (and third) run changes nothing.
+    expect(await deactivateLegacyApiKeys()).toBe(0);
+    await deactivateLegacyApiKeys();
+    expect(await after()).toEqual(first);
+    expect(await findActiveKey(good)).not.toBeNull();
+  });
+
   it("runs on every startup, right after the other data fix-ups and before anything serves keys", async () => {
     const order: string[] = [];
     const step = (name: string) => async () => {
@@ -370,7 +405,7 @@ describe("legacy API key fix-up", () => {
       emailTemplates: step("templates"),
     } as unknown as SeederSet;
     await runSeeders({} as NodeJS.ProcessEnv, seeders);
-    expect(order.slice(0, 3)).toEqual(["roles", "assignees", "apiKeys"]);
-    expect(order).toContain("apiKeys");
+    // M8: demo-login deactivation is first of all; then the data fix-ups, keys among them.
+    expect(order.slice(0, 4)).toEqual(["demo", "roles", "assignees", "apiKeys"]);
   });
 });

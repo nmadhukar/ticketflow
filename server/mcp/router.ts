@@ -2,6 +2,7 @@ import { Router, type RequestHandler } from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { User } from "@shared/schema";
 import { createMcpServer } from "./server";
+import { createMcpRateLimit, rateLimitingEnabled } from "../security/rateLimiting";
 
 export const MCP_PERMISSION = "mcp:tickets";
 
@@ -59,10 +60,17 @@ const methodNotAllowed: RequestHandler = (_req, res) => {
   });
 };
 
-/** Mounted at /api/mcp. */
-export function createMcpRouter(): Router {
+const passThrough: RequestHandler = (_req, _res, next) => next();
+
+/**
+ * Mounted at /api/mcp. The limiter (per API key, M4) is on where the general
+ * /api limit is on (production unless RATE_LIMITING_ENABLED=false), which skips
+ * this path; `opts.rateLimit` replaces it (tests).
+ */
+export function createMcpRouter(opts: { rateLimit?: RequestHandler } = {}): Router {
+  const limiter = opts.rateLimit ?? (rateLimitingEnabled() ? createMcpRateLimit() : passThrough);
   const router = Router();
-  router.post("/", requireMcpKey, mcpPost);
+  router.post("/", limiter, requireMcpKey, mcpPost);
   router.all("/", methodNotAllowed);
   return router;
 }

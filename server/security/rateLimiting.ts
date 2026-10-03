@@ -2,21 +2,74 @@ import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import type { Request, RequestHandler } from "express";
 import { AuthenticatedRequest } from "./jwt";
 
-// General API rate limiting
-export const generalRateLimit = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === "development" ? 10000 : 100, // High limit for development
-  message: {
-    error: "Too many requests",
-    message: "Too many requests from this IP, please try again later.",
-    retryAfter: "15 minutes",
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-  // Key on req.ip, never on the client-supplied X-Forwarded-For. The app sets
-  // `trust proxy` = 1, so req.ip is the address the reverse proxy saw.
-  keyGenerator: (req) => ipKeyGenerator(req.ip ?? ""),
-});
+/** Every 429 follows the error contract: `{ error: "too_many_requests", message }`. */
+export function tooManyRequests(message: string): { error: "too_many_requests"; message: string } {
+  return { error: "too_many_requests", message };
+}
+
+/**
+ * The general /api limiter (and the MCP one) run only in production, and there
+ * only while RATE_LIMITING_ENABLED is not "false". The auth limiters below are
+ * always on.
+ */
+export function rateLimitingEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV === "production" && env.RATE_LIMITING_ENABLED !== "false";
+}
+
+function positiveInt(raw: string | undefined, fallback: number): number {
+  const n = Number(raw);
+  return raw !== undefined && raw.trim() !== "" && Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
+/** RATE_LIMIT_MAX_REQUESTS (default 100) per RATE_LIMIT_WINDOW_MS (default 15 minutes); a non-positive or non-integer value falls back to the default. */
+export function generalRateLimitConfig(env: NodeJS.ProcessEnv = process.env): { windowMs: number; max: number } {
+  return {
+    windowMs: positiveInt(env.RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),
+    max: positiveInt(env.RATE_LIMIT_MAX_REQUESTS, 100),
+  };
+}
+
+// General API rate limiting, per IP.
+export function createGeneralRateLimit(env: NodeJS.ProcessEnv = process.env): RequestHandler {
+  const { windowMs, max } = generalRateLimitConfig(env);
+  return rateLimit({
+    windowMs,
+    max,
+    message: tooManyRequests("Too many requests from this address, please try again later."),
+    standardHeaders: true,
+    legacyHeaders: false,
+    // Key on req.ip, never on the client-supplied X-Forwarded-For. The app sets
+    // `trust proxy` = 1, so req.ip is the address the reverse proxy saw.
+    keyGenerator: (req) => ipKeyGenerator(req.ip ?? ""),
+  });
+}
+export const generalRateLimit = createGeneralRateLimit();
+
+/**
+ * POST /api/mcp: an agent's traffic, keyed by the API key (req.apiKeyId, set by
+ * the bearer middleware that runs first), not by IP, so agents behind one NAT do
+ * not share a budget and one key cannot spread over many addresses. Generous:
+ * 600 per 15 minutes per key. A request with no key is keyed by IP (it is
+ * refused 401 right after). The 429 body is the REST error contract, not a
+ * JSON-RPC error: the limiter answers before the MCP transport, and the SDK's
+ * HTTP client reports any non-2xx answer by its status.
+ */
+export const MCP_RATE_LIMIT = { windowMs: 15 * 60 * 1000, max: 600 };
+
+export function createMcpRateLimit(opts: { windowMs: number; max: number } = MCP_RATE_LIMIT): RequestHandler {
+  return rateLimit({
+    windowMs: opts.windowMs,
+    max: opts.max,
+    message: tooManyRequests("Too many MCP requests for this API key, please slow down."),
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) =>
+      typeof req.apiKeyId === "number" ? `api-key:${req.apiKeyId}` : `ip:${ipKeyGenerator(req.ip ?? "")}`,
+  });
+}
+
+/** Path, relative to the /api mount, of the MCP endpoint (it has its own limiter). */
+export const MCP_PATH = "/mcp";
 
 /**
  * POST /api/email/inbound. SNS delivers from AWS addresses shared by many accounts and retries
@@ -27,7 +80,7 @@ export const generalRateLimit = rateLimit({
 export const inboundEmailRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 600,
-  message: { error: "too_many_requests", message: "Too many requests." },
+  message: tooManyRequests("Too many requests."),
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => ipKeyGenerator(req.ip ?? ""),
@@ -39,6 +92,17 @@ export const INBOUND_EMAIL_PATH = "/email/inbound";
 /** Wraps a limiter mounted at /api so POST /api/email/inbound bypasses it (it has its own). */
 export function exceptInboundEmail(limiter: RequestHandler): RequestHandler {
   return (req, res, next) => (req.path === INBOUND_EMAIL_PATH ? next() : limiter(req, res, next));
+}
+
+/**
+ * Wraps the general limiter mounted at /api so the two endpoints with their own
+ * limiter bypass it: POST /api/email/inbound (per IP, 600) and /api/mcp (per API key, 600).
+ */
+export function exceptOwnLimiters(limiter: RequestHandler): RequestHandler {
+  return (req, res, next) => {
+    const p = req.path.toLowerCase().replace(/\/+$/, "");
+    return p === INBOUND_EMAIL_PATH || p === MCP_PATH ? next() : limiter(req, res, next);
+  };
 }
 
 /**
@@ -114,11 +178,7 @@ export function recordBearerFailure(req: Pick<Request, "ip">): void {
 export const passwordResetRateLimit = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 3, // Maximum 3 password reset attempts per hour
-  message: {
-    error: "Too many password reset attempts",
-    message: "Too many password reset requests, please try again later.",
-    retryAfter: "1 hour",
-  },
+  message: tooManyRequests("Too many password reset requests, please try again later."),
   // Use default IP-based rate limiting for IPv6 compatibility
 });
 
@@ -134,10 +194,7 @@ export const createRoleBasedRateLimit = (
       const role = (authReq.user?.role || "customer") as keyof typeof limits;
       return limits[role] || limits.customer;
     },
-    message: {
-      error: "Rate limit exceeded",
-      message: "You have exceeded the rate limit for your user role.",
-    },
+    message: tooManyRequests("You have exceeded the rate limit for your user role."),
     // Use default IP-based key generation
   });
 };
@@ -160,10 +217,7 @@ export const fileUploadRateLimit = rateLimit({
         return 5;
     }
   },
-  message: {
-    error: "File upload rate limit exceeded",
-    message: "Too many file uploads, please try again later.",
-  },
+  message: tooManyRequests("Too many file uploads, please try again later."),
 });
 
 // Search rate limiting to prevent abuse
@@ -184,10 +238,7 @@ export const searchRateLimit = rateLimit({
         return 20;
     }
   },
-  message: {
-    error: "Search rate limit exceeded",
-    message: "Too many search requests, please slow down.",
-  },
+  message: tooManyRequests("Too many search requests, please slow down."),
 });
 
 // Bulk operation rate limiting
@@ -208,20 +259,14 @@ export const bulkOperationRateLimit = rateLimit({
         return 1;
     }
   },
-  message: {
-    error: "Bulk operation rate limit exceeded",
-    message: "Too many bulk operations, please try again later.",
-  },
+  message: tooManyRequests("Too many bulk operations, please try again later."),
 });
 
 // Admin action rate limiting
 export const adminActionRateLimit = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 1000, // High limit for admin actions
-  message: {
-    error: "Admin action rate limit exceeded",
-    message: "Too many admin actions performed.",
-  },
+  message: tooManyRequests("Too many admin actions performed."),
   skip: (req: Request) => {
     // Only apply to admin users
     const authReq = req as AuthenticatedRequest;
@@ -240,10 +285,7 @@ export const createCustomRateLimit = (options: {
   return rateLimit({
     windowMs: options.windowMs,
     max: options.max,
-    message: {
-      error: "Rate limit exceeded",
-      message: options.message || "Too many requests, please try again later.",
-    },
+    message: tooManyRequests(options.message || "Too many requests, please try again later."),
     keyGenerator:
       options.keyGenerator ||
       ((req: Request) => {

@@ -3,7 +3,13 @@ import type { Express } from "express";
 import { installRequestPipeline } from "./pipeline";
 import { authenticateJWT, optionalJWT } from "./jwt";
 import { requireRole, requireAdmin, requireAgentOrAdmin } from "./rbac";
-import { generalRateLimit, authRateLimit, exceptInboundEmail } from "./rateLimiting";
+import {
+  generalRateLimit,
+  authRateLimit,
+  exceptOwnLimiters,
+  generalRateLimitConfig,
+  rateLimitingEnabled,
+} from "./rateLimiting";
 import {
   sanitizeInput,
   preventXSS,
@@ -33,12 +39,11 @@ export const securityConfig = {
     expiresIn: process.env.JWT_EXPIRES_IN || "7d",
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "30d",
   },
+  // The general /api limit (security/rateLimiting.ts) reads the same values.
   rateLimiting: {
-    enabled:
-      process.env.NODE_ENV === "production" &&
-      process.env.RATE_LIMITING_ENABLED !== "false",
-    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "900000"), // 15 minutes
-    maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "100"),
+    enabled: rateLimitingEnabled(),
+    windowMs: generalRateLimitConfig().windowMs,
+    maxRequests: generalRateLimitConfig().max,
   },
   cors: {
     enabled: process.env.CORS_ENABLED !== "false",
@@ -60,8 +65,9 @@ export const applySecurity = (app: Express) => {
     bodyLimit: `${maxRequestSizeMB}mb`,
     sanitize: securityConfig.validation.enabled,
     // POST /api/email/inbound has its own limiter (inboundEmailRateLimit): SNS's shared AWS
-    // addresses would exhaust the general 100 per 15 minutes and drop real mail.
-    rateLimit: securityConfig.rateLimiting.enabled ? exceptInboundEmail(generalRateLimit) : undefined,
+    // addresses would exhaust the general per-IP limit and drop real mail. /api/mcp has its
+    // own too, keyed by API key (createMcpRateLimit, mounted in mcp/router.ts).
+    rateLimit: securityConfig.rateLimiting.enabled ? exceptOwnLimiters(generalRateLimit) : undefined,
   });
 
   console.log("Security middleware applied successfully");
