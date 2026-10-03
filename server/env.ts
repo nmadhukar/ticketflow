@@ -11,18 +11,22 @@ export function isDevelopmentEnv(nodeEnv: string | undefined = process.env.NODE_
 
 /**
  * R49: how many reverse proxies sit in front of the app (Express "trust proxy" as a hop count).
- * TRUST_PROXY_HOPS is an integer of 0 or more; unset means 1 (nginx alone); 2 is Coolify/Traefik
- * in front of nginx; 0 trusts no proxy header at all. Junk or a negative value logs one line and
- * uses 1. The one place `trust proxy` is set is server/index.ts.
+ * TRUST_PROXY_HOPS is an integer from 0 to 10; unset means 1 (nginx alone); 2 is Coolify/Traefik
+ * in front of nginx; 0 trusts no proxy header at all (a Dockerfile-only deploy with nothing in
+ * front). Junk, a negative value or one above 10 logs one line and uses 1: a huge number would
+ * mean "trust every X-Forwarded-For entry", so a client could choose its own address.
+ * The one place `trust proxy` is set is server/index.ts.
  */
+export const MAX_TRUST_PROXY_HOPS = 10;
+
 export function parseTrustProxyHops(
   raw: string | undefined = process.env.TRUST_PROXY_HOPS,
   warn: (line: string) => void = (line) => console.warn(line),
 ): number {
   if (raw === undefined || raw.trim() === "") return 1;
   const value = raw.trim();
-  if (/^\d+$/.test(value) && Number.isSafeInteger(Number(value))) return Number(value);
-  warn("TRUST_PROXY_HOPS must be an integer of 0 or more; using 1.");
+  if (/^\d+$/.test(value) && Number(value) <= MAX_TRUST_PROXY_HOPS) return Number(value);
+  warn(`TRUST_PROXY_HOPS must be an integer from 0 to ${MAX_TRUST_PROXY_HOPS}; using 1.`);
   return 1;
 }
 

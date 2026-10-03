@@ -539,7 +539,7 @@ PG_POOL_MAX=10
 | Variable | Default | Meaning |
 |---|---|---|
 | `RATE_LIMIT_MAX_REQUESTS` | `600` | General per-IP limit on `/api` per `RATE_LIMIT_WINDOW_MS` (900000 ms). Was 100. |
-| `TRUST_PROXY_HOPS` | `1` | Express `trust proxy`: how many reverse proxies sit in front. Set `2` behind Coolify/Traefik plus nginx; `0` trusts no proxy header. One place sets it (`server/index.ts`). |
+| `TRUST_PROXY_HOPS` | `1` | Express `trust proxy`: how many reverse proxies sit in front, 0 to 10 (above 10 or junk logs one line and uses 1). `2` only with Traefik AND nginx, `1` with nginx or Traefik alone, `0` with nothing in front; too high lets a client choose its own address. One place sets it (`server/index.ts`). |
 | `TEAMS_WEBHOOKS_ENABLED` | off | Teams webhooks send only when this is exactly `true`. Off: ticket events send nothing, the test route answers 503 and saving settings answers 409 `teams_webhooks_disabled`. |
 | `SSO_DEFAULT_ROLE` | `customer` | Role of a new SSO account (`customer` or `agent`). Any other value, `admin` included, is logged once and read as `customer`. Set only when the account is created. |
 | `INBOUND_EMAIL_MAX_HEADER_BYTES` | `65536` | Largest accepted inbound email header block (1 to 262144). Junk or out-of-range values log one line and use the default. |
@@ -611,7 +611,7 @@ export default defineConfig({
 - Deploy with `docker-compose.yml`. Its command is
   `npm run db:migrate-sql && npm run db:push && exec node dist/index.js`. The Dockerfile `CMD` runs the
   same three steps (R66; a unit test keeps them identical), so a Dockerfile-only deploy migrates too.
-  The last step is `exec node ...` so node is PID 1 and receives SIGTERM from `docker stop`.
+  The last step is `exec node ...` so node is PID 1 and receives SIGTERM from `docker stop`; `server/shutdown.ts` handles SIGTERM and SIGINT (close sockets, HTTP server, session stores, pool, exit 0; hard exit after 10 s).
 - Required: `NODE_ENV=production` (the built server refuses to start when it is unset; `npm run dev`
   is unaffected), `DATABASE_URL`, `SESSION_SECRET`, `JWT_SECRET`, and `APP_BASE_URL` in production.
 - `scripts/apply-sql-migrations.mjs` re-runs every `migrations/0007+` file on each deploy, so each must

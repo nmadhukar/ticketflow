@@ -97,6 +97,26 @@ app.use(requestLogger(log));
   const listenOptions: any = { port, host: "0.0.0.0" };
   if (!isWindows) listenOptions.reusePort = true;
 
+  // SIGTERM (docker stop, a Coolify redeploy) and SIGINT: close sockets, the HTTP server, the
+  // session stores and the pool, then exit. node is PID 1 (`exec node`, R66), where a signal with
+  // no handler is ignored. See ./shutdown.
+  {
+    const { createShutdown } = await import("./shutdown");
+    const { pool } = await import("./storage/db");
+    const { closeRealtime } = await import("./realtime/ws");
+    const { closeAuth } = await import("./services/auth");
+    const shutdown = createShutdown({
+      server,
+      closeRealtime,
+      closeAuth,
+      closePool: () => pool.end(),
+      exit: (code) => process.exit(code),
+      log: (line) => console.log(line),
+    });
+    process.once("SIGTERM", () => void shutdown("SIGTERM"));
+    process.once("SIGINT", () => void shutdown("SIGINT"));
+  }
+
   server
     .listen(listenOptions, () => {
       log(`serving on port ${port}`);

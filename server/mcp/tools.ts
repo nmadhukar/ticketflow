@@ -45,21 +45,36 @@ function mcpWriteContext(user: User, ip?: string): WriteContext {
  */
 
 /**
- * `id`, `limit` and `offset` are `z.unknown()` in the schema, on purpose: any narrower schema
+* `id`, `limit` and `offset` accept a value of ANY JSON type, on purpose: any narrower schema
  * (`z.number()`, a number-or-string union) makes the SDK reject a value of another type (null,
  * true, an array, an object) itself, with a plain-text protocol error and no code. With
- * `z.unknown()` every value reaches the handler, which converts what it can and leaves the rest
+ * `anyValue` every value reaches the handler, which converts what it can and leaves the rest
  * for the service, whose assertId and listQuerySchema answer a coded VALIDATION
  * (`fieldErrors.id`, `.limit`, `.offset`). The `.describe()` text is what the model reads.
+ *
+ * Why a union and not `z.unknown()`: `z.unknown()` accepts `undefined`, so zod marks the key
+ * optional and gives it no type, and tools/list then told every client that `id` was optional
+ * and untyped (I2 of the final review). The union below rejects only `undefined`, so `id` is
+ * advertised as required, with number and string the first types listed. A MISSING id is then
+ * refused by the SDK (a protocol error), which is the right contract for a key the schema says is
+ * required; every id that is present reaches the handler.
  *
  * R47: a model often sends the id as a string, so a string of plain digits (no sign, space,
  * leading zero or decimal point) up to 2147483647 (int4, the largest id the database holds) is
  * that number. Everything else, "abc", "1.5", "", " 12", a number above int4, stays a VALIDATION.
  * `ticketId` narrows the type for the service, which re-checks it at run time.
  */
-const id = z
-  .unknown()
-  .describe('Ticket id: a positive integer, as a number or a string of digits such as "12"');
+// A function, not a shared schema object: one instance used twice makes the JSON schema point at itself with $ref.
+const anyValue = () =>
+  z.union([
+    z.number(),
+    z.string(),
+    z.boolean(),
+    z.null(),
+    z.array(z.unknown()),
+    z.record(z.unknown()),
+  ]);
+const id = anyValue().describe('Ticket id: a positive integer, as a number or a string of digits such as "12"');
 
 const MAX_INT = 2147483647;
 const ID_PATTERN = /^[1-9][0-9]{0,9}$/;
@@ -102,12 +117,10 @@ const listArgs = z
     category: z.string().optional(),
     assigneeId: z.string().describe("Only tickets assigned to this user id").optional(),
     search: z.string().describe("Text to find in the title or description").optional(),
-    limit: z
-      .unknown()
+    limit: anyValue()
       .describe('Page size, 1-100 (default 25); a number or a numeric string such as "10"')
       .optional(),
-    offset: z
-      .unknown()
+    offset: anyValue()
       .describe('Rows to skip, 0 or more (default 0); a number or a numeric string')
       .optional(),
   })

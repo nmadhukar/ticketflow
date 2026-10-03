@@ -20,6 +20,6 @@ RUN npm run build
 #    Dockerfile-only deploy (Coolify) therefore migrates too, and the R32 drift check still
 #    applies: the hand-written idempotent migrations run first, then drizzle-kit push, and the
 #    server refuses to boot if a required schema object is still missing. The last step is
-#    `exec node ...` so node replaces the shell as PID 1 and receives SIGTERM from `docker stop`.
+#    `exec node ...` so node replaces the shell as PID 1 and receives SIGTERM from `docker stop`; server/shutdown.ts handles it.
 EXPOSE 5000
 CMD ["sh", "-c", "npm run db:migrate-sql && npm run db:push && exec node dist/index.js"]

@@ -136,7 +136,9 @@ ORDER BY 1;
 3. In the database:
    ```sql
    SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'users'
-     AND column_name IN ('failed_login_attempts','locked_until','must_change_password','password_changed_at'); -- 4
+     AND column_name IN ('failed_login_attempts','locked_until','must_change_password','password_changed_at','last_failed_login_at'); -- 5
+   SELECT column_name FROM information_schema.columns WHERE table_schema = 'public'
+     AND table_name = 'ticket_auto_responses' AND column_name = 'applied_at';                       -- 1 row
    SELECT to_regclass('public.ticket_number_counters'), to_regclass('public.sns_message_dedupe');   -- both non-null
    SELECT column_name FROM information_schema.columns WHERE table_name = 'sns_message_dedupe' AND column_name = 'status'; -- 1 row
    SELECT indexname FROM pg_indexes WHERE indexname = 'api_keys_key_hash_sha256_uniq';            -- 1 row
@@ -430,6 +432,8 @@ with the evidence in the plan's item ledger). The lines keep their original word
 the verdicts are at the head of each subsection and on every line that used to say "still open".
 Items are cited as in the plan's ledger, `docs/superpowers/plans/2026-10-03-ticketflow-followups-final.md`
 (N01-N67 follow-up items, C01-C50 requirement caveats).
+The only residuals are the known ones listed in section 7 ("Known residuals"): they were found by
+the final round and are not ledger items.
 
 ### From the final whole-branch review (documented, not fixed)
 RESOLVED (FU3): M2 (emailed and unassigned customer tickets visible only to admins) by R36 and
@@ -591,8 +595,8 @@ N34); `updateTask` history logging null/0: ALREADY FIXED (N65).
 
 ### Realtime, Teams webhooks and inbound email
 - Task 14: RESOLVED (FU4). `acceptInvitationForUser` (after the commit) and `approveUser` now call `disconnectUser(userId, 1012)`. `originAllowed` no longer trusts `x-forwarded-host` unless the app's Express `trust proxy` is on (`server/index.ts` sets it to 1 for the deployed reverse proxy, so behind the proxy it is trusted, and then only the LAST entry, the one the proxy wrote, is read); `attachRealtime(server, { trustProxy })` carries the setting. RESOLVED (FF4, R51, N41): was "still open: a per-event users read and a UNION per 200 sockets": eligible users are cached for at most 1 s and one visibility query runs per event. ALREADY FIXED (N42): `secureAuth.ts` was deleted in FU2.
-- Task 15: RESOLVED (FF4, R44, N43; was NOT FIXED, by decision): the DNS-rebinding window. The webhook connection is now pinned to the checked address (`https.request` with a custom lookup that validates every resolved address; no new dependency), and Teams webhooks are off by default (R84). The host allow-list (`*.webhook.office.com`) is the control; pinning the checked address needs an undici dispatcher, i.e. a new dependency, which this plan does not add (documented in `webhookGuard.ts`). RESOLVED (FU4): fan-out resolves access for all candidate owners in one query (per 200) and posts at most 5 webhooks at a time (`WEBHOOK_CONCURRENCY`, an in-house limiter). RESOLVED (FF2, R61, N44; was still open): `storage.createTeam` inserts only the team and `POST /api/teams` adds the creator as team admin in the same transaction. ALREADY FIXED (N45; was still open): team routes answer through `fail()` with an `error` code.
-- Task 16: RESOLVED (FF3, R65, N46): an inbound `From` whose display name is exactly its address is accepted; every other `@` in a display name and every backslash is still refused. RESOLVED (FF3, R46, N47 and N48): the done mark is written in the same transaction as the ticket or comment, and a fenced-out holder rolls back and answers 503 `in_progress`. Was: display names containing `@` or a backslash are refused (safe direction); a fenced-out late holder only logs. NOT FIXED, by decision: the done mark stays a separate statement from the create. Sharing a transaction means threading `tx` through the ticket-number counter and the one-retry-on-number-clash in `createTask` (a unique violation aborts a transaction, so the retry needs savepoints); the claim fence stays and the window is two statements wide (documented in `routes/email.ts`). RESOLVED (FF3, R52, N49): the header cap is `INBOUND_EMAIL_MAX_HEADER_BYTES` (default 65536, maximum 262144); check real Received or ARC sizes after deploy. Was: the 64 KB header cap stays as a documented limit.
+- Task 15: RESOLVED (FF4, R44, N43; was NOT FIXED, by decision): the DNS-rebinding window. The webhook connection is now pinned to the checked address (`https.request` with a custom lookup that validates every resolved address; no new dependency), and Teams webhooks are off by default (R84). Was: the host allow-list (`*.webhook.office.com`) is the control; pinning the checked address needs an undici dispatcher, i.e. a new dependency, which this plan does not add (R44 pins it with `https.request` and no dependency). RESOLVED (FU4, then FF4 R51): fan-out resolves access for all candidate owners in one set-based query and posts at most 5 webhooks at a time (`WEBHOOK_CONCURRENCY`, an in-house limiter). RESOLVED (FF2, R61, N44; was still open): `storage.createTeam` inserts only the team and `POST /api/teams` adds the creator as team admin in the same transaction. ALREADY FIXED (N45; was still open): team routes answer through `fail()` with an `error` code.
+- Task 16: RESOLVED (FF3, R65, N46): an inbound `From` whose display name is exactly its address is accepted; every other `@` in a display name and every backslash is still refused. RESOLVED (FF3, R46, N47 and N48): the done mark is written in the same transaction as the ticket or comment, and a fenced-out holder rolls back and answers 503 `in_progress`. Was: display names containing `@` or a backslash are refused (safe direction); a fenced-out late holder only logs. Was: NOT FIXED, by decision: the done mark stays a separate statement from the create; sharing a transaction means threading `tx` through the ticket-number counter and the one-retry-on-number-clash in `createTask` (a unique violation aborts a transaction, so the retry needs savepoints). That is exactly what R46 did: `tx` is threaded through numbering, history and comments, the retry runs on a SAVEPOINT, and the claim fence stays as the guard against a second holder. RESOLVED (FF3, R52, N49): the header cap is `INBOUND_EMAIL_MAX_HEADER_BYTES` (default 65536, maximum 262144); check real Received or ARC sizes after deploy. Was: the 64 KB header cap stays as a documented limit.
 
 ### Security hardening and deployment
 RESOLVED (FU2): `sanitizeForSQL` and `sanitizeText` are deleted. 404s without an error code were
@@ -760,14 +764,14 @@ no 0023 (FF5 fixed the push loop in `shared/schema.ts` alone).
 | R46 | The inbound done mark is written in the same transaction as the ticket or comment; the ticket-number retry uses a SAVEPOINT. |
 | R47 | MCP ids accept numeric strings; non-numeric values stay a coded VALIDATION; `limit` and `offset` coerce numeric strings or answer VALIDATION. |
 | R48 | `ticket_auto_responses.applied_at` (migration 0021) is set on apply; analytics use it and fall back to the old rule for legacy rows. |
-| R49 | `TRUST_PROXY_HOPS` (integer >= 0, default 1) sets Express `trust proxy` in one place (2 behind Coolify/Traefik plus nginx). |
+| R49 | `TRUST_PROXY_HOPS` (integer 0 to 10, default 1; anything else logs one line and uses 1) sets Express `trust proxy` in one place (2 only with Traefik AND nginx in front, 1 for nginx alone or Traefik alone, 0 with nothing in front). |
 | R50 | `drizzle-kit push` is idempotent (`unique_team_admin` in table column order, the `'{}'` array defaults removed); proven by two pushes in a scratch database. |
 | R51 | Realtime caches eligible users for at most 1 s and runs one visibility query per event; correctness tests stay. |
 | R52 | The general `/api` limit default is 600 per 15 minutes; `INBOUND_EMAIL_MAX_HEADER_BYTES` (default 65536, max 262144); the MCP list limit stays 100 (decided). |
 | R53 | The login failure counter restarts once the lockout window has passed since the last failure (`users.last_failed_login_at`, migration 0022). |
 | R54 | The gate gets generated JWT and session secrets; the no-egress bracket-strip regex and its empty, unparsable, portless and IPv6 tests; the `split2` dev flag verified; `bootGuard` decides by its module path. |
 | R55 | `setupAuth` tracks every session store and `closeAuth` closes them all. |
-| R56 | The security access log and the default custom-limiter key read the session user's id. |
+| R56 | The security access log and the default custom-limiter key read the session user's id. **Latent only:** `securityAuditLog` and `createCustomRateLimit` are not mounted in production, so no deployment's behaviour changes (see below). |
 | R57 | The placeholder-secret test derives its samples from the repository's tracked files. |
 | R58 | Unimplemented email providers (SMTP, Mailgun, SendGrid, Custom) cannot be selected (400 `provider_not_supported`, UI unavailable); implementing one needs a new dependency. |
 | R59 | `storage.getTasks` is deleted (tests only); the detail query's `lastUpdatedBy` matches the list for missing users. |
@@ -858,8 +862,13 @@ Realtime, Teams, proxy and limits (FF4)
 - The realtime layer caches eligible users for at most 1 s (a raw database change to a role or
   state can lag a socket by up to 1 s; changes made through the app disconnect at once) and runs one
   visibility query per event instead of one per user.
-- The proxy depth is configurable (`TRUST_PROXY_HOPS`); the security access log and the custom
-  limiter key use the signed-in user's id.
+- The proxy depth is configurable (`TRUST_PROXY_HOPS`).
+- R56 is a latent fix, not a live behaviour change: `securityAuditLog` (the SECURITY_ACCESS and
+  SECURITY_RESPONSE lines) and `createCustomRateLimit` are exported but not mounted by
+  `applySecurity`, so no deployment writes those lines or uses that limiter. They now read the
+  session user's id (`id`, falling back to `userId`), and a unit test pins it. If either is ever
+  mounted, mount it after passport (a request-start line has no user before passport runs) and
+  test it through `createTestApp`.
 
 Schema push, image and gate (FF5, FFZ)
 - **The first `drizzle-kit push` after this deploy drops the database DEFAULT on three array
@@ -869,7 +878,11 @@ Schema push, image and gate (FF5, FFZ)
   reader treats as empty (a key with NULL permissions is refused by MCP with 403 and listed with
   `[]`). The second push reports no changes.
 - The Dockerfile `CMD` runs `db:migrate-sql`, `db:push`, then `exec node dist/index.js` (node is
-  PID 1 and receives `docker stop`'s SIGTERM), the same as compose.
+  PID 1 and receives `docker stop`'s SIGTERM), the same as compose. The server now handles SIGTERM
+  and SIGINT (`server/shutdown.ts`): it closes the WebSockets, stops the HTTP server, closes the
+  session stores and the database pool, and exits 0; a step that fails is logged by type and the
+  exit code is 1; a hard timer exits 1 after 10 s if anything hangs. Without a handler a PID-1
+  node ignores the signal and the container is killed after the grace period.
 - The gate no longer warns about an insecure development JWT secret, and a gate step proves the
   built bundle refuses to start with `NODE_ENV` empty from any working directory.
 - The R50 push-idempotence test builds its own database state, so it passes alone or in order.
@@ -885,12 +898,30 @@ Requirement-caveat defects found and fixed (FF6)
 - New tests cover A1, A5, A9, S1, Y1, Y5, Y7, Y8, T15 (size), I1, I7, I9, K1, K5, K6, E2, E3, G1,
   G4, G7, D2 and P2; `docs/dc4-validation-2026-10-01/requirements-status-after-fixes.md` names them.
 
+### Known residuals (open, deliberately not fixed in this round)
+
+- `PUT /api/admin/help/:id`, `DELETE /api/admin/help/:id` and the company-policy toggle still answer
+  200 (or a 500 from the update) for an unknown id, and the help-document update passes the request
+  body straight to `updateHelpDocument`. FF6 found it while covering K5 and K6; it was not in any
+  ledger item. The knowledge-article delete (K1) was fixed; these were not.
+- C15 (requirement I7): the ledger named `/api/bedrock/usage/summary`, which does not exist (no
+  route, no client). FF6 tested the routes that do exist, `/api/bedrock/cost-statistics` and
+  `/api/bedrock/usage`, and found and fixed the UTC-window defect through them. Aliasing the old
+  path is an owner decision.
+- No red-first evidence exists for two tests because the sandbox classifier refused the mutation
+  runs: the R84 off-by-default tests (`teamsWebhook.test.ts`) and the R51 epoch-invalidation test
+  (`realtime.cache.test.ts`, the guard for a demoted user reconnecting within the 1 s cache window).
+  Both pass against the real code and read correctly; neither was shown to fail with its guard
+  removed.
+- Runtime signals: the SIGTERM handler is proven by a unit test of the shutdown function with
+  fakes; no test sends a real signal to a built container (a Windows host cannot deliver one).
+
 ### New and changed environment
 
 | Variable | Default | Change |
 |---|---|---|
 | `SSO_DEFAULT_ROLE` | `customer` | New (R42). `customer` or `agent`; anything else (`admin` included) is logged once and reads as `customer`. Compose passes it through with no value. |
-| `TRUST_PROXY_HOPS` | `1` | New (R49). Integer >= 0. **Set `2` behind Coolify/Traefik plus nginx**; `0` trusts no proxy header. |
+| `TRUST_PROXY_HOPS` | `1` | New (R49). Integer 0 to 10; a value above 10, junk or a negative number logs one line and uses 1. Set it to the number of proxies actually in front: **`2` only with Traefik AND nginx**, `1` with nginx alone (the compose file's nginx) or Traefik alone (a Dockerfile-only deploy on Coolify), `0` with nothing in front. |
 | `INBOUND_EMAIL_MAX_HEADER_BYTES` | `65536` | New (R52). 1 to 262144; junk or out of range logs one line and uses the default. |
 | `PG_POOL_MAX` | `10` | New. Database pool size; a wait for a connection fails after 10 s. |
 | `RATE_LIMIT_MAX_REQUESTS` | `600` | Default raised from 100 (R52). |
@@ -915,8 +946,13 @@ merged schema: `db:migrate-sql` on the empty database (`fresh database ... nothi
 
 ### Deploy checks
 
-1. Set the new environment in Coolify: **`TRUST_PROXY_HOPS=2`**, and **`TEAMS_WEBHOOKS_ENABLED=true`**
-   if Teams webhooks must keep working. Optionally `SSO_DEFAULT_ROLE`, `INBOUND_EMAIL_MAX_HEADER_BYTES`
+1. Set the new environment in Coolify. **`TRUST_PROXY_HOPS` must equal the number of proxies in
+   front of the app:** `2` only when Traefik AND nginx are both in front (the compose file's nginx
+   behind Coolify/Traefik); `1` for nginx alone, or for a Dockerfile-only deploy where only Traefik
+   is in front; `0` for a Dockerfile-only deploy with nothing in front. Too high a number lets a
+   client choose its own address through `X-Forwarded-For` (the per-IP limits and the audit IP can
+   then be spoofed); too low makes every client look like the proxy. Also set
+   **`TEAMS_WEBHOOKS_ENABLED=true`** if Teams webhooks must keep working. Optionally `SSO_DEFAULT_ROLE`, `INBOUND_EMAIL_MAX_HEADER_BYTES`
    and `PG_POOL_MAX`.
 2. The drift check (section 1) now has `last_failed_login_at` in its users column list and a third
    query for `ticket_auto_responses` (with `applied_at`). All three lists must be empty.
@@ -941,6 +977,8 @@ merged schema: `db:migrate-sql` on the empty database (`fresh database ... nothi
 5. `server/__tests__/fixtures/webhook/key.pem` (and `cert.pem`) is a throwaway self-signed key and
    certificate for the local HTTPS test server. It is not a secret and protects nothing; a secret
    scanner may flag it, and it is safe to allow-list.
-6. If the reverse proxy is nginx behind Traefik, confirm `TRUST_PROXY_HOPS=2` before relying on the
-   per-IP limit or the audit log's IP: with the default of 1 every client appears as the proxy.
+6. Check the hop count from the outside: send a request with a made-up `X-Forwarded-For: 203.0.113.9`
+   and confirm the app does not log that address as the client (with the right count it logs the
+   address your proxies saw). With the default of 1 behind two proxies every client appears as the
+   inner proxy.
 7. Verify the deployed commit through Coolify's deployment record, not a bundle hash.

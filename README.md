@@ -404,7 +404,7 @@ refuses to boot if a required schema object is still missing. The command is:
 npm run db:migrate-sql && npm run db:push && exec node dist/index.js
 ```
 
-`exec` makes node PID 1, so it receives SIGTERM from `docker stop`.
+`exec` makes node PID 1, so it receives SIGTERM from `docker stop`; the server handles SIGTERM and SIGINT (`server/shutdown.ts`): it closes the sockets, the HTTP server, the session stores and the database pool, then exits 0 (a timer forces exit after 10 s).
 
 ### Environment Configuration
 
@@ -422,7 +422,7 @@ Optional, with their defaults:
 | Variable | Default | Meaning |
 |---|---|---|
 | `RATE_LIMIT_MAX_REQUESTS` | `600` | General per-IP limit on `/api` per `RATE_LIMIT_WINDOW_MS` (15 minutes). |
-| `TRUST_PROXY_HOPS` | `1` | Reverse proxies in front of the app (Express `trust proxy`). Set `2` behind Coolify/Traefik plus nginx. |
+| `TRUST_PROXY_HOPS` | `1` | Number of reverse proxies in front of the app (Express `trust proxy`), 0 to 10: `2` only with Traefik AND nginx, `1` with nginx or Traefik alone, `0` with nothing in front. A value above 10 or junk logs one line and uses 1. |
 | `TEAMS_WEBHOOKS_ENABLED` | off | Teams webhooks send only when this is exactly `true`. |
 | `SSO_DEFAULT_ROLE` | `customer` | Role of a new Microsoft SSO account: `customer` or `agent`. It always waits for admin approval. |
 | `INBOUND_EMAIL_MAX_HEADER_BYTES` | `65536` | Largest accepted inbound email header block, 1 to 262144. |

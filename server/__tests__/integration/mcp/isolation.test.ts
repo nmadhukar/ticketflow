@@ -249,12 +249,21 @@ describe("a non-numeric id", () => {
   it.each(ID_TOOLS)("%s answers a coded VALIDATION, not the SDK's plain-text error", async (tool, args) => {
     // Strings, numbers outside 1..2147483647 (int4: a larger id can never exist, and would reach
     // the database as an out-of-range parameter), and values of other types: all the same coded error.
-    const badIds = ["abc", "1.5", "", " 12", "012", "12 ", "1e2", "2147483648", 0, -1, 1.5, 2147483648, 9007199254740991, undefined, null, true, false, [1], {}];
+    const badIds = ["abc", "1.5", "", " 12", "012", "12 ", "1e2", "2147483648", 0, -1, 1.5, 2147483648, 9007199254740991, null, true, false, [1], {}];
     for (const bad of badIds) {
       const res = await run(mcp.admin, tool, args(bad as never));
       expect([tool, bad, res.isError, res.data?.code]).toEqual([tool, bad, true, "VALIDATION"]);
       expect(res.data.details.fieldErrors.id).toBeDefined();
     }
+  });
+});
+
+describe("a missing id", () => {
+  it.each(ID_TOOLS)("%s refuses the call: the schema says id is required", async (tool, args) => {
+    const res = await run(mcp.admin, tool, args(undefined as never));
+    expect(res.isError).toBe(true);
+    expect(res.data.code).toBeUndefined(); // the SDK's protocol error, for a key the schema marks required
+    expect(res.data.message).toContain("at id");
   });
 });
 

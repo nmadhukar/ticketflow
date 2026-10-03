@@ -22,6 +22,17 @@ describe("R49: parseTrustProxyHops", () => {
     expect(l.out).toEqual([]);
   });
 
+  it("accepts up to 10 hops and refuses more (R49: 999999 would mean trusting a client-supplied entry)", () => {
+    const l = lines();
+    expect(parseTrustProxyHops("10", l.warn)).toBe(10);
+    expect(l.out).toEqual([]);
+    expect(parseTrustProxyHops("11", l.warn)).toBe(1);
+    expect(parseTrustProxyHops("999999", l.warn)).toBe(1);
+    expect(l.out).toHaveLength(2);
+    expect(l.out[0]).toContain("TRUST_PROXY_HOPS");
+    expect(l.out[0]).toContain("10");
+  });
+
   it.each(["-1", "x", "1.5", "2 hops", "1e1", "NaN", "99999999999999999999"])(
     "%j gives 1 and logs exactly one line",
     (raw) => {
