@@ -3,7 +3,7 @@ import request from "supertest";
 import { sanitizeRichHtml } from "../../security/sanitizeHtml";
 import { installRequestPipeline, contentSecurityDirectives } from "../../security/pipeline";
 import { sanitizeDeep } from "../../security/validation";
-import { isDevelopmentEnv } from "../../env";
+import { isDevelopmentEnv, unsetNodeEnvBootProblem } from "../../env";
 import { escapeLike, containsPattern } from "../../utils/like";
 
 describe("sanitizeRichHtml", () => {
@@ -162,5 +162,45 @@ describe("development switch (one helper for the CSP and the server entry)", () 
     } finally {
       process.env.NODE_ENV = saved;
     }
+  });
+});
+
+describe("FU5: built server with NODE_ENV unset", () => {
+  const dist = "/app/dist";
+  it("refuses with one line when unset and the entry file is inside dist", () => {
+    const line = unsetNodeEnvBootProblem(undefined, "/app/dist/index.js", dist);
+    expect(line).toMatch(/NODE_ENV is not set/);
+    expect(line).not.toMatch(/\n/);
+    expect(unsetNodeEnvBootProblem("", "/app/dist/index.js", dist)).not.toBeNull();
+    // Windows separators
+    expect(unsetNodeEnvBootProblem(undefined, "C:\\app\\dist\\index.js", "C:\\app\\dist")).not.toBeNull();
+  });
+  it("lets tsx (npm run dev) and any set NODE_ENV through", () => {
+    expect(unsetNodeEnvBootProblem(undefined, "/app/server/index.ts", dist)).toBeNull();
+    expect(unsetNodeEnvBootProblem(undefined, "/app/distant/index.js", dist)).toBeNull();
+    for (const env of ["production", "development", "test"]) {
+      expect(unsetNodeEnvBootProblem(env, "/app/dist/index.js", dist)).toBeNull();
+    }
+  });
+});
+
+describe("FU5: sanitizeDeep has no depth limit", () => {
+  it("cleans a value nested 5000 deep without overflowing, in linear time", () => {
+    let body: unknown = { leaf: "a\u0000b", __proto__x: 1 };
+    for (let i = 0; i < 5000; i++) body = i % 2 ? { n: body } : [body];
+    const start = Date.now();
+    let cur = sanitizeDeep(body) as any;
+    expect(Date.now() - start).toBeLessThan(500);
+    while (!("leaf" in cur)) cur = Array.isArray(cur) ? cur[0] : cur.n;
+    expect(cur.leaf).toBe("ab");
+  });
+  it("still cleans below the old depth of 20 and keeps credentials and forbidden keys handling", () => {
+    let body: any = JSON.parse('{"__proto__":{"x":1},"password":"p\\u0000q","t":"x\\u0000y"}');
+    for (let i = 0; i < 30; i++) body = { n: body };
+    let cur = sanitizeDeep(body) as any;
+    for (let i = 0; i < 30; i++) cur = cur.n;
+    expect(cur.t).toBe("xy");
+    expect(cur.password).toBe("p\u0000q");
+    expect(Object.keys(cur)).toEqual(["password", "t"]);
   });
 });

@@ -91,7 +91,7 @@ The system uses a comprehensive relational database schema:
 
 ## Prerequisites
 
-- Node.js 18+ (recommended: Node.js 20)
+- Node.js 22.12+ (the Docker image uses Node 24)
 - PostgreSQL database (provided by Neon)
 - AWS Account (for SES and Bedrock)
 - Microsoft Azure AD App Registration (optional, for SSO)
@@ -389,26 +389,43 @@ The application implements a zero-trust security architecture:
 # Build frontend and backend
 npm run build
 
-# Start production server
-npm start
+# Start production server (NODE_ENV must be set, see below)
+NODE_ENV=production npm start
+```
+
+### Docker and compose (the supported production path)
+
+The image is built on Node 24 (`node:24-alpine`; `package.json` requires Node >= 22.12). Deploy
+with `docker-compose.yml` (Coolify must use the compose file): the Dockerfile `CMD` alone runs
+neither schema step, and the server then refuses to boot on an unmigrated database. The compose
+command is:
+
+```bash
+npm run db:migrate-sql && npm run db:push && node dist/index.js
 ```
 
 ### Environment Configuration
 
 Ensure all production environment variables are set:
 
-- Use strong, unique passwords
-- Enable HTTPS
-- Configure proper CORS origins
-- Set NODE_ENV=production
+- `NODE_ENV=production` (required: the built server, `node dist/index.js`, refuses to start when it is unset)
+- `DATABASE_URL`
+- `SESSION_SECRET` and `JWT_SECRET` (strong, unique)
+- `APP_BASE_URL` (public origin, e.g. `https://tickets.example.com`; the server refuses to boot without it in production)
+- Enable HTTPS and configure proper CORS origins
 - Use production database credentials
 
 ### Database Migrations
 
 ```bash
-# Push schema changes to production
+# Hand-written idempotent SQL migrations (migrations/0007_* onwards), then the schema push
+npm run db:migrate-sql
 npm run db:push
 ```
+
+A migration file that is not idempotent is listed in `NOT_RUN` (with the reason) in
+`scripts/apply-sql-migrations.mjs`, which is skipped on every run; add a future non-idempotent
+file there, or make it idempotent, or every deploy fails.
 
 ### Monitoring
 

@@ -1,4 +1,5 @@
 import "dotenv/config";
+import "./bootGuard";
 import express from "express";
 import { registerRoutes } from "./routes/index";
 import { installErrorHandling } from "./http/install";
