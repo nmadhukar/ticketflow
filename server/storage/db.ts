@@ -30,9 +30,12 @@ try {
  * a positive integer, default 10) sets the size.
  */
 function poolLimits(): { max?: number; connectionTimeoutMillis: number } {
-  const n = Number(process.env.PG_POOL_MAX);
+  const raw = process.env.PG_POOL_MAX?.trim();
+  const n = Number(raw);
+  const valid = Number.isInteger(n) && n > 0 && n <= 500;
+  if (raw && !valid) console.warn("PG_POOL_MAX must be an integer from 1 to 500; using the default pool size");
   return {
-    ...(Number.isInteger(n) && n > 0 && n <= 500 ? { max: n } : {}),
+    ...(valid ? { max: n } : {}),
     connectionTimeoutMillis: 10_000,
   };
 }
