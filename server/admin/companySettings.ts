@@ -36,7 +36,10 @@ export function registerCompanySettingsRoutes(app: Express): void {
     isAuthenticated,
     async (req, res) => {
       try {
-        const s = await storage.getCompanySettings();
+        // A copy: getCompanySettings hands out its cached row, and writing the presigned
+        // URL into that object replaced the stored logo key for every later reader.
+        const stored = await storage.getCompanySettings();
+        const s = stored ? { ...stored } : stored;
 
         // If logo is stored as S3 key, generate presigned URL
         if (s?.logoUrl && s3Service.isS3Url(s.logoUrl)) {
@@ -110,12 +113,27 @@ export function registerCompanySettingsRoutes(app: Express): void {
     isAdmin,
     async (req: any, res) => {
       try {
+        // The columns are varchar(255) not null and varchar(7): anything else used to be a
+        // database error (500) or a blank company name shown in every page header.
+        const name = req.body.companyName;
+        if (
+          name !== undefined &&
+          (typeof name !== "string" || name.trim() === "" || name.trim().length > 255)
+        ) {
+          return fail(res, 400, "companyName must be 1 to 255 characters", {
+            details: { formErrors: [], fieldErrors: { companyName: ["1 to 255 characters"] } },
+          });
+        }
+        const color = req.body.primaryColor;
+        if (color !== undefined && (typeof color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(color))) {
+          return fail(res, 400, "primaryColor must be a #rrggbb colour", {
+            details: { formErrors: [], fieldErrors: { primaryColor: ["#rrggbb"] } },
+          });
+        }
         const userId = getUserId(req);
         const payload: any = {};
-        if (req.body.companyName !== undefined)
-          payload.companyName = req.body.companyName;
-        if (req.body.primaryColor !== undefined)
-          payload.primaryColor = req.body.primaryColor;
+        if (name !== undefined) payload.companyName = name.trim();
+        if (color !== undefined) payload.primaryColor = color;
         const updated = await storage.updateCompanySettings(payload, userId);
         res.json({
           companyName: updated.companyName,
@@ -261,21 +279,10 @@ export function registerCompanySettingsRoutes(app: Express): void {
         // Upload to S3
         const s3Key = `logos/company-logo.${extension}`;
 
-        // Delete old logo from S3 if it exists
         const currentSettings = await storage.getCompanySettings();
-        if (
-          currentSettings?.logoUrl &&
-          s3Service.isS3Url(currentSettings.logoUrl)
-        ) {
-          try {
-            const oldKey = s3Service.extractKeyFromUrl(currentSettings.logoUrl);
-            await s3Service.deleteFile(oldKey);
-          } catch (error) {
-            console.warn("Failed to delete old logo from S3:", error);
-            // Continue with upload even if deletion fails
-          }
-        }
 
+        // Upload first: the old logo used to be deleted before this, so a failed upload
+        // left the stored key pointing at an object that no longer existed.
         await s3Service.uploadFile(s3Key, buffer, fileType);
 
         // Store S3 key in database (we'll use presigned URLs when serving)
@@ -285,6 +292,20 @@ export function registerCompanySettingsRoutes(app: Express): void {
           { logoUrl },
           userId
         );
+
+        // Then remove the previous logo, unless it is the object just written (png over png).
+        if (
+          currentSettings?.logoUrl &&
+          s3Service.isS3Url(currentSettings.logoUrl)
+        ) {
+          try {
+            const oldKey = s3Service.extractKeyFromUrl(currentSettings.logoUrl);
+            if (oldKey !== s3Key) await s3Service.deleteFile(oldKey);
+          } catch (error) {
+            console.warn("Failed to delete old logo from S3:", error);
+            // The new logo is already live; a leftover object is harmless
+          }
+        }
         res.json(settings);
       } catch (error) {
         logRouteError("Error uploading logo", error);

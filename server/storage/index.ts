@@ -2890,12 +2890,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateArticleEffectiveness(id: number, rating: number): Promise<void> {
-    // Simple effectiveness calculation - in production could be more sophisticated
+    // The score is a 0..1 fraction (the knowledge page shows it x 100). A 1..5 rating is
+    // mapped onto that scale first, so a thumbs-up cannot push the score to 2.75 (275%).
     const article = await this.getKnowledgeArticle(id);
     if (!article) return;
 
     const currentScore = Number(article.effectivenessScore || 0);
-    const newScore = (currentScore + Number(rating)) / 2; // Simple average
+    const asFraction = Math.max(0, Math.min(1, (Number(rating) - 1) / 4));
+    const newScore = (currentScore + asFraction) / 2; // Simple average
 
     await db
       .update(knowledgeArticles)
