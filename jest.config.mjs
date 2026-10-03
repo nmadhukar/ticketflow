@@ -1,5 +1,7 @@
 /** @type {import('jest').Config} */
 
+// `npm test` passes --runInBand globally because the integration suites share one database.
+
 // ts-jest runs the suites as CommonJS, so override the module settings that
 // tsconfig.json (bundler/ESNext, for Vite and tsx) sets. isolatedModules makes
 // ts-jest transpile only: type errors are the job of `npm run check`.
@@ -25,7 +27,7 @@ const tsJestOptions = (extra = {}) => [
   },
 ];
 const tsJest = (extra = {}) => ({
-  '^.+.tsx?$': tsJestOptions(extra),
+  '^.+\\.tsx?$': tsJestOptions(extra),
   // sanitize-html depends on htmlparser2 and friends, which ship ES modules
   // only; ts-jest (allowJs) turns them into CommonJS for the test runtime.
   '^.+[\\\\/]node_modules[\\\\/](htmlparser2|domhandler|domutils|dom-serializer|domelementtype|entities)[\\\\/].+\\.js$':

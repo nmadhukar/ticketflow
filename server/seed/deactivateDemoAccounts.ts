@@ -26,37 +26,40 @@ export async function deactivateDemoAccounts(
   const deactivated: string[] = [];
   const unchecked: string[] = [];
   for (const demo of DEMO_ACCOUNTS) {
-    let row: typeof users.$inferSelect | undefined;
+    // Every row whose email matches ignoring case: a case-variant duplicate
+    // (Admin@... next to admin@...) is a separate account that signs in too.
+    let rows: Array<typeof users.$inferSelect>;
     try {
-      [row] = await db
+      rows = await db
         .select()
         .from(users)
-        .where(sql`lower(${users.email}) = ${demo.email}`)
-        .limit(1);
+        .where(sql`lower(${users.email}) = ${demo.email}`);
     } catch (error) {
       unchecked.push(demo.email);
       console.error(`Could not look up demo account ${demo.email} [${describeError(error)}]`);
       continue;
     }
-    if (!row || !row.isActive || !row.password) continue;
+    for (const row of rows) {
+      if (!row.isActive || !row.password) continue;
 
-    let published: boolean;
-    try {
-      published = await comparePasswords(demo.password, row.password);
-    } catch (error) {
-      console.error(
-        `Could not check demo account ${demo.email}; skipping it: its stored hash is unreadable, so it cannot sign in [${describeError(error)}]`
-      );
-      continue;
-    }
-    if (!published) continue;
+      let published: boolean;
+      try {
+        published = await comparePasswords(demo.password, row.password);
+      } catch (error) {
+        console.error(
+          `Could not check demo account ${demo.email}; skipping it: its stored hash is unreadable, so it cannot sign in [${describeError(error)}]`
+        );
+        continue;
+      }
+      if (!published) continue;
 
-    try {
-      await db.update(users).set({ isActive: false }).where(eq(users.id, row.id));
-      deactivated.push(demo.email);
-    } catch (error) {
-      unchecked.push(demo.email);
-      console.error(`Could not deactivate demo account ${demo.email} [${describeError(error)}]`);
+      try {
+        await db.update(users).set({ isActive: false }).where(eq(users.id, row.id));
+        deactivated.push(demo.email);
+      } catch (error) {
+        unchecked.push(demo.email);
+        console.error(`Could not deactivate demo account ${demo.email} [${describeError(error)}]`);
+      }
     }
   }
   if (deactivated.length > 0) {

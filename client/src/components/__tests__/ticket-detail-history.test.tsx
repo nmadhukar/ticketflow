@@ -65,6 +65,21 @@ describe("describeHistoryItem", () => {
     expect(describeHistoryItem(HISTORY[2])).toBe("estimatedHours: — → 0");
     expect(describeHistoryItem(HISTORY[3])).toBe("Assignee: abc → —");
   });
+
+  it("renders an empty string as an em dash, but keeps real values like 0 and false", () => {
+    const entry = (oldValue: string | null, newValue: string | null) => ({
+      id: 9,
+      action: "updated",
+      field: "notes",
+      oldValue,
+      newValue,
+      createdAt: "2026-01-01T10:00:00Z",
+    });
+    expect(describeHistoryItem(entry("", "text"))).toBe("notes: — → text");
+    expect(describeHistoryItem(entry("text", ""))).toBe("notes: text → —");
+    expect(describeHistoryItem(entry("", ""))).toBe("notes: — → —");
+    expect(describeHistoryItem(entry("0", "false"))).toBe("notes: 0 → false");
+  });
 });
 
 describe("TicketDetail activity history", () => {

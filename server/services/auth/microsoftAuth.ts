@@ -11,7 +11,7 @@ import { getSession } from ".";
 import { loginBlockReason } from "./accountStatus";
 import { AI_SYSTEM_USER_EMAIL } from "../../utils/aiSystemUserId";
 import { randomBytes } from "crypto";
-import { fail } from "../../http/errors";
+import { fail, logRouteError } from "../../http/errors";
 import { publicBaseUrl } from "../../utils/appBaseUrl";
 
 interface MicrosoftProfile {
@@ -24,8 +24,12 @@ interface MicrosoftProfile {
 }
 
 export async function setupMicrosoftAuth(app: Express) {
-  // Use the same session configuration as Replit auth
-  if (!app.get("microsoftAuthConfigured")) {
+  // setupAuth already mounted the one session + passport stack the whole app uses
+  // (and marks the app). Only a bare app that never ran it (a test harness) gets
+  // its own here: a second stack on the real app would open a second session-store
+  // pool that nothing closes, and never be consulted (express-session skips a
+  // request that already has a session).
+  if (!app.get("sessionStackMounted") && !app.get("microsoftAuthConfigured")) {
     app.use(getSession());
     app.use(passport.initialize());
     app.use(passport.session());
@@ -154,10 +158,11 @@ export async function setupMicrosoftAuth(app: Express) {
 
       const authUrl = await msalClient.getAuthCodeUrl(authCodeUrlParameters);
 
-      console.log("Redirecting to Microsoft login:", authUrl);
+      // The URL carries the CSRF state: it is never logged.
+      console.log("Redirecting to Microsoft login");
       res.redirect(authUrl);
     } catch (error) {
-      console.error("Error during Microsoft authentication:", error);
+      logRouteError("Error during Microsoft authentication", error);
       res.redirect("/auth?error=microsoft_auth_error");
     }
   });
@@ -212,7 +217,8 @@ export async function setupMicrosoftAuth(app: Express) {
       try {
         tokenResponse = await msalClient.acquireTokenByCode(tokenRequest);
       } catch (tokenError: any) {
-        console.error("Error acquiring token:", tokenError);
+        // Type and code only: an MSAL error object can carry the code, tokens and request details.
+        logRouteError("Error acquiring token", tokenError);
         return res.redirect("/auth?error=microsoft_token_error");
       }
 
@@ -288,7 +294,7 @@ export async function setupMicrosoftAuth(app: Express) {
       // Log in user using Passport
       req.logIn(sessionUser, (loginErr: any) => {
         if (loginErr) {
-          console.error("Login error:", loginErr);
+          logRouteError("Login error", loginErr);
           return res.redirect("/auth?error=login_failed");
         }
         // Successful authentication
@@ -296,7 +302,7 @@ export async function setupMicrosoftAuth(app: Express) {
         res.redirect("/");
       });
     } catch (error) {
-      console.error("Error in Microsoft callback:", error);
+      logRouteError("Error in Microsoft callback", error);
       res.redirect("/auth?error=microsoft_auth_error");
     }
   };

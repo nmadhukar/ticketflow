@@ -21,12 +21,12 @@
  */
 import type { IncomingMessage, Server } from "http";
 import type { Duplex } from "stream";
-import { inArray, sql } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { WebSocketServer } from "ws";
-import { tasks, users } from "@shared/schema";
+import { users } from "@shared/schema";
 import { db } from "../storage/db";
 import { authenticateUpgrade, isSessionRevoked } from "../services/auth";
-import { ticketVisibilityWhere, type AccessUser } from "../permissions/ticketAccess";
+import { usersWhoCanAccessTask, type AccessUser } from "../permissions/ticketAccess";
 import { normalizeRole } from "../permissions/roles";
 import { isAiSystemUserId } from "../utils/aiSystemUserId";
 import {
@@ -86,6 +86,14 @@ function allowedOrigins(): string[] {
     .filter((s) => s !== "" && s !== "*");
 }
 
+/**
+ * Whether X-Forwarded-Host is believed. It is only the proxy's word when the app was told
+ * a proxy sits in front (Express "trust proxy", which server/index.ts sets to 1 for the
+ * deployed reverse proxy); on a direct connection any client can send that header and
+ * choose its own "same origin". attachRealtime(server, { trustProxy }) sets this from the app.
+ */
+let trustForwardedHost = false;
+
 /** No Origin (non-browser client) passes: it still needs the session cookie. */
 export function originAllowed(req: IncomingMessage): boolean {
   const origin = req.headers.origin;
@@ -96,17 +104,19 @@ export function originAllowed(req: IncomingMessage): boolean {
   } catch {
     return false; // "null" or garbage
   }
-  const fwd = req.headers["x-forwarded-host"];
-  const host = String(Array.isArray(fwd) ? fwd[0] : fwd ?? req.headers.host ?? "")
-    .split(",")[0]
-    .trim()
-    .toLowerCase();
+  const fwd = trustForwardedHost ? req.headers["x-forwarded-host"] : undefined;
+  // With a trusted proxy the LAST entry is the one it wrote; earlier ones came from the client.
+  const forwarded = String(Array.isArray(fwd) ? fwd[fwd.length - 1] : fwd ?? "")
+    .split(",")
+    .pop()!
+    .trim();
+  const host = (forwarded !== "" ? forwarded : String(req.headers.host ?? "")).trim().toLowerCase();
   if (host !== "" && originHost === host) return true;
   return allowedOrigins().includes(origin.toLowerCase());
 }
 
 async function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
-  let auth: { user: AccessUser; authAt: unknown } | null = null;
+  let auth: { user: AccessUser; authAt: unknown; pwdAt: unknown } | null = null;
   if (originAllowed(req)) {
     try {
       auth = await authenticateUpgrade(req);
@@ -129,6 +139,7 @@ async function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer)
       ws,
       user: { id: auth.user.id, role: auth.user.role },
       authAt: auth.authAt,
+      pwdAt: auth.pwdAt,
       alive: true,
     };
     ws.on("pong", () => {
@@ -140,8 +151,13 @@ async function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer)
   });
 }
 
-/** Starts serving /ws on this HTTP server. Returns a function that stops doing so. */
-export function attachRealtime(server: Server): () => void {
+/**
+ * Starts serving /ws on this HTTP server. Returns a function that stops doing so.
+ * `trustProxy`: the app's Express "trust proxy" setting is on, so X-Forwarded-Host
+ * may stand for the public host in the Origin check (default: not trusted).
+ */
+export function attachRealtime(server: Server, opts: { trustProxy?: boolean } = {}): () => void {
+  trustForwardedHost = opts.trustProxy === true;
   const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     let pathname = "";
     try {
@@ -199,7 +215,7 @@ async function currentlyEligibleUsers(): Promise<AccessUser[]> {
       row.isApproved &&
       !row.mustChangePassword &&
       !isAiSystemUserId(row.id) &&
-      !isSessionRevoked(row, { authAt: c.authAt });
+      !isSessionRevoked(row, { authAt: c.authAt, pwdAt: c.pwdAt });
     if (!ok) {
       try {
         c.ws.close(1008, "unauthorized");
@@ -218,22 +234,13 @@ async function currentlyEligibleUsers(): Promise<AccessUser[]> {
 /**
  * The connected users who can see ticket `ticketId` right now. Two queries per
  * RECIPIENT_CHUNK connected users: one re-reads the user rows (current role and
- * state), one is a UNION ALL of
+ * state), one (usersWhoCanAccessTask) is a UNION ALL of
  * `SELECT <id> FROM tasks WHERE id = <ticket> AND <ticketVisibilityWhere(user)>`
  * branches, so the rule is exactly the one canAccessTask applies.
  */
 export async function ticketRecipients(ticketId: number): Promise<string[]> {
   const candidates = await currentlyEligibleUsers();
-  const allowed: string[] = [];
-  for (let i = 0; i < candidates.length; i += RECIPIENT_CHUNK) {
-    const branches = candidates.slice(i, i + RECIPIENT_CHUNK).map(
-      (u) =>
-        sql`(SELECT ${u.id}::text AS uid FROM ${tasks} WHERE ${tasks.id} = ${ticketId} AND ${ticketVisibilityWhere(u)})`
-    );
-    const result = await db.execute(sql.join(branches, sql` UNION ALL `));
-    for (const row of result.rows as Array<{ uid: string }>) allowed.push(row.uid);
-  }
-  return allowed;
+  return Array.from(await usersWhoCanAccessTask(candidates, ticketId));
 }
 
 function ticketMessage(ticketId: number, reason: TicketEventReason) {

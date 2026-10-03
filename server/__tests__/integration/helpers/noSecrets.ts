@@ -1,3 +1,5 @@
+import type { NextFunction, Request, Response } from "express";
+
 const FORBIDDEN = [
   "password",
   "passwordResetToken",
@@ -20,11 +22,15 @@ export function findSecrets(body: unknown, path = "$"): string[] {
   if (Array.isArray(body))
     return body.flatMap((v, i) => findSecrets(v, `${path}[${i}]`));
   if (body && typeof body === "object")
-    return Object.entries(body).flatMap(([k, v]) =>
-      (FORBIDDEN.includes(k) ? [`${path}.${k}`] : []).concat(
+    return Object.entries(body).flatMap(([k, v]) => {
+      // A validation error names the FIELD that failed (`fieldErrors: { password: ["Required"] }`):
+      // its keys are field names (not flagged) but its values are still scanned.
+      if (k === "fieldErrors" && v && typeof v === "object" && !Array.isArray(v))
+        return Object.values(v).flatMap((fieldValue) => findSecrets(fieldValue, `${path}.fieldErrors`));
+      return (FORBIDDEN.includes(k) ? [`${path}.${k}`] : []).concat(
         findSecrets(v, `${path}.${k}`)
-      )
-    );
+      );
+    });
   return [];
 }
 
@@ -33,6 +39,20 @@ const recorded: Array<{ url: string; body: unknown }> = [];
 /** Test-only: called by createTestApp's middleware for every res.json body. */
 export function recordResponse(url: string, body: unknown): void {
   recorded.push({ url, body });
+}
+
+/**
+ * Test-only middleware: records every res.json body for assertNoSecretsRecorded.
+ * createTestApp installs it; any other app a test builds by hand (express())
+ * must `app.use(recordJsonResponses)` first, or the secrets hook does not see it.
+ */
+export function recordJsonResponses(req: Request, res: Response, next: NextFunction): void {
+  const realJson = res.json.bind(res);
+  res.json = ((body?: unknown) => {
+    recordResponse(`${req.method} ${req.originalUrl}`, body);
+    return realJson(body);
+  }) as typeof res.json;
+  next();
 }
 
 /**

@@ -11,6 +11,14 @@ import { HttpError } from "../http/errors";
  *  - the request does not follow redirects (a redirect is a failure) and ends
  *    within WEBHOOK_TIMEOUT_MS.
  * Only the host is ever logged, never the URL (the path carries the secret).
+ *
+ * KNOWN LIMIT (DNS rebinding, documented, not fixed): the addresses are checked by one
+ * lookup and fetch then resolves the name again, so a host that answers differently the
+ * second time could slip past the address check. The control that holds is the host
+ * allow-list (only *.webhook.office.com, which this project does not control, can be
+ * named). Closing the window means pinning the checked address into the connection
+ * (an undici dispatcher with a custom `connect.lookup`), which needs the `undici`
+ * dependency; Node's bundled fetch does not export it. No dependency was added.
  */
 
 export const WEBHOOK_TIMEOUT_MS = 8000;

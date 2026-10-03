@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import * as authHooks from "@/hooks/useAuth";
 import { useAuth } from "@/hooks/useAuth";
 import { getQueryFn } from "@/lib/queryClient";
 import { ForcedPasswordChange } from "@/components/forced-password-change";
@@ -57,7 +58,13 @@ describe("ForcedPasswordChange", () => {
 });
 
 describe("ForcedPasswordChange sign out (real query client)", () => {
-  beforeEach(() => jest.clearAllMocks());
+  let goHome: jest.SpyInstance;
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // jsdom cannot navigate; the spy records where the screen sends the browser.
+    goHome = jest.spyOn(authHooks, "goHome").mockImplementation(() => undefined);
+  });
+  afterEach(() => goHome.mockRestore());
 
   function Harness() {
     const { user, isAuthenticated } = useAuth();
@@ -106,9 +113,11 @@ describe("ForcedPasswordChange sign out (real query client)", () => {
     const calls = (global.fetch as jest.Mock).mock.calls.filter((c) => c[0] === "/api/auth/logout");
     expect(calls).toHaveLength(1);
     expect(calls[0][1].method).toBe("POST");
+    // The same exit as the header menu: one full load of "/", so a deep path does not land on NotFound.
+    expect(goHome).toHaveBeenCalledTimes(1);
   });
 
-  it("a failed sign out shows the error and does not reject unhandled", async () => {
+  it("a failed sign out shows the error, stays on the screen and does not reject unhandled", async () => {
     (global.fetch as jest.Mock).mockImplementation(async (url: string) => {
       if (url === "/api/auth/logout") throw new Error("network down");
       return { ok: true, json: async () => ({ id: "1", role: "agent", mustChangePassword: true }) };
@@ -117,5 +126,9 @@ describe("ForcedPasswordChange sign out (real query client)", () => {
     fireEvent.click(await screen.findByRole("button", { name: /sign out/i }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/network down/);
     expect(screen.getByRole("button", { name: /change password/i })).toBeTruthy();
+    expect(goHome).not.toHaveBeenCalled();
+    // Give a stray rejected promise the chance to surface. Jest itself fails the test on an
+    // unhandled rejection, so no listener or assertion is needed here.
+    await new Promise((resolve) => setTimeout(resolve, 20));
   });
 });

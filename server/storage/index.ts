@@ -108,6 +108,7 @@ import {
   gt,
   gte,
   lte,
+  getTableColumns,
   type SQL,
 } from "drizzle-orm";
 import { IStorage, type TaskAssignmentBinding, type TaskHistoryEntry } from "./storage.inteface";
@@ -340,7 +341,7 @@ export class DatabaseStorage implements IStorage {
     user: InsertUser,
     invitationId: number
   ): Promise<User | null> {
-    return await (db as any).transaction(async (tx: typeof db) => {
+    return await db.transaction(async (tx) => {
       const claimed = await tx
         .update(userInvitations)
         .set({ status: "accepted", acceptedAt: new Date() })
@@ -367,7 +368,7 @@ export class DatabaseStorage implements IStorage {
     userId: string,
     role: string
   ): Promise<boolean> {
-    return await (db as any).transaction(async (tx: typeof db) => {
+    const accepted: boolean = await db.transaction(async (tx) => {
       const claimed = await tx
         .update(userInvitations)
         .set({ status: "accepted", acceptedAt: new Date() })
@@ -386,6 +387,10 @@ export class DatabaseStorage implements IStorage {
         .where(eq(users.id, userId));
       return true;
     });
+    // The role and approval changed under any open socket: reconnect it with the new ones
+    // (after the commit, so a rolled-back claim drops nothing).
+    if (accepted) disconnectUser(userId, 1012);
+    return accepted;
   }
 
   async clearPasswordResetToken(userId: string): Promise<void> {
@@ -535,17 +540,27 @@ export class DatabaseStorage implements IStorage {
       return row;
     };
     let createdTask: Task;
+    const isNumberClash = (e: any) => {
+      const cause = e?.cause ?? e;
+      return cause?.code === "23505" && /ticket_number/.test(String(cause?.constraint ?? cause?.detail ?? ""));
+    };
     try {
       createdTask = await insertOnce();
     } catch (e: any) {
       // A ticket number taken outside the counter (unique violation on ticket_number
-      // only): re-sync the counter once and retry once. A second failure propagates.
-      const cause = e?.cause ?? e;
-      const isNumberClash =
-        cause?.code === "23505" && /ticket_number/.test(String(cause?.constraint ?? cause?.detail ?? ""));
-      if (!isNumberClash) throw e;
+      // only): re-sync the counter once and retry once.
+      if (!isNumberClash(e)) throw e;
       await this.resyncTicketCounter();
-      createdTask = await insertOnce();
+      try {
+        createdTask = await insertOnce();
+      } catch (second: any) {
+        // Still clashing (a concurrent writer): a retryable 409 `conflict` with a fixed
+        // message, never the raw pg error (constraint and key text) in a 500.
+        if (isNumberClash(second)) {
+          throw new HttpError(409, "conflict", "Could not assign a ticket number; please try again");
+        }
+        throw second;
+      }
     }
 
     // Add history entry
@@ -559,8 +574,13 @@ export class DatabaseStorage implements IStorage {
     return createdTask;
   }
 
-  async getTask(id: number): Promise<any | undefined> {
-    const [task] = await db
+  /**
+   * The ticket row with its joined names (creator, assignee or team, last updater), ready for
+   * .where(). getTask and the list pages both read through it, so a page is ONE query and
+   * every row has the same shape and name rules as getTask.
+   */
+  private taskDetailQuery() {
+    return db
       .select({
         id: tasks.id,
         ticketNumber: tasks.ticketNumber,
@@ -614,9 +634,21 @@ export class DatabaseStorage implements IStorage {
         sql`${users} as assignee`,
         sql`assignee.id = ${tasks.assigneeId} AND ${assignedToUserSql}`
       )
-      .leftJoin(teams, eq(teams.id, tasks.assigneeTeamId))
-      .where(eq(tasks.id, id));
+      .leftJoin(teams, eq(teams.id, tasks.assigneeTeamId));
+  }
+
+  async getTask(id: number): Promise<any | undefined> {
+    const [task] = await this.taskDetailQuery().where(eq(tasks.id, id));
     return task;
+  }
+
+  /** One page of getTask-shaped rows for `where`, newest first (id breaks createdAt ties). One query. */
+  async getTaskPage(where: SQL | undefined, limit: number, offset: number): Promise<any[]> {
+    return this.taskDetailQuery()
+      .where(where)
+      .orderBy(desc(tasks.createdAt), desc(tasks.id))
+      .limit(limit)
+      .offset(offset);
   }
 
   /**
@@ -703,73 +735,40 @@ export class DatabaseStorage implements IStorage {
 
     const whereAll = and(...filters);
 
-    let idQuery: any = db
-      .select({ id: tasks.id })
+    // M9: the page and the three names in ONE query (it was 1 + 5 per row). The CASE
+    // branches repeat the per-row rules exactly: "Unknown" creator when absent; the team
+    // name for a team ticket that names a team, else the assignee user's name, else "";
+    // the latest history entry's user, else "".
+    const rows = await db
+      .select({
+        ...getTableColumns(tasks),
+        creatorName: sql<string>`CASE WHEN ${tasks.createdBy} IS NOT NULL AND creator.id IS NOT NULL
+          THEN ${displayNameSql("creator.first_name", "creator.last_name", "creator.role")} ELSE 'Unknown' END`,
+        assigneeName: sql<string>`COALESCE(CASE
+          WHEN ${tasks.assigneeType} = 'team' AND ${tasks.assigneeTeamId} IS NOT NULL THEN ${teams.name}
+          WHEN ${tasks.assigneeId} IS NOT NULL AND assignee.id IS NOT NULL
+            THEN ${displayNameSql("assignee.first_name", "assignee.last_name", "assignee.role")}
+          ELSE NULL END, '')`,
+        lastUpdatedBy: sql<string>`COALESCE((
+          SELECT CASE WHEN lu.id IS NULL THEN NULL
+            ELSE ${displayNameSql("lu.first_name", "lu.last_name", "lu.role")} END
+          FROM ${taskHistory} th
+          LEFT JOIN ${users} lu ON lu.id = th.user_id
+          WHERE th.task_id = ${tasks.id}
+          ORDER BY th.created_at DESC, th.id DESC
+          LIMIT 1
+        ), '')`,
+      })
       .from(tasks)
+      .leftJoin(sql`${users} as creator`, sql`creator.id = ${tasks.createdBy}`)
+      .leftJoin(sql`${users} as assignee`, sql`assignee.id = ${tasks.assigneeId}`)
+      .leftJoin(teams, eq(teams.id, tasks.assigneeTeamId))
       .where(whereAll)
       // id breaks createdAt ties so consecutive pages never overlap or skip a row.
-      .orderBy(desc(tasks.createdAt), desc(tasks.id));
-    if (limit) idQuery = (idQuery as any).limit(limit);
-    if (offset) idQuery = (idQuery as any).offset(offset);
-    const ids = (await idQuery).map((r: { id: number }) => r.id);
-    if (ids.length === 0) return [];
-
-    const taskResults = await db
-      .select()
-      .from(tasks)
-      .where(inArray(tasks.id, ids))
-      .orderBy(desc(tasks.createdAt), desc(tasks.id));
-
-    const enhancedTasks: any[] = [];
-    for (const task of taskResults) {
-      let creatorName = "Unknown";
-      let assigneeName = "";
-      if ((task as any).createdBy) {
-        const [creator] = await db
-          .select()
-          .from(users)
-          .where(eq(users.id, (task as any).createdBy));
-        if (creator) {
-          creatorName = displayNameOf(creator);
-        }
-      }
-      if (
-        (task as any).assigneeType === "team" &&
-        (task as any).assigneeTeamId
-      ) {
-        const [team] = await db
-          .select()
-          .from(teams)
-          .where(eq(teams.id, (task as any).assigneeTeamId));
-        if (team) assigneeName = (team as any).name;
-      } else if ((task as any).assigneeId) {
-        const [assignee] = await db
-          .select()
-          .from(users)
-          .where(eq(users.id, (task as any).assigneeId));
-        if (assignee) {
-          assigneeName = displayNameOf(assignee);
-        }
-      }
-      const [lastHistory] = await db
-        .select({ userId: taskHistory.userId })
-        .from(taskHistory)
-        .where(eq(taskHistory.taskId, (task as any).id))
-        .orderBy(desc(taskHistory.createdAt))
-        .limit(1);
-      let lastUpdatedBy = "";
-      if (lastHistory?.userId) {
-        const [u] = await db
-          .select()
-          .from(users)
-          .where(eq(users.id, lastHistory.userId));
-        if (u) {
-          lastUpdatedBy = displayNameOf(u);
-        }
-      }
-      enhancedTasks.push({ ...task, creatorName, assigneeName, lastUpdatedBy });
-    }
-    return enhancedTasks;
+      .orderBy(desc(tasks.createdAt), desc(tasks.id))
+      .limit(limit ?? 2147483647)
+      .offset(offset ?? 0);
+    return rows;
   }
 
   async getTasks(
@@ -817,7 +816,8 @@ export class DatabaseStorage implements IStorage {
       taskQuery = (taskQuery as any).where(and(...conditions));
     }
 
-    taskQuery = (taskQuery as any).orderBy(desc(tasks.createdAt));
+    // id breaks createdAt ties so paging by offset reaches every row exactly once.
+    taskQuery = (taskQuery as any).orderBy(desc(tasks.createdAt), desc(tasks.id));
 
     if (filters.limit) {
       taskQuery = (taskQuery as any).limit(filters.limit);
@@ -1548,7 +1548,10 @@ export class DatabaseStorage implements IStorage {
       role?: string;
       phone?: string;
       isActive?: boolean;
-    }
+    },
+    // A transaction handle when the write must happen inside one (updateUserKeepingAnAdmin).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    exec: any = db
   ): Promise<PublicUser> {
     // Filter out undefined values and convert boolean properly
     const cleanUpdates: any = {};
@@ -1566,7 +1569,7 @@ export class DatabaseStorage implements IStorage {
     // Always update the timestamp
     cleanUpdates.updatedAt = new Date();
 
-    const [updatedUser] = await db
+    const [updatedUser] = await exec
       .update(users)
       .set(cleanUpdates)
       .where(eq(users.id, userId))
@@ -1574,10 +1577,65 @@ export class DatabaseStorage implements IStorage {
 
     // Open sockets must not outlive the state they were admitted under: a
     // deactivated user is dropped for good, a role change reconnects with the new role.
-    if (updates.isActive === false) disconnectUser(userId);
-    else if (updates.role !== undefined) disconnectUser(userId, 1012);
+    // (Inside a transaction the caller drops them after the commit.)
+    if (exec === db) {
+      if (updates.isActive === false) disconnectUser(userId);
+      else if (updates.role !== undefined) disconnectUser(userId, 1012);
+    }
 
     return updatedUser;
+  }
+
+  /**
+   * updateUserProfile for an admin acting on a user, keeping at least one active administrator.
+   * The check and the write run in ONE transaction that first locks every active admin row
+   * (FOR UPDATE, in id order), so two demotions at once cannot both see "another admin
+   * remains". users.is_active is NOT NULL (0020), so there is no third state.
+   * 404 user_not_found; 409 last_admin; 409 self_demotion (an admin cannot demote or
+   * deactivate their own account).
+   */
+  async updateUserKeepingAnAdmin(
+    userId: string,
+    updates: Parameters<DatabaseStorage["updateUserProfile"]>[1],
+    actorId: string,
+    // flipActive: derive isActive from the locked row (a toggle), ignoring updates.isActive.
+    opts: { flipActive?: boolean } = {}
+  ): Promise<PublicUser> {
+    let effective = updates;
+    const updated = await db.transaction(async (tx) => {
+      const activeAdmins = await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.role, "admin"), eq(users.isActive, true), excludeSystemAccounts()))
+        .orderBy(asc(users.id))
+        .for("update");
+      const [target] = await tx
+        .select({ role: users.role, isActive: users.isActive })
+        .from(users)
+        .where(eq(users.id, userId))
+        .for("update");
+      if (!target) throw new HttpError(404, "user_not_found", "User not found");
+      if (opts.flipActive) effective = { ...updates, isActive: target.isActive !== true };
+      updates = effective;
+
+      const losesAdmin =
+        target.role === "admin" &&
+        target.isActive === true &&
+        ((updates.role !== undefined && updates.role !== "admin") || updates.isActive === false);
+      if (losesAdmin) {
+        if (!activeAdmins.some((a) => a.id !== userId)) {
+          throw new HttpError(409, "last_admin", "This is the last active administrator");
+        }
+        if (userId === actorId) {
+          throw new HttpError(409, "self_demotion", "You cannot demote or deactivate your own account");
+        }
+      }
+      return this.updateUserProfile(userId, updates, tx);
+    });
+    // After the commit: drop open sockets that must not outlive the old state.
+    if (effective.isActive === false) disconnectUser(userId);
+    else if (effective.role !== undefined) disconnectUser(userId, 1012);
+    return updated;
   }
 
   async toggleUserStatus(userId: string): Promise<PublicUser> {
@@ -1609,6 +1667,9 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(users.id, userId))
       .returning(publicUserColumns);
+
+    // Approval changes what the user may see: reconnect any open socket with it.
+    if (updatedUser) disconnectUser(userId, 1012);
 
     return updatedUser;
   }
@@ -2890,12 +2951,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateArticleEffectiveness(id: number, rating: number): Promise<void> {
-    // Simple effectiveness calculation - in production could be more sophisticated
+    // The score is a 0..1 fraction (the knowledge page shows it x 100). A 1..5 rating is
+    // mapped onto that scale first, so a thumbs-up cannot push the score to 2.75 (275%).
     const article = await this.getKnowledgeArticle(id);
     if (!article) return;
 
     const currentScore = Number(article.effectivenessScore || 0);
-    const newScore = (currentScore + Number(rating)) / 2; // Simple average
+    const asFraction = Math.max(0, Math.min(1, (Number(rating) - 1) / 4));
+    const newScore = (currentScore + asFraction) / 2; // Simple average
 
     await db
       .update(knowledgeArticles)
@@ -3074,9 +3137,11 @@ export class DatabaseStorage implements IStorage {
       totalTickets: number;
       openTickets: number;
       inProgress: number;
+      onHold: number;
       resolved: number;
       closed: number;
       highPriority: number;
+      urgent: number;
     }>;
   }> {
     // Personal stats: tickets assigned to me
@@ -3117,111 +3182,52 @@ export class DatabaseStorage implements IStorage {
       assignedCount > 0 ? resolvedCount / assignedCount : 0;
     const avgResolutionTime = Number(resolvedTickets[0]?.avgTime || 0);
 
-    // Team stats: get user's teams (only teams the user is enrolled in via teamMembers table)
+    // Team stats: the user's teams (only teams the user is enrolled in via teamMembers),
+    // counted in one grouped query. highPriority is priority high only and urgent (non-closed)
+    // is counted separately: the definitions /api/stats uses.
     const userTeams = await this.getUserTeams(userId);
-    const teamStats: Array<{
-      teamId: number;
-      teamName: string;
-      totalTickets: number;
-      openTickets: number;
-      inProgress: number;
-      resolved: number;
-      closed: number;
-      highPriority: number;
-    }> = [];
-
-    for (const team of userTeams) {
-      // Total tickets assigned to team
-      const totalResult = await db
-        .select({ count: count() })
-        .from(tasks)
-        .where(
-          and(eq(tasks.assigneeTeamId, team.id), eq(tasks.assigneeType, "team"))
-        );
-
-      const total = Number(totalResult[0]?.count || 0);
-
-      // Open tickets
-      const openResult = await db
-        .select({ count: count() })
-        .from(tasks)
-        .where(
-          and(
-            eq(tasks.assigneeTeamId, team.id),
-            eq(tasks.assigneeType, "team"),
-            eq(tasks.status, "open")
-          )
-        );
-
-      const open = Number(openResult[0]?.count || 0);
-
-      // In progress tickets
-      const inProgressResult = await db
-        .select({ count: count() })
-        .from(tasks)
-        .where(
-          and(
-            eq(tasks.assigneeTeamId, team.id),
-            eq(tasks.assigneeType, "team"),
-            eq(tasks.status, "in_progress")
-          )
-        );
-
-      const inProgress = Number(inProgressResult[0]?.count || 0);
-
-      // Resolved tickets
-      const resolvedResult = await db
-        .select({ count: count() })
-        .from(tasks)
-        .where(
-          and(
-            eq(tasks.assigneeTeamId, team.id),
-            eq(tasks.assigneeType, "team"),
-            eq(tasks.status, "resolved")
-          )
-        );
-
-      const resolved = Number(resolvedResult[0]?.count || 0);
-
-      // Closed tickets
-      const closedResult = await db
-        .select({ count: count() })
-        .from(tasks)
-        .where(
-          and(
-            eq(tasks.assigneeTeamId, team.id),
-            eq(tasks.assigneeType, "team"),
-            eq(tasks.status, "closed")
-          )
-        );
-
-      const closed = Number(closedResult[0]?.count || 0);
-
-      // High priority tickets (high or urgent)
-      const highPriorityResult = await db
-        .select({ count: count() })
-        .from(tasks)
-        .where(
-          and(
-            eq(tasks.assigneeTeamId, team.id),
-            eq(tasks.assigneeType, "team"),
-            or(eq(tasks.priority, "high"), eq(tasks.priority, "urgent"))
-          )
-        );
-
-      const highPriority = Number(highPriorityResult[0]?.count || 0);
-
-      teamStats.push({
+    const teamRows =
+      userTeams.length > 0
+        ? await db
+            .select({
+              teamId: tasks.assigneeTeamId,
+              total: count(),
+              open: sql<number>`count(*) FILTER (WHERE ${tasks.status} = 'open')`.mapWith(Number),
+              inProgress: sql<number>`count(*) FILTER (WHERE ${tasks.status} = 'in_progress')`.mapWith(Number),
+              onHold: sql<number>`count(*) FILTER (WHERE ${tasks.status} = 'on_hold')`.mapWith(Number),
+              resolved: sql<number>`count(*) FILTER (WHERE ${tasks.status} = 'resolved')`.mapWith(Number),
+              closed: sql<number>`count(*) FILTER (WHERE ${tasks.status} = 'closed')`.mapWith(Number),
+              highPriority: sql<number>`count(*) FILTER (WHERE ${tasks.priority} = 'high')`.mapWith(Number),
+              urgent: sql<number>`count(*) FILTER (WHERE ${tasks.priority} = 'urgent' AND ${tasks.status} <> 'closed')`.mapWith(Number),
+            })
+            .from(tasks)
+            .where(
+              and(
+                inArray(
+                  tasks.assigneeTeamId,
+                  userTeams.map((t) => t.id)
+                ),
+                eq(tasks.assigneeType, "team")
+              )
+            )
+            .groupBy(tasks.assigneeTeamId)
+        : [];
+    const byTeam = new Map(teamRows.map((r) => [r.teamId, r]));
+    const teamStats = userTeams.map((team) => {
+      const r = byTeam.get(team.id);
+      return {
         teamId: team.id,
         teamName: team.name,
-        totalTickets: total,
-        openTickets: open,
-        inProgress,
-        resolved,
-        closed,
-        highPriority,
-      });
-    }
+        totalTickets: Number(r?.total ?? 0),
+        openTickets: r?.open ?? 0,
+        inProgress: r?.inProgress ?? 0,
+        onHold: r?.onHold ?? 0,
+        resolved: r?.resolved ?? 0,
+        closed: r?.closed ?? 0,
+        highPriority: r?.highPriority ?? 0,
+        urgent: r?.urgent ?? 0,
+      };
+    });
 
     return {
       personal: {
@@ -3241,9 +3247,11 @@ export class DatabaseStorage implements IStorage {
       totalTickets: number;
       openTickets: number;
       inProgress: number;
+      onHold: number;
       resolved: number;
       closed: number;
       highPriority: number;
+      urgent: number;
       avgResolutionTime: number;
     }>;
     priorityDistribution: {
@@ -3273,7 +3281,8 @@ export class DatabaseStorage implements IStorage {
       }>;
     }>;
   }> {
-    // Get departments managed by this manager
+    // Departments this manager runs, and their teams. The counting below is done by Postgres:
+    // one grouped query per question, not one row load or one query per team and member.
     const managerDepartments = await db
       .select()
       .from(departments)
@@ -3282,118 +3291,75 @@ export class DatabaseStorage implements IStorage {
           eq(departments.managerId as any, userId),
           eq(departments.isActive, true)
         )
-      );
+      )
+      .orderBy(asc(departments.id));
+    const deptIds = managerDepartments.map((d) => d.id);
 
-    const departmentStats: Array<{
-      departmentId: number;
-      departmentName: string;
-      totalTickets: number;
-      openTickets: number;
-      inProgress: number;
-      resolved: number;
-      closed: number;
-      highPriority: number;
-      avgResolutionTime: number;
-    }> = [];
+    const deptTeams =
+      deptIds.length > 0
+        ? await db
+            .select({ id: teams.id, name: teams.name, departmentId: teams.departmentId })
+            .from(teams)
+            .where(inArray(teams.departmentId, deptIds))
+            .orderBy(asc(teams.id))
+        : [];
+    const teamIds = deptTeams.map((t) => t.id);
 
-    const allDepartmentTaskIds: number[] = [];
+    // A department's tickets are the ones queued to one of its teams.
+    const inDeptTeams: SQL =
+      teamIds.length > 0
+        ? (and(inArray(tasks.assigneeTeamId, teamIds), eq(tasks.assigneeType, "team")) as SQL)
+        : sql`FALSE`;
+    const isDone = sql`${tasks.status} IN ('resolved', 'closed')`;
+    const hoursToResolve = sql`EXTRACT(EPOCH FROM (COALESCE(${tasks.resolvedAt}, ${tasks.closedAt}) - ${tasks.createdAt})) / 3600`;
+    const avgHours = sql<number | null>`AVG(${hoursToResolve}) FILTER (WHERE ${isDone})`;
+    const countWhere = (cond: SQL) => sql<number>`count(*) FILTER (WHERE ${cond})`.mapWith(Number);
 
-    for (const dept of managerDepartments) {
-      // Get teams in this department
-      const deptTeams = await db
-        .select({ id: teams.id })
-        .from(teams)
-        .where(eq(teams.departmentId, dept.id));
+    // Department counters. highPriority is priority high only, the definition /api/stats uses.
+    const deptRows =
+      teamIds.length > 0
+        ? await db
+            .select({
+              departmentId: teams.departmentId,
+              total: count(),
+              open: countWhere(sql`${tasks.status} = 'open'`),
+              inProgress: countWhere(sql`${tasks.status} = 'in_progress'`),
+              onHold: countWhere(sql`${tasks.status} = 'on_hold'`),
+              resolved: countWhere(sql`${tasks.status} = 'resolved'`),
+              closed: countWhere(sql`${tasks.status} = 'closed'`),
+              highPriority: countWhere(sql`${tasks.priority} = 'high'`),
+              urgent: countWhere(sql`${tasks.priority} = 'urgent' AND ${tasks.status} <> 'closed'`),
+              avgTime: avgHours,
+            })
+            .from(tasks)
+            .innerJoin(teams, eq(teams.id, tasks.assigneeTeamId))
+            .where(inDeptTeams)
+            .groupBy(teams.departmentId)
+        : [];
+    const deptById = new Map(deptRows.map((r) => [r.departmentId, r]));
 
-      const teamIds = deptTeams.map((t) => t.id);
-
-      if (teamIds.length === 0) {
-        departmentStats.push({
-          departmentId: dept.id,
-          departmentName: dept.name,
-          totalTickets: 0,
-          openTickets: 0,
-          inProgress: 0,
-          resolved: 0,
-          closed: 0,
-          highPriority: 0,
-          avgResolutionTime: 0,
-        });
-        continue;
-      }
-
-      // Get all tickets for teams in this department
-      const deptTasks = await db
-        .select({
-          id: tasks.id,
-          status: tasks.status,
-          priority: tasks.priority,
-        })
-        .from(tasks)
-        .where(
-          and(
-            inArray(tasks.assigneeTeamId, teamIds),
-            eq(tasks.assigneeType, "team")
-          )
-        );
-
-      allDepartmentTaskIds.push(...deptTasks.map((t) => t.id));
-
-      // Calculate department stats
-      const total = deptTasks.length;
-      const open = deptTasks.filter((t) => t.status === "open").length;
-      const inProgress = deptTasks.filter(
-        (t) => t.status === "in_progress"
-      ).length;
-      const resolved = deptTasks.filter((t) => t.status === "resolved").length;
-      const closed = deptTasks.filter((t) => t.status === "closed").length;
-      const highPriority = deptTasks.filter(
-        (t) => t.priority === "high" || t.priority === "urgent"
-      ).length;
-
-      // Calculate avg resolution time for resolved/closed tickets
-      const resolvedTasks = await db
-        .select({
-          avgTime: sql<number>`AVG(
-            EXTRACT(EPOCH FROM (COALESCE(${tasks.resolvedAt}, ${tasks.closedAt}) - ${tasks.createdAt})) / 3600
-          )`,
-        })
-        .from(tasks)
-        .where(
-          and(
-            inArray(tasks.assigneeTeamId, teamIds),
-            eq(tasks.assigneeType, "team"),
-            or(eq(tasks.status, "resolved"), eq(tasks.status, "closed"))
-          )
-        );
-
-      const avgResolutionTime = Number(resolvedTasks[0]?.avgTime || 0);
-
-      departmentStats.push({
+    const departmentStats = managerDepartments.map((dept) => {
+      const r = deptById.get(dept.id);
+      return {
         departmentId: dept.id,
         departmentName: dept.name,
-        totalTickets: total,
-        openTickets: open,
-        inProgress,
-        resolved,
-        closed,
-        highPriority,
-        avgResolutionTime,
-      });
-    }
+        totalTickets: Number(r?.total ?? 0),
+        openTickets: r?.open ?? 0,
+        inProgress: r?.inProgress ?? 0,
+        onHold: r?.onHold ?? 0,
+        resolved: r?.resolved ?? 0,
+        closed: r?.closed ?? 0,
+        highPriority: r?.highPriority ?? 0,
+        urgent: r?.urgent ?? 0,
+        avgResolutionTime: Number(r?.avgTime ?? 0),
+      };
+    });
 
     // Priority distribution across all department tickets
     const priorityResult = await db
-      .select({
-        priority: tasks.priority,
-        count: count(),
-      })
+      .select({ priority: tasks.priority, count: count() })
       .from(tasks)
-      .where(
-        allDepartmentTaskIds.length > 0
-          ? inArray(tasks.id, allDepartmentTaskIds)
-          : sql`FALSE`
-      )
+      .where(inDeptTeams)
       .groupBy(tasks.priority);
 
     const priorityDistribution = {
@@ -3405,25 +3371,18 @@ export class DatabaseStorage implements IStorage {
 
     for (const row of priorityResult) {
       const priority = row.priority?.toLowerCase() || "";
-      const count = Number(row.count || 0);
-      if (priority === "urgent") priorityDistribution.urgent = count;
-      else if (priority === "high") priorityDistribution.high = count;
-      else if (priority === "medium") priorityDistribution.medium = count;
-      else if (priority === "low") priorityDistribution.low = count;
+      const n = Number(row.count || 0);
+      if (priority === "urgent") priorityDistribution.urgent = n;
+      else if (priority === "high") priorityDistribution.high = n;
+      else if (priority === "medium") priorityDistribution.medium = n;
+      else if (priority === "low") priorityDistribution.low = n;
     }
 
     // Category breakdown
     const categoryResult = await db
-      .select({
-        category: tasks.category,
-        count: count(),
-      })
+      .select({ category: tasks.category, count: count() })
       .from(tasks)
-      .where(
-        allDepartmentTaskIds.length > 0
-          ? inArray(tasks.id, allDepartmentTaskIds)
-          : sql`FALSE`
-      )
+      .where(inDeptTeams)
       .groupBy(tasks.category);
 
     const totalCategoryTickets = categoryResult.reduce(
@@ -3440,127 +3399,74 @@ export class DatabaseStorage implements IStorage {
           : 0,
     }));
 
-    // Team performance
-    const teamPerformance: Array<{
-      teamId: number;
-      teamName: string;
-      totalTickets: number;
-      resolutionRate: number;
-      avgResolutionTime: number;
-      members: Array<{
-        userId: string;
-        name: string;
-        assigned: number;
-        resolved: number;
-        resolutionRate: number;
-        avgResolutionTime: number;
-      }>;
-    }> = [];
+    // Team performance: ticket counters per team, then each member's assigned and resolved.
+    const teamRows =
+      teamIds.length > 0
+        ? await db
+            .select({
+              teamId: tasks.assigneeTeamId,
+              total: count(),
+              done: countWhere(isDone),
+              avgTime: avgHours,
+            })
+            .from(tasks)
+            .where(inDeptTeams)
+            .groupBy(tasks.assigneeTeamId)
+        : [];
+    const teamById = new Map(teamRows.map((r) => [r.teamId, r]));
 
-    for (const dept of managerDepartments) {
-      const deptTeams = await db
-        .select({ id: teams.id, name: teams.name })
-        .from(teams)
-        .where(eq(teams.departmentId, dept.id));
+    const memberList =
+      teamIds.length > 0
+        ? await db
+            .select({ teamId: teamMembers.teamId, user: publicUserColumns })
+            .from(teamMembers)
+            .innerJoin(users, eq(teamMembers.userId, users.id))
+            .where(and(inArray(teamMembers.teamId, teamIds), excludeSystemAccounts()))
+            .orderBy(asc(teamMembers.id))
+        : [];
+    const memberIds = Array.from(new Set(memberList.map((m) => m.user.id)));
+    const memberRows =
+      memberIds.length > 0
+        ? await db
+            .select({
+              userId: tasks.assigneeId,
+              assigned: count(),
+              resolved: countWhere(isDone),
+              avgTime: avgHours,
+            })
+            .from(tasks)
+            .where(and(inArray(tasks.assigneeId, memberIds), assignedToUserSql))
+            .groupBy(tasks.assigneeId)
+        : [];
+    const memberById = new Map(memberRows.map((r) => [r.userId, r]));
 
-      for (const team of deptTeams) {
-        // Team ticket stats
-        const teamTasks = await db
-          .select()
-          .from(tasks)
-          .where(
-            and(
-              eq(tasks.assigneeTeamId, team.id),
-              eq(tasks.assigneeType, "team")
-            )
-          );
-
-        const totalTickets = teamTasks.length;
-        const resolvedTickets = teamTasks.filter(
-          (t) => t.status === "resolved" || t.status === "closed"
-        ).length;
-        const resolutionRate =
-          totalTickets > 0 ? resolvedTickets / totalTickets : 0;
-
-        // Team avg resolution time
-        const teamResolvedResult = await db
-          .select({
-            avgTime: sql<number>`AVG(
-              EXTRACT(EPOCH FROM (COALESCE(${tasks.resolvedAt}, ${tasks.closedAt}) - ${tasks.createdAt})) / 3600
-            )`,
-          })
-          .from(tasks)
-          .where(
-            and(
-              eq(tasks.assigneeTeamId, team.id),
-              eq(tasks.assigneeType, "team"),
-              or(eq(tasks.status, "resolved"), eq(tasks.status, "closed"))
-            )
-          );
-
-        const teamAvgResolutionTime = Number(
-          teamResolvedResult[0]?.avgTime || 0
-        );
-
-        // Team member stats
-        const teamMemberList = await this.getTeamMembers(team.id);
-        const memberStats = await Promise.all(
-          teamMemberList.map(async (member) => {
-            const assignedResult = await db
-              .select({ count: count() })
-              .from(tasks)
-              .where(
-                and(
-                  eq(tasks.assigneeId, member.user.id),
-                  assignedToUserSql
-                )
-              );
-
-            const assigned = Number(assignedResult[0]?.count || 0);
-
-            const resolvedResult = await db
-              .select({
-                count: count(),
-                avgTime: sql<number>`AVG(
-                  EXTRACT(EPOCH FROM (COALESCE(${tasks.resolvedAt}, ${tasks.closedAt}) - ${tasks.createdAt})) / 3600
-                )`,
-              })
-              .from(tasks)
-              .where(
-                and(
-                  eq(tasks.assigneeId, member.user.id),
-                  assignedToUserSql,
-                  or(eq(tasks.status, "resolved"), eq(tasks.status, "closed"))
-                )
-              );
-
-            const resolved = Number(resolvedResult[0]?.count || 0);
-            const memberResolutionRate = assigned > 0 ? resolved / assigned : 0;
-            const memberAvgResolutionTime = Number(
-              resolvedResult[0]?.avgTime || 0
-            );
-
+    const teamPerformance = deptTeams.map((team) => {
+      const r = teamById.get(team.id);
+      const totalTickets = Number(r?.total ?? 0);
+      const resolvedTickets = r?.done ?? 0;
+      return {
+        teamId: team.id,
+        teamName: team.name,
+        totalTickets,
+        resolutionRate: totalTickets > 0 ? resolvedTickets / totalTickets : 0,
+        avgResolutionTime: Number(r?.avgTime ?? 0),
+        members: memberList
+          .filter((m) => m.teamId === team.id)
+          .map((m) => {
+            const mr = memberById.get(m.user.id);
+            const assigned = Number(mr?.assigned ?? 0);
+            const resolved = mr?.resolved ?? 0;
             return {
-              userId: member.user.id,
-              name: displayNameOf(member.user),
+              userId: m.user.id,
+              name: displayNameOf(m.user),
               assigned,
               resolved,
-              resolutionRate: memberResolutionRate,
-              avgResolutionTime: memberAvgResolutionTime,
+              resolutionRate: assigned > 0 ? resolved / assigned : 0,
+              avgResolutionTime: Number(mr?.avgTime ?? 0),
             };
-          })
-        );
-
-        teamPerformance.push({
-          teamId: team.id,
-          teamName: team.name,
-          totalTickets,
-          resolutionRate,
-          avgResolutionTime: teamAvgResolutionTime,
-          members: memberStats,
-        });
-      }
-    }
+          }),
+      };
+    });
 
     return {
       department: departmentStats,

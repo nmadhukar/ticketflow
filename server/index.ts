@@ -1,7 +1,9 @@
 import "dotenv/config";
+import "./bootGuard";
 import express from "express";
 import { registerRoutes } from "./routes/index";
 import { installErrorHandling } from "./http/install";
+import { registerHealthRoutes } from "./http/health";
 import { setupVite, serveStatic, log } from "./vite";
 import { requestLogger } from "./utils/requestLogger";
 import { isDevelopmentEnv } from "./env";
@@ -9,7 +11,6 @@ import { describeError } from "./http/errors";
 import {
   applySecurity,
   applyRouteSpecificSecurity,
-  securityHealthCheck,
 } from "./security";
 
 const app = express();
@@ -53,6 +54,14 @@ app.use(requestLogger(log));
       console.error(startupFailureLine(error));
       process.exit(1);
     }
+
+    // R36: validate DEFAULT_TRIAGE_TEAM_ID once. A bad value is logged and ignored, never fatal.
+    try {
+      const { initDefaultTriageTeam } = await import("./services/tickets/triage");
+      await initDefaultTriageTeam();
+    } catch (error) {
+      console.error(`DEFAULT_TRIAGE_TEAM_ID check failed [${describeError(error)}]; ignoring it`);
+    }
   } catch (error) {
     console.error(`Startup error [${describeError(error)}]`);
     process.exit(1);
@@ -63,20 +72,7 @@ app.use(requestLogger(log));
 
   const server = await registerRoutes(app);
 
-  // Simple health check endpoint (no database required)
-  app.get("/health", (req, res) => {
-    res.json({
-      status: "ok",
-      timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV,
-      port: process.env.PORT,
-    });
-  });
-
-  // Security health check endpoint
-  app.get("/api/security/health", (req, res) => {
-    res.json(securityHealthCheck());
-  });
+  registerHealthRoutes(app);
 
   installErrorHandling(app);
 

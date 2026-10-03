@@ -192,6 +192,27 @@ describe("AI routes honour settings, access and authorship", () => {
       expect(rows[0].wasApplied).toBe(false);
     });
 
+    it("comment written but setApplied failing: the row stays unapplied, the log says so, and a later apply posts no second comment", async () => {
+      await setSettings({});
+      await seedMatchingArticle();
+      errorSpy.mockClear(); // lines logged by earlier tests (same ticket ids after a reset) must not count
+      const spy = jest.spyOn(aiAutoResponseService, "setApplied").mockRejectedValue(new Error("db down"));
+      const { id } = await customerTicket();
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      expect(spy).toHaveBeenCalledTimes(2); // one retry
+      spy.mockRestore();
+      expect(await commentsOf(id)).toHaveLength(1);
+      expect((await rowsOf(id))[0].wasApplied).toBe(false);
+      expect(logged()).toContain("the comment was posted but marking the draft applied failed");
+      expect(logged()).not.toContain("comment failed");
+
+      const res = await adminA.post(`/api/tasks/${id}/auto-response/apply`);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ applied: true, alreadyApplied: true });
+      expect(await commentsOf(id)).toHaveLength(1); // not duplicated
+      expect((await rowsOf(id))[0].wasApplied).toBe(true);
+    });
+
     it("never logs model output, whatever the model says: an unparseable reply with a marker leaves no trace", async () => {
       await setSettings({});
       await seedMatchingArticle();
@@ -869,6 +890,46 @@ describe("AI routes honour settings, access and authorship", () => {
       expect(res.status).toBe(200);
       expect(res.body.autoResponsesSent).toBe(4); // not 6: drafts were never sent
       expect(res.body.ticketsResolvedByAI).toBe(2); // A and D; B is open, C had only a draft
+    });
+
+    /** An applied draft: the row, plus the AI comment that is its applied time. */
+    async function appliedDraft(ticketId: number, draftAt: Date, appliedAt: Date) {
+      await db.insert(ticketAutoResponses).values({
+        ticketId,
+        aiResponse: "r",
+        confidenceScore: "0.8",
+        wasApplied: true,
+        respondedBy: AI_SYSTEM_USER_ID,
+        createdAt: draftAt,
+      });
+      await db.insert(taskComments).values({
+        taskId: ticketId,
+        userId: AI_SYSTEM_USER_ID,
+        content: "AI Auto-Response (confidence 80%): r",
+        createdAt: appliedAt,
+      });
+    }
+
+    it("the applied time is the comment's, not the draft's: drafted before the resolve, applied after it, does not count", async () => {
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      const id = (await createTicketAs(adminA)).body.id as number;
+      const h = (n: number) => new Date(Date.now() - n * 3600_000);
+      await db.update(tasks).set({ status: "resolved", resolvedAt: h(2) }).where(eq(tasks.id, id));
+      await appliedDraft(id, h(3), h(1)); // generated first, posted after the resolve
+      const res = await adminA.get("/api/admin/ai-analytics");
+      expect(res.body.autoResponsesSent).toBe(1);
+      expect(res.body.ticketsResolvedByAI).toBe(0);
+    });
+
+    it("the latest resolution counts: applied, resolved, reopened and closed again still counts as resolved by AI", async () => {
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      const id = (await createTicketAs(adminA)).body.id as number;
+      const h = (n: number) => new Date(Date.now() - n * 3600_000);
+      // resolvedAt is stale (3h ago, before the 2h-old comment); the latest close (30 min ago) is after it.
+      await db.update(tasks).set({ status: "closed", resolvedAt: h(3), closedAt: new Date(Date.now() - 1800_000) }).where(eq(tasks.id, id));
+      await appliedDraft(id, h(4), h(2));
+      const res = await adminA.get("/api/admin/ai-analytics");
+      expect(res.body.ticketsResolvedByAI).toBe(1);
     });
 
     it("an applied response posted AFTER the ticket was resolved does not count as resolving it", async () => {

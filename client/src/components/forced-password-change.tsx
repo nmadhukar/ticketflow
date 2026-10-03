@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { goHome, signOutRequest } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,15 +23,14 @@ export function ForcedPasswordChange() {
   async function signOut() {
     setError(null);
     try {
-      await apiRequest("POST", "/api/auth/logout");
+      await signOutRequest(queryClient);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not sign out.");
       return;
     }
-    // A refetch would 401 yet keep the previous (flagged) user in the cache, so
-    // mark the user signed out directly and drop everything else cached.
-    queryClient.setQueryData(["/api/auth/user"], null);
-    queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== "/api/auth/user" });
+    // Same exit as the header menu: a full load of "/", so a deep path the user was
+    // sent to does not land on NotFound.
+    goHome();
   }
 
   async function submit(e: React.FormEvent) {

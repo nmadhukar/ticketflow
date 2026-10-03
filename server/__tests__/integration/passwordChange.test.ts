@@ -2,6 +2,7 @@ import { jest } from "@jest/globals";
 import request from "supertest";
 import { eq, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
+import { inspect } from "util";
 import { users } from "@shared/schema";
 import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
@@ -13,7 +14,9 @@ function loggedText(): string {
   const parts: string[] = [];
   for (const fn of ["log", "info", "warn", "error", "debug"] as const) {
     const mock = console[fn] as unknown as jest.Mock;
-    for (const call of mock.mock?.calls ?? []) parts.push(call.map(String).join(" "));
+    // inspect, not String: String(obj) is "[object Object]" and would hide a secret nested in a logged object.
+    for (const call of mock.mock?.calls ?? [])
+      parts.push(call.map((a: unknown) => (typeof a === "string" ? a : inspect(a, { depth: 10, showHidden: true }))).join(" "));
   }
   return parts.join("\n");
 }
@@ -239,9 +242,17 @@ describe("forced password change, session revocation, admin reset rules", () => 
         .send({ email: target.email, password: reset.body.tempPassword });
       expect(login.status).toBe(200);
       expect((await stale.get("/api/auth/user")).status).toBe(200);
+      // Revoke again, then put back the session the browser NOW holds (the one the login
+      // created), so the 401 below can only come from the revocation rule, not from a
+      // session row that is simply gone.
+      const current = await snapshot(target.id);
+      expect(current).toHaveLength(1);
       await adminReset(target.id);
-      await restore(saved);
-      expect((await stale.get("/api/tasks")).status).toBe(401);
+      await restore(current);
+      expect(await sessionCount(target.id)).toBe(1);
+      const refused = await stale.get("/api/tasks");
+      expect(refused.status).toBe(401);
+      expect(refused.body.error).toBe("session_revoked");
     });
 
     it("passwordChangedAt is never sent to clients", async () => {

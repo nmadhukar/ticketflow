@@ -23,7 +23,9 @@ export interface AuthenticatedRequest extends Omit<Request, "user"> {
   user?: JWTPayload;
 }
 
-// Generate JWT token
+// Generate JWT token. Accepted (R29): with the 7-day default lifetime these tokens are
+// never accepted as REST bearers (services/auth/bearer.ts requires exp - iat <= 24 h),
+// so a long lifetime here cannot become a long-lived API credential.
 export const generateTokens = (payload: Omit<JWTPayload, "iat" | "exp">) => {
   const accessToken = jwt.sign(
     payload as Record<string, any>,
@@ -56,7 +58,7 @@ export const verifyToken = (token: string): JWTPayload => {
       audience: JWT_AUDIENCE,
     }) as JWTPayload;
     return decoded;
-  } catch (error) {
+  } catch {
     throw new Error("Invalid or expired token");
   }
 };
@@ -103,7 +105,7 @@ export const optionalJWT = (
     try {
       const decoded = verifyToken(token);
       req.user = decoded;
-    } catch (error) {
+    } catch {
       // Continue without authentication for optional routes
     }
   }
@@ -129,7 +131,7 @@ export const refreshAccessToken = (refreshToken: string) => {
     };
 
     return generateTokens(newPayload);
-  } catch (error) {
+  } catch {
     throw new Error("Invalid or expired refresh token");
   }
 };

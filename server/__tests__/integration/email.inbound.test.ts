@@ -878,4 +878,57 @@ describe("POST /api/email/inbound", () => {
       warn.mockRestore();
     }
   });
+
+  describe("R36: DEFAULT_TRIAGE_TEAM_ID", () => {
+    beforeEach(async () => {
+      (await import("../../services/tickets/triage")).resetDefaultTriageTeam();
+    });
+    afterEach(async () => {
+      delete process.env.DEFAULT_TRIAGE_TEAM_ID;
+      (await import("../../services/tickets/triage")).resetDefaultTriageTeam();
+    });
+
+    async function teamWithMember() {
+      const manager = await createUser({ role: "manager" });
+      const agent = await createUser({ role: "agent" });
+      const stranger = await createUser({ role: "agent" });
+      const { createTeam } = await import("./helpers/fixtures");
+      const team = await createTeam(manager);
+      await storage.addTeamMember({ teamId: team.id, userId: agent.id } as never);
+      return { team, agent, stranger };
+    }
+
+    it("set: an emailed ticket is queued to the team, so its members can see it", async () => {
+      await customer("ann.customer@example.test");
+      const { team, agent, stranger } = await teamWithMember();
+      process.env.DEFAULT_TRIAGE_TEAM_ID = String(team.id);
+      const res = await post(notification(sesBody({ from: "ann.customer@example.test", subject: "Triage me", body: "b" })));
+      expect(res.body).toMatchObject({ status: "created" });
+      const [ticket] = await db.select().from(tasks);
+      expect(ticket).toMatchObject({ assigneeType: "team", assigneeTeamId: team.id, assigneeId: null });
+      const { canAccessTask } = await import("../../permissions/ticketAccess");
+      expect(await canAccessTask({ id: agent.id, role: "agent" }, ticket.id)).toBe(true);
+      expect(await canAccessTask({ id: stranger.id, role: "agent" }, ticket.id)).toBe(false);
+    });
+
+    it("unset: the emailed ticket stays unassigned (admin triage), as before", async () => {
+      await customer("ann.customer@example.test");
+      await post(notification(sesBody({ from: "ann.customer@example.test", subject: "Plain", body: "b" })));
+      const [ticket] = await db.select().from(tasks);
+      expect(ticket.assigneeTeamId).toBeNull();
+      expect(ticket.assigneeType).not.toBe("team");
+    });
+
+    it("a team id that does not exist is ignored: the ticket is still created, unassigned", async () => {
+      await customer("ann.customer@example.test");
+      process.env.DEFAULT_TRIAGE_TEAM_ID = "424242";
+      const err = jest.spyOn(console, "error").mockImplementation(() => undefined);
+      err.mockClear();
+      const res = await post(notification(sesBody({ from: "ann.customer@example.test", subject: "Bad id", body: "b" })));
+      expect(res.body).toMatchObject({ status: "created" });
+      const [ticket] = await db.select().from(tasks);
+      expect(ticket.assigneeTeamId).toBeNull();
+      expect(err.mock.calls.filter((c) => String(c[0]).includes("DEFAULT_TRIAGE_TEAM_ID"))).toHaveLength(1);
+    });
+  });
 });

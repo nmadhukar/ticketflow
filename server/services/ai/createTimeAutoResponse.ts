@@ -3,6 +3,7 @@ import { storage } from "../../storage";
 import { getAISettings } from "../../admin/aiSettings";
 import { ensureAiSystemUser } from "../../utils/aiSystemUser";
 import { describeAIError } from "./aiErrors";
+import { autoResponseCommentBody } from "./autoResponseComment";
 
 /**
  * Runs after a ticket exists. Never throws: a failure here must not fail the
@@ -50,14 +51,29 @@ export async function runCreateTimeAutoResponse(task: Task): Promise<void> {
       await storage.addTaskComment({
         taskId: task.id,
         userId: aiUserId,
-        content: `AI Auto-Response (confidence ${(analysis.confidence * 100).toFixed(0)}%): ${analysis.autoResponse}`,
+        content: autoResponseCommentBody(analysis.confidence, analysis.autoResponse),
       } as any);
-      // The row was stored NOT applied; it becomes applied only now that the comment exists.
-      if (analysis.autoResponseRowId !== undefined) {
-        await aiAutoResponseService.setApplied(analysis.autoResponseRowId, true);
-      }
     } catch (error) {
       console.error(`AI auto-response comment failed for ticket ${task.id}:`, describeAIError(error));
+      return;
+    }
+    // The row was stored NOT applied; it becomes applied only now that the comment exists.
+    // If this fails the comment is already there: say so (it is not "comment failed"), try
+    // once more, and leave the row unapplied otherwise. A later apply finds the comment
+    // (autoResponseCommentExists) and marks the row without posting a second one.
+    if (analysis.autoResponseRowId !== undefined) {
+      const rowId = analysis.autoResponseRowId;
+      try {
+        await aiAutoResponseService.setApplied(rowId, true);
+      } catch (first) {
+        try {
+          await aiAutoResponseService.setApplied(rowId, true);
+        } catch (second) {
+          console.error(
+            `AI auto-response for ticket ${task.id}: the comment was posted but marking the draft applied failed (${describeAIError(first)}; retry ${describeAIError(second)})`
+          );
+        }
+      }
     }
   } catch (error) {
     console.error(`AI auto-response for new ticket ${task.id} failed:`, describeAIError(error));

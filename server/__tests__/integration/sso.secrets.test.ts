@@ -1,10 +1,12 @@
 import { jest } from "@jest/globals";
 import { randomBytes } from "crypto";
+import { inspect } from "util";
 import express from "express";
 import { ssoConfiguration } from "@shared/schema";
 import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
 import { createUser, loginAs } from "./helpers/fixtures";
+import { recordJsonResponses } from "./helpers/noSecrets";
 import { db } from "../../storage/db";
 import { storage } from "../../storage";
 import { setupMicrosoftAuth } from "../../services/auth/microsoftAuth";
@@ -15,7 +17,8 @@ function loggedText(): string {
   const parts: string[] = [];
   for (const fn of ["log", "info", "warn", "error", "debug"] as const) {
     const mock = console[fn] as unknown as jest.Mock;
-    for (const call of mock.mock?.calls ?? []) parts.push(call.map(String).join(" "));
+    for (const call of mock.mock?.calls ?? [])
+      parts.push(call.map((a: unknown) => (typeof a === "string" ? a : inspect(a, { depth: 10, showHidden: true }))).join(" "));
   }
   return parts.join("\n");
 }
@@ -121,6 +124,7 @@ describe("settings secrets are masked and never returned", () => {
         .mockRejectedValue(new Error("connect ECONNREFUSED password=hunter2"));
       try {
         const app = express();
+        app.use(recordJsonResponses); // a hand-built app is invisible to the secrets hook without it
         app.set("microsoftAuthConfigured", true); // skip the session middleware
         const before = process.env.MICROSOFT_CLIENT_ID;
         delete process.env.MICROSOFT_CLIENT_ID;
@@ -229,13 +233,68 @@ describe("settings secrets are masked and never returned", () => {
     it("a secret from another provider is not carried across a provider switch", async () => {
       const T = secret();
       await admin.post("/api/company-settings/email").send({ ...base, provider: "mailtrap", token: T });
-      await admin.post("/api/company-settings/email").send({
+      // No secret and nothing stored for aws-ses: refused (see the next test), so the
+      // active provider is still Mailtrap and nothing was saved for SES.
+      const refused = await admin.post("/api/company-settings/email").send({
         ...base,
         provider: "aws-ses",
         awsAccessKeyId: "AKIATESTKEY",
       });
+      expect(refused.status).toBe(400);
+      const S = secret();
+      const ok = await admin.post("/api/company-settings/email").send({
+        ...base,
+        provider: "aws-ses",
+        awsAccessKeyId: "AKIATESTKEY",
+        awsSecretAccessKey: S,
+      });
+      expect(ok.status).toBe(200);
       const active: any = await storage.getActiveEmailProvider();
       expect(JSON.stringify(active.metadata)).not.toContain(T);
+    });
+
+    describe("AWS SES with a blank secret and nothing stored", () => {
+      const savedEnvKey = process.env.AWS_ACCESS_KEY_ID;
+      afterEach(() => {
+        if (savedEnvKey === undefined) delete process.env.AWS_ACCESS_KEY_ID;
+        else process.env.AWS_ACCESS_KEY_ID = savedEnvKey;
+      });
+
+      it("is refused for an access key id that is not the server's own: the sender would pair it with the environment's secret", async () => {
+        process.env.AWS_ACCESS_KEY_ID = "AKIAENVIRONMENT";
+        const res = await admin.post("/api/company-settings/email").send({
+          ...base,
+          provider: "aws-ses",
+          awsAccessKeyId: "AKIANEWHOST",
+        });
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe("validation_failed");
+        // Field errors, the shape the form reads for every other field.
+        expect(res.body.details.fieldErrors.awsSecretAccessKey).toEqual([expect.any(String)]);
+        expect(await storage.getActiveEmailProvider()).toBeFalsy();
+      });
+
+      it("is accepted when the key id is the one the environment provides", async () => {
+        process.env.AWS_ACCESS_KEY_ID = "AKIAENVIRONMENT";
+        const res = await admin.post("/api/company-settings/email").send({
+          ...base,
+          provider: "aws-ses",
+          awsAccessKeyId: "AKIAENVIRONMENT",
+        });
+        expect(res.status).toBe(200);
+        expect(((await storage.getActiveEmailProvider()) as any).metadata.awsSecretAccessKey).toBeUndefined();
+      });
+
+      it("changing the identifier of a stored secret is refused with fieldErrors too", async () => {
+        await admin
+          .post("/api/company-settings/email")
+          .send({ ...base, provider: "aws-ses", awsAccessKeyId: "AKIATESTKEY", awsSecretAccessKey: secret() });
+        const res = await admin
+          .post("/api/company-settings/email")
+          .send({ ...base, provider: "aws-ses", awsAccessKeyId: "AKIATESTKEY2" });
+        expect(res.status).toBe(400);
+        expect(res.body.details.fieldErrors.awsSecretAccessKey).toEqual([expect.any(String)]);
+      });
     });
   });
 

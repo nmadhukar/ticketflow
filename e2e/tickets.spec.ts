@@ -28,12 +28,11 @@ test.describe.serial("ticket lifecycle: create, comment, reply, close, reopen", 
   const title = `E2E lifecycle ${Date.now()}`;
   let ticketNumber = "";
   let ticketId = 0;
-  let customer: { context: BrowserContext; page: Page };
-  let csp: { violations: string[] };
+  let customer: { context: BrowserContext; page: Page; csp: { violations: string[] } };
 
   test.beforeAll(async ({ browser }) => {
+    // signedInContext attaches the CSP watcher before the login.
     customer = await signedInContext(browser, "customerA");
-    csp = watchCsp(customer.page);
   });
 
   test.afterAll(async () => {
@@ -136,6 +135,6 @@ test.describe.serial("ticket lifecycle: create, comment, reply, close, reopen", 
 
   test("no CSP violation was reported during the lifecycle", async () => {
     expect(await cspEvents(customer.page)).toEqual([]);
-    expect(csp.violations).toEqual([]);
+    expect(customer.csp.violations).toEqual([]);
   });
 });

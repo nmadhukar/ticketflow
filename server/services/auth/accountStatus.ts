@@ -4,7 +4,7 @@
  * them would just 401 everywhere.
  */
 export function loginBlockReason(user: {
-  isActive?: boolean | null;
+  isActive?: boolean | null; // never null in the users table since 0020; kept for callers with a looser row type
   isApproved?: boolean | null;
 }): "account_inactive" | "pending_approval" | null {
   if (!user.isActive) return "account_inactive";

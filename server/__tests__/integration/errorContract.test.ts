@@ -6,6 +6,7 @@ import { resetDb } from "./helpers/testDb";
 import { createUser, loginAs } from "./helpers/fixtures";
 import { HttpError, asyncHandler } from "../../http/errors";
 import { installErrorHandling } from "../../http/install";
+import { recordJsonResponses } from "./helpers/noSecrets";
 
 describe("error contract on the real app", () => {
   let ctx: Awaited<ReturnType<typeof createTestApp>>;
@@ -44,6 +45,7 @@ describe("error contract on the real app", () => {
 
 describe("errorMiddleware", () => {
   const app = express();
+  app.use(recordJsonResponses);
   app.get("/boom", (_req, _res) => { throw new Error("secret internals"); });
   app.get("/async-boom", asyncHandler(async () => { throw new Error("async secret"); }));
   app.get("/http", asyncHandler(async () => { throw new HttpError(409, "invalid_state", "nope", { a: 1 }); }));
@@ -66,6 +68,7 @@ describe("errorMiddleware", () => {
       detail: "Key (email)=(alice@example.test)",
     });
     const local = express();
+    local.use(recordJsonResponses);
     local.get("/pg", () => {
       throw pgLike;
     });

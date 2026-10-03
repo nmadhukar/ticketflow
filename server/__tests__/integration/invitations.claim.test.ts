@@ -1,3 +1,4 @@
+import { jest } from "@jest/globals";
 import request from "supertest";
 import { eq, sql } from "drizzle-orm";
 import { users, userInvitations } from "@shared/schema";
@@ -68,6 +69,26 @@ describe("invitation claim is atomic and expiry is bounded", () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("invalid_invitation");
     expect(await storage.getUserByEmail("late@example.test")).toBeUndefined();
+  });
+
+  it("a claim lost AFTER the pre-check passed (the transactional claim itself) creates no user", async () => {
+    const inv = await invite("lost@example.test");
+    // The route's pre-check reads the invitation as still pending ...
+    const pending = (await storage.getUserInvitationByToken(inv.invitationToken))!;
+    expect(pending.status).toBe("pending");
+    // ... but another request has already consumed it, so the conditional UPDATE matches nothing.
+    await db.update(userInvitations).set({ status: "accepted" }).where(eq(userInvitations.id, inv.id));
+    const stale = jest.spyOn(storage, "getUserInvitationByToken").mockResolvedValueOnce(pending);
+    const claim = jest.spyOn(storage, "createUserClaimingInvitation");
+    const res = await register({ email: "lost@example.test", inviteToken: inv.invitationToken });
+    stale.mockRestore();
+    // Proof it was the claim, not the pre-check, that refused: the claim ran and returned null.
+    expect(claim).toHaveBeenCalledTimes(1);
+    await expect(claim.mock.results[0].value).resolves.toBeNull();
+    claim.mockRestore();
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_invitation");
+    expect(await storage.getUserByEmail("lost@example.test")).toBeUndefined();
   });
 
   it("the claim itself refuses an expired invitation (storage level, no pre-check)", async () => {

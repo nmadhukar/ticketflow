@@ -1,21 +1,6 @@
 import Joi from "joi";
 import { body, param, query, validationResult } from "express-validator";
 import { Request, Response, NextFunction } from "express";
-import DOMPurify from "isomorphic-dompurify";
-
-// Custom sanitizer for text content
-export const sanitizeText = (text: string): string => {
-  if (typeof text !== "string") return "";
-
-  // Remove script tags and dangerous HTML
-  const cleaned = DOMPurify.sanitize(text, {
-    ALLOWED_TAGS: ["b", "i", "em", "strong", "p", "br", "ul", "ol", "li"],
-    ALLOWED_ATTR: [],
-  });
-
-  // Trim whitespace
-  return cleaned.trim();
-};
 
 // Input validation schemas using Joi
 export const validationSchemas = {
@@ -297,11 +282,6 @@ const UNSANITISED_KEYS = new Set([
 // Keys that would let a body reach into Object.prototype if a later handler
 // merges or spreads it. JSON.parse makes `__proto__` an own property.
 const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
-// Depth guard: below this the value is returned as it is. The walk stays
-// bounded and cannot overflow the stack on a maliciously nested body; no real
-// payload is this deep, so the unchecked subtree is not a practical gap.
-const MAX_SANITISE_DEPTH = 20;
-
 /**
  * Lossless, linear-time walk over a parsed body or query (Ruling R27). It
  * strips NUL characters and drops prototype-pollution keys, and changes
@@ -309,23 +289,43 @@ const MAX_SANITISE_DEPTH = 20;
  * `<style attribute` must round-trip exactly. Text that is rendered AS HTML
  * (guide content) is sanitised with an allow-list in its own routes, on write
  * and on read; everything else is escaped by React on render.
+ *
+ * FU5: the walk is iterative (an explicit stack), so there is no depth limit and
+ * no stack overflow on a deeply nested body; every node is visited exactly once.
  */
-export const sanitizeDeep = (value: unknown, depth = 0): unknown => {
-  if (typeof value === "string") {
-    return value.includes("\u0000") ? value.split("\u0000").join("") : value;
+const cleanScalar = (value: string): string =>
+  value.includes("\u0000") ? value.split("\u0000").join("") : value;
+
+export const sanitizeDeep = (value: unknown): unknown => {
+  if (typeof value === "string") return cleanScalar(value);
+  if (value === null || typeof value !== "object") return value;
+
+  const root: unknown = Array.isArray(value) ? [] : {};
+  const stack: Array<[unknown, unknown]> = [[value, root]];
+  // Returns the cleaned form of a child: scalars at once, containers as an empty
+  // shell that the loop below fills in later.
+  const shell = (child: unknown): unknown => {
+    if (typeof child === "string") return cleanScalar(child);
+    if (child === null || typeof child !== "object") return child;
+    const copy: unknown = Array.isArray(child) ? [] : {};
+    stack.push([child, copy]);
+    return copy;
+  };
+
+  while (stack.length > 0) {
+    const [src, dst] = stack.pop() as [unknown, unknown];
+    if (Array.isArray(src)) {
+      const out = dst as unknown[];
+      for (const item of src) out.push(shell(item));
+    } else {
+      const out = dst as Record<string, unknown>;
+      for (const [key, inner] of Object.entries(src as Record<string, unknown>)) {
+        if (FORBIDDEN_KEYS.has(key)) continue;
+        out[key] = UNSANITISED_KEYS.has(key) ? inner : shell(inner);
+      }
+    }
   }
-  if (depth >= MAX_SANITISE_DEPTH || value === null || typeof value !== "object") {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => sanitizeDeep(item, depth + 1));
-  }
-  const out: Record<string, unknown> = {};
-  for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
-    if (FORBIDDEN_KEYS.has(key)) continue;
-    out[key] = UNSANITISED_KEYS.has(key) ? inner : sanitizeDeep(inner, depth + 1);
-  }
-  return out;
+  return root;
 };
 
 // Sanitization middleware. Mount it AFTER the body parsers (see pipeline.ts).
@@ -373,20 +373,6 @@ export const validateFileUpload = (allowedTypes: string[], maxSize: number) => {
 
     next();
   };
-};
-
-// SQL injection prevention for raw queries
-export const sanitizeForSQL = (input: string): string => {
-  if (typeof input !== "string") return "";
-
-  // Remove or escape potentially dangerous characters
-  return input
-    .replace(/'/g, "''") // Escape single quotes
-    .replace(/;/g, "") // Remove semicolons
-    .replace(/--/g, "") // Remove SQL comments
-    .replace(/\/\*/g, "") // Remove SQL block comments start
-    .replace(/\*\//g, "") // Remove SQL block comments end
-    .trim();
 };
 
 // XSS prevention middleware

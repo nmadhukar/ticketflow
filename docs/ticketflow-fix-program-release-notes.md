@@ -4,7 +4,7 @@ This covers the 24-task fix program on branch `fix/merge-main-and-gaps` (start f
 document was built on 076197a, with every task merged, and updated by the final fix dispatch
 after the whole-branch review: rulings R32-R35 and minors M1-M8). It is written for the person
 who deploys. Sections: 1 deploy order and environment variables, 2 owner actions, 3 behaviour
-changes users will notice, 4 rulings, 5 follow-ups.
+changes users will notice, 4 rulings, 5 follow-ups, 6 the follow-ups round of 2026-10-03.
 
 Related files: `API_ENDPOINTS_REFERENCE.md` (every route),
 `TicketFlow_API_Collection.postman_collection.json` (requests),
@@ -118,7 +118,7 @@ ORDER BY 1;
 
 ### After the deploy: verify
 
-1. The container log shows `sql-migrations: done, 9 applied, 1 not run` (on a brand-new
+1. The container log shows `sql-migrations: done, 10 applied, 1 not run` (on a brand-new
    database: `fresh database ... nothing to apply`) and push's `[✓] Changes applied`. If the push output contains a question ("created or renamed",
    "data-loss statements", "Do you still want to push changes?"), push applied nothing: run the
    drift check again.
@@ -139,7 +139,7 @@ ORDER BY 1;
 5. An API key gets 200 on `GET /api/tasks` and 403 `session_required` on `GET /api/users` (R33).
 
 The numbered SQL files in `migrations/` from 0007 (0007, 0009, 0010, 0011, 0012, 0013, 0014,
-0018, 0019) are applied by `npm run db:migrate-sql` on every deploy; 0008 is listed in the
+0018, 0019, 0020) are applied by `npm run db:migrate-sql` on every deploy; 0008 is listed in the
 script as not run, with the reason.
 
 ### New tables and columns (created by `npm run db:migrate-sql`, and declared for push)
@@ -148,6 +148,7 @@ script as not run, with the reason.
 |---|---|
 | `users.failed_login_attempts`, `users.locked_until` (login lockout) | `users` |
 | `users.must_change_password`, `users.password_changed_at` (forced change, session revocation) | `users` |
+| `users.is_active` is now `NOT NULL DEFAULT true` (0020). Sign-in, sessions and listings read a NULL as inactive, but the Teams webhook check (`IS NOT FALSE`) and the old last-admin check read it as active. Existing NULL rows become `false` (never `true`), so no account is switched on; the one visible effect is that a NULL user's Teams webhooks stop firing, the safe direction | `users` |
 | `users.role` default is now `customer` in the main table (legacy `user` means agent; the invitations table default is `agent`) | `users`, `user_invitations` |
 | `ticket_number_counters` (prefix, year, last_number; primary key prefix+year) | new table |
 | `sns_message_dedupe` (message_id, status, received_at) for inbound email | new table |
@@ -160,10 +161,12 @@ Required (production refuses to start without them):
 | Variable | Why |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string. |
-| `SESSION_SECRET` | Signs sessions. Missing in production is a startup error; there is no fallback. |
-| `JWT_SECRET` | The JWT module refuses to load in production without it. |
+| `SESSION_SECRET` | Signs sessions. Missing in production is a startup error; there is no fallback. A value that starts like an example placeholder (`your-`, `change-me`, `replace-with`, `dev-only-`, `long-random-string`, `example`, `todo`, ...) or is shorter than 32 characters is refused too. Checked before the seeders run. |
+| `JWT_SECRET` | The JWT module refuses to load in production without it, and refuses a placeholder value and a value shorter than 32 characters, like `SESSION_SECRET`. |
 | `APP_BASE_URL` | **New (R34).** The public origin, e.g. `https://tickets.example.com` (http or https, no query, a trailing slash is fine). Password-reset and invitation emails, Teams card links and the Microsoft SSO redirect URI are built from it, never from the request's Host header. Production refuses to start without it (`Startup refused: APP_BASE_URL must be set in production ...`); a malformed value is refused in every environment. `MICROSOFT_REDIRECT_URL`, when set, still overrides the SSO redirect URI. In development it may be unset: links then use the origin the request came in on. |
-| `NODE_ENV=production` | The Dockerfile sets it; `npm start` does not. Unset means development mode, including a permissive Content-Security-Policy. |
+| `NODE_ENV=production` | The Dockerfile sets it; `npm start` does not. **Required for the built server (FU5):** `node dist/index.js` (so `npm start`) refuses to boot with one log line when it is unset; `npm run dev` through tsx still defaults to development. |
+| `COOKIE_SECURE` | **Set `true` behind HTTPS.** The session cookie is `Secure` only when this is `true`, not by `NODE_ENV` (Y9). The compose file passes it through, but Coolify must hold a value. Unset or `false` sends the cookie over plain HTTP. |
+| `DEFAULT_TRIAGE_TEAM_ID` | **New (R36), optional.** A positive team id. Emailed tickets and customer tickets with no user or team assignee are queued to that team, so its members can see them. Unset or blank: unchanged (admin triage). A value that is not a positive integer or names no team logs one line at startup and is ignored. If the team is deleted later, such tickets are created unassigned (one log line, ids only), never a 500. |
 
 Needed for a fresh install, or when no active admin exists:
 
@@ -400,44 +403,64 @@ New features
 The owner chose to defer the minors below instead of running a cleanup pass. One line per
 ledger entry ("Task N" is the plan task). Nothing here blocks the release.
 
+**Status after the follow-ups round (2026-10-03, section 6):** a line marked RESOLVED is done and
+stays only as the record. A line without that mark is still open: either deliberately left, with
+its reason on the line, or an owner question. Where a single line mixes both (the Task N lines
+in the lists below), read each clause: a clause named in the RESOLVED notes at the top of its
+subsection is done; the rest stays.
+
 ### From the final whole-branch review (documented, not fixed)
-- Startup now fails fast on required seed steps (M8). If a row with an id other than `system`
-  already holds `system@ticketflow.local`, `seedSystemUser` hits a unique violation and the
-  container restarts in a loop; check with
-  `SELECT id FROM users WHERE email = 'system@ticketflow.local'` before deploying (it must be
-  `system` or absent). A transient database error during a required step also restarts the
-  container until the database answers.
+RESOLVED (FU3): M2 (emailed and unassigned customer tickets visible only to admins) by R36 and
+`DEFAULT_TRIAGE_TEAM_ID`, see section 6; M9 (per-row list queries): `listTickets` is now a count
+plus one page query and the REST list is one query. Still open by design: the 100-per-15-minutes
+per-IP limit (raise `RATE_LIMIT_MAX_REQUESTS` behind one NAT address).
+- Startup now fails fast on required seed steps (M8). FU2: if a row with an id other than
+  `system` already holds `system@ticketflow.local`, `seedSystemUser` no longer hits a unique
+  violation and restarts the container in a loop; like the AI user it logs one line (ids only),
+  creates no `system` row and leaves the other account untouched (rows that need the system
+  user then cannot be attributed to it until the clash is resolved; check with
+  `SELECT id FROM users WHERE email = 'system@ticketflow.local'`). A transient database error
+  during a required step still restarts the container until the database answers.
 - Coolify must deploy with the compose file: the Dockerfile `CMD` alone runs neither
   `db:migrate-sql` nor `db:push`, and the schema check then refuses to boot (fails safe).
-- `pg` is needed at run time by `scripts/apply-sql-migrations.mjs` but is a devDependency; it
-  works because the image keeps dev dependencies (drizzle-kit needs them too).
-- An existing ticket prefix longer than 6 characters keeps numbering tickets, but the Tickets
-  settings tab cannot be saved until the prefix is shortened (M5).
+- `pg` is needed at run time by `scripts/apply-sql-migrations.mjs`. Fixed (FU5): it is now a
+  `dependencies` entry (same version).
+- An existing ticket prefix longer than 6 characters keeps numbering tickets. Fixed (FU5): the
+  prefix is validated only when a request changes it, so the Tickets settings tab saves the other
+  fields (M5).
 - The general /api limit stays 100 requests per 15 minutes per IP; `RATE_LIMIT_MAX_REQUESTS`
   now takes effect, so raise it if staff share one NAT address.
-- Teams cards for tickets created or updated through MCP carry no link (the service could use
-  the APP_BASE_URL helper).
-- README and DEVELOPER_DOCUMENTATION still show the old compose command.
-- M2: tickets created from email, and customer tickets created with no user or team assignee
+- RESOLVED (FU4): Teams cards for tickets created or updated through MCP now carry the
+  APP_BASE_URL link (no link when APP_BASE_URL is unset or unusable).
+- README and DEVELOPER_DOCUMENTATION showed the old compose command. Fixed (FU5): both now give
+  the current one, the required environment and the Node 24 image; the Dockerfile `CMD` carries a
+  comment that it skips the schema steps.
+- RESOLVED (FU3, R36): M2: tickets created from email, and customer tickets created with no user or team assignee
   (unassigned, or routed to a department only), are visible among staff only to admins (and to
   the customer who opened them) until someone triages them: manager and agent scope reaches a
   ticket only through its assigned user or team, never through its department alone. Admins should watch the
   unassigned queue, or a later change should route emailed tickets (for example to a default
   department or team).
-- M9: list queries load each row separately: `ticketService.listTickets` (MCP, and the REST
+- RESOLVED (FU3): M9: list queries load each row separately: `ticketService.listTickets` (MCP, and the REST
   list after the merge) runs one `storage.getTask` per row (up to 100 per page), and several
   other list paths do per-row lookups. Correct but slow on big pages; replace with one joined
   query per page.
 - The general per-IP limit (100 per 15 minutes) is low for one busy office behind a single NAT
   address; raise `RATE_LIMIT_MAX_REQUESTS` if staff see 429s.
-- `pg` is a devDependency but the server bundle needs it at run time; it is present because the
-  image installs dev dependencies (needed for `drizzle-kit`). Move it to `dependencies` when the
-  image is slimmed to production dependencies.
+- `pg` as a devDependency: done (FU5), see above.
 - The migration script re-runs every 0007+ file on each deploy (they are idempotent by
   design); a future non-idempotent file must be added to its `NOT_RUN` list or made idempotent,
-  or every deploy fails.
+  or every deploy fails. This guidance is now in the header of `scripts/apply-sql-migrations.mjs`
+  and in README and DEVELOPER_DOCUMENTATION (FU5).
 
 ### Build, lint and test tooling
+RESOLVED (FU1): the Task 1 lines (transform regex, unused mock and utils, `TEST_DATABASE_URL`
+duplicate, `createTeam` warning, `isolatedModules`, `generateResponse` coverage), the Task 2 lines
+(duplicated casts, redundant tsconfig includes), Task 3 `caughtErrors` (now `all`), the Task 10
+`noDuplicateRoutes` health routes and the `FOR UPDATE` test, and the Task 23 CSP listener and 404
+matcher. The Playwright trace line is informational (do not upload `test-results`). NOT CHANGED
+(R37): the CRLF and whitespace-only churn lines; changing them changes no behaviour and hurts
+blame and merges.
 - Task 1: `jest.config.mjs` tsJest transform regex `'^.+\.tsx?$'` is unescaped (`\.`).
 - Task 1: `server/__tests__/mocks/aws-bedrock.mock.ts` and `utils/*` are unused.
 - Task 1: the `package-lock` resync removed `passport-azure-ad` and others that were never in `package.json` (also noted in section 2).
@@ -455,6 +478,24 @@ ledger entry ("Task N" is the plan task). Nothing here blocks the release.
 - Task 23: Playwright trace retain-on-failure records test passwords in the gitignored `test-results` (do not upload in CI); the CSP listener attaches after login in later tests; the 404 matcher is loose.
 
 ### Authentication, sessions and accounts
+**FU2 status:** every line below was handled in the `fix(auth): follow-ups` commit except the
+items under "Still open after FU2". The original lines are kept as the record. Fixed: change-password
+spends the lockout budget; forgot, reset and change-password have separate rate-limit budgets;
+the revoked cookie is cleared; the session stores the verified row's change stamp (`pwdAt`,
+closes the `authAt` race); the `bearerFailures` table is capped; `/apixyz` is no bearer path;
+a blank SES secret is refused for a key id that is not the server's own, with `fieldErrors`;
+`secureAuth.ts`, `sanitizeForSQL` and `sanitizeText` are deleted; placeholder secrets are refused
+in production and `SESSION_SECRET` is checked before the seeders; `users.is_active` is NOT NULL
+(0020); the audit line names the signed-in actor; the second session stack and the logged
+authorize URL / MSAL error object are gone; the forced screen signs out like the header menu.
+**Still open after FU2:** `phone` stays visible to every agent (owner question);
+`invitation.departmentId` is never applied (users have no department link); the failure counter
+does not decay (documented in `lockout.ts`); the changer's in-flight request can save old stamps
+(fails closed) and multi-instance clock skew (documented in `isSessionRevoked`); the SMTP adapter
+is not implemented, so a blank SMTP password simply stores none; `trust proxy 1` assumes one proxy
+(commented at the setting); SSO sign-ups still default to customer (owner note); `--runInBand` stays
+global; CRLF churn items are not touched (R37); `generateTokens`' 7-day JWTs cannot be bearers
+(R29, accepted).
 - Task 4: `/api/users` 403 body lacks an error code; duplicate requester lookup routes (`:371`/`:190`); `toPublicUser` unused in production; the staff-role test lacks legacy `user` and `forTeamMemberSelection` for manager and agent; the secrets hook covers only `createTestApp` apps; `--runInBand` is global; `phone` is visible to all agents (an owner question).
 - Task 5: legacy error shapes in register/create handlers; a duplicate email should be 409 (deferred to Task 7).
 - Task 5: tests assert status, not error codes; no test for role or `isApproved` in the register body; `invitation.departmentId` is never applied (pre-existing).
@@ -469,6 +510,16 @@ ledger entry ("Task N" is the plan task). Nothing here blocks the release.
 - Task 18: a blank SMTP or SES secret with nothing stored falls back to env credentials even for a new host (pre-existing, admin only); `secureAuth.ts` is an unimported module (delete it); a 400 `details.required` is returned instead of `fieldErrors` for secret fields.
 
 ### Ticket access, workflow and API contract
+RESOLVED (FU3): Task 7 (`app.param` list, generic 4xx mapping, string-param test); Task 8 and
+Task 20 (double access query, customer routing now in `ticketService`, per-row `getTask`); Task 9a
+(null role denied); Task 9b (0-row update is 404, second ticket-number clash is 409 `conflict`,
+seeders twice); Task 10 (client em dash); Task 11 (legacy `user` in the parity matrix, `onHold`,
+manager stats in SQL, one `highPriority` definition, `listAll` tie order); Task 17 (last-admin
+check is now locked, `isActive` NULL counted one way, and `toggle-status` has the same rule),
+and the audit user id. RESOLVED (FU4): no Teams link on MCP updates. Still open, deliberately:
+manager stats do not include the manager's own created or assigned tickets (department stats are
+the tickets queued to the department's teams; a personal block is a product change); `getTasks`
+per-row lookups (tests only); `get_ticket` FORBIDDEN existence disclosure (REST parity).
 - Task 7: the numeric `app.param` list is hard-coded (`install.ts:360`), so a future `:articleId` is silently unvalidated; the generic 4xx branch maps other middleware's 401/403/404 message to `bad_request` (`errors.ts:339`); the string-param test asserts only "not invalid_id"; an anonymous bad id is 400 before 401 (accepted).
 - Task 8: PATCH checks access twice (harmless).
 - Task 9a: `assertAgentMayAssign` returns early on a null role (unreachable; deny-by-default would be tidier); PATCH `assigneeId ""` now reads as absent (only null clears); other route catches still return ad-hoc `{message}` 500s (meta route went to 9b, the rest to Task 17).
@@ -481,17 +532,150 @@ ledger entry ("Task N" is the plan task). Nothing here blocks the release.
 - Task 20: REST `change_status` audit logs userId "anonymous" (reads `req.user.userId`; pre-existing); MCP audit `ip='mcp'`; customer routing rewrite still in the REST create handler; `listTickets` per-row `getTask`; double access query on REST by-id; no Teams link on MCP updates.
 
 ### AI
-- Task 12: on the create path, a comment written and then a failed `setApplied` leaves the row unapplied (a later apply duplicates; the log says "comment failed").
-- Task 12: `ticketsResolvedByAI` compares the draft `createdAt`, not the applied time, and `COALESCE(resolvedAt, closedAt)` is stale after a reopen; `knowledgeBaseLearning` logs the ticket category; raw `console.error(error)` in non-AI knowledge routes (about `:4352` and `:5612`); `ESCALATION_ACTIVE` is client-only.
-- Task 12 (out-of-scope review note): the tests README still describes the old mock.
+- Task 12: RESOLVED (FU4). On the create path, a comment written and then a failed `setApplied` is retried once and logged as "the comment was posted but marking the draft applied failed" (no longer "comment failed"). If the row stays unapplied, the apply route finds the AI comment with the same response text, marks the draft applied and posts nothing (`alreadyApplied: true`). Test: `ai.routes.test.ts` "comment written but setApplied failing".
+- Task 12: RESOLVED (FU4). `ticketsResolvedByAI` now uses the applied time (the AI comment's `created_at`, falling back to the draft's `createdAt` when no comment is found) and the LATEST resolution (`GREATEST(resolvedAt, closedAt)`). `knowledgeBaseLearning` no longer logs the ticket category; the remaining raw error logs (ticket knowledge learning, attachments, S3 delete) log the error type only (`logRouteError`). The non-AI knowledge routes already used `logRouteError`.
+- Task 12: still open, by design: `ESCALATION_ACTIVE` is client-only.
+- Task 12 (out-of-scope review note): RESOLVED (FU4). The tests README describes the real layout, the SDK-boundary Bedrock mock and the run commands.
 
 ### Realtime, Teams webhooks and inbound email
-- Task 14: `acceptInvitationForUser` and `approveUser` do not call `disconnectUser` (the lazy re-check covers it); a per-event users read and a UNION per 200 sockets; `originAllowed` trusts `x-forwarded-host`; `secureAuth.ts` is a dead module.
-- Task 15: the DNS-rebinding window (the allow-list is the control; pinning through an undici dispatcher would need a dependency); fan-out runs one `canAccessTask` per webhook row per event with no concurrency cap (disable legacy non-admin webhook rows after deploy); `createTeam` still inserts the creator as team admin (latent if a new caller appears); team routes still return `{message}` without `error` (to Task 17).
-- Task 16: display names containing `@` or a backslash are refused (safe direction); a fenced-out late holder only logs; the done mark is not in the same transaction as the create (`createTask` has no transaction); the 64 KB header cap may refuse long Received or ARC chains (check real sizes after deploy).
+- Task 14: RESOLVED (FU4). `acceptInvitationForUser` (after the commit) and `approveUser` now call `disconnectUser(userId, 1012)`. `originAllowed` no longer trusts `x-forwarded-host` unless the app's Express `trust proxy` is on (`server/index.ts` sets it to 1 for the deployed reverse proxy, so behind the proxy it is trusted, and then only the LAST entry, the one the proxy wrote, is read); `attachRealtime(server, { trustProxy })` carries the setting. Still open: a per-event users read and a UNION per 200 sockets; `secureAuth.ts` is a dead module.
+- Task 15: NOT FIXED, by decision: the DNS-rebinding window. The host allow-list (`*.webhook.office.com`) is the control; pinning the checked address needs an undici dispatcher, i.e. a new dependency, which this plan does not add (documented in `webhookGuard.ts`). RESOLVED (FU4): fan-out resolves access for all candidate owners in one query (per 200) and posts at most 5 webhooks at a time (`WEBHOOK_CONCURRENCY`, an in-house limiter). Still open: `createTeam` inserts the creator as team admin (latent if a new caller appears); team routes still return `{message}` without `error` (to Task 17).
+- Task 16: display names containing `@` or a backslash are refused (safe direction); a fenced-out late holder only logs. NOT FIXED, by decision: the done mark stays a separate statement from the create. Sharing a transaction means threading `tx` through the ticket-number counter and the one-retry-on-number-clash in `createTask` (a unique violation aborts a transaction, so the retry needs savepoints); the claim fence stays and the window is two statements wide (documented in `routes/email.ts`). The 64 KB header cap stays as a documented limit (check real Received or ARC sizes after deploy; documented in `mime.ts`).
 
 ### Security hardening and deployment
-- Task 13: `NODE_ENV` unset means development mode including a permissive CSP (the Dockerfile sets production, `npm start` does not); consider failing loudly when it is unset and `dist` exists; a subtree deeper than 20 is not walked; `sanitizeForSQL` and `sanitizeText` are dead; existing 404s lack an error code (to Task 17).
+RESOLVED (FU2): `sanitizeForSQL` and `sanitizeText` are deleted. 404s without an error code were
+handled with the Task 7 and Task 17 contract work.
+- FU5: the built server (`node dist/index.js`, so `npm start`) now refuses to boot with one log line when `NODE_ENV` is unset (`npm run dev` through tsx still defaults to development; `npm start` needs `NODE_ENV=production`); the request sanitiser now walks iteratively with no depth limit (still linear).
+- Task 13: still open: `NODE_ENV` unset in other entry points means development mode; a subtree deeper than 20 (fixed by FU5, above); `sanitizeForSQL` and `sanitizeText` are dead; existing 404s lack an error code (to Task 17).
 
 ### MCP
-- Tasks 21 and 22: the MCP list limit is capped at 100 versus REST 500; the invented-status test accepts `VALIDATION` or `INVALID_STATE`; the isolation suite's last test is order-dependent; a non-numeric id gives the SDK's plain-text error; `get_ticket` FORBIDDEN discloses existence (REST parity).
+- Tasks 21 and 22: the MCP list limit stays at 100 versus REST 500, on purpose (FU4): the caller is a model, 500 full tickets in one tool result fills its context, each row costs a `getTask`, and `hasMore`/`offset` make paging cheap (reason in `ticketService.ts`). RESOLVED (FU4): the invented-status test asserts exactly `VALIDATION`; the isolation suite's secret-scan test makes its own calls and no longer depends on test order; a non-numeric id (`"abc"`, `"12"`, `1.5`) gives a coded `VALIDATION` with `fieldErrors.id` (the tool schema accepts number or string so the value reaches the service). Still open: `get_ticket` FORBIDDEN discloses existence (REST parity).
+
+## 6. Follow-ups round (2026-10-03)
+
+The queued follow-ups from section 5 were worked in seven tasks (FU0 to FU7) and merged on top of
+the fix program. Tests: about 1,590 Jest tests (FU6 counted 1,586 passed, 6 skipped); the Playwright
+suite (7 specs) runs in the gate and makes no outbound calls.
+
+### The DC4 gate
+
+`scripts/ai/verify.sh` (documented in `docs/gate.md`) is the acceptance gate: in throwaway
+containers it builds the production bundle, applies the migrations, runs the full Jest suite and
+the Playwright suite against their own databases, probes a running app (login, ticket workflow,
+error contract) and prints `TESTS[<nonce>]: <n> passed, <m> skipped` then `RESULT: PASS` or `FAIL`.
+Allow **about 20 minutes** (image build, two `npm ci`, Jest in a container, Playwright). It must see
+a valid Jest JSON report with `numPassedTests > 0` and `numFailedTests === 0`; secrets are
+generated per run, and `.env*` files are not copied into the test tree (FU7). Its Docker files live
+in `docker/gate/` and never replace the production `Dockerfile` and `docker-compose.yml` (R39).
+
+### Rulings
+
+- **R36:** emailed tickets and unassigned customer tickets (no user or team assignee, department
+  only included) are queued to `DEFAULT_TRIAGE_TEAM_ID`; unset keeps admin triage; a deleted team
+  means the ticket is created unassigned.
+- **R37:** whitespace and line-ending churn items are not changed.
+- **R38:** a requirement whose endpoint was deliberately not ported or has no client (I8, K8, G3)
+  is closed as superseded with the reason; the real replacement path is tested; no dead endpoint is
+  re-added.
+- **R39:** the gate's Docker files stay under `docker/gate/`; `scripts/ai/verify.sh` stays at its
+  path and is adapted to Node 24, `APP_BASE_URL`, `db:migrate-sql` and Playwright 1.63.
+- **R40:** `GET /api/departments` answers every signed-in user: admins full rows, managers their
+  active departments, agents and customers `[{id, name}]` of active departments only (the G5
+  requirement); anonymous is 401.
+
+### Behaviour changes users and admins will notice
+
+Accounts and sign-in
+- Change-password counts wrong current passwords toward the lockout (423 `account_locked` when
+  locked); forgot, reset and change-password each have their own rate-limit budget.
+- A revoked session's cookie is cleared; a password change revokes sessions that verified an older
+  row, including a login racing the change. Sessions created before the deploy keep the old rule.
+- The forced password-change screen signs out and returns to the home page like the header menu.
+- `POST /api/admin/users/:id/toggle-status` now keeps at least one active administrator and
+  refuses self-deactivation (409 `last_admin`, `self_demotion`); it had no check. The flip is
+  decided inside the locked transaction, so two simultaneous toggles flip twice.
+- Admin password resets are logged with the admin's user id, not "anonymous".
+- AWS SES: a blank secret for a key id that is not the server's own is refused with `fieldErrors`,
+  and at send time a stored key id without a secret, or a stored secret without a key id, is never
+  paired with the server's own credentials (the send is refused with one log line).
+
+Tickets, lists and stats
+- Customer tickets with no assignee are queued to the triage team when `DEFAULT_TRIAGE_TEAM_ID` is
+  set, so its members can open them; staff-created tickets are not triaged.
+- An invalid routing choice on a customer ticket is refused before any attachment is uploaded.
+- Ticket lists are much faster (REST 79 to 3 statements per page of 25, MCP 27 to 2). A second
+  ticket-number clash answers 409 `conflict` ("please try again") instead of a raw 500.
+- Team and department stats: `highPriority` counts `high` only, with a new `urgent` field and an
+  `onHold` count; legacy `user` role gets agent stats.
+- `GET /api/teams/:id` is 403 for customers. `GET /api/faq-cache` clamps `limit` to 1..100.
+- Duplicate department name is 409, deleting a department with teams is 409
+  `department_has_teams`, an unknown id is 404 (were 500s).
+- Knowledge ratings map a 1-5 rating onto a 0..1 score (a thumbs-up had scored 275%); a missing
+  rating or `wasHelpful` is 400. The AI connection test no longer reports success when it failed.
+- Company branding validates name and colour, and a logo replace uploads before deleting the old
+  object. Escalation rule bodies are validated (an incomplete body was a 500).
+- AI: a comment written but not marked applied is retried and not duplicated on a later apply;
+  `ticketsResolvedByAI` counts from the time the response was applied.
+
+Realtime, integrations
+- Approving a user or accepting an invitation reconnects open sockets with the new rights.
+  WebSocket `x-forwarded-host` is trusted only behind `trust proxy` (the deployed proxy), last
+  entry only. **The reverse proxy must forward the host** (nginx: `X-Forwarded-Host $http_host`)
+  or the browser's `/ws` origin check refuses the socket.
+- Teams webhooks fan out at most 5 at a time; MCP-created and updated tickets carry the
+  `APP_BASE_URL` link in Teams cards.
+- MCP tools answer a non-numeric id with a coded VALIDATION error.
+
+Deployment
+- The built server refuses to start with `NODE_ENV` unset; production refuses placeholder or
+  short (under 32 characters) `SESSION_SECRET` and `JWT_SECRET`.
+- The ticket prefix is validated only when a request changes it; a legacy prefix over 6
+  characters no longer blocks saving the other Tickets settings.
+- A deeply nested request body is sanitised iteratively (no depth cutoff).
+- `pg` is a runtime dependency.
+
+### New and changed environment
+
+| Variable | Change |
+|---|---|
+| `DEFAULT_TRIAGE_TEAM_ID` | New, optional (R36). Compose passes it through. |
+| `SESSION_SECRET`, `JWT_SECRET` | At least 32 characters and not a placeholder, or production refuses to start. |
+| `COOKIE_SECURE` | Set `true` behind HTTPS; the cookie is `Secure` only then. |
+| `NODE_ENV` | Required for the built server (`node dist/index.js`, `npm start`); the Dockerfile sets `production`. |
+
+### Migration
+
+`0020_users_is_active_not_null.sql` makes `users.is_active` `NOT NULL DEFAULT true`. Existing NULL
+rows become `false` (inactive, as they already behaved), never `true`. It runs in
+`npm run db:migrate-sql`, is idempotent, and takes a brief lock on `users`.
+
+### Deploy checks
+
+1. **Secrets in Coolify.** `SESSION_SECRET` and `JWT_SECRET` must each be at least 32 characters
+   and not an example value (`your-...`, `change-me`, `dev-only-...`). A shorter or placeholder
+   secret stops the container at boot. Check before deploying.
+2. **`is_active` NULL rows.** Before deploying, `SELECT id, email FROM users WHERE is_active IS
+   NULL;` lists the accounts that become inactive. Re-activate any that should work after the
+   deploy (or set them `true` first).
+3. `COOKIE_SECURE=true` and `NODE_ENV=production` are present; the proxy forwards
+   `X-Forwarded-Host` for `/ws`.
+4. Optionally set `DEFAULT_TRIAGE_TEAM_ID` to the intake team.
+5. Verify the deployed commit (Coolify's deployment record), not a bundle hash.
+
+### Left open on purpose
+
+- DNS-rebinding window on Teams webhooks: the host allow-list is the control; pinning needs an
+  undici dispatcher, a new dependency.
+- The 64 KB inbound header cap stays as a documented limit (check real Received or ARC sizes).
+- The inbound done mark stays a separate statement from the ticket create (needs savepoints and a
+  `tx` threaded through numbering, history and comments); the claim fence stays.
+- Manager stats exclude the manager's own created or assigned tickets (a product change).
+- `phone` is visible to every agent, and SSO sign-ups default to the customer role (owner
+  questions).
+- `invitation.departmentId` is never applied (users have no department link in the schema).
+- Duplicate email on register stays 400 `email_registered` (binding).
+- Team detail for staff does not apply the `/members` agent and manager-department rules, to avoid
+  breaking team pages.
+- Per-instance lockout counters, clock skew across instances, and the changer's in-flight request
+  (fails closed) are documented in `lockout.ts` and `isSessionRevoked`.
+- MCP list limit 100 versus REST 500, on purpose.

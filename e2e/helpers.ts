@@ -39,12 +39,19 @@ export async function loginViaUi(page: Page, who: E2EUser): Promise<void> {
   await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
 
-/** A fresh browser context signed in as `who`. */
-export async function signedInContext(browser: Browser, who: E2EUser): Promise<{ context: BrowserContext; page: Page }> {
+/**
+ * A fresh browser context signed in as `who`. The CSP watcher is attached
+ * BEFORE the login, so a violation while signing in is recorded too.
+ */
+export async function signedInContext(
+  browser: Browser,
+  who: E2EUser
+): Promise<{ context: BrowserContext; page: Page; csp: { violations: string[] } }> {
   const context = await browser.newContext();
   const page = await context.newPage();
+  const csp = watchCsp(page);
   await loginViaUi(page, who);
-  return { context, page };
+  return { context, page, csp };
 }
 
 /** Opens the detail panel (the Eye action) of the row holding `ticketNumber`. */

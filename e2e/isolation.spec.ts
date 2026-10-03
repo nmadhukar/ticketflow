@@ -28,7 +28,8 @@ test("customer B cannot open customer A's ticket and does not see it listed", as
 
     // Opening its URL: the SPA has no per-ticket page, so the app's not-found state renders.
     await b.page.goto(`/tickets/${ticket.id}`);
-    await expect(b.page.getByText(/404|not found/i).first()).toBeVisible();
+    // Match the NotFound page's own heading exactly, not any text containing "404".
+    await expect(b.page.getByRole("heading", { level: 1, name: /^page not found$/i })).toBeVisible();
     await expect(b.page.getByText(ticketNumber)).toHaveCount(0);
 
     // And the API refuses it, on the by-id path and the comments the panel reads.

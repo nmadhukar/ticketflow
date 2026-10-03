@@ -245,8 +245,11 @@ describe("ticket workflow, meta route and search", () => {
     await db.execute(sql`UPDATE users SET role = 'user', first_name = 'Lee', last_name = 'Legacy' WHERE id = ${legacy.id}`);
     const nameless = await createUser({ role: "agent" });
     await db.execute(sql`UPDATE users SET first_name = NULL, last_name = NULL WHERE id = ${nameless.id}`);
+    // A NULL is_active can no longer exist (NOT NULL since migration 0020); the database refuses it.
     const nullActive = await createUser({ role: "agent" });
-    await db.execute(sql`UPDATE users SET is_active = NULL WHERE id = ${nullActive.id}`);
+    await expect(db.execute(sql`UPDATE users SET is_active = NULL WHERE id = ${nullActive.id}`)).rejects.toMatchObject({
+      code: "23502",
+    });
 
     const res = await customerA.get("/api/tickets/meta");
     expect(res.status).toBe(200);
@@ -255,7 +258,7 @@ describe("ticket workflow, meta route and search", () => {
     for (const u of listed) expect(Object.keys(u).sort()).toEqual(["displayName", "id"]);
     const ids = listed.map((u) => u.id);
     expect(ids).toEqual(expect.arrayContaining([agent.id, manager.id, legacy.id, nameless.id]));
-    for (const hidden of [inactive.id, unapproved.id, nullActive.id, admin.id]) expect(ids).not.toContain(hidden);
+    for (const hidden of [inactive.id, unapproved.id, admin.id]) expect(ids).not.toContain(hidden);
     expect(listed.find((u) => u.id === legacy.id)?.displayName).toBe("Lee Legacy");
     expect(listed.find((u) => u.id === nameless.id)?.displayName).toBe("Support agent");
 

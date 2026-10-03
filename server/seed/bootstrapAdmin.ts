@@ -37,6 +37,8 @@ export async function seedBootstrapAdmin(
 
   // The email may already belong to a non-admin, inactive or SSO account:
   // leave it exactly as it is and say so, rather than failing on the insert.
+  // Accepted: this is only logged (a refusal to start would take the whole site
+  // down, and the fix is one database update or a different ADMIN_EMAIL).
   const [taken] = await db
     .select({ id: users.id })
     .from(users)

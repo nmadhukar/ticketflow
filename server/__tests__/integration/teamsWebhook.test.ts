@@ -5,6 +5,7 @@ import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
 import { createTeam, createTicketAs, createUser, loginAs } from "./helpers/fixtures";
 import { db } from "../../storage/db";
+import { mcpFor } from "./helpers/mcpClient";
 
 const hook = (tenant: string) => `https://${tenant}.webhook.office.com/webhookb2/abc@def/IncomingWebhook/xyz/secret`;
 
@@ -145,6 +146,42 @@ describe("Teams webhook settings and fan-out", () => {
     });
   });
 
+  describe("tickets created and updated through MCP", () => {
+    const bodies = () =>
+      fetchMock.mock.calls
+        .filter((c) => String(c[0]).includes("webhook.office.com"))
+        .map((c) => String((c[1] as RequestInit | undefined)?.body ?? ""));
+
+    it("carry a link built from APP_BASE_URL, and none when it is unset", async () => {
+      const admin = await createUser({ role: "admin" });
+      await giveWebhook(admin, "admin");
+      const mcp = await mcpFor(ctx.app, admin);
+      const saved = process.env.APP_BASE_URL;
+      try {
+        process.env.APP_BASE_URL = "https://tickets.example.test/";
+        const created = await mcp.call("create_ticket", { title: "from mcp", category: "support" });
+        expect(created.isError).toBe(false);
+        expect(bodies()).toHaveLength(1);
+        expect(bodies()[0]).toContain("https://tickets.example.test/my-tasks");
+
+        fetchMock.mockClear();
+        const updated = await mcp.call("update_ticket", { id: created.data.id, priority: "high" });
+        expect(updated.isError).toBe(false);
+        expect(bodies()).toHaveLength(1);
+        expect(bodies()[0]).toContain("https://tickets.example.test/my-tasks");
+
+        delete process.env.APP_BASE_URL;
+        fetchMock.mockClear();
+        await mcp.call("update_ticket", { id: created.data.id, priority: "low" });
+        expect(bodies()).toHaveLength(1);
+        expect(bodies()[0]).not.toContain("potentialAction");
+      } finally {
+        if (saved === undefined) delete process.env.APP_BASE_URL;
+        else process.env.APP_BASE_URL = saved;
+      }
+    });
+  });
+
   describe("a ticket notifies only the webhooks of users who can access it", () => {
     async function world() {
       const admin = await createUser({ role: "admin" });
@@ -210,6 +247,36 @@ describe("Teams webhook settings and fan-out", () => {
       expect(res.status).toBe(201);
       expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("evil.example"))).toHaveLength(0);
       expect(webhookHosts()).toEqual(["customer-owner.webhook.office.com"]);
+    });
+
+    it("fan-out posts at most WEBHOOK_CONCURRENCY webhooks at a time and still reaches all of them", async () => {
+      const real = globalThis.fetch;
+      let inFlight = 0;
+      let peak = 0;
+      fetchMock.mockImplementation(((input: unknown, init?: RequestInit) => {
+        if (!String(input).includes("webhook.office.com")) return real(input as never, init);
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        return new Promise((resolve) =>
+          setTimeout(() => {
+            inFlight--;
+            resolve(new Response("1", { status: 200 }));
+          }, 25)
+        );
+      }) as never);
+      const requester = await createUser({ role: "customer" });
+      const requesterAgent = await loginAs(ctx.app, requester);
+      const created = await createTicketAs(requesterAgent, {});
+      expect(created.status).toBe(201);
+      for (let i = 0; i < 12; i++) await giveWebhook(await createUser({ role: "admin" }), `bulk-${i}`);
+      fetchMock.mockClear();
+      peak = 0;
+      const [task] = await db.select().from(tasks);
+      const { notifyTicketWebhooks, WEBHOOK_CONCURRENCY } = await import("../../services/teamsNotifications");
+      await notifyTicketWebhooks({ task, kind: "updated", actionUrl: null });
+      expect(webhookHosts()).toHaveLength(12);
+      expect(peak).toBeGreaterThan(1);
+      expect(peak).toBeLessThanOrEqual(WEBHOOK_CONCURRENCY);
     });
 
     it("a private DNS answer blocks the call and the ticket still saves", async () => {

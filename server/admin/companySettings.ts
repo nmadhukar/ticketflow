@@ -36,7 +36,10 @@ export function registerCompanySettingsRoutes(app: Express): void {
     isAuthenticated,
     async (req, res) => {
       try {
-        const s = await storage.getCompanySettings();
+        // A copy: getCompanySettings hands out its cached row, and writing the presigned
+        // URL into that object replaced the stored logo key for every later reader.
+        const stored = await storage.getCompanySettings();
+        const s = stored ? { ...stored } : stored;
 
         // If logo is stored as S3 key, generate presigned URL
         if (s?.logoUrl && s3Service.isS3Url(s.logoUrl)) {
@@ -110,12 +113,27 @@ export function registerCompanySettingsRoutes(app: Express): void {
     isAdmin,
     async (req: any, res) => {
       try {
+        // The columns are varchar(255) not null and varchar(7): anything else used to be a
+        // database error (500) or a blank company name shown in every page header.
+        const name = req.body.companyName;
+        if (
+          name !== undefined &&
+          (typeof name !== "string" || name.trim() === "" || name.trim().length > 255)
+        ) {
+          return fail(res, 400, "companyName must be 1 to 255 characters", {
+            details: { formErrors: [], fieldErrors: { companyName: ["1 to 255 characters"] } },
+          });
+        }
+        const color = req.body.primaryColor;
+        if (color !== undefined && (typeof color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(color))) {
+          return fail(res, 400, "primaryColor must be a #rrggbb colour", {
+            details: { formErrors: [], fieldErrors: { primaryColor: ["#rrggbb"] } },
+          });
+        }
         const userId = getUserId(req);
         const payload: any = {};
-        if (req.body.companyName !== undefined)
-          payload.companyName = req.body.companyName;
-        if (req.body.primaryColor !== undefined)
-          payload.primaryColor = req.body.primaryColor;
+        if (name !== undefined) payload.companyName = name.trim();
+        if (color !== undefined) payload.primaryColor = color;
         const updated = await storage.updateCompanySettings(payload, userId);
         res.json({
           companyName: updated.companyName,
@@ -139,8 +157,16 @@ export function registerCompanySettingsRoutes(app: Express): void {
         // M5: ticket numbers are PREFIX-YYYY-NNNN, matched by the inbound-email tag and
         // the counter's backfill as [A-Za-z0-9]+; anything else would make numbers that
         // no reply can reference.
+        // FU5: validated only when the request changes it, so a legacy prefix longer
+        // than 6 characters (which keeps numbering tickets) does not block saving the
+        // other fields when the settings form sends it back unchanged.
+        const currentPrefix =
+          req.body.ticketPrefix !== undefined
+            ? ((await storage.getCompanySettings())?.ticketPrefix ?? "TKT")
+            : undefined;
         if (
           req.body.ticketPrefix !== undefined &&
+          req.body.ticketPrefix !== currentPrefix &&
           (typeof req.body.ticketPrefix !== "string" || !TICKET_PREFIX_PATTERN.test(req.body.ticketPrefix))
         ) {
           return fail(res, 400, "ticketPrefix must be 1 to 6 letters or digits", {
@@ -261,21 +287,10 @@ export function registerCompanySettingsRoutes(app: Express): void {
         // Upload to S3
         const s3Key = `logos/company-logo.${extension}`;
 
-        // Delete old logo from S3 if it exists
         const currentSettings = await storage.getCompanySettings();
-        if (
-          currentSettings?.logoUrl &&
-          s3Service.isS3Url(currentSettings.logoUrl)
-        ) {
-          try {
-            const oldKey = s3Service.extractKeyFromUrl(currentSettings.logoUrl);
-            await s3Service.deleteFile(oldKey);
-          } catch (error) {
-            console.warn("Failed to delete old logo from S3:", error);
-            // Continue with upload even if deletion fails
-          }
-        }
 
+        // Upload first: the old logo used to be deleted before this, so a failed upload
+        // left the stored key pointing at an object that no longer existed.
         await s3Service.uploadFile(s3Key, buffer, fileType);
 
         // Store S3 key in database (we'll use presigned URLs when serving)
@@ -285,6 +300,20 @@ export function registerCompanySettingsRoutes(app: Express): void {
           { logoUrl },
           userId
         );
+
+        // Then remove the previous logo, unless it is the object just written (png over png).
+        if (
+          currentSettings?.logoUrl &&
+          s3Service.isS3Url(currentSettings.logoUrl)
+        ) {
+          try {
+            const oldKey = s3Service.extractKeyFromUrl(currentSettings.logoUrl);
+            if (oldKey !== s3Key) await s3Service.deleteFile(oldKey);
+          } catch (error) {
+            console.warn("Failed to delete old logo from S3:", error);
+            // The new logo is already live; a leftover object is harmless
+          }
+        }
         res.json(settings);
       } catch (error) {
         logRouteError("Error uploading logo", error);
@@ -356,11 +385,11 @@ export function registerCompanySettingsRoutes(app: Express): void {
         // unchanged. Changing the identifier with a blank secret is refused
         // rather than silently pairing the old secret with a new identity.
         const blank = (v: unknown) => typeof v !== "string" || v.trim() === "";
-        const secretRequired = (field: string) =>
-          res.status(400).json({
-            error: "validation_failed",
-            message: `${field} is required when the account identifier changes`,
-            details: { required: [field] },
+        // fieldErrors, the same shape every other form field error has.
+        const secretRequired = (field: string, why: string) =>
+          fail(res, 400, `${field} is required ${why}`, {
+            code: "validation_failed",
+            details: { formErrors: [], fieldErrors: { [field]: [`Required ${why}`] } },
           });
         if (
           data.provider === EMAIL_PROVIDERS.AWS &&
@@ -368,7 +397,19 @@ export function registerCompanySettingsRoutes(app: Express): void {
           prev.awsSecretAccessKey &&
           prev.awsAccessKeyId !== data.awsAccessKeyId
         ) {
-          return secretRequired("awsSecretAccessKey");
+          return secretRequired("awsSecretAccessKey", "when the account identifier changes");
+        }
+        // Nothing stored and nothing submitted: the SES sender would pair this access key id
+        // with the SERVER's own AWS secret (environment fallback). That is only coherent when
+        // the key id is the environment's own; any other id (a new host or account) must
+        // bring its secret.
+        if (
+          data.provider === EMAIL_PROVIDERS.AWS &&
+          blank(data.awsSecretAccessKey) &&
+          !prev.awsSecretAccessKey &&
+          data.awsAccessKeyId !== process.env.AWS_ACCESS_KEY_ID
+        ) {
+          return secretRequired("awsSecretAccessKey", "for an access key id that is not the server's own");
         }
         if (
           data.provider === EMAIL_PROVIDERS.SMTP &&
@@ -376,8 +417,10 @@ export function registerCompanySettingsRoutes(app: Express): void {
           prev.password &&
           (prev.host !== data.host || prev.username !== data.username)
         ) {
-          return secretRequired("password");
+          return secretRequired("password", "when the host or username changes");
         }
+        // SMTP has no environment fallback (its adapter is not implemented), so a blank
+        // password with nothing stored simply saves none; nothing is borrowed from the server.
 
         const saved = await storage.upsertEmailProvider(
           {

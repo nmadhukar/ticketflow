@@ -57,6 +57,7 @@ import { sessionTrackingMiddleware } from "../middleware/sessionTracking.middlew
 import {
   type User,
   insertTaskAttachmentSchema,
+  insertEscalationRuleSchema,
   ticketAutoResponses,
   ticketComplexityScores,
   knowledgeArticles,
@@ -87,7 +88,6 @@ import {
   sum,
   sql,
   inArray,
-  ne,
   getTableColumns,
 } from "drizzle-orm";
 import { teams, departments, users } from "@shared/schema";
@@ -113,6 +113,7 @@ import {
   ticketVisibilityWhere,
 } from "../permissions/ticketAccess";
 import { HttpError, asyncHandler, fail, logRouteError } from "../http/errors";
+import { autoResponseCommentBody, autoResponseCommentExists } from "../services/ai/autoResponseComment";
 import { projectUserForViewer } from "../utils/publicUser";
 import { toPublicInvitation } from "../utils/publicInvitation";
 import { publicBaseUrl } from "../utils/appBaseUrl";
@@ -230,6 +231,12 @@ const adminUserUpdateSchema = z.object({
   isActive: z.boolean().optional(),
 });
 
+/** A Postgres unique-constraint violation, bare or wrapped by the driver. */
+const isUniqueViolation = (error: unknown): boolean => {
+  const e = error as { code?: string; cause?: { code?: string } } | null;
+  return e?.code === "23505" || e?.cause?.code === "23505";
+};
+
 export async function registerRoutes(app: Express): Promise<Server> {
   registerIdParams(app);
 
@@ -259,6 +266,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/users", isAuthenticated, async (req: any, res) => {
     try {
       // Staff only. normalizeRole reads the legacy role "user" as agent.
+      // One lookup of the requester, used for both the staff check and the picker below.
       const requesterRole = normalizeRole(
         (await storage.getUser(getUserId(req)))?.role
       );
@@ -273,9 +281,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (forTeamMemberSelection) {
         // Filter for team member selection: agents, managers, and admins (if requester is admin)
-        const requesterId = getUserId(req);
-        const requester = await storage.getUser(requesterId);
-        const isRequesterAdmin = requester?.role === "admin";
+        const isRequesterAdmin = requesterRole === "admin";
 
         let query = db.select(publicUserColumns).from(users);
 
@@ -548,7 +554,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res, next) => {
+  // The by-id routes below that call ticketService (GET, PATCH, DELETE, POST comments) do not
+  // add requireTaskAccess(): the service checks access once, as its first step.
+  app.get("/api/tasks/:id", isAuthenticated, async (req: any, res, next) => {
     try {
       const taskId = parseInt(req.params.id);
       res.json(await getTicket(req.user, taskId));
@@ -622,13 +630,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const userId = getUserId(req);
         const files = req.files as Express.Multer.File[] | undefined;
         const user = req.user as User;
-        const isCustomer = user?.role === "customer";
 
         // Validate before anything is uploaded or written (ticketService owns the rules):
-        // server-owned fields are rejected, customers cannot set hours, and assignee checks
-        // (existence, ruling R16) run. The customer flow rewrites its assignment below, so
-        // its assignment is checked on the final body.
-        await prepareTicketCreate(user, req.body ?? {}, { skipAssignment: isCustomer });
+        // server-owned fields are rejected, customers cannot set hours, a customer's routing
+        // choice becomes the assignment (with the R36 triage team), and assignee checks
+        // (existence, ruling R16) run. createTicket reuses this result below.
+        const prepared = await prepareTicketCreate(user, req.body ?? {});
 
         // 1. Validate S3 configuration if files provided
         if (files && files.length > 0) {
@@ -706,71 +713,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
 
-        // Customer create: support user, team, department-only, unassigned
-        if (isCustomer) {
-          const { assigneeType, assigneeId, teamId, departmentId } =
-            req.body || {};
-          const parsedTeamId = teamId ? parseInt(teamId) : undefined;
-          const parsedDeptId = departmentId
-            ? parseInt(departmentId)
-            : undefined;
-
-          if (assigneeType === "user") {
-            if (!assigneeId) {
-              return fail(res, 400, "assigneeId is required for user assignment");
-            }
-            req.body.assigneeId = String(assigneeId);
-            req.body.assigneeTeamId = null;
-            req.body.teamId = undefined;
-            // departmentId optional
-          } else if (assigneeType === "team" || parsedTeamId) {
-            if (!parsedTeamId) {
-              return fail(res, 400, "teamId is required for team assignment");
-            }
-            const team = await storage.getTeam(parsedTeamId);
-            if (!team) return fail(res, 400, "Invalid team");
-            if (parsedDeptId) {
-              const dept = await storage.getDepartmentById(parsedDeptId);
-              if (!dept || (dept as any).isActive === false) {
-                return fail(res, 400, "Invalid or inactive department");
-              }
-              if (
-                (team as any).departmentId &&
-                (team as any).departmentId !== parsedDeptId
-              ) {
-                return fail(res, 400, "Team does not belong to the selected department");
-              }
-            }
-            req.body.assigneeType = "team";
-            req.body.assigneeTeamId = parsedTeamId;
-            req.body.assigneeId = null;
-            // If department not provided, try deriving from team
-            if (!parsedDeptId && (team as any).departmentId) {
-              req.body.departmentId = (team as any).departmentId;
-            }
-          } else if (parsedDeptId) {
-            const dept = await storage.getDepartmentById(parsedDeptId);
-            if (!dept || (dept as any).isActive === false) {
-              return fail(res, 400, "Invalid or inactive department");
-            }
-            // Department-only routing: clear team and assignee fields
-            req.body.teamId = null;
-            req.body.assigneeId = null;
-            req.body.assigneeTeamId = null;
-            // assigneeType can be omitted
-          } else {
-            // Unassigned: clear all assignment fields
-            req.body.assigneeId = null;
-            req.body.assigneeTeamId = null;
-            req.body.departmentId = null;
-            req.body.teamId = null;
-          }
-        }
-
-        // The customer routing above may have rewritten the body: validate the
-        // final shape, then keep one assignee kind (the same rule as update).
-        // Hooks run after the attachments are linked, below.
-        const task = await createTicket(user, req.body, { runHooks: false });
+        // The fields were validated and routed above; the write follows. Hooks run after
+        // the attachments are linked, below.
+        const task = await createTicket(user, req.body, { runHooks: false, prepared });
 
         // 4. Create attachment records (if files provided)
         const attachmentErrors: string[] = [];
@@ -787,10 +732,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               });
             } catch (error) {
               attachmentErrors.push(file.fileName);
-              console.error(
-                `Failed to create attachment record for ${file.fileName}:`,
-                error
-              );
+              logRouteError("Failed to create attachment record", error);
             }
           }
         }
@@ -820,7 +762,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
-  app.patch("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res, next) => {
+  app.patch("/api/tasks/:id", isAuthenticated, async (req: any, res, next) => {
     try {
       // Access, the role's field table, the status workflow, the write and its
       // notifications are ticketService.updateTicket; this is the HTTP adapter.
@@ -840,7 +782,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res, next) => {
+  app.delete("/api/tasks/:id", isAuthenticated, async (req: any, res, next) => {
     try {
       await deleteTicket(req.user, parseInt(req.params.id), true);
       res.status(204).send();
@@ -883,7 +825,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/tasks/:id/comments",
     isAuthenticated,
-    requireTaskAccess(),
     async (req: any, res, next) => {
       try {
         // ticketService.addComment: the body is only `content` (trimmed, 1..10000
@@ -966,35 +907,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           throw new HttpError(404, "user_not_found", "User not found");
         }
 
-        // An active admin must stay: never leave zero, and never let an admin
-        // demote or deactivate themselves.
-        const losesAdmin =
-          target.role === "admin" &&
-          target.isActive !== false &&
-          ((updates.role !== undefined && updates.role !== "admin") ||
-            updates.isActive === false);
-        if (losesAdmin) {
-          const [others] = await db
-            .select({ n: sql<number>`count(*)::int` })
-            .from(users)
-            .where(
-              and(
-                eq(users.role, "admin"),
-                eq(users.isActive, true),
-                ne(users.id, userId),
-                excludeSystemAccounts()
-              )
-            );
-          if (!others || others.n === 0) {
-            throw new HttpError(409, "last_admin", "This is the last active administrator");
-          }
-          if (userId === getUserId(req)) {
-            throw new HttpError(409, "self_demotion", "You cannot demote or deactivate your own account");
-          }
-        }
-
-        // updateUserProfile also drops the user's open sockets on a role change.
-        const updatedUser = await storage.updateUserProfile(userId, updates);
+        // An active admin must stay: never leave zero, and never let an admin demote or
+        // deactivate themselves. The check and the write share one transaction that locks
+        // the admin rows, so two requests at once cannot both pass it. It also drops the
+        // user's open sockets on a role or status change.
+        const updatedUser = await storage.updateUserKeepingAnAdmin(userId, updates, getUserId(req));
         res.json(updatedUser);
       } catch (error) {
         if ((error as { code?: string })?.code === "23505") {
@@ -1008,7 +925,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/admin/users/:userId/toggle-status",
     isAuthenticated,
-    async (req: any, res) => {
+    async (req: any, res, next) => {
       try {
         const user = await storage.getUser(getUserId(req));
         if (user?.role !== "admin") {
@@ -1016,9 +933,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const { userId } = req.params;
-        const updatedUser = await storage.toggleUserStatus(userId);
+        const target = await storage.getUser(userId);
+        if (!target) {
+          throw new HttpError(404, "user_not_found", "User not found");
+        }
+        // The same last-admin rule as PATCH. is_active is NOT NULL (0020).
+        const updatedUser = await storage.updateUserKeepingAnAdmin(
+          userId,
+          {},
+          getUserId(req),
+          { flipActive: true } // flipped inside the locked transaction, not from the read above
+        );
         res.json(updatedUser);
       } catch (error) {
+        if (error instanceof HttpError) return next(error);
         logRouteError("Error toggling user status", error);
         fail(res, 500, "Failed to toggle user status");
       }
@@ -1262,10 +1190,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 fileUrl: presignedUrl, // Replace S3 key with presigned URL
               };
             } catch (error) {
-              console.error(
-                `Failed to generate presigned URL for attachment ${attachment.id}:`,
-                error
-              );
+              logRouteError(`Failed to generate presigned URL for attachment ${attachment.id}`, error);
               // Return attachment with original fileUrl if presigned URL generation fails
               return attachment;
             }
@@ -1476,7 +1401,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const s3Key = s3Service.extractKeyFromUrl(attachment.fileUrl);
           await s3Service.deleteFile(s3Key);
         } catch (error) {
-          console.warn("Failed to delete file from S3:", error);
+          logRouteError("Failed to delete file from S3", error);
           // Continue with database deletion even if S3 delete fails
         }
       }
@@ -1649,8 +1574,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return fail(res, 403, "Admin access required");
         }
 
-        const ok = await bedrockIntegration.testConnection();
-        if (ok) {
+        // testConnection answers an object ({success, error?}); the object itself is always
+        // truthy, so only its `success` field says whether the model replied.
+        const result = await bedrockIntegration.testConnection();
+        if (result.success) {
           return res.json({ success: true });
         }
         return fail(res, 400, "Bedrock test failed", { code: "bedrock_test_failed" });
@@ -2584,7 +2511,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return fail(res, 403, "Admin access required");
       }
 
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
+      const parsed = Number.parseInt(String(req.query.limit ?? ""), 10);
+      const limit = Number.isInteger(parsed) ? Math.min(100, Math.max(1, parsed)) : 10;
       const popularFaqs = await storage.getPopularFaqs(limit);
       res.json(popularFaqs);
     } catch (error) {
@@ -3019,7 +2947,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json(rows);
       }
 
-      return fail(res, 403, "Forbidden");
+      // Ruling R40: every signed-in user can list departments; agents and
+      // customers get only id and name of the active ones.
+      const rows = await db
+        .select({ id: departments.id, name: departments.name })
+        .from(departments)
+        .where(eq(departments.isActive, true))
+        .orderBy(departments.name);
+      return res.json(rows);
     } catch (error) {
       logRouteError("Error fetching departments", error);
       fail(res, 500, "Failed to fetch departments");
@@ -3047,6 +2982,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(department);
     } catch (error) {
+      if (isUniqueViolation(error)) {
+        return fail(res, 409, "A department with that name already exists", { code: "department_name_in_use" });
+      }
       logRouteError("Error creating department", error);
       fail(res, 500, "Failed to create department");
     }
@@ -3068,12 +3006,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const id = parseInt(req.params.id);
       const department = await storage.updateDepartment(id, req.body);
+      if (!department) {
+        return fail(res, 404, "Department not found");
+      }
 
       // Broadcast department updated event
       await notifyStaff("department:updated", { ...department });
 
       res.json(department);
     } catch (error) {
+      if (isUniqueViolation(error)) {
+        return fail(res, 409, "A department with that name already exists", { code: "department_name_in_use" });
+      }
       logRouteError("Error updating department", error);
       fail(res, 500, "Failed to update department");
     }
@@ -3092,6 +3036,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const id = parseInt(req.params.id);
+        if (!(await storage.getDepartmentById(id))) {
+          return fail(res, 404, "Department not found");
+        }
+        // Teams reference their department; deleting it from under them is a
+        // foreign-key error (a bare 500), so say what to do instead.
+        const [{ n: teamCount }] = await db
+          .select({ n: count() })
+          .from(teams)
+          .where(eq(teams.departmentId, id));
+        if (Number(teamCount) > 0) {
+          return fail(res, 409, "Move or delete the department's teams first", {
+            code: "department_has_teams",
+          });
+        }
         await storage.deleteDepartment(id);
 
         // Broadcast department deleted event
@@ -3233,9 +3191,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           (t) => t.status === "resolved"
         ).length;
         closedTickets = deptTasks.filter((t) => t.status === "closed").length;
-        highPriorityTickets = deptTasks.filter(
-          (t) => t.priority === "high" || t.priority === "urgent"
-        ).length;
+        // Priority high only: the same definition /api/stats and the manager stats use.
+        highPriorityTickets = deptTasks.filter((t) => t.priority === "high").length;
       }
 
       res.json({
@@ -3486,7 +3443,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             (emailProvider?.provider === EMAIL_PROVIDERS.AWS &&
               emailProvider?.metadata?.awsSecretAccessKey &&
               emailProvider?.metadata?.awsAccessKeyId);
-        } catch (error) {
+        } catch {
           // Email provider check failed, continue with env check
         }
 
@@ -3495,7 +3452,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const template = await storage.getEmailTemplate("user_invitation");
           emailTemplateExists = !!template;
-        } catch (error) {
+        } catch {
           // Template check failed
         }
 
@@ -3888,11 +3845,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (claimed.length === 0) return res.json({ applied: true, alreadyApplied: true });
 
       try {
-        const pct = (Number(draft.confidenceScore ?? 0) * 100).toFixed(0);
+        // The create path may have posted this comment and then failed to mark the draft
+        // applied; posting again would duplicate it. The claim above already marked it applied.
+        if (await autoResponseCommentExists(taskId, aiUserId, draft.aiResponse)) {
+          return res.json({ applied: true, alreadyApplied: true });
+        }
         await storage.addTaskComment({
           taskId,
           userId: aiUserId,
-          content: `AI Auto-Response (confidence ${pct}%): ${draft.aiResponse}`,
+          content: autoResponseCommentBody(Number(draft.confidenceScore ?? 0), draft.aiResponse),
         } as any);
       } catch (error) {
         // Release the claim so the draft can be applied again. If that fails too, log
@@ -4229,6 +4190,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const articleId = parseInt(req.params.id);
       const { wasHelpful } = req.body;
 
+      // A missing flag used to count as "not helpful" and push the score down.
+      if (typeof wasHelpful !== "boolean") {
+        return fail(res, 400, "wasHelpful must be true or false");
+      }
+      if (!(await storage.getKnowledgeArticle(articleId))) {
+        return fail(res, 404, "Article not found");
+      }
+
       const { knowledgeBaseService } = await import(
         "../services/ai/knowledgeBase"
       );
@@ -4344,13 +4313,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return fail(res, 403, "Admin access required");
         }
 
+        // Parsed, not stored raw: a missing field used to be a not-null error (500).
+        const values = insertEscalationRuleSchema.parse(req.body);
         const rule = await db
           .insert(escalationRules)
-          .values(req.body)
+          .values(values)
           .returning();
 
         res.json(rule[0]);
       } catch (error) {
+        if (error instanceof z.ZodError) {
+          return fail(res, 400, "Invalid escalation rule", { details: error.flatten() });
+        }
         logRouteError("Error creating escalation rule", error);
         fail(res, 500, "Failed to create escalation rule");
       }
@@ -4369,14 +4343,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const ruleId = parseInt(req.params.id);
+        const changes = insertEscalationRuleSchema.partial().parse(req.body);
         const rule = await db
           .update(escalationRules)
-          .set(req.body)
+          .set({ ...changes, updatedAt: new Date() })
           .where(eq(escalationRules.id, ruleId))
           .returning();
+        if (rule.length === 0) {
+          return fail(res, 404, "Escalation rule not found");
+        }
 
         res.json(rule[0]);
       } catch (error) {
+        if (error instanceof z.ZodError) {
+          return fail(res, 400, "Invalid escalation rule", { details: error.flatten() });
+        }
         logRouteError("Error updating escalation rule", error);
         fail(res, 500, "Failed to update escalation rule");
       }
@@ -4395,7 +4376,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const ruleId = parseInt(req.params.id);
-        await db.delete(escalationRules).where(eq(escalationRules.id, ruleId));
+        const removed = await db
+          .delete(escalationRules)
+          .where(eq(escalationRules.id, ruleId))
+          .returning({ id: escalationRules.id });
+        if (removed.length === 0) {
+          return fail(res, 404, "Escalation rule not found");
+        }
 
         res.json({ message: "Rule deleted successfully" });
       } catch (error) {
@@ -4894,8 +4881,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .from(ticketAutoResponses)
         .where(eq(ticketAutoResponses.wasApplied, true));
 
-      // Tickets resolved by AI: DISTINCT tickets that are resolved/closed and whose applied
-      // auto-response was posted before that resolved/closed time.
+      // Tickets resolved by AI: DISTINCT tickets that are resolved/closed now and whose applied
+      // auto-response was posted before the LATEST resolve/close (GREATEST, not COALESCE: after
+      // a reopen and a second resolve, resolvedAt alone is stale). "Posted" is the AI comment's
+      // time (the applied time; the draft's createdAt is when it was generated), falling back to
+      // the draft's createdAt for a row whose comment cannot be found.
       const [ticketsResolvedByAIResult] = await db
         .select({ count: sql<number>`count(DISTINCT ${ticketAutoResponses.ticketId})::int` })
         .from(ticketAutoResponses)
@@ -4904,7 +4894,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           and(
             eq(ticketAutoResponses.wasApplied, true),
             inArray(tasks.status, ["resolved", "closed"]),
-            sql`COALESCE(${tasks.resolvedAt}, ${tasks.closedAt}) >= ${ticketAutoResponses.createdAt}`
+            sql`GREATEST(${tasks.resolvedAt}, ${tasks.closedAt}) >= COALESCE(
+              (SELECT MIN(c.created_at) FROM task_comments c
+                WHERE c.task_id = ${ticketAutoResponses.ticketId}
+                  AND c.user_id = ${ticketAutoResponses.respondedBy}
+                  AND c.content LIKE 'AI Auto-Response (confidence %'
+                  AND c.created_at >= ${ticketAutoResponses.createdAt}),
+              ${ticketAutoResponses.createdAt})`
           )
         );
 
@@ -4939,7 +4935,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
 
   // Real-time updates: the WebSocket lives in ../realtime/ws (session-authenticated upgrade).
-  attachRealtime(httpServer);
+  attachRealtime(httpServer, { trustProxy: Boolean(app.get("trust proxy")) });
 
   // Inbound email creates tickets outside this file; its "created" event goes to the
   // same recipients as POST /api/tasks (everyone connected who can see the ticket).
@@ -5299,8 +5295,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const id = parseInt(req.params.id);
         const { rating } = req.body;
 
-        if (rating < 1 || rating > 5) {
-          return fail(res, 400, "Rating must be between 1 and 5");
+        // `undefined < 1` is false, so a missing rating used to pass and store NaN.
+        if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+          return fail(res, 400, "Rating must be a whole number between 1 and 5");
+        }
+        if (!(await storage.getKnowledgeArticle(id))) {
+          return fail(res, 404, "Article not found");
         }
 
         // Update helpful/unhelpful counters based on rating
@@ -5332,7 +5332,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return fail(res, 404, "User not found", { code: "user_not_found" });
       }
 
-      if (user.role !== "agent") {
+      // The legacy role `user` is an agent (owner decision), so it gets agent stats too.
+      if (normalizeRole(user.role) !== "agent") {
         return fail(res, 403, "Access denied. Agent role required.");
       }
 

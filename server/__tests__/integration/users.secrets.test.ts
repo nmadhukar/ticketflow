@@ -10,7 +10,7 @@ import {
 import { findSecrets } from "./helpers/noSecrets";
 import { storage } from "../../storage";
 import { db } from "../../storage/db";
-import { tasks } from "@shared/schema";
+import { tasks, users } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
 describe("users: staff only, and no secrets in any response", () => {
@@ -28,19 +28,42 @@ describe("users: staff only, and no secrets in any response", () => {
   it("forbids customers from listing users", async () => {
     const customer = await createUser({ role: "customer" });
     const agent = await loginAs(ctx.app, customer);
-    expect((await agent.get("/api/users")).status).toBe(403);
-    expect(
-      (await agent.get("/api/users?forTeamMemberSelection=true")).status
-    ).toBe(403);
+    const denied = await agent.get("/api/users");
+    expect(denied.status).toBe(403);
+    // The 403 follows the error contract: a stable code, not just a status.
+    expect(denied.body.error).toBe("forbidden");
+    expect(typeof denied.body.message).toBe("string");
+    const deniedPicker = await agent.get("/api/users?forTeamMemberSelection=true");
+    expect(deniedPicker.status).toBe(403);
+    expect(deniedPicker.body.error).toBe("forbidden");
   });
 
-  it("still lets every staff role list users", async () => {
-    for (const role of ["admin", "manager", "agent"] as const) {
-      const u = await createUser({ role });
+  it("still lets every staff role list users, the legacy role 'user' (an agent) included", async () => {
+    for (const role of ["admin", "manager", "agent", "user"] as const) {
+      const u = await createUser({ role: role === "user" ? "agent" : role });
+      if (role === "user") await db.update(users).set({ role: "user" }).where(eq(users.id, u.id));
       const res = await (await loginAs(ctx.app, u)).get("/api/users");
-      expect(res.status).toBe(200);
+      expect({ role, status: res.status }).toEqual({ role, status: 200 });
       expect(Array.isArray(res.body)).toBe(true);
       expect(findSecrets(res.body)).toEqual([]);
+    }
+  });
+
+  it("the team-member picker: admins see staff and admins, managers and agents see agents and managers only", async () => {
+    const admin = await createUser({ role: "admin" });
+    const manager = await createUser({ role: "manager" });
+    const agent = await createUser({ role: "agent" });
+    const customer = await createUser({ role: "customer" });
+    const idsFor = async (viewer: typeof admin) =>
+      ((await (await loginAs(ctx.app, viewer)).get("/api/users?forTeamMemberSelection=true")).body as Array<{ id: string }>)
+        .map((u) => u.id)
+        .sort();
+    expect(await idsFor(admin)).toEqual([admin.id, manager.id, agent.id].sort());
+    for (const viewer of [manager, agent]) {
+      const ids = await idsFor(viewer);
+      expect(ids).toEqual([manager.id, agent.id].sort());
+      expect(ids).not.toContain(admin.id);
+      expect(ids).not.toContain(customer.id);
     }
   });
 

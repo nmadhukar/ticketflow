@@ -19,9 +19,19 @@ export default async function globalSetup(): Promise<void> {
   const { storage } = await import("../server/storage");
   const { db, pool } = await import("../server/storage/db");
   const { hashPassword } = await import("../server/services/auth");
-  const { users } = await import("../shared/schema");
+  const { users, bedrockSettings, emailProviders, teamsIntegrationSettings } = await import("../shared/schema");
 
   try {
+    // No credential held in the database may trigger an outbound call during the
+    // run: drop Bedrock settings, email providers and Teams webhooks (earlier
+    // integration runs on this database may have stored fake ones), then store
+    // one credential-less Bedrock row with auto-response and auto-learn OFF
+    // (with no row at all the app defaults auto-response to ON).
+    await db.delete(bedrockSettings);
+    await db.delete(emailProviders);
+    await db.delete(teamsIntegrationSettings);
+    await db.insert(bedrockSettings).values({ autoResponseEnabled: false, autoLearnEnabled: false });
+
     for (const spec of Object.values(E2E_USERS)) {
       const password = await hashPassword(process.env[spec.env]!);
       const [existing] = await db.select().from(users).where(eq(users.email, spec.email));

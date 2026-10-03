@@ -13,14 +13,18 @@ import {
   type WriteContext,
 } from "../services/tickets/ticketService";
 import { logSecurityEvent } from "../security/rbac";
+import { publicBaseUrl } from "../utils/appBaseUrl";
 import { runTool } from "./errors";
 
 /** Audit a refused status change like REST does, without an HTTP request. */
 function mcpWriteContext(user: User): WriteContext {
   return {
+    // The Teams card's link: APP_BASE_URL (there is no request to take an origin from);
+    // null when it is unset or unusable, and the card then has no link. Read per call.
+    actionBaseUrl: publicBaseUrl(),
     onStatusRefusal: ({ from, to, taskId }) =>
       logSecurityEvent(
-        { user: { userId: user.id, role: user.role }, ip: "mcp", get: () => undefined } as never,
+        { user: { id: user.id, role: user.role }, ip: "mcp", get: () => undefined } as never,
         "change_status",
         "ticket",
         false,
@@ -37,7 +41,16 @@ function mcpWriteContext(user: User): WriteContext {
  * protocol error with nothing the model can act on.
  */
 
-const id = z.number().describe("Ticket id (positive integer)");
+/**
+ * A number OR a string in the schema, on purpose: with `z.number()` the SDK rejects a
+ * non-numeric id itself, with a plain-text protocol error and no code. Accepting both lets
+ * the value reach the service, whose assertId answers a coded VALIDATION
+ * (`fieldErrors.id`) for anything that is not a positive integer, "12" and "abc" alike.
+ * The model still sees `number | string` and the description. `ticketId` narrows the
+ * type for the service, which re-checks it at run time.
+ */
+const id = z.union([z.number(), z.string()]).describe("Ticket id (positive integer)");
+const ticketId = (v: string | number): number => v as number;
 
 const ticketFields = {
   title: z.string().describe("Short summary (1-255 characters)").optional(),
@@ -82,7 +95,7 @@ export function registerTicketTools(server: McpServer, user: User): void {
         "Create a ticket. Requires title and category. The ticket is created as the key's owner; status starts as open and cannot be set.",
       inputSchema: create,
     },
-    (args) => runTool(() => createTicket(user, args))
+    (args) => runTool(() => createTicket(user, args, { actionBaseUrl: publicBaseUrl() }))
   );
 
   server.registerTool(
@@ -91,7 +104,7 @@ export function registerTicketTools(server: McpServer, user: User): void {
       description: "Get one ticket by id, optionally with its comments. Only tickets the key's owner can see.",
       inputSchema: z.object({ id, includeComments: z.boolean().describe("Also return the comments").optional() }),
     },
-    (args) => runTool(() => getTicket(user, args.id, { includeComments: args.includeComments === true }))
+    (args) => runTool(() => getTicket(user, ticketId(args.id), { includeComments: args.includeComments === true }))
   );
 
   server.registerTool(
@@ -112,15 +125,15 @@ export function registerTicketTools(server: McpServer, user: User): void {
       inputSchema: update,
     },
     (args) => {
-      const { id: ticketId, ...patch } = args;
-      return runTool(() => updateTicket(user, ticketId, patch, mcpWriteContext(user)));
+      const { id: rawId, ...patch } = args;
+      return runTool(() => updateTicket(user, ticketId(rawId), patch, mcpWriteContext(user)));
     }
   );
 
   server.registerTool(
     "close_ticket",
     { description: "Close a ticket (staff only). Closing an already closed ticket is an INVALID_STATE error.", inputSchema: byId },
-    (args) => runTool(() => closeTicket(user, args.id, mcpWriteContext(user)))
+    (args) => runTool(() => closeTicket(user, ticketId(args.id),mcpWriteContext(user)))
   );
 
   server.registerTool(
@@ -129,7 +142,7 @@ export function registerTicketTools(server: McpServer, user: User): void {
       description: "Reopen a resolved or closed ticket (back to open). Staff, or the customer who created it.",
       inputSchema: byId,
     },
-    (args) => runTool(() => reopenTicket(user, args.id, mcpWriteContext(user)))
+    (args) => runTool(() => reopenTicket(user, ticketId(args.id),mcpWriteContext(user)))
   );
 
   server.registerTool(
@@ -142,7 +155,7 @@ export function registerTicketTools(server: McpServer, user: User): void {
           .describe("Must be the boolean true to delete; anything else is a VALIDATION error")
           .optional() }),
     },
-    (args) => runTool(() => deleteTicket(user, args.id, args.confirm === true))
+    (args) => runTool(() => deleteTicket(user, ticketId(args.id),args.confirm === true))
   );
 
   server.registerTool(
@@ -151,6 +164,6 @@ export function registerTicketTools(server: McpServer, user: User): void {
       description: "Add a comment to a ticket (1-10000 characters).",
       inputSchema: z.object({ id, content: z.string().describe("Comment text") }),
     },
-    (args) => runTool(() => addComment(user, args.id, args.content))
+    (args) => runTool(() => addComment(user, ticketId(args.id),args.content))
   );
 }
