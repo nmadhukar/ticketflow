@@ -255,6 +255,14 @@ export function registerTeamsRoutes(app: Express): void {
       if (isNaN(teamId)) {
         return fail(res, 400, "Invalid team ID", { code: "invalid_id" });
       }
+      // Customers have no use for team records (the members route refuses them too).
+      const viewer = await storage.getUser(getUserId(req));
+      if (!viewer) {
+        return fail(res, 404, "User not found", { code: "user_not_found" });
+      }
+      if (viewer.role === "customer") {
+        return fail(res, 403, "Customers cannot access teams");
+      }
       const team = await storage.getTeam(teamId);
       if (!team) {
         return fail(res, 404, "Team not found");

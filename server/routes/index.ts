@@ -57,6 +57,7 @@ import { sessionTrackingMiddleware } from "../middleware/sessionTracking.middlew
 import {
   type User,
   insertTaskAttachmentSchema,
+  insertEscalationRuleSchema,
   ticketAutoResponses,
   ticketComplexityScores,
   knowledgeArticles,
@@ -230,6 +231,12 @@ const adminUserUpdateSchema = z.object({
     .optional(),
   isActive: z.boolean().optional(),
 });
+
+/** A Postgres unique-constraint violation, bare or wrapped by the driver. */
+const isUniqueViolation = (error: unknown): boolean => {
+  const e = error as { code?: string; cause?: { code?: string } } | null;
+  return e?.code === "23505" || e?.cause?.code === "23505";
+};
 
 export async function registerRoutes(app: Express): Promise<Server> {
   registerIdParams(app);
@@ -1644,8 +1651,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return fail(res, 403, "Admin access required");
         }
 
-        const ok = await bedrockIntegration.testConnection();
-        if (ok) {
+        // testConnection answers an object ({success, error?}); the object itself is always
+        // truthy, so only its `success` field says whether the model replied.
+        const result = await bedrockIntegration.testConnection();
+        if (result.success) {
           return res.json({ success: true });
         }
         return fail(res, 400, "Bedrock test failed", { code: "bedrock_test_failed" });
@@ -2579,7 +2588,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return fail(res, 403, "Admin access required");
       }
 
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
+      const parsed = Number.parseInt(String(req.query.limit ?? ""), 10);
+      const limit = Number.isInteger(parsed) ? Math.min(100, Math.max(1, parsed)) : 10;
       const popularFaqs = await storage.getPopularFaqs(limit);
       res.json(popularFaqs);
     } catch (error) {
@@ -3014,7 +3024,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json(rows);
       }
 
-      return fail(res, 403, "Forbidden");
+      // Ruling R40: every signed-in user can list departments; agents and
+      // customers get only id and name of the active ones.
+      const rows = await db
+        .select({ id: departments.id, name: departments.name })
+        .from(departments)
+        .where(eq(departments.isActive, true))
+        .orderBy(departments.name);
+      return res.json(rows);
     } catch (error) {
       logRouteError("Error fetching departments", error);
       fail(res, 500, "Failed to fetch departments");
@@ -3042,6 +3059,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(department);
     } catch (error) {
+      if (isUniqueViolation(error)) {
+        return fail(res, 409, "A department with that name already exists", { code: "department_name_in_use" });
+      }
       logRouteError("Error creating department", error);
       fail(res, 500, "Failed to create department");
     }
@@ -3063,12 +3083,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const id = parseInt(req.params.id);
       const department = await storage.updateDepartment(id, req.body);
+      if (!department) {
+        return fail(res, 404, "Department not found");
+      }
 
       // Broadcast department updated event
       await notifyStaff("department:updated", { ...department });
 
       res.json(department);
     } catch (error) {
+      if (isUniqueViolation(error)) {
+        return fail(res, 409, "A department with that name already exists", { code: "department_name_in_use" });
+      }
       logRouteError("Error updating department", error);
       fail(res, 500, "Failed to update department");
     }
@@ -3087,6 +3113,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const id = parseInt(req.params.id);
+        if (!(await storage.getDepartmentById(id))) {
+          return fail(res, 404, "Department not found");
+        }
+        // Teams reference their department; deleting it from under them is a
+        // foreign-key error (a bare 500), so say what to do instead.
+        const [{ n: teamCount }] = await db
+          .select({ n: count() })
+          .from(teams)
+          .where(eq(teams.departmentId, id));
+        if (Number(teamCount) > 0) {
+          return fail(res, 409, "Move or delete the department's teams first", {
+            code: "department_has_teams",
+          });
+        }
         await storage.deleteDepartment(id);
 
         // Broadcast department deleted event
@@ -4228,6 +4268,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const articleId = parseInt(req.params.id);
       const { wasHelpful } = req.body;
 
+      // A missing flag used to count as "not helpful" and push the score down.
+      if (typeof wasHelpful !== "boolean") {
+        return fail(res, 400, "wasHelpful must be true or false");
+      }
+      if (!(await storage.getKnowledgeArticle(articleId))) {
+        return fail(res, 404, "Article not found");
+      }
+
       const { knowledgeBaseService } = await import(
         "../services/ai/knowledgeBase"
       );
@@ -4343,13 +4391,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return fail(res, 403, "Admin access required");
         }
 
+        // Parsed, not stored raw: a missing field used to be a not-null error (500).
+        const values = insertEscalationRuleSchema.parse(req.body);
         const rule = await db
           .insert(escalationRules)
-          .values(req.body)
+          .values(values)
           .returning();
 
         res.json(rule[0]);
       } catch (error) {
+        if (error instanceof z.ZodError) {
+          return fail(res, 400, "Invalid escalation rule", { details: error.flatten() });
+        }
         logRouteError("Error creating escalation rule", error);
         fail(res, 500, "Failed to create escalation rule");
       }
@@ -4368,14 +4421,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const ruleId = parseInt(req.params.id);
+        const changes = insertEscalationRuleSchema.partial().parse(req.body);
         const rule = await db
           .update(escalationRules)
-          .set(req.body)
+          .set({ ...changes, updatedAt: new Date() })
           .where(eq(escalationRules.id, ruleId))
           .returning();
+        if (rule.length === 0) {
+          return fail(res, 404, "Escalation rule not found");
+        }
 
         res.json(rule[0]);
       } catch (error) {
+        if (error instanceof z.ZodError) {
+          return fail(res, 400, "Invalid escalation rule", { details: error.flatten() });
+        }
         logRouteError("Error updating escalation rule", error);
         fail(res, 500, "Failed to update escalation rule");
       }
@@ -4394,7 +4454,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const ruleId = parseInt(req.params.id);
-        await db.delete(escalationRules).where(eq(escalationRules.id, ruleId));
+        const removed = await db
+          .delete(escalationRules)
+          .where(eq(escalationRules.id, ruleId))
+          .returning({ id: escalationRules.id });
+        if (removed.length === 0) {
+          return fail(res, 404, "Escalation rule not found");
+        }
 
         res.json({ message: "Rule deleted successfully" });
       } catch (error) {
@@ -5307,8 +5373,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const id = parseInt(req.params.id);
         const { rating } = req.body;
 
-        if (rating < 1 || rating > 5) {
-          return fail(res, 400, "Rating must be between 1 and 5");
+        // `undefined < 1` is false, so a missing rating used to pass and store NaN.
+        if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+          return fail(res, 400, "Rating must be a whole number between 1 and 5");
+        }
+        if (!(await storage.getKnowledgeArticle(id))) {
+          return fail(res, 404, "Article not found");
         }
 
         // Update helpful/unhelpful counters based on rating
