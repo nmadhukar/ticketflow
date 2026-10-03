@@ -33,8 +33,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # Run database migrations before starting the application
-    command: sh -c "npm run db:push && node dist/index.js"
+    # Schema before start (ruling R32): the hand-written idempotent migrations (0007+) first,
+    # so drizzle-kit push has nothing of theirs left to create (push silently applies nothing
+    # when it would have to ask a question); the server then refuses to boot if anything
+    # required is still missing.
+    command: sh -c "npm run db:migrate-sql && npm run db:push && node dist/index.js"
     environment:
       # Core runtime
       NODE_ENV: ${NODE_ENV:-production}

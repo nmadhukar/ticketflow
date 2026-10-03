@@ -32,6 +32,12 @@ app.use(requestLogger(log));
     console.log("PORT:", process.env.PORT);
     console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
 
+    // Ruling R32: refuse to boot (one log line, exit 1) when the database lacks a
+    // schema object the code needs, e.g. after drizzle-kit push silently applied nothing.
+    const { pool } = await import("./storage/db");
+    const { assertSchemaReady } = await import("./startup/schemaCheck");
+    if (!(await assertSchemaReady({ db: pool }))) return;
+
     // Required seed data always; demo data only with SEED_DEMO_DATA=true
     try {
       const { runSeeders } = await import("./seed/runSeeders");

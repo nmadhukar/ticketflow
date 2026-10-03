@@ -76,9 +76,8 @@ temp/
 Thumbs.db
 .DS_Store
 
-# Database migrations (if not needed at runtime)
-migrations/
-# Keep if you need to run migrations in container, remove if migrations run separately
+# Database migrations are NOT ignored: the container runs scripts/apply-sql-migrations.mjs
+# (migrations/0007+) before drizzle-kit push (ruling R32).
 
 # Config files with secrets
 config/cred.txt
