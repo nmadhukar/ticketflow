@@ -6,9 +6,9 @@ import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
 import { createUser } from "./helpers/fixtures";
 import { setTicketCreatedBroadcaster } from "../../services/tickets/create";
-import { db } from "../../storage/db";
+import { db, pool } from "../../storage/db";
 import { storage } from "../../storage";
-import { claimMessage, emailInboundDeps } from "../../routes/email";
+import { claimMessage, emailInboundDeps, markMessageDone, releaseMessageClaim } from "../../routes/email";
 import { clearCertCache, type SnsMessage } from "../../services/email/snsVerify";
 import { createSnsTestSigner } from "../utils/snsTestSigner";
 import sesReceived from "../fixtures/ses/ses-received.json";
@@ -156,12 +156,16 @@ describe("inbound email: insert and done mark share one transaction (R46)", () =
     it("(c) a pre-existing ticket holding the next number forces a 23505: the savepoint retry succeeds and the mark is committed", async () => {
       const owner = await createUser({ role: "customer", email: EMAIL });
       const taken = await existingTicket(owner.id);
+      // The clash really happened: the retry path (resync on the transaction) ran exactly once.
+      const resync = jest.spyOn(storage as any, "resyncTicketCounter");
       // The counter is behind the table, as after a ticket written outside it.
       await db.execute(sql`UPDATE ticket_number_counters SET last_number = last_number - 1`);
       const msg = newMail();
       const res = await post(msg);
       expect(res.status).toBe(200);
       expect(res.body).toMatchObject({ status: "created" });
+      expect(resync).toHaveBeenCalledTimes(1);
+      expect(resync.mock.calls[0][0]).toBeDefined(); // called with the transaction
       const rows = await db.select().from(tasks);
       expect(rows).toHaveLength(2);
       const created = rows.find((r) => r.id === res.body.ticketId)!;
@@ -211,6 +215,8 @@ describe("inbound email: insert and done mark share one transaction (R46)", () =
       expect((await dedupe(id)).status).toBe("processing");
     });
 
+    // (A ticket-number clash cannot happen for a comment: it takes no number. The brief's third
+    // case for replies is therefore this normal path: comment, history row and mark commit together.)
     it("the normal path writes the comment, its history row and the done mark", async () => {
       const owner = await createUser({ role: "customer", email: EMAIL });
       const ticket = await existingTicket(owner.id);
@@ -221,6 +227,46 @@ describe("inbound email: insert and done mark share one transaction (R46)", () =
       expect((await db.select().from(taskHistory).where(eq(taskHistory.action, "commented"))).length).toBe(1);
       expect((await dedupe(msg.MessageId as string)).status).toBe("done");
     });
+  });
+
+  it("never asks the pool for a second connection inside the transaction: a cold company-settings cache and pool.max concurrent creates all finish", async () => {
+    await createUser({ role: "customer", email: EMAIL });
+    const n = ((pool as unknown as { options: { max: number } }).options.max ?? 10) + 2;
+    const max = n - 2;
+    // Park the first `max` creates, each holding its transaction's connection, until all are in:
+    // the pool is then empty, which is exactly when a pool query from inside a transaction hangs.
+    let arrived = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const original = storage.createTask.bind(storage);
+    jest.spyOn(storage, "createTask").mockImplementation(async (t: any, tx?: any) => {
+      if (tx && ++arrived === max) {
+        (storage as any).companySettingsCache = null; // cold at the moment every connection is held
+        release();
+      }
+      if (tx && arrived <= max) await gate;
+      return original(t, tx);
+    });
+    const msgs = Array.from({ length: n }, () => newMail());
+    const results = await Promise.all(msgs.map((m) => post(m)));
+    expect(results.map((r) => r.status)).toEqual(Array(n).fill(200));
+    expect(await countTickets()).toBe(n);
+    const numbers = (await db.select().from(tasks)).map((t) => t.ticketNumber);
+    expect(new Set(numbers).size).toBe(n);
+  }, 30_000);
+
+  it("a 'done' row is never deleted by a release, even with the right token (ambiguous COMMIT)", async () => {
+    const id = `ambiguous-${randomUUID()}`;
+    const claim = await claimMessage(id);
+    if (claim.state !== "claimed") throw new Error("expected a claim");
+    expect(await markMessageDone(id, claim.token)).toBe(true);
+    expect(await releaseMessageClaim(id, claim.token)).toBe(false);
+    expect((await dedupe(id)).status).toBe("done");
+    // and a 'processing' row of the same holder is still released
+    const other = `ambiguous-${randomUUID()}`;
+    const c2 = await claimMessage(other);
+    if (c2.state !== "claimed") throw new Error("expected a claim");
+    expect(await releaseMessageClaim(other, c2.token)).toBe(true);
   });
 
   it("a message that writes nothing is still marked done, outside any transaction", async () => {

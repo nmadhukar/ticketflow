@@ -479,7 +479,7 @@ export class DatabaseStorage implements IStorage {
   // lock is held until that transaction ends and a rollback gives the number back. Without one it
   // opens its own transaction exactly as before.
   async getNextTicketNumber(tx?: DbTx): Promise<string> {
-    const settings = await this.getCompanySettings();
+    const settings = await this.getCompanySettings(tx);
     const prefix = settings?.ticketPrefix || "TKT";
     const year = new Date().getFullYear();
     const head = `${prefix}-${year}-`;
@@ -516,7 +516,7 @@ export class DatabaseStorage implements IStorage {
   // Raise the counter to at least the numeric max of existing tickets for this
   // prefix and year (recovery after a ticket was written outside the counter).
   private async resyncTicketCounter(tx?: DbTx): Promise<void> {
-    const settings = await this.getCompanySettings();
+    const settings = await this.getCompanySettings(tx);
     const prefix = settings?.ticketPrefix || "TKT";
     const year = new Date().getFullYear();
     const head = `${prefix}-${year}-`;
@@ -1931,7 +1931,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Company settings operations
-  async getCompanySettings(): Promise<CompanySettings | undefined> {
+  // `conn`: inside a transaction the cold-cache read must use the transaction's own connection;
+  // a pool query there waits for a free connection, and with every connection held by a
+  // transaction doing the same, nothing ever frees one (deadlock).
+  async getCompanySettings(conn?: DbTx): Promise<CompanySettings | undefined> {
     // Check cache first
     const now = Date.now();
     if (
@@ -1942,7 +1945,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     // Cache miss or expired - fetch from database
-    const [settings] = await db.select().from(companySettings).limit(1);
+    const [settings] = await (conn ?? db).select().from(companySettings).limit(1);
 
     // Update cache
     this.companySettingsCache = {

@@ -132,7 +132,9 @@ class ClaimLostError extends Error {
 export async function releaseMessageClaim(messageId: string, token: string): Promise<boolean> {
   const rows = await db
     .delete(snsMessageDedupe)
-    .where(ownedBy(messageId, token))
+    // Only a 'processing' row: after an ambiguous COMMIT (the done mark committed but the answer
+    // was lost) the row is 'done' and must never be deleted, or a retry would duplicate.
+    .where(and(ownedBy(messageId, token), eq(snsMessageDedupe.status, "processing")))
     .returning({ id: snsMessageDedupe.messageId });
   return rows.length > 0;
 }

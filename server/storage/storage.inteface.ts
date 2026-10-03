@@ -334,7 +334,7 @@ export interface IStorage {
   deleteTaskAttachment(id: number): Promise<void>;
 
   // Company settings operations
-  getCompanySettings(): Promise<CompanySettings | undefined>;
+  getCompanySettings(conn?: DbTx): Promise<CompanySettings | undefined>;
   updateCompanySettings(
     settings: Partial<InsertCompanySettings>,
     userId: string

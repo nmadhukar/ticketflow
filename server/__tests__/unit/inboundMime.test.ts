@@ -107,6 +107,10 @@ describe("parseSingleMailbox: a display name equal to the address (R65)", () => 
     "a@b.com\\ <a@b.com>",
     '"a@b.com" (c@d.com) <a@b.com>',
     '"<a@b.com>" <a@b.com>',
+    '"a@b" ".com" <a@b.com>',
+    '"a@b.com" "" <a@b.com>',
+    "\"K@b.com\" <k@b.com>", // Kelvin sign: toLowerCase() would fold it to "k"
+    "K@b.com <k@b.com>",
   ])("still refuses %s", (value) => {
     expect(parseSingleMailbox(value)).toBeNull();
   });

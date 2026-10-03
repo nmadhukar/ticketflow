@@ -3839,7 +3839,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Claim the draft first: of two concurrent applies only one gets the row back and posts.
       const claimed = await db
         .update(ticketAutoResponses)
-        .set({ wasApplied: true, appliedAt: sql`now()` }) // R48
+        .set({ wasApplied: true, appliedAt: new Date() }) // R48 (a JS time, like resolvedAt)
         .where(and(eq(ticketAutoResponses.id, draft.id), eq(ticketAutoResponses.wasApplied, false)))
         .returning({ id: ticketAutoResponses.id });
       if (claimed.length === 0) return res.json({ applied: true, alreadyApplied: true });

@@ -131,12 +131,17 @@ describe("ai-analytics uses applied_at (R48) and the AI comment match is a SQL f
       expect(after.appliedAt).not.toBeNull();
     });
 
-    it("a failed comment write releases the claim and clears applied_at (undo)", async () => {
+    it("the claim sets applied_at, and a failed comment write releases it and clears it again (undo)", async () => {
       const id = await newTicket();
       const row = await draft(id, { createdAt: h(1), wasApplied: false });
-      jest.spyOn(storage, "addTaskComment").mockRejectedValue(new Error("db down"));
+      let seenDuringWrite: Date | null = null;
+      jest.spyOn(storage, "addTaskComment").mockImplementation(async () => {
+        seenDuringWrite = (await rowOf(row.id)).appliedAt; // the claim is in place while the comment is written
+        throw new Error("db down");
+      });
       const res = await adminA.post(`/api/tasks/${id}/auto-response/apply`);
       expect(res.status).toBeGreaterThanOrEqual(500);
+      expect(seenDuringWrite).not.toBeNull();
       const after = await rowOf(row.id);
       expect(after.wasApplied).toBe(false);
       expect(after.appliedAt).toBeNull();

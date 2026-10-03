@@ -76,6 +76,7 @@ services:
       # Category of emailed tickets; unset or unknown = support.
       INBOUND_EMAIL_CATEGORY: ${INBOUND_EMAIL_CATEGORY:-}
       INBOUND_EMAIL_MAX_HEADER_BYTES: ${INBOUND_EMAIL_MAX_HEADER_BYTES:-}
+      PG_POOL_MAX: ${PG_POOL_MAX:-}
 
       # Microsoft 365 SSO from the environment (the admin panel's SSO settings take precedence).
       MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}

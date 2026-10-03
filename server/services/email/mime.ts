@@ -281,6 +281,8 @@ export function parseSingleMailbox(value: string | undefined): string | null {
   let hasAngle = false;
   let quoted = false; // a quoted string appeared in the current mailbox
   let quotedText = ""; // the text of the quoted strings of the current mailbox
+  let quotedCount = 0; // how many quoted strings the current mailbox has
+  const asciiLower = (s: string) => s.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
 
   const finish = (): boolean => {
     let address: string;
@@ -291,8 +293,17 @@ export function parseSingleMailbox(value: string | undefined): string | null {
       // write the address as the name. Anything else ("x@y <a@b>": which one is the sender?),
       // including a mix of quoted and unquoted name text, is refused.
       if (display.includes("@") || quotedText.includes("@")) {
-        const shown = display.trim() === "" ? quotedText.trim() : quotedText.trim() === "" ? display.trim() : null;
-        if (shown === null || shown.toLowerCase() !== address.toLowerCase()) return false;
+        // One quoted string at most (`"a@b" ".com"` would splice), and ASCII-only case folding:
+        // toLowerCase() maps the Kelvin sign to "k", so `"K@b.com"` would equal `k@b.com`.
+        const shown =
+          quotedCount > 1
+            ? null
+            : display.trim() === ""
+              ? quotedText.trim()
+              : quotedText.trim() === ""
+                ? display.trim()
+                : null;
+        if (shown === null || asciiLower(shown) !== asciiLower(address)) return false;
       }
     } else {
       // No <...>: the text IS the address, so a quoted string anywhere in it (a quoted local
@@ -302,6 +313,7 @@ export function parseSingleMailbox(value: string | undefined): string | null {
     }
     quoted = false;
     quotedText = "";
+    quotedCount = 0;
     if (address === ""|| address.length > 254 || !ADDR_SPEC.test(address)) return false;
     if (address.indexOf("@") !== address.lastIndexOf("@")) return false;
     addresses.push(address);
@@ -316,6 +328,7 @@ export function parseSingleMailbox(value: string | undefined): string | null {
     if (ch === '"') {
       if (inAngle || hasAngle) return null; // nothing quoted inside or after the address
       quoted = true;
+      quotedCount++;
       i++;
       while (i < value.length && value[i] !== '"') {
         // A quoted display name has no business holding a bracket; refusing them means the
