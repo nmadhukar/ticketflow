@@ -73,6 +73,74 @@ describe("e2e guards", () => {
     }
   });
 
+  describe("the no-egress preload reads DATABASE_URL defensively (R54)", () => {
+    // Prints ALLOWED/BLOCKED/OTHER per target. A target that is allowed really starts a connect
+    // (to an address nothing answers) and destroys it at once, so no packet needs to be answered.
+    const probe = (databaseUrl: string | undefined, targets: Array<[string, number]>) => {
+      const dir = mkdtempSync(path.join(tmpdir(), "egress-"));
+      const log = path.join(dir, "egress.log");
+      try {
+        const script = `
+          const net = require("node:net");
+          const attempt = (host, port) => {
+            try { const s = net.connect(port, host); s.on("error", () => {}); s.destroy(); return "ALLOWED"; }
+            catch (e) { return /E2E_EGRESS_BLOCKED/.test(String(e)) ? "BLOCKED" : "OTHER"; }
+          };
+          for (const [h, p] of ${JSON.stringify(targets)}) console.log(h + ":" + p + "=" + attempt(h, p));
+        `;
+        const env: NodeJS.ProcessEnv = { ...process.env, E2E_EGRESS_LOG: log };
+        if (databaseUrl === undefined) delete env.DATABASE_URL;
+        else env.DATABASE_URL = databaseUrl;
+        const res = spawnSync(process.execPath, ["--require", preload, "-e", script], { encoding: "utf8", env, timeout: 20000 });
+        return { status: res.status, out: res.stdout, err: res.stderr };
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    };
+
+    it("an empty DATABASE_URL loads without throwing and allows loopback only", () => {
+      const r = probe("", [["127.0.0.1", 5432], ["db.egress-test.invalid", 5432]]);
+      expect(r.status).toBe(0);
+      expect(r.out).toContain("127.0.0.1:5432=ALLOWED");
+      expect(r.out).toContain("db.egress-test.invalid:5432=BLOCKED");
+    });
+
+    it("an unparsable DATABASE_URL loads without throwing and allows loopback only", () => {
+      const r = probe("not a url at all", [["localhost", 5432], ["db.egress-test.invalid", 5432]]);
+      expect(r.status).toBe(0);
+      expect(r.out).toContain("localhost:5432=ALLOWED");
+      expect(r.out).toContain("db.egress-test.invalid:5432=BLOCKED");
+    });
+
+    it("a DATABASE_URL without a port allows the given host on 5432 and nothing else", () => {
+      const r = probe("postgres://u:p@db.egress-test.invalid/ticketflow_test", [
+        ["db.egress-test.invalid", 5432],
+        ["db.egress-test.invalid", 5433],
+        ["other.egress-test.invalid", 5432],
+      ]);
+      expect(r.status).toBe(0);
+      expect(r.out).toContain("db.egress-test.invalid:5432=ALLOWED");
+      expect(r.out).toContain("db.egress-test.invalid:5433=BLOCKED");
+      expect(r.out).toContain("other.egress-test.invalid:5432=BLOCKED");
+    });
+
+    it("an IPv6 host in DATABASE_URL allows exactly that host and port, bracketed or not", () => {
+      const r = probe("postgresql://u:p@[fd00::1]:6543/db", [
+        ["fd00::1", 6543],
+        ["[fd00::1]", 6543],
+        ["fd00::1", 5432],
+        ["[fd00::1]", 5432],
+        ["fd00::2", 6543],
+      ]);
+      expect(r.status).toBe(0);
+      expect(r.out).toContain("fd00::1:6543=ALLOWED");
+      expect(r.out).toContain("[fd00::1]:6543=ALLOWED");
+      expect(r.out).toContain("fd00::1:5432=BLOCKED");
+      expect(r.out).toContain("[fd00::1]:5432=BLOCKED");
+      expect(r.out).toContain("fd00::2:6543=BLOCKED");
+    });
+  });
+
   it("the playwright config rejects an invalid E2E_PORT with a clear message", () => {
     for (const bad of ["80", "70000", "abc", "5055.5"]) {
       const res = spawnSync("npx", ["playwright", "test", "--list"], {
@@ -104,6 +172,24 @@ describe("tooling config", () => {
     // An unescaped dot would also match these.
     expect(pattern.test("atsx")).toBe(false);
     expect(pattern.test("a-ts")).toBe(false);
+  });
+
+  it("the Dockerfile CMD and the docker-compose app command run the same three steps in the same order (R66)", () => {
+    const steps = (command: string) => command.split("&&").map((s) => s.trim());
+    const expected = ["npm run db:migrate-sql", "npm run db:push", "node dist/index.js"];
+
+    // CMD ["sh", "-c", "..."] is a JSON array; take the last CMD instruction.
+    const cmdLines = read("Dockerfile").split(/\r?\n/).filter((l) => /^\s*CMD\s/.test(l));
+    expect(cmdLines).toHaveLength(1);
+    const cmd: string[] = JSON.parse(cmdLines[0].replace(/^\s*CMD\s+/, ""));
+    expect(cmd.slice(0, 2)).toEqual(["sh", "-c"]);
+    expect(steps(cmd[2])).toEqual(expected);
+
+    const compose = read("docker-compose.yml").split(/\r?\n/).find((l) => /^\s+command:\s/.test(l));
+    expect(compose).toBeDefined();
+    const composeCommand = /command:\s*sh -c "([^"]+)"/.exec(compose!)?.[1];
+    expect(composeCommand).toBeDefined();
+    expect(steps(composeCommand!)).toEqual(expected);
   });
 
   it("scripts/test-db.mjs and the integration env helper default to the same database URL", () => {

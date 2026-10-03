@@ -1,5 +1,8 @@
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { buildSync } from "esbuild";
 import express from "express";
 import request from "supertest";
 import { sanitizeRichHtml } from "../../security/sanitizeHtml";
@@ -168,21 +171,62 @@ describe("development switch (one helper for the CSP and the server entry)", () 
 });
 
 describe("FU5: built server with NODE_ENV unset", () => {
+  // R54: the third argument is the directory of the running module, not a cwd-derived path.
   const dist = "/app/dist";
-  it("refuses with one line when unset and the entry file is inside dist", () => {
+  it("refuses with one line when unset and the module lives in a directory named dist", () => {
     const line = unsetNodeEnvBootProblem(undefined, "/app/dist/index.js", dist);
     expect(line).toMatch(/NODE_ENV is not set/);
     expect(line).not.toMatch(/\n/);
     expect(unsetNodeEnvBootProblem("", "/app/dist/index.js", dist)).not.toBeNull();
     // Windows separators
     expect(unsetNodeEnvBootProblem(undefined, "C:\\app\\dist\\index.js", "C:\\app\\dist")).not.toBeNull();
+    // Whatever the cwd is, the answer depends only on where the module is.
+    expect(unsetNodeEnvBootProblem(undefined, "/elsewhere/entry.js", "/srv/app/dist")).not.toBeNull();
   });
-  it("lets tsx (npm run dev) and any set NODE_ENV through", () => {
-    expect(unsetNodeEnvBootProblem(undefined, "/app/server/index.ts", dist)).toBeNull();
-    expect(unsetNodeEnvBootProblem(undefined, "/app/distant/index.js", dist)).toBeNull();
+  it("lets tsx (npm run dev, module in server/) and any set NODE_ENV through", () => {
+    expect(unsetNodeEnvBootProblem(undefined, "/app/server/index.ts", "/app/server")).toBeNull();
+    expect(unsetNodeEnvBootProblem(undefined, "/app/distant/index.js", "/app/distant")).toBeNull();
+    expect(unsetNodeEnvBootProblem(undefined, "/app/server/index.ts", undefined)).toBeNull();
     for (const env of ["production", "development", "test"]) {
       expect(unsetNodeEnvBootProblem(env, "/app/dist/index.js", dist)).toBeNull();
     }
+  });
+  describe("wiring: the bundled bootGuard decides by its own path, whatever the cwd", () => {
+    const root = path.resolve(__dirname, "../../..");
+    const bundleAndRun = (dirName: string) => {
+      const work = mkdtempSync(path.join(root, ".tmp-bootguard-"));
+      try {
+        const outfile = path.join(work, dirName, "index.js");
+        // The JS API, not the CLI: node_modules/esbuild/bin/esbuild is a native binary on Linux.
+        buildSync({
+          entryPoints: [path.join(root, "server/bootGuard.ts")],
+          bundle: true,
+          platform: "node",
+          format: "esm",
+          packages: "external",
+          outfile,
+          logLevel: "error",
+        });
+        // cwd is the OS temp directory, not the app root, so a cwd-derived dist would not match.
+        return spawnSync(process.execPath, [outfile], {
+          cwd: tmpdir(),
+          encoding: "utf8",
+          env: { ...process.env, NODE_ENV: "" },
+          timeout: 60000,
+        });
+      } finally {
+        rmSync(work, { recursive: true, force: true });
+      }
+    };
+    it("a bundle in <root>/dist with NODE_ENV empty and cwd elsewhere refuses with exit 1", () => {
+      const res = bundleAndRun("dist");
+      expect(res.status).toBe(1);
+      expect(res.stderr).toContain("Refusing to start: NODE_ENV is not set");
+    });
+    it("the same module in a directory not named dist (server/) is not refused by this guard", () => {
+      const res = bundleAndRun("server");
+      expect(res.stderr).not.toContain("Refusing to start: NODE_ENV is not set");
+    });
   });
 });
 

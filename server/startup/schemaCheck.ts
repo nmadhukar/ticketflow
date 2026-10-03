@@ -21,11 +21,21 @@ export interface RequiredTable {
   columns: string[];
 }
 
+// To extend: a new column on a listed table goes on its own line in that table's `columns`; a new
+// table gets its own entry appended at the END of this array (with the migration number in a
+// comment). server/__tests__/integration/schemaSafety.test.ts derives the migration files it
+// applies from the migrations/ directory, so a new migration is covered there automatically.
 export const REQUIRED_TABLES: RequiredTable[] = [
   {
     table: "users",
     // 0010 login lockout, 0011 forced password change, session revocation.
-    columns: ["failed_login_attempts", "locked_until", "must_change_password", "password_changed_at"],
+    // One column per line, newest last: two branches adding a column then merge without a conflict.
+    columns: [
+      "failed_login_attempts",
+      "locked_until",
+      "must_change_password",
+      "password_changed_at",
+    ],
   },
   // connect-pg-simple runs with createTableIfMissing: false.
   { table: "sessions", columns: ["sid", "sess", "expire"] },
