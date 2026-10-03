@@ -164,7 +164,16 @@ export const teamAdmins = pgTable(
     permissions: text("permissions").array(), // Optional: for future extensibility
   },
   (table) => [
-    unique("unique_team_admin").on(table.userId, table.teamId),
+    // R50 note: three other tables used `.array().default([])`. drizzle-kit 0.30 reads an empty
+    // array default back from Postgres as '{""}' (its introspection splits "" into one empty
+    // element), so no declaration of `'{}'` can ever compare equal and every push re-issued
+    // SET DEFAULT. Those columns (api_keys.permissions, email_templates.variables,
+    // teams_integration_settings.notification_types) therefore have no database default; drizzle
+    // inserts still write [] through $defaultFn, and every reader already treats NULL as empty.
+    // R50: columns in TABLE order (team_id, user_id). drizzle-kit push reads a unique
+    // constraint's columns back in table order, so declaring (user_id, team_id) made every
+    // push drop and re-add it. Uniqueness is the same either way.
+    unique("unique_team_admin").on(table.teamId, table.userId),
     index("idx_team_admins_team_user").on(table.teamId, table.userId),
     index("idx_team_admins_user").on(table.userId),
     index("idx_team_admins_team").on(table.teamId),
@@ -340,7 +349,7 @@ export const apiKeys = pgTable(
     name: varchar("name", { length: 255 }).notNull(),
     keyHash: varchar("key_hash", { length: 255 }).notNull(), // "sha256:" + hex of the key; never the key
     keyPrefix: varchar("key_prefix", { length: 10 }).notNull(), // first few chars for identification
-    permissions: text("permissions").array().default([]), // array of permission strings
+    permissions: text("permissions").array().$defaultFn(() => []), // array of permission strings; R50: no DB default (see note at teamAdmins) // array of permission strings
     lastUsedAt: timestamp("last_used_at"),
     expiresAt: timestamp("expires_at"),
     isActive: boolean("is_active").default(true),
@@ -436,7 +445,7 @@ export const emailTemplates = pgTable("email_templates", {
   name: varchar("name", { length: 100 }).notNull().unique(), // ticket_created, ticket_updated, etc.
   subject: varchar("subject", { length: 255 }).notNull(),
   body: text("body").notNull(), // HTML template with variables
-  variables: text("variables").array().default([]), // available template variables
+  variables: text("variables").array().$defaultFn(() => []), // available template variables
   isActive: boolean("is_active").default(true),
   updatedBy: varchar("updated_by").references(() => users.id),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -745,7 +754,7 @@ export const teamsIntegrationSettings = pgTable("teams_integration_settings", {
   channelId: varchar("channel_id"),
   channelName: varchar("channel_name"),
   webhookUrl: text("webhook_url"),
-  notificationTypes: text("notification_types").array().default([]), // ticket_created, ticket_updated, ticket_assigned, etc.
+  notificationTypes: text("notification_types").array().$defaultFn(() => []), // ticket_created, ticket_updated, ticket_assigned, etc.
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

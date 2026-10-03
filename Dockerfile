@@ -15,9 +15,10 @@ ENV NODE_ENV=production \
     PORT=5000
 RUN npm run build
 
-# 3) Run the server bundle. This CMD alone runs NEITHER `npm run db:migrate-sql` NOR
-#    `npm run db:push`; the schema check then refuses to boot on an unmigrated database.
-#    docker-compose.yml overrides the command to do the schema steps first:
-#    `npm run db:migrate-sql && npm run db:push && node dist/index.js`. Deploy with the compose file.
+# 3) Apply the schema, then run the server bundle: the same three steps, in the same order, as
+#    the `command:` in docker-compose.yml (R66; a unit test keeps the two identical). A
+#    Dockerfile-only deploy (Coolify) therefore migrates too, and the R32 drift check still
+#    applies: the hand-written idempotent migrations run first, then drizzle-kit push, and the
+#    server refuses to boot if a required schema object is still missing.
 EXPOSE 5000
-CMD ["node", "dist/index.js"]
+CMD ["sh", "-c", "npm run db:migrate-sql && npm run db:push && node dist/index.js"]

@@ -10,21 +10,25 @@ export function isDevelopmentEnv(nodeEnv: string | undefined = process.env.NODE_
 }
 
 /**
- * FU5: the built server (`node dist/index.js`, i.e. `npm start`) with NODE_ENV unset
+ * FU5/R54: the built server (`node dist/index.js`, i.e. `npm start`) with NODE_ENV unset
  * would run in development mode, including the permissive CSP. Returns the one line to
- * log when that is the case, or null. `npm run dev` runs `server/index.ts` through tsx,
- * which is not inside `dist`, so it keeps defaulting to development.
+ * log when that is the case, or null.
+ *
+ * "Built" is decided by where the running MODULE lives, not by the process's cwd: the bundle
+ * is one file, `<root>/dist/index.js`, so its own directory (`import.meta.dirname`) is named
+ * `dist`. `npm run dev` runs `server/index.ts` through tsx, where that directory is `server`,
+ * so it keeps defaulting to development. A cwd other than the app root (`docker run -w /`)
+ * therefore no longer skips the guard.
  */
 export function unsetNodeEnvBootProblem(
   nodeEnv: string | undefined,
   entryFile: string | undefined,
-  distDir: string,
+  moduleDir: string | undefined,
 ): string | null {
   if (nodeEnv) return null;
-  if (!entryFile) return null;
+  if (!moduleDir) return null;
   const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
-  const dist = norm(distDir);
-  const entry = norm(entryFile);
-  if (entry !== dist && !entry.startsWith(`${dist}/`)) return null;
-  return `Refusing to start: NODE_ENV is not set but the built server (${entry}) is running. Set NODE_ENV=production (or development or test explicitly).`;
+  if (norm(moduleDir).split("/").pop() !== "dist") return null;
+  const where = entryFile ? norm(entryFile) : `${norm(moduleDir)}/index.js`;
+  return `Refusing to start: NODE_ENV is not set but the built server (${where}) is running. Set NODE_ENV=production (or development or test explicitly).`;
 }
