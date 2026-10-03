@@ -51,6 +51,20 @@ describe("team detail, members (G2) and team admins instead of member roles (G3)
       expect(res.body).toMatchObject({ id: w.t1.id, name: "Platform", departmentId: w.t1.departmentId });
     });
 
+    it("a customer gets 403 forbidden and no team record; staff roles get it", async () => {
+      const w = await world();
+      const denied = await (await w.as(w.c1)).get(`/api/teams/${w.t1.id}`);
+      expect(denied.status).toBe(403);
+      expect(denied.body.error).toBe("forbidden");
+      expect(denied.body.name).toBeUndefined();
+      for (const who of ["admin", "m1", "m2", "a1", "a3"] as const) {
+        const res = await (await w.as((w as any)[who] as User)).get(`/api/teams/${w.t1.id}`);
+        expect([who, res.status]).toEqual([who, 200]);
+      }
+      const request = (await import("supertest")).default;
+      expect((await request(ctx.app).get(`/api/teams/${w.t1.id}`)).status).toBe(401);
+    });
+
     it("an unknown team is 404 and a non-numeric id is 400", async () => {
       const w = await world();
       const admin = await w.as(w.admin);

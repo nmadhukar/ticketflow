@@ -2593,7 +2593,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return fail(res, 403, "Admin access required");
       }
 
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
+      const parsed = Number.parseInt(String(req.query.limit ?? ""), 10);
+      const limit = Number.isInteger(parsed) ? Math.min(100, Math.max(1, parsed)) : 10;
       const popularFaqs = await storage.getPopularFaqs(limit);
       res.json(popularFaqs);
     } catch (error) {
@@ -3028,7 +3029,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json(rows);
       }
 
-      return fail(res, 403, "Forbidden");
+      // Ruling R40: every signed-in user can list departments; agents and
+      // customers get only id and name of the active ones.
+      const rows = await db
+        .select({ id: departments.id, name: departments.name })
+        .from(departments)
+        .where(eq(departments.isActive, true))
+        .orderBy(departments.name);
+      return res.json(rows);
     } catch (error) {
       logRouteError("Error fetching departments", error);
       fail(res, 500, "Failed to fetch departments");

@@ -121,7 +121,7 @@ describe("departments: create, rename, delete (G5)", () => {
     expect(await names()).toEqual(["Support"]);
   });
 
-  it("listing is scoped by role: admin all, manager their active ones, agent and customer 403", async () => {
+  it("listing by role (R40): admin all rows, manager their active ones, agent and customer id and name of active ones", async () => {
     const a = await admin();
     const manager = await createUser({ role: "manager" });
     const other = await createUser({ role: "manager" });
@@ -134,9 +134,18 @@ describe("departments: create, rename, delete (G5)", () => {
     expect((await a.get("/api/departments")).body.map((d: any) => d.name).sort()).toEqual(["Mine", "Mine inactive", "Theirs"]);
     const m = await loginAs(ctx.app, manager);
     expect((await m.get("/api/departments")).body.map((d: any) => d.name)).toEqual(["Mine"]);
+    // R40: agents and customers get {id, name} of ACTIVE departments only.
+    const all = await db.select().from(departments);
+    const active = all.filter((d) => d.isActive).map((d) => ({ id: d.id, name: d.name })).sort((x, y) => x.name.localeCompare(y.name));
+    expect(active).toHaveLength(2);
     for (const role of ["agent", "customer"] as const) {
       const u = await loginAs(ctx.app, await createUser({ role }));
-      expect([role, (await u.get("/api/departments")).status]).toEqual([role, 403]);
+      const res = await u.get("/api/departments");
+      expect([role, res.status]).toEqual([role, 200]);
+      expect(res.body).toEqual(active);
+      expect(JSON.stringify(res.body)).not.toMatch(/managerId|description|isActive/);
     }
+    const request = (await import("supertest")).default;
+    expect((await request(ctx.app).get("/api/departments")).status).toBe(401);
   });
 });

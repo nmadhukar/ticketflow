@@ -210,6 +210,26 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
       expect(top.body.map((r: any) => r.questionHash)).toEqual(["h2", "h3"]);
     });
 
+    it("?limit is an integer clamped to 1..100; anything else falls back to 10", async () => {
+      await db.insert(faqCache).values(
+        Array.from({ length: 12 }, (_, i) => ({ questionHash: `h${i}`, originalQuestion: `q${i}`, normalizedQuestion: `q${i}`, answer: "a", hitCount: i + 1 }))
+      );
+      const admin = await adminAgent();
+      const len = async (qs: string) => {
+        const res = await admin.get(`/api/faq-cache${qs}`);
+        expect([qs, res.status]).toEqual([qs, 200]);
+        return res.body.length;
+      };
+      expect(await len("")).toBe(10);
+      expect(await len("?limit=abc")).toBe(10);
+      expect(await len("?limit=")).toBe(10);
+      expect(await len("?limit=1.5x")).toBe(1);
+      expect(await len("?limit=0")).toBe(1);
+      expect(await len("?limit=-5")).toBe(1);
+      expect(await len("?limit=3")).toBe(3);
+      expect(await len("?limit=100000")).toBe(12); // capped at 100, only 12 rows exist
+    });
+
     it("only an admin may list or clear it (403), anonymous is 401, and a refused clear keeps the rows", async () => {
       await db.insert(faqCache).values({ questionHash: "h1", originalQuestion: "q", normalizedQuestion: "q", answer: "a" });
       for (const role of ["agent", "manager", "customer"] as const) {
