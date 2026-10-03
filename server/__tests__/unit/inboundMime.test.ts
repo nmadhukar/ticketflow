@@ -1,4 +1,4 @@
-import { decodeEncodedWords, parseEmail, parseSingleMailbox } from "../../services/email/mime";
+import { decodeEncodedWords, getMaxHeaderBlock, parseEmail, parseSingleMailbox } from "../../services/email/mime";
 
 const crlf = (lines: string[]) => lines.join("\r\n");
 
@@ -86,6 +86,32 @@ describe("parseSingleMailbox", () => {
   });
 });
 
+describe("parseSingleMailbox: a display name equal to the address (R65)", () => {
+  it.each([
+    ['"a@b.com" <a@b.com>', "a@b.com"],
+    ["a@b.com <a@b.com>", "a@b.com"],
+    ['"A@B.com" <a@b.com>', "a@b.com"],
+    ['"  a@b.com " <a@b.com>', "a@b.com"],
+  ])("accepts %s", (value, expected) => {
+    expect(parseSingleMailbox(value)).toBe(expected);
+  });
+
+  it.each([
+    '"x@y.com" <a@b.com>',
+    "a@b.com <c@d.com>",
+    '"a@b.com" x <a@b.com>',
+    'x "a@b.com" <a@b.com>',
+    "a@b.com x <a@b.com>",
+    '"a@b.com a@b.com" <a@b.com>',
+    '"a@b.com\\" <a@b.com>',
+    "a@b.com\\ <a@b.com>",
+    '"a@b.com" (c@d.com) <a@b.com>',
+    '"<a@b.com>" <a@b.com>',
+  ])("still refuses %s", (value) => {
+    expect(parseSingleMailbox(value)).toBeNull();
+  });
+});
+
 describe("parseEmail sender handling", () => {
   it("reports a duplicate From header and refuses to read a sender from a spoofed one", () => {
     const dup = parseEmail(crlf(["From: a@b.test", "From: c@d.test", "Subject: x", "", "body"]));
@@ -97,6 +123,45 @@ describe("parseEmail sender handling", () => {
   it("cuts a Subject over 2 KB before decoding it", () => {
     const mail = parseEmail(crlf([`Subject: ${"s".repeat(5000)}`, "From: a@b.test", "", "body"]));
     expect(mail.subject.length).toBe(2048);
+  });
+});
+
+describe("INBOUND_EMAIL_MAX_HEADER_BYTES (R52)", () => {
+  const big = () =>
+    crlf(["From: <a@b.test>", ...Array.from({ length: 4500 }, (_, i) => `X-Pad-${i}: padding value`), "Subject: x", "", "body"]);
+  let logSpy: jest.SpyInstance;
+  beforeEach(() => {
+    delete process.env.INBOUND_EMAIL_MAX_HEADER_BYTES;
+    logSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    delete process.env.INBOUND_EMAIL_MAX_HEADER_BYTES;
+    logSpy.mockRestore();
+  });
+
+  it("refuses a ~100 KB header block by default and accepts it with 131072", () => {
+    const raw = big();
+    expect(raw.length).toBeGreaterThan(100 * 1024);
+    expect(parseEmail(raw).refusal).toBe("header_too_large");
+    process.env.INBOUND_EMAIL_MAX_HEADER_BYTES = "131072";
+    const ok = parseEmail(raw);
+    expect(ok.refusal).toBeNull();
+    expect(ok.fromAddress).toBe("a@b.test");
+  });
+
+  it.each(["300000", "abc", "0", "-5", "1.5"])("falls back to the default and logs one line for %s", (value) => {
+    process.env.INBOUND_EMAIL_MAX_HEADER_BYTES = value;
+    expect(getMaxHeaderBlock()).toBe(64 * 1024);
+    expect(getMaxHeaderBlock()).toBe(64 * 1024);
+    expect(parseEmail(big()).refusal).toBe("header_too_large");
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    expect(String(logSpy.mock.calls[0][0])).toContain("INBOUND_EMAIL_MAX_HEADER_BYTES");
+  });
+
+  it("accepts the maximum, 262144", () => {
+    process.env.INBOUND_EMAIL_MAX_HEADER_BYTES = "262144";
+    expect(getMaxHeaderBlock()).toBe(262144);
+    expect(logSpy).not.toHaveBeenCalled();
   });
 });
 

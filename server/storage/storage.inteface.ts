@@ -57,6 +57,7 @@ import {
   type UserPreferences,
 } from "@shared/schema";
 import type { PublicUser } from "../utils/publicUser";
+import type { DbTx } from "./db";
 
 /** One row of GET /api/tasks/:id/history; the actor is a public user projection. */
 export type TaskHistoryEntry = {
@@ -175,7 +176,7 @@ export interface IStorage {
   ): Promise<UserPreferences>;
 
   // Task operations
-  createTask(task: InsertTask): Promise<Task>;
+  createTask(task: InsertTask, tx?: DbTx): Promise<Task>;
   getTask(id: number): Promise<Task | undefined>;
   getTasks(filters?: {
     status?: string;
@@ -247,7 +248,7 @@ export interface IStorage {
   deleteTaskAssignment(binding: TaskAssignmentBinding): Promise<boolean>;
 
   // Comment operations
-  addTaskComment(comment: InsertTaskComment): Promise<TaskComment>;
+  addTaskComment(comment: InsertTaskComment, tx?: DbTx): Promise<TaskComment>;
   getTaskComments(
     taskId: number
   ): Promise<(TaskComment & { user?: PublicUser })[]>;

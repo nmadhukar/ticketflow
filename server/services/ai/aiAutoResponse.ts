@@ -336,7 +336,7 @@ export class AIAutoResponseService {
   async setApplied(rowId: number, applied: boolean): Promise<void> {
     await db
       .update(ticketAutoResponses)
-      .set({ wasApplied: applied })
+      .set({ wasApplied: applied, appliedAt: applied ? sql`now()` : null }) // R48: applied_at follows it
       .where(eq(ticketAutoResponses.id, rowId));
   }
 

@@ -113,7 +113,7 @@ import {
   ticketVisibilityWhere,
 } from "../permissions/ticketAccess";
 import { HttpError, asyncHandler, fail, logRouteError } from "../http/errors";
-import { autoResponseCommentBody, autoResponseCommentExists } from "../services/ai/autoResponseComment";
+import { autoResponseCommentBody, findAutoResponseComment } from "../services/ai/autoResponseComment";
 import { projectUserForViewer } from "../utils/publicUser";
 import { toPublicInvitation } from "../utils/publicInvitation";
 import { publicBaseUrl } from "../utils/appBaseUrl";
@@ -3839,7 +3839,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Claim the draft first: of two concurrent applies only one gets the row back and posts.
       const claimed = await db
         .update(ticketAutoResponses)
-        .set({ wasApplied: true })
+        .set({ wasApplied: true, appliedAt: sql`now()` }) // R48
         .where(and(eq(ticketAutoResponses.id, draft.id), eq(ticketAutoResponses.wasApplied, false)))
         .returning({ id: ticketAutoResponses.id });
       if (claimed.length === 0) return res.json({ applied: true, alreadyApplied: true });
@@ -3847,7 +3847,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         // The create path may have posted this comment and then failed to mark the draft
         // applied; posting again would duplicate it. The claim above already marked it applied.
-        if (await autoResponseCommentExists(taskId, aiUserId, draft.aiResponse)) {
+        const existingAt = await findAutoResponseComment(taskId, aiUserId, draft.aiResponse);
+        if (existingAt) {
+          // R48: it was applied when that comment was posted, not now.
+          await db
+            .update(ticketAutoResponses)
+            .set({ appliedAt: existingAt })
+            .where(eq(ticketAutoResponses.id, draft.id));
           return res.json({ applied: true, alreadyApplied: true });
         }
         await storage.addTaskComment({
@@ -3863,7 +3869,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           await db
             .update(ticketAutoResponses)
-            .set({ wasApplied: false })
+            .set({ wasApplied: false, appliedAt: null })
             .where(eq(ticketAutoResponses.id, draft.id));
         } catch (rollbackError) {
           console.error(
@@ -4886,6 +4892,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // a reopen and a second resolve, resolvedAt alone is stale). "Posted" is the AI comment's
       // time (the applied time; the draft's createdAt is when it was generated), falling back to
       // the draft's createdAt for a row whose comment cannot be found.
+      // R48: applied_at is that time when it was recorded. Only a row applied before 0021 has NULL
+      // and keeps the comment-based rule, which can borrow another draft's earlier comment.
       const [ticketsResolvedByAIResult] = await db
         .select({ count: sql<number>`count(DISTINCT ${ticketAutoResponses.ticketId})::int` })
         .from(ticketAutoResponses)
@@ -4895,6 +4903,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             eq(ticketAutoResponses.wasApplied, true),
             inArray(tasks.status, ["resolved", "closed"]),
             sql`GREATEST(${tasks.resolvedAt}, ${tasks.closedAt}) >= COALESCE(
+              ${ticketAutoResponses.appliedAt},
               (SELECT MIN(c.created_at) FROM task_comments c
                 WHERE c.task_id = ${ticketAutoResponses.ticketId}
                   AND c.user_id = ${ticketAutoResponses.respondedBy}

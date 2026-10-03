@@ -91,7 +91,7 @@ import {
   TeamTaskAssignment,
   InsertTeamTaskAssignment,
 } from "@shared/schema";
-import { db } from "./db";
+import { db, type DbTx } from "./db";
 import {
   eq,
   desc,
@@ -474,7 +474,11 @@ export class DatabaseStorage implements IStorage {
   // lock serialises concurrent creates. Only when no row exists is it seeded from
   // the NUMERIC max of existing tickets (so it is right even where migration 0012
   // never ran), then the UPDATE is repeated. All inside one transaction.
-  async getNextTicketNumber(): Promise<string> {
+  //
+  // R46: with a `tx` the bump (and the seed) run on the caller's transaction, so the counter row
+  // lock is held until that transaction ends and a rollback gives the number back. Without one it
+  // opens its own transaction exactly as before.
+  async getNextTicketNumber(tx?: DbTx): Promise<string> {
     const settings = await this.getCompanySettings();
     const prefix = settings?.ticketPrefix || "TKT";
     const year = new Date().getFullYear();
@@ -490,7 +494,7 @@ export class DatabaseStorage implements IStorage {
       return rows.length ? Number(rows[0].last_number) : null;
     };
 
-    const next = await db.transaction(async (tx) => {
+    const run = async (tx: any): Promise<number> => {
       const first = await bump(tx);
       if (first !== null) return first;
       await tx.execute(sql`
@@ -503,19 +507,20 @@ export class DatabaseStorage implements IStorage {
       const second = await bump(tx);
       if (second === null) throw new Error("ticket number counter could not be seeded");
       return second;
-    });
+    };
+    const next = tx ? await run(tx) : await db.transaction((own) => run(own));
 
     return `${head}${next.toString().padStart(4, "0")}`;
   }
 
   // Raise the counter to at least the numeric max of existing tickets for this
   // prefix and year (recovery after a ticket was written outside the counter).
-  private async resyncTicketCounter(): Promise<void> {
+  private async resyncTicketCounter(tx?: DbTx): Promise<void> {
     const settings = await this.getCompanySettings();
     const prefix = settings?.ticketPrefix || "TKT";
     const year = new Date().getFullYear();
     const head = `${prefix}-${year}-`;
-    await db.execute(sql`
+    await (tx ?? db).execute(sql`
       INSERT INTO ticket_number_counters (prefix, year, last_number)
       SELECT ${prefix}, ${year}, COALESCE(MAX(CAST(substr(ticket_number, ${head.length + 1}) AS integer)), 0)
       FROM tasks
@@ -526,19 +531,25 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Task operations
-  async createTask(task: InsertTask): Promise<Task> {
-    // Generate ticket number
-    const insertOnce = async () => {
-      const ticketNumber = await this.getNextTicketNumber();
+  //
+  // R46: with a `tx` the counter bump, the insert and the history row all run on the caller's
+  // transaction. A unique violation aborts a Postgres transaction, so each attempt then runs
+  // inside tx.transaction(...), which is a SAVEPOINT: a clash rolls back to it (the bump with
+  // it), the counter is re-synced on the same tx, and the one retry runs in a second savepoint.
+  // Without a `tx` (REST, MCP) nothing changes: each statement is its own, as before.
+  async createTask(task: InsertTask, tx?: DbTx): Promise<Task> {
+    const attempt = async (conn: DbTx) => {
+      const ticketNumber = await this.getNextTicketNumber(tx ? conn : undefined);
       // Convert string date to Date object if needed
       const taskData = {
         ...task,
         ticketNumber,
         dueDate: task.dueDate ? new Date(task.dueDate) : null,
       };
-      const [row] = await db.insert(tasks).values(taskData).returning();
-      return row;
+      const [row] = await conn.insert(tasks).values(taskData).returning();
+      return row as Task;
     };
+    const insertOnce = async () => (tx ? tx.transaction((sp: DbTx) => attempt(sp)) : attempt(db));
     let createdTask: Task;
     const isNumberClash = (e: any) => {
       const cause = e?.cause ?? e;
@@ -550,7 +561,7 @@ export class DatabaseStorage implements IStorage {
       // A ticket number taken outside the counter (unique violation on ticket_number
       // only): re-sync the counter once and retry once.
       if (!isNumberClash(e)) throw e;
-      await this.resyncTicketCounter();
+      await this.resyncTicketCounter(tx);
       try {
         createdTask = await insertOnce();
       } catch (second: any) {
@@ -564,7 +575,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     // Add history entry
-    await db.insert(taskHistory).values({
+    await (tx ?? db).insert(taskHistory).values({
       taskId: createdTask.id,
       userId: task.createdBy,
       action: "created",
@@ -1397,14 +1408,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Comment operations
-  async addTaskComment(comment: InsertTaskComment): Promise<TaskComment> {
-    const [createdComment] = await db
+  // R46: an optional `tx` puts the comment and its history row on the caller's transaction.
+  async addTaskComment(comment: InsertTaskComment, tx?: DbTx): Promise<TaskComment> {
+    const conn = tx ?? db;
+    const [createdComment] = await conn
       .insert(taskComments)
       .values(comment)
       .returning();
 
     // Add history entry
-    await db.insert(taskHistory).values({
+    await conn.insert(taskHistory).values({
       taskId: comment.taskId,
       userId: comment.userId,
       action: "commented",

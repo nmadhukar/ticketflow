@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { taskComments } from "@shared/schema";
 import { db } from "../../storage/db";
 
@@ -18,10 +18,34 @@ const PREFIX = "AI Auto-Response (confidence ";
  * the apply route finds the comment, marks the draft applied and posts nothing.
  */
 export async function autoResponseCommentExists(taskId: number, aiUserId: string, response: string): Promise<boolean> {
-  const rows = await db
-    .select({ content: taskComments.content })
-    .from(taskComments)
-    .where(and(eq(taskComments.taskId, taskId), eq(taskComments.userId, aiUserId)));
+  return (await findAutoResponseComment(taskId, aiUserId, response)) !== null;
+}
+
+/**
+ * The earliest matching comment's created_at (null when there is none). R64: the match is a SQL
+ * filter, not a scan of every comment the AI user wrote on the ticket. left()/right() compare
+ * literal text, so a `%`, `_` or quote in the response is never a LIKE wildcard, and both
+ * halves are bound parameters.
+ */
+export async function findAutoResponseComment(
+  taskId: number,
+  aiUserId: string,
+  response: string
+): Promise<Date | null> {
   const tail = `%): ${response}`;
-  return rows.some((r) => r.content.startsWith(PREFIX) && r.content.endsWith(tail));
+  const [row] = await db
+    .select({ createdAt: taskComments.createdAt })
+    .from(taskComments)
+    .where(
+      and(
+        eq(taskComments.taskId, taskId),
+        eq(taskComments.userId, aiUserId),
+        sql`left(${taskComments.content}, ${PREFIX.length}) = ${PREFIX}`,
+        // Postgres counts characters (code points); String.length counts UTF-16 units.
+        sql`right(${taskComments.content}, ${Array.from(tail).length}) = ${tail}`
+      )
+    )
+    .orderBy(asc(taskComments.createdAt), asc(taskComments.id))
+    .limit(1);
+  return row ? (row.createdAt ?? new Date()) : null;
 }

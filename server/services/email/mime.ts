@@ -29,8 +29,33 @@ export const MAX_HEADER_VALUE = 2048;
  * A DOCUMENTED LIMIT, kept on purpose: a message with very long Received or ARC chains
  * could exceed it and be ignored (logged as the refusal reason, never ticketed). Check
  * real header sizes after deploy before raising it; the cap is what bounds parse cost.
+ *
+ * R52: INBOUND_EMAIL_MAX_HEADER_BYTES raises (or lowers) it: a positive integer up to
+ * MAX_HEADER_BLOCK_CEILING. Anything else (junk, 0, negative, fractional, over the ceiling)
+ * logs ONE line per distinct bad value and uses the default. Read on each call so a restart
+ * is not needed in tests; the value is cheap to parse. The route's 512 kb text body limit
+ * sits above the ceiling, and snsVerify's 64 KB limit only bounds the signing-certificate
+ * download, so neither refuses a message first.
  */
-export const MAX_HEADER_BLOCK = 64 * 1024;
+export const DEFAULT_MAX_HEADER_BLOCK = 64 * 1024;
+export const MAX_HEADER_BLOCK_CEILING = 256 * 1024;
+
+const warnedHeaderCap = new Set<string>();
+
+export function getMaxHeaderBlock(): number {
+  const raw = process.env.INBOUND_EMAIL_MAX_HEADER_BYTES;
+  if (raw === undefined || raw.trim() === "") return DEFAULT_MAX_HEADER_BLOCK;
+  const trimmed = raw.trim();
+  const n = Number(trimmed);
+  if (/^[0-9]+$/.test(trimmed) && Number.isSafeInteger(n) && n > 0 && n <= MAX_HEADER_BLOCK_CEILING) return n;
+  if (!warnedHeaderCap.has(trimmed)) {
+    warnedHeaderCap.add(trimmed);
+    console.warn(
+      `INBOUND_EMAIL_MAX_HEADER_BYTES must be an integer from 1 to ${MAX_HEADER_BLOCK_CEILING}; using the default ${DEFAULT_MAX_HEADER_BLOCK}`,
+    );
+  }
+  return DEFAULT_MAX_HEADER_BLOCK;
+}
 
 function splitHeadBody(raw: string): { head: string; body: string } {
   const text = raw.replace(/\r\n/g, "\n");
@@ -45,7 +70,7 @@ function readHeaders(head: string): { headers: Record<string, string>; duplicate
   // Callers that need the whole block (the top-level message) refuse an oversize one first;
   // for a nested part the cap only bounds the work. A header is never silently dropped to
   // make a message fit.
-  const unfolded = head.slice(0, MAX_HEADER_BLOCK).replace(/\n[ \t]+/g, " ");
+  const unfolded = head.slice(0, getMaxHeaderBlock()).replace(/\n[ \t]+/g, " ");
   const headers: Record<string, string> = {};
   const duplicates = new Set<string>();
   for (const line of unfolded.split("\n")) {
@@ -237,8 +262,10 @@ const DISPLAY_CHAR = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.@\s-]$/;
  * ambiguous returns null: more than one mailbox, group syntax, an unterminated quote, comment
  * or angle bracket, any quoted string when there is no <...> (the text is then the address),
  * a backslash or other non-atext character outside a quoted string or comment, an "@" in the
- * display name, an invalid address.
- * Also refused: a quoted string or comment containing `<`, `>` or `@`, and any backslash
+ * display name (EXCEPT, R65, a display name that is exactly the angle address, compared
+ * case-insensitively: `"a@b.com" <a@b.com>`, `a@b.com <a@b.com>`), an invalid address.
+ * Also refused: a quoted string containing `<` or `>`, a comment containing `<`, `>` or `@`,
+ * a quoted string with an `@` unless it is that whole display name, and any backslash
  * (quoted-pair), so the answer never hinges on a parser's quote/comment nesting rules. An
  * encoded-word display name that would decode to an address changes nothing (never decoded).
  */
@@ -253,12 +280,20 @@ export function parseSingleMailbox(value: string | undefined): string | null {
   let inAngle = false;
   let hasAngle = false;
   let quoted = false; // a quoted string appeared in the current mailbox
+  let quotedText = ""; // the text of the quoted strings of the current mailbox
 
   const finish = (): boolean => {
     let address: string;
     if (hasAngle) {
-      if (display.includes("@")) return false; // "x@y <a@b>": which one is the sender?
       address = angle.trim();
+      // R65: a display name holding an "@" is accepted only when it IS the angle address
+      // (case-insensitive), as in `"a@b.com" <a@b.com>` or `a@b.com <a@b.com>`: some clients
+      // write the address as the name. Anything else ("x@y <a@b>": which one is the sender?),
+      // including a mix of quoted and unquoted name text, is refused.
+      if (display.includes("@") || quotedText.includes("@")) {
+        const shown = display.trim() === "" ? quotedText.trim() : quotedText.trim() === "" ? display.trim() : null;
+        if (shown === null || shown.toLowerCase() !== address.toLowerCase()) return false;
+      }
     } else {
       // No <...>: the text IS the address, so a quoted string anywhere in it (a quoted local
       // part, or one spliced in to hide characters) leaves the address undecidable.
@@ -266,7 +301,8 @@ export function parseSingleMailbox(value: string | undefined): string | null {
       address = display.trim();
     }
     quoted = false;
-    if (address === "" || address.length > 254 || !ADDR_SPEC.test(address)) return false;
+    quotedText = "";
+    if (address === ""|| address.length > 254 || !ADDR_SPEC.test(address)) return false;
     if (address.indexOf("@") !== address.lastIndexOf("@")) return false;
     addresses.push(address);
     display = "";
@@ -282,9 +318,11 @@ export function parseSingleMailbox(value: string | undefined): string | null {
       quoted = true;
       i++;
       while (i < value.length && value[i] !== '"') {
-        // A quoted display name has no business holding an address or a bracket; refusing them
-        // means the result never depends on how another parser reads quotes.
-        if (value[i] === "<" || value[i] === ">" || value[i] === "@") return null;
+        // A quoted display name has no business holding a bracket; refusing them means the
+        // result never depends on how another parser reads quotes. An "@" is kept for finish(),
+        // which accepts it only when the name is the angle address itself (R65).
+        if (value[i] === "<" || value[i] === ">") return null;
+        quotedText += value[i];
         i++;
       }
       if (i >= value.length) return null; // unterminated quote
@@ -341,7 +379,7 @@ function mixedLineEndings(raw: string): boolean {
   let crlf = false;
   let bareLf = false;
   let pos = 0;
-  const limit = MAX_HEADER_BLOCK + 1024; // a longer block is refused as too large anyway
+  const limit = getMaxHeaderBlock() + 1024; // a longer block is refused as too large anyway
   while (pos <= limit && pos < raw.length) {
     const lf = raw.indexOf("\n", pos);
     if (lf === -1) break;
@@ -363,7 +401,7 @@ export function parseEmail(raw: string): ParsedEmail {
   // cut-off, or behind a lone CR or a mixed line ending that another reader treats as a line
   // break, would let the sender seen here differ from the one SES evaluated.
   const refusal =
-    head.length > MAX_HEADER_BLOCK
+    head.length > getMaxHeaderBlock()
       ? "header_too_large"
       : head.includes("\r") || head.includes("\u0000") || mixedLineEndings(raw)
         ? "header_malformed" // (a CR left after CRLF -> LF is a bare CR)

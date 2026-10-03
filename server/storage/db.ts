@@ -48,3 +48,11 @@ if (isLocal || (!isExplicitNeon && !isNeonHost)) {
 }
 
 export { pool };
+
+/**
+ * A drizzle transaction handle (db.transaction's callback argument) or a SAVEPOINT handle
+ * (tx.transaction's). The two drivers' types do not unify, so it is deliberately loose; every
+ * use is `conn.insert / conn.execute / conn.transaction` with the same shapes as `db`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type DbTx = any;

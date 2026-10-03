@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { insertTaskCommentSchema, tasks, users } from "@shared/schema";
 import { TICKET_CATEGORIES } from "@shared/constants";
-import { db } from "../../storage/db";
+import { db, type DbTx } from "../../storage/db";
 import { storage } from "../../storage";
 import { canAccessTask } from "../../permissions/ticketAccess";
 import { normalizeRole } from "../../permissions/roles";
@@ -45,7 +45,16 @@ export type InboundOutcome =
 export interface InboundResult {
   outcome: InboundOutcome;
   after?: () => Promise<void>;
+  /** True when `finalize` ran inside the write's transaction (so the caller must not mark it again). */
+  finalized?: boolean;
 }
+
+/**
+ * Runs on the transaction that holds the ticket or comment insert, as its last statement
+ * (R46). The route passes the 'done' mark; if the claim is no longer this holder's it throws,
+ * the transaction rolls back and the fenced-out holder leaves nothing behind.
+ */
+export type InboundFinalize = (tx: DbTx) => Promise<void>;
 
 const ignored = (reason: string): InboundResult => ({ outcome: { status: "ignored", reason } });
 
@@ -102,7 +111,7 @@ async function findSender(address: string): Promise<SenderLookup> {
   return { ok: true, user };
 }
 
-export async function processSesNotification(input: unknown): Promise<InboundResult> {
+export async function processSesNotification(input: unknown, finalize?: InboundFinalize): Promise<InboundResult> {
   const notification = (input && typeof input === "object" ? input : {}) as SesNotification;
   if (notification.notificationType !== "Received") return ignored("not_a_received_message");
   if (typeof notification.content !== "string" || notification.content === "") return ignored("no_content");
@@ -157,13 +166,21 @@ export async function processSesNotification(input: unknown): Promise<InboundRes
     }
     const parsed = commentBodySchema.safeParse({ content: text.slice(0, COMMENT_MAX_LENGTH) });
     if (!parsed.success) return ignored("empty_body");
-    await storage.addTaskComment(
-      insertTaskCommentSchema.parse({ content: parsed.data.content, taskId: ticket.id, userId: sender.id })
-    );
+    const commentData = insertTaskCommentSchema.parse({
+      content: parsed.data.content,
+      taskId: ticket.id,
+      userId: sender.id,
+    });
+    // R46: the comment, its history row and the 'done' mark commit together or not at all.
+    await db.transaction(async (tx) => {
+      await storage.addTaskComment(commentData, tx);
+      await finalize?.(tx);
+    });
     // The realtime event the REST comment route sends (ticketService.addComment), after SNS is answered.
     return {
       outcome: { status: "commented", ticketId: ticket.id },
       after: () => notifyCommentAdded(ticket.id),
+      finalized: finalize !== undefined,
     };
   }
 
@@ -176,7 +193,14 @@ export async function processSesNotification(input: unknown): Promise<InboundRes
   });
   // R36: with DEFAULT_TRIAGE_TEAM_ID set the ticket is queued to that team; unset, it stays admin-triage.
   const triage = await defaultTriageAssignment();
-  const ticket = await createTicketRecord({ ...fields, ...(triage ?? {}) }, sender.id);
+  // R46: the counter bump, the ticket, its history row and the 'done' mark are ONE transaction.
+  // A crash anywhere in it leaves no ticket and the claim to be released or taken over; a holder
+  // whose claim was taken over fails the mark, rolls everything back and creates nothing.
+  const ticket = await db.transaction(async (tx) => {
+    const created = await createTicketRecord({ ...fields, ...(triage ?? {}) }, sender.id, tx);
+    await finalize?.(tx);
+    return created;
+  });
   // The same after-create effects as POST /api/tasks (AI auto-response per settings, realtime
   // broadcast, Teams webhooks), run by the route after it has answered SNS. APP_BASE_URL is the
   // site origin for the Teams link; unset, the card has no link (there is no request to read it from).
@@ -184,5 +208,6 @@ export async function processSesNotification(input: unknown): Promise<InboundRes
   return {
     outcome: { status: "created", ticketId: ticket.id },
     after: () => runTicketCreatedHooks(ticket, sender.id, baseUrl),
+    finalized: finalize !== undefined,
   };
 }
