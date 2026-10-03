@@ -12,6 +12,7 @@ import { createTicketSchema } from "../tickets/schemas";
 import { COMMENT_MAX_LENGTH, commentBodySchema } from "../tickets/commentSchema";
 import { createTicketRecord, runTicketCreatedHooks } from "../tickets/create";
 import { parseEmail, parseSingleMailbox } from "./mime";
+import { publicBaseUrl } from "../../utils/appBaseUrl";
 
 /**
  * Inbound email (SES receipt rule -> SNS -> POST /api/email/inbound), after the SNS
@@ -171,9 +172,9 @@ export async function processSesNotification(input: unknown): Promise<InboundRes
   // The same after-create effects as POST /api/tasks (AI auto-response per settings, realtime
   // broadcast, Teams webhooks), run by the route after it has answered SNS. APP_BASE_URL is the
   // site origin for the Teams link; unset, the card has no link (there is no request to read it from).
-  const baseUrl = (process.env.APP_BASE_URL ?? "").replace(/\/+$/, "");
+  const baseUrl = publicBaseUrl();
   return {
     outcome: { status: "created", ticketId: ticket.id },
-    after: () => runTicketCreatedHooks(ticket, sender.id, baseUrl === "" ? null : baseUrl),
+    after: () => runTicketCreatedHooks(ticket, sender.id, baseUrl),
   };
 }

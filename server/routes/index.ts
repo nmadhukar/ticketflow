@@ -115,6 +115,7 @@ import {
 import { HttpError, asyncHandler, fail, logRouteError } from "../http/errors";
 import { projectUserForViewer } from "../utils/publicUser";
 import { toPublicInvitation } from "../utils/publicInvitation";
+import { publicBaseUrl } from "../utils/appBaseUrl";
 import { displayNameSql } from "../utils/displayName";
 import { ticketListQuerySchema } from "../services/tickets/schemas";
 import {
@@ -796,7 +797,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // After-create effects shared with inbound email: AI auto-response (settings,
         // never fails the create), realtime broadcast to everyone who can see the
         // ticket, and Teams webhooks whose owner can access it.
-        await runTicketCreatedHooks(task, userId, `${req.protocol}://${req.get("host")}`);
+        // R34: the Teams link's origin is APP_BASE_URL, never the request's Host header.
+        await runTicketCreatedHooks(task, userId, publicBaseUrl(req));
 
         // Return task with warning if some attachments failed
         if (attachmentErrors.length > 0) {
@@ -822,7 +824,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Access, the role's field table, the status workflow, the write and its
       // notifications are ticketService.updateTicket; this is the HTTP adapter.
       const { ticket } = await updateTicket(req.user, parseInt(req.params.id), req.body, {
-        actionBaseUrl: `${req.protocol}://${req.get("host")}`,
+        actionBaseUrl: publicBaseUrl(req),
         onStatusRefusal: ({ from, to }) =>
           logSecurityEvent(req as any, "change_status", "ticket", false, {
             from,
@@ -2849,10 +2851,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const companySettings = await storage.getCompanySettings();
         const emailProvider = await storage.getActiveEmailProvider();
 
-        if (emailTemplate && emailProvider) {
-          const inviteUrl = `${req.protocol}://${req.get(
-            "host"
-          )}/auth?mode=register&email=${encodeURIComponent(
+        // R34: the link's origin is APP_BASE_URL, never the request's Host header.
+        const inviteBase = publicBaseUrl(req);
+        if (!inviteBase) console.warn("Invitation email not sent: APP_BASE_URL is not set");
+        if (emailTemplate && emailProvider && inviteBase) {
+          const inviteUrl = `${inviteBase}/auth?mode=register&email=${encodeURIComponent(
             invitation.email
           )}&token=${invitation.invitationToken}`;
 
@@ -3365,10 +3368,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const companySettings = await storage.getCompanySettings();
       const emailProvider = await storage.getActiveEmailProvider();
 
-      if (emailTemplate && emailProvider) {
-        const inviteUrl = `${req.protocol}://${req.get(
-          "host"
-        )}/auth?mode=register&email=${encodeURIComponent(
+      // R34: the link's origin is APP_BASE_URL, never the request's Host header.
+      const inviteBase = publicBaseUrl(req);
+      if (!inviteBase) console.warn("Invitation email not sent: APP_BASE_URL is not set");
+      if (emailTemplate && emailProvider && inviteBase) {
+        const inviteUrl = `${inviteBase}/auth?mode=register&email=${encodeURIComponent(
           invitation.email
         )}&token=${invitation.invitationToken}`;
 
@@ -3764,7 +3768,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           updatedAt: new Date(),
         } as any;
 
-        const actionUrl = `${req.protocol}://${req.get("host")}/`;
+        // R34: APP_BASE_URL, never the request's Host header.
+        const actionUrl = `${publicBaseUrl(req) ?? ""}/`;
         let success = false;
 
         if (settings.webhookUrl) {

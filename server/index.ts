@@ -32,6 +32,10 @@ app.use(requestLogger(log));
     console.log("PORT:", process.env.PORT);
     console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
 
+    // Required configuration (ruling R34: APP_BASE_URL in production), before anything connects.
+    const { assertStartupConfig } = await import("./startup/config");
+    if (!assertStartupConfig()) return;
+
     // Ruling R32: refuse to boot (one log line, exit 1) when the database lacks a
     // schema object the code needs, e.g. after drizzle-kit push silently applied nothing.
     const { pool } = await import("./storage/db");

@@ -801,6 +801,17 @@ describe("POST /api/email/inbound", () => {
       expect(hooks.teams).toHaveBeenCalled();
     });
 
+    it("R34: the Teams card of a REST-created ticket links to APP_BASE_URL, not the Host header", async () => {
+      const sender = await customer("ann.customer@example.test");
+      const agent = await loginAs(ctx.app, sender);
+      const hooks = await spyOnHooks();
+      process.env.APP_BASE_URL = "https://tickets.example.test";
+      const res = await createTicketAs(agent.set("Host", "evil.example") as typeof agent);
+      expect(res.status).toBe(201);
+      await eventually(() => expect(hooks.teams).toHaveBeenCalledTimes(1));
+      expect(hooks.teams.mock.calls[0][3]).toBe("https://tickets.example.test/my-tasks");
+    });
+
     it("a failing hook never fails the emailed ticket", async () => {
       await customer("ann.customer@example.test");
       const hooks = await spyOnHooks();

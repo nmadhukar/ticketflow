@@ -27,6 +27,7 @@ import { randomUUID } from "crypto";
 import * as client from "openid-client";
 import { EMAIL_PROVIDERS } from "@shared/constants";
 import { requireSecret } from "../../security/secrets";
+import { publicBaseUrl } from "../../utils/appBaseUrl";
 import { isAiSystemUserId } from "../../utils/aiSystemUserId";
 import { ServerResponse, type IncomingMessage } from "http";
 import { disconnectUser } from "../../realtime/connections";
@@ -592,10 +593,12 @@ export function setupAuth(app: Express) {
       const companySettings = await storage.getCompanySettings();
       const emailProvider = await storage.getActiveEmailProvider();
 
-      if (emailTemplate && emailProvider) {
-        const resetUrl = `${req.protocol}://${req.get(
-          "host"
-        )}/auth?mode=reset&token=${resetToken}`;
+      // R34: the link's origin is APP_BASE_URL, never the request's Host header.
+      const baseUrl = publicBaseUrl(req);
+      if (!baseUrl) {
+        console.warn("Password reset email not sent: APP_BASE_URL is not set");
+      } else if (emailTemplate && emailProvider) {
+        const resetUrl = `${baseUrl}/auth?mode=reset&token=${resetToken}`;
 
         // Generate a 6-digit reset code from the token (first 6 characters)
         const resetCode = resetToken.substring(0, 6).toUpperCase();

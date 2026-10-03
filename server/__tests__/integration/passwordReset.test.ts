@@ -123,6 +123,62 @@ describe("password reset tokens and admin reset", () => {
     expect(r.passwordResetExpires).toBeNull();
   });
 
+  describe("R34: emailed links use APP_BASE_URL, never the Host header", () => {
+    const savedBase = process.env.APP_BASE_URL;
+    afterEach(() => {
+      if (savedBase === undefined) delete process.env.APP_BASE_URL;
+      else process.env.APP_BASE_URL = savedBase;
+    });
+
+    it("forgot-password with Host: evil.example mails a link on APP_BASE_URL", async () => {
+      process.env.APP_BASE_URL = "https://tickets.example.test/";
+      const u = await createUser({ role: "agent" });
+      const res = await request(ctx.app)
+        .post("/api/auth/forgot-password")
+        .set("Host", "evil.example")
+        .set("X-Forwarded-Host", "evil2.example")
+        .send({ email: u.email });
+      expect(res.status).toBe(200);
+      expect(mockSent).toHaveLength(1);
+      const link = new URL(mockSent[0].variables.resetUrl);
+      expect(link.origin).toBe("https://tickets.example.test");
+      expect(link.pathname).toBe("/auth");
+      expect(mockSent[0].variables.resetUrl).not.toContain("evil");
+      // the emailed token is the real one
+      const ok = await request(ctx.app)
+        .post("/api/auth/reset-password")
+        .send({ token: link.searchParams.get("token"), password: "Another-pw-12345!" });
+      expect(ok.status).toBe(200);
+    });
+
+    it("an invitation with Host: evil.example mails a link on APP_BASE_URL", async () => {
+      process.env.APP_BASE_URL = "https://tickets.example.test";
+      await db.insert(emailTemplates).values({
+        name: "user_invitation",
+        subject: "Invite",
+        body: "{{registrationUrl}}",
+      });
+      const admin = await createUser({ role: "admin" });
+      const agent = await loginAs(ctx.app, admin);
+      const res = await agent
+        .post("/api/admin/invitations")
+        .set("Host", "evil.example")
+        .send({ email: "invitee@example.test", role: "agent" });
+      expect(res.status).toBe(201);
+      expect(mockSent).toHaveLength(1);
+      const link = new URL(mockSent[0].variables.registrationUrl);
+      expect(link.origin).toBe("https://tickets.example.test");
+      expect(link.searchParams.get("token")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    });
+
+    it("without APP_BASE_URL (test environment) the link falls back to the request's own host", async () => {
+      delete process.env.APP_BASE_URL;
+      const u = await createUser({ role: "agent" });
+      await request(ctx.app).post("/api/auth/forgot-password").set("Host", "localhost:5000").send({ email: u.email });
+      expect(new URL(mockSent[0].variables.resetUrl).host).toBe("localhost:5000");
+    });
+  });
+
   describe("admin reset-password", () => {
     it("returns a temporary password once; it logs in, the old one does not, and the user must change it", async () => {
       const admin = await createUser({ role: "admin" });

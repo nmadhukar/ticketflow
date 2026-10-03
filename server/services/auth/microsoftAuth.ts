@@ -12,6 +12,7 @@ import { loginBlockReason } from "./accountStatus";
 import { AI_SYSTEM_USER_EMAIL } from "../../utils/aiSystemUserId";
 import { randomBytes } from "crypto";
 import { fail } from "../../http/errors";
+import { publicBaseUrl } from "../../utils/appBaseUrl";
 
 interface MicrosoftProfile {
   sub: string;
@@ -105,14 +106,15 @@ export async function setupMicrosoftAuth(app: Express) {
     return;
   }
 
-  // Build redirect URL from request or use environment variable
+  // The redirect URI: MICROSOFT_REDIRECT_URL when set, else APP_BASE_URL + the
+  // callback path (R34: never the request's Host header; development falls back
+  // to the request's own origin, then to localhost).
   const getRedirectUrl = (req: any): string => {
     if (process.env.MICROSOFT_REDIRECT_URL) {
       return process.env.MICROSOFT_REDIRECT_URL;
     }
-    const protocol = req.protocol || "http";
-    const host = req.get("host") || "localhost:5000";
-    return `${protocol}://${host}/api/auth/microsoft/callback`;
+    const base = publicBaseUrl(req) ?? "http://localhost:5000";
+    return `${base}/api/auth/microsoft/callback`;
   };
 
   // Initialize MSAL ConfidentialClientApplication
@@ -134,8 +136,6 @@ export async function setupMicrosoftAuth(app: Express) {
   app.get("/api/auth/microsoft", async (req, res) => {
     try {
       console.log("Microsoft login initiated");
-      console.log("Request host:", req.get("host"));
-      console.log("Request protocol:", req.protocol);
 
       const redirectUri = getRedirectUrl(req);
       console.log("- Redirect URL:", redirectUri);

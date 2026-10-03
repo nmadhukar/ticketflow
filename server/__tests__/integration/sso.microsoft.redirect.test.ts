@@ -33,4 +33,16 @@ describe("GET /api/auth/microsoft when configured", () => {
     expect(res.headers.location).not.toContain("generated-test-secret");
     expect(location.searchParams.get("state")).toBeTruthy();
   });
+
+  it("R34: the redirect URI is APP_BASE_URL's callback, not the request's Host", async () => {
+    process.env.APP_BASE_URL = "https://tickets.example.test";
+    try {
+      const res = await request(ctx.app).get("/api/auth/microsoft").set("Host", "evil.example").redirects(0);
+      expect(res.status).toBe(302);
+      const redirectUri = new URL(res.headers.location).searchParams.get("redirect_uri");
+      expect(redirectUri).toBe("https://tickets.example.test/api/auth/microsoft/callback");
+    } finally {
+      delete process.env.APP_BASE_URL;
+    }
+  });
 });
