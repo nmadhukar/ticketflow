@@ -11,6 +11,8 @@ const FORBIDDEN = [
   "bedrockSecretAccessKey",
   "mailtrapToken",
   "mtToken",
+  // R33: an invitation token lets anyone register as the invited role.
+  "invitationToken",
 ];
 
 /** Returns the JSON path of every forbidden key found anywhere in `body`. */

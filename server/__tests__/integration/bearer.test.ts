@@ -14,7 +14,9 @@ import {
   generateApiKey,
   issueApiKey,
 } from "../../services/auth/apiKeys";
-import { bearerAuth, markSessionAuth } from "../../services/auth/bearer";
+import { bearerAuth, bearerAllowedPath, markSessionAuth } from "../../services/auth/bearer";
+import { storage } from "../../storage";
+import { callTool } from "./helpers/mcpClient";
 
 const DAY = 24 * 60 * 60 * 1000;
 const JWT_SECRET_VALUE = randomBytes(24).toString("hex");
@@ -386,20 +388,85 @@ describe("a bearer request never touches a session", () => {
   });
 });
 
-describe("R28: credential management is session-only", () => {
+describe("R33: a bearer works only on /api/mcp, /api/tasks/** and /api/auth/user", () => {
   async function expectSessionRequired(
-    method: "get" | "post" | "delete" | "patch",
+    method: "get" | "post" | "delete" | "patch" | "put",
     path: string,
-    token: string
+    token: string,
+    body: object = {}
   ) {
     const call = request(ctx.app)[method](path);
     const res = await call
       .set("X-Forwarded-For", freshIp())
       .set("Authorization", `Bearer ${token}`)
-      .send({});
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe("session_required");
+      .send(body);
+    expect({ method, path, status: res.status, error: res.body.error }).toEqual({
+      method,
+      path,
+      status: 403,
+      error: "session_required",
+    });
+    return res;
   }
+
+  it("an admin key cannot mint an admin, change a role, set webhooks or touch sessions", async () => {
+    const admin = await createUser({ role: "admin" });
+    const target = await createUser({ role: "agent" });
+    const { plaintext } = await issueApiKey({ userId: admin.id, name: "k" });
+
+    await expectSessionRequired("post", "/api/admin/invitations", plaintext, { email: "evil@example.test", role: "admin" });
+    await expectSessionRequired("get", "/api/admin/invitations", plaintext);
+    await expectSessionRequired("patch", `/api/admin/users/${target.id}`, plaintext, { role: "admin" });
+    await expectSessionRequired("get", "/api/teams-integration/settings", plaintext);
+    await expectSessionRequired("post", "/api/teams-integration/settings", plaintext, {
+      enabled: true,
+      webhookUrl: "https://contoso.webhook.office.com/x",
+    });
+    await expectSessionRequired("get", "/api/user/sessions", plaintext);
+    await expectSessionRequired("delete", "/api/user/sessions/some-session-id", plaintext);
+    // Case and trailing segments do not get around it.
+    await expectSessionRequired("get", "/API/Admin/Invitations", plaintext);
+    await expectSessionRequired("get", "/api/tasksX", plaintext);
+
+    // Nothing was written by the refused calls.
+    const [row] = await db.select().from(users).where(eq(users.id, target.id));
+    expect(row.role).toBe("agent");
+    expect(await storage.getUserInvitations({})).toHaveLength(0);
+  });
+
+  it("the same admin key still works on /api/tasks, /api/tasks/:id, /api/auth/user and /api/mcp", async () => {
+    const admin = await createUser({ role: "admin" });
+    const { plaintext } = await issueApiKey({ userId: admin.id, name: "k" });
+    const created = await request(ctx.app)
+      .post("/api/tasks")
+      .set("X-Forwarded-For", freshIp())
+      .set("Authorization", `Bearer ${plaintext}`)
+      .send({ title: "via key", description: "x", category: "support", priority: "medium" });
+    expect(created.status).toBe(201);
+    expect((await get("/api/tasks", plaintext)).status).toBe(200);
+    expect((await get(`/api/tasks/${created.body.id}`, plaintext)).status).toBe(200);
+    expect((await get(`/api/tasks/${created.body.id}/comments`, plaintext)).status).toBe(200);
+    expect((await get("/api/auth/user", plaintext)).status).toBe(200);
+    const mcp = await callTool(ctx.app, plaintext, "get_ticket", { id: created.body.id });
+    expect(mcp.status).toBe(200);
+    expect(mcp.isError).toBe(false);
+  });
+
+  it("the allow-list matches whole segments only", () => {
+    for (const p of ["/api/mcp", "/api/tasks", "/api/tasks/", "/api/tasks/12/comments", "/API/TASKS/my", "/api/auth/user"]) {
+      expect({ p, allowed: bearerAllowedPath(p) }).toEqual({ p, allowed: true });
+    }
+    for (const p of ["/api/tasksx", "/api/mcpx", "/api/auth/user/x", "/api/auth/users", "/api/admin/invitations", "/api/users", "/api"]) {
+      expect({ p, allowed: bearerAllowedPath(p) }).toEqual({ p, allowed: false });
+    }
+  });
+
+  it("a cookie admin is not affected by the gate", async () => {
+    const admin = await createUser({ role: "admin" });
+    const agent = await loginAs(ctx.app, admin);
+    expect((await agent.get("/api/admin/invitations")).status).toBe(200);
+    expect((await agent.get("/api/user/sessions")).status).toBe(200);
+  });
 
   it("refuses an admin key on every credential family, and a session admin still reaches them", async () => {
     const admin = await createUser({ role: "admin" });
@@ -484,13 +551,30 @@ describe("bearer is an /api concern", () => {
 });
 
 describe("role gates apply to bearer users", () => {
-  it("GET /api/users: customer key 403, admin key 200", async () => {
+  it("DELETE /api/tasks/:id: customer key 403 forbidden (own ticket), admin key 200", async () => {
     const customer = await createUser({ role: "customer" });
     const admin = await createUser({ role: "admin" });
     const c = await issueApiKey({ userId: customer.id, name: "k" });
     const a = await issueApiKey({ userId: admin.id, name: "k" });
-    expect((await get("/api/users", c.plaintext)).status).toBe(403);
-    expect((await get("/api/users", a.plaintext)).status).toBe(200);
+    const ticket = await createTicketAs(await loginAs(ctx.app, customer), { title: "own" });
+    expect(ticket.status).toBe(201);
+    const del = (key: string) =>
+      request(ctx.app)
+        .delete(`/api/tasks/${ticket.body.id}`)
+        .set("X-Forwarded-For", freshIp())
+        .set("Authorization", `Bearer ${key}`);
+    const refused = await del(c.plaintext);
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toBe("forbidden");
+    expect((await del(a.plaintext)).status).toBe(204);
+  });
+
+  it("GET /api/users is outside the bearer allow-list: 403 session_required for any key (R33)", async () => {
+    const admin = await createUser({ role: "admin" });
+    const a = await issueApiKey({ userId: admin.id, name: "k" });
+    const res = await get("/api/users", a.plaintext);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("session_required");
   });
 });
 

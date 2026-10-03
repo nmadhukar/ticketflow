@@ -114,6 +114,7 @@ import {
 } from "../permissions/ticketAccess";
 import { HttpError, asyncHandler, fail, logRouteError } from "../http/errors";
 import { projectUserForViewer } from "../utils/publicUser";
+import { toPublicInvitation } from "../utils/publicInvitation";
 import { displayNameSql } from "../utils/displayName";
 import { ticketListQuerySchema } from "../services/tickets/schemas";
 import {
@@ -3262,7 +3263,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const invitations = await storage.getUserInvitations({
         status: status as string,
       });
-      res.json(invitations);
+      // R33: the token is a credential; it travels only in the emailed link.
+      res.json(invitations.map(toPublicInvitation));
     } catch (error) {
       logRouteError("Error fetching invitations", error);
       fail(res, 500, "Failed to fetch invitations");
@@ -3451,7 +3453,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      res.status(201).json(invitation);
+      // R33: never the token (it is in the emailed link only).
+      res.status(201).json(toPublicInvitation(invitation));
     } catch (error) {
       logRouteError("Error creating invitation", error);
       fail(res, 500, "Failed to create invitation");

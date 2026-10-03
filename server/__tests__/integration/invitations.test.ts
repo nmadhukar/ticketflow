@@ -195,8 +195,35 @@ describe("invitations, registration and SSO accounts", () => {
     const res = await agent
       .post("/api/admin/invitations")
       .send({ email: "g2@example.test", role: "agent" });
-    expect(res.body.invitationToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(res.body.invitationToken).not.toBe(a.invitationToken);
+    expect(res.status).toBe(201);
+    // R33: the response never carries the token; read it from the row.
+    expect(res.body).not.toHaveProperty("invitationToken");
+    const stored = await storage.getUserInvitationById(res.body.id);
+    expect(stored?.invitationToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(stored?.invitationToken).not.toBe(a.invitationToken);
+  });
+
+  it("(R33) no invitation response carries the token, and the emailed link still does", async () => {
+    const admin = await createUser({ role: "admin" });
+    const agent = await loginAs(ctx.app, admin);
+    const created = await agent
+      .post("/api/admin/invitations")
+      .send({ email: "r33@example.test", role: "admin" });
+    expect(created.status).toBe(201);
+    const listed = await agent.get("/api/admin/invitations");
+    expect(listed.status).toBe(200);
+    expect(listed.body.length).toBeGreaterThan(0);
+    const stored = await storage.getUserInvitationById(created.body.id);
+    for (const body of [created.body, ...listed.body]) {
+      expect(body).not.toHaveProperty("invitationToken");
+      expect(JSON.stringify(body)).not.toContain(stored!.invitationToken);
+      // the rest of the row is still there for the admin page
+      expect(body).toEqual(expect.objectContaining({ id: expect.any(Number), email: expect.any(String), status: "pending" }));
+    }
+    // The public lookup by token (the emailed link) still works.
+    const lookup = await request(ctx.app).get(`/api/invitations/${stored!.invitationToken}`);
+    expect(lookup.status).toBe(200);
+    expect(lookup.body.email).toBe("r33@example.test");
   });
 
   it("(h) registering over an SSO account (no password) is refused like any taken email (400) and changes nothing", async () => {

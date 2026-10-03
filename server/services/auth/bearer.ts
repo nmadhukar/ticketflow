@@ -71,37 +71,39 @@ export const markSessionAuth: RequestHandler = (req, _res, next) => {
 };
 
 /**
- * Ruling R28: credential-management routes are session-only. A bearer request
- * (API key or JWT) gets 403 session_required on every route below, so a leaked
- * key can neither mint further credentials nor change/reset passwords, sign the
- * owner out, or rewrite SSO/email secrets. One list: add a route here to protect it.
+ * Ruling R33 (supersedes R28's deny-list): a bearer (API key or JWT) is accepted
+ * ONLY on the routes below. Every other /api route answers a valid bearer with
+ * 403 session_required, whatever the key's owner could do with a session.
+ *
+ * Why an allow-list: a key is issued for ticket automation (`mcp:tickets`). A
+ * deny-list has to name every credential-minting path and R28's missed some (an
+ * invitation for an admin, an admin's role change, webhook settings, session
+ * deletion). Here a new route is session-only until someone adds it below.
+ *
+ *  - /api/mcp           the MCP endpoint (itself requires an API key with mcp:tickets)
+ *  - /api/tasks, /api/tasks/**  the ticket REST API (create, list, read, update, comment, ...)
+ *  - /api/auth/user     who the bearer is
+ *
+ * Paths are compared lower-cased (Express routes case-insensitively), and a
+ * prefix only matches at a segment boundary (/api/tasksfoo is not /api/tasks).
  */
-const SESSION_ONLY: { methods: string[] | "*"; path: RegExp }[] = [
-  { methods: "*", path: /^\/api\/api-keys(\/|$)/ },
-  { methods: ["POST"], path: /^\/api\/auth\/change-password\/?$/ },
-  { methods: ["POST"], path: /^\/api\/auth\/logout\/?$/ },
-  { methods: ["GET"], path: /^\/api\/logout\/?$/ },
-  // admin password reset / temporary password
-  { methods: ["POST"], path: /^\/api\/admin\/users\/[^/]+\/reset-password\/?$/ },
-  // SSO configuration (holds the client secret)
-  { methods: ["POST"], path: /^\/api\/sso\/config\/?$/ },
-  // outbound email settings and secrets (writes)
-  { methods: ["POST", "PUT", "PATCH", "DELETE"], path: /^\/api\/company-settings\/email(\/|$)/ },
-  // Invitation creation sets no credentials (the invitee chooses a password
-  // through the public accept route), so it is not listed.
+export const BEARER_ALLOWED: RegExp[] = [
+  /^\/api\/mcp(\/|$)/,
+  /^\/api\/tasks(\/|$)/,
+  /^\/api\/auth\/user\/?$/,
 ];
+
+export function bearerAllowedPath(path: string): boolean {
+  const p = path.toLowerCase();
+  return BEARER_ALLOWED.some((rule) => rule.test(p));
+}
 
 export const requireSessionForCredentials: RequestHandler = (req, res, next) => {
   if (req.authMethod !== "api_key" && req.authMethod !== "jwt") return next();
-  const path = req.path.toLowerCase();
-  const hit = SESSION_ONLY.some(
-    (rule) =>
-      rule.path.test(path) && (rule.methods === "*" || rule.methods.includes(req.method))
-  );
-  if (!hit) return next();
+  if (bearerAllowedPath(req.path)) return next();
   return res.status(403).json({
     error: "session_required",
-    message: "This action needs a signed-in session; API keys and bearer tokens cannot do it.",
+    message: "This action needs a signed-in session; API keys and bearer tokens work only on the ticket API.",
   });
 };
 
