@@ -34,7 +34,7 @@ Every API failure is JSON, never HTML, and never carries a stack trace:
 | 409 | `invalid_transition`, `last_admin`, `self_demotion`, `no_local_password`, `email_in_use`, `conflict` | State conflict. |
 | 413 | `payload_too_large` | Request body over the limit. |
 | 423 | `account_locked` | Five wrong passwords lock the account for 15 minutes. |
-| 429 | `too_many_requests`, `rate_limited`, `quota_exceeded` | Rate limit, or the AI cost limit (see section 8). |
+| 429 | `too_many_requests`, `quota_exceeded` | Rate limit (every limiter, `/api/mcp` included), or the AI cost limit (see section 8). |
 | 503 | `ai_not_configured`, `ai_unavailable`, `inbound_email_not_configured`, `S3_CONFIGURATION_REQUIRED` | A dependency is not configured or not available. |
 
 Two non-obvious rules:
@@ -76,7 +76,8 @@ Two ways to authenticate, never mixed in one request:
 A request that carries a Bearer header is authenticated by the bearer alone: an invalid,
 expired or revoked bearer is `401 invalid_token` even when a valid session cookie came
 with it. Bearer requests never create a session and never set a cookie. Bearer applies to
-`/api` paths only.
+`/api` paths only, and a valid bearer is accepted only on `/api/mcp`, `/api/tasks/**` and
+`/api/auth/user` (section 2.4, R33).
 
 ### 2.1 Session routes
 
@@ -84,12 +85,12 @@ with it. Bearer requests never create a session and never set a cookie. Bearer a
 |---|---|---|
 | `POST /api/auth/register` | none | Body `{email, password (min 8), firstName, lastName, inviteToken?}`. 201 `{message, user:{id,email,firstName,lastName,role,isApproved}}`. Account is an unapproved `customer` unless a valid invitation token for that email is presented (then invited role, approved). An existing email, password or SSO account alike, is `400 {"error":"email_registered","message":"Email already registered"}`. |
 | `POST /api/auth/login` | none | Body `{email, password}`. 200 `{id,email,firstName,lastName,role,mustChangePassword}` and a cookie. Failures: 401 `invalid_credentials` (wrong password, unknown email, SSO-only account, deactivated, or pending approval all use 401 with a message), 423 `account_locked`, 403 `invalid_role`. |
-| `POST /api/auth/logout` | session | 200 `{message}`. Session only (R28). |
+| `POST /api/auth/logout` | session | 200 `{message}`. Session only (R33). |
 | `GET /api/logout` | session | Redirect to `/`. Session only. |
 | `GET /api/auth/user` | session | 200 `{id,email,firstName,lastName,role,mustChangePassword,profileImageUrl,phone,createdAt,updatedAt}`; 401 when signed out. |
-| `POST /api/auth/forgot-password` | none | Body `{email}`. Always answers the same generic 200 for known, unknown and SSO-only emails. The reset token is emailed, stored only as a hash, and never logged. |
+| `POST /api/auth/forgot-password` | none | Body `{email}`. Always answers the same generic 200 for known, unknown and SSO-only emails. The reset token is emailed (the link is built on `APP_BASE_URL`, never the request's Host, R34), stored only as a hash, and never logged. |
 | `POST /api/auth/reset-password` | none | Body `{token, password}`. Ends all sessions of that user and clears any lock. Bad or expired token: 400 `invalid_reset_token`. |
-| `POST /api/auth/change-password` | session | Body `{currentPassword, password}`. 200; keeps this session, ends the user's other sessions and sockets. 409 `no_local_password` for SSO accounts, 400 `invalid_current_password`, 400 `password_unchanged`. Session only (R28). |
+| `POST /api/auth/change-password` | session | Body `{currentPassword, password}`. 200; keeps this session, ends the user's other sessions and sockets. 409 `no_local_password` for SSO accounts, 400 `invalid_current_password`, 400 `password_unchanged`. Session only (R33). |
 | `GET /api/auth/microsoft`, `GET/POST /api/auth/microsoft/callback` | none | Microsoft 365 SSO. 503 JSON when SSO is not configured. SSO sign-ups default to `customer`. |
 | `GET /api/user/sessions`, `DELETE /api/user/sessions/:sessionId` | session | List and revoke the caller's own sessions. |
 
@@ -127,18 +128,23 @@ same `iss` and `aud` as the application's own tokens, a numeric `iat` not in the
 owner's last password change. The token's own role claim is ignored: the role is read from
 the user row. Nothing in the app mints such tokens today.
 
-### 2.4 Session-only credential routes (R28)
+### 2.4 Where a bearer works (R33, supersedes R28)
 
-A bearer request (API key or JWT) gets `403 session_required` on:
+A bearer (API key or JWT) is accepted **only** on:
 
-- `/api/api-keys` (every method)
-- `POST /api/auth/change-password`, `POST /api/auth/logout`, `GET /api/logout`
-- `POST /api/admin/users/:userId/reset-password`
-- `POST /api/sso/config`
-- `POST|PUT|PATCH|DELETE /api/company-settings/email...`
+- `/api/mcp`
+- `/api/tasks` and every path under it (`/api/tasks/:id`, `/api/tasks/:id/comments`, ...)
+- `/api/auth/user`
 
-A leaked key therefore cannot mint keys, rotate credentials, sign the owner out, or rewrite
-SSO or email secrets.
+Every other `/api` route answers a valid bearer with
+
+```json
+{ "error": "session_required", "message": "This action needs a signed-in session; API keys and bearer tokens work only on the ticket API." }
+```
+
+(403), whatever the key owner's role: an admin's key cannot invite users, change roles,
+rewrite webhook or other settings, list or end sessions, mint keys, change passwords or sign
+the owner out. Paths compare lower-cased and by whole segment (`/api/tasksX` is not allowed).
 
 ## 3. Tickets ("tasks")
 
@@ -249,7 +255,9 @@ id/name/picture only).
 
 ### Ticket meta
 
-- `GET /api/tickets/meta`: pickers and permissions for the create form.
+- `GET /api/tickets/meta`: pickers and permissions for the create form. For a customer,
+  `assignableUsers` is active, approved managers and agents as `{id, displayName}` only (no
+  email, no role).
 - `GET /api/tickets/:id/meta`: the same plus what this caller may do on this ticket
   (`allowedFields`, `allowedStatuses`, `allowedAssigneeTypes`, `canAssign`, `canChangeStatus`),
   derived from the same tables PATCH enforces.
@@ -343,7 +351,7 @@ re-save a `*.webhook.office.com` URL.
 
 ## 8. AI routes
 
-All AI routes need a session or bearer. AI tools that act on a ticket take **`{ticketId}`**;
+All AI routes need a session; the ones under `/api/tasks/:id/...` also take a bearer (R33). AI tools that act on a ticket take **`{ticketId}`**;
 the ticket text is always read from the database, never from the request.
 
 | Route | Who | Behaviour |
@@ -401,7 +409,7 @@ protect plain text. Only fields rendered as HTML (guides) are HTML-sanitised.
 
 ## 10. API keys
 
-Admin only, **session only** (R28). Keys are issued by an admin for a chosen user; a caller
+Admin only, **session only** (R33). Keys are issued by an admin for a chosen user; a caller
 cannot create a key for themselves.
 
 ### POST /api/api-keys
@@ -454,7 +462,8 @@ Secrets are **never returned**. The response says only whether one is stored.
   secret never follows an admin across a provider switch.
 - `GET /api/bedrock/settings` is masked the same way.
 - Company settings: `GET /api/company-settings/branding|tickets|preferences` (signed in),
-  `PATCH` the same (admin), `POST /api/company-settings/branding/logo` (admin).
+  `PATCH` the same (admin), `POST /api/company-settings/branding/logo` (admin). A `ticketPrefix`
+  must match `^[A-Za-z0-9]{1,6}$` (else `400 validation_failed`).
 
 ## 12. Users, invitations, statistics, other routes
 
@@ -462,7 +471,7 @@ Secrets are **never returned**. The response says only whether one is stored.
 |---|---|
 | Users | `GET /api/users` (staff only, 403 for customers; no secret fields; system accounts hidden). `GET|PATCH /api/user/preferences`. |
 | Admin users | `GET /api/admin/users`, `PATCH /api/admin/users/:userId` (role/profile; 409 `last_admin` when it would leave no active admin, 409 `self_demotion` for your own account, 409 `email_in_use`, 400 `invalid_role`), `POST .../toggle-status`, `POST .../approve`, `POST .../reset-password` (session only; returns `{tempPassword}` once with `Cache-Control: no-store`, sets `mustChangePassword`, ends the user's sessions; 409 `no_local_password` for SSO or system accounts). |
-| Invitations | Admin: `GET|POST /api/admin/invitations` (`role` whitelist, `expiresAt` must be in the future and within 30 days, default 7 days; 400 `invalid_expiry` / `invalid_role`), `DELETE /api/admin/invitations/:id`, `POST .../:id/resend`. Public: `GET /api/invitations/:token`, `POST /api/invitations/:token/accept` (an anonymous caller gets `{registrationRequired:true, email, registerPath}` and no account; a signed-in user whose email matches is promoted). Claiming an invitation is atomic. Tokens are 32 random bytes and are redacted from request logs. |
+| Invitations | Admin: `GET|POST /api/admin/invitations` (`role` whitelist, `expiresAt` must be in the future and within 30 days, default 7 days; 400 `invalid_expiry` / `invalid_role`), `DELETE /api/admin/invitations/:id`, `POST .../:id/resend`. Public: `GET /api/invitations/:token`, `POST /api/invitations/:token/accept` (an anonymous caller gets `{registrationRequired:true, email, registerPath}` and no account; a signed-in user whose email matches is promoted). Claiming an invitation is atomic. Tokens are 32 random bytes and are redacted from request logs. The admin responses never include the token (R33): it travels only in the emailed link, built on `APP_BASE_URL` (R34). |
 | Statistics | `GET /api/stats`, `GET /api/stats/agent`, `GET /api/stats/manager`, `GET /api/stats/global` (admin only), `GET /api/admin/stats` (admin only), `GET /api/activity?limit=` (only events of tickets the caller can see). Counts follow the same visibility rule as the lists. |
 | Notifications | `GET /api/notifications`, `PATCH /api/notifications/:id/read`, `PATCH /api/notifications/read-all`. |
 | Email templates | `GET /api/email-templates`, `PUT /api/email-templates/:name`. |
@@ -579,7 +588,8 @@ curl -X POST {{baseUrl}}/api/mcp \
 
 | Limiter | Scope | Limit |
 |---|---|---|
-| General `/api` | per IP | 100 requests per 15 minutes in production |
+| General `/api` | per IP | `RATE_LIMIT_MAX_REQUESTS` (default 100) per `RATE_LIMIT_WINDOW_MS` (default 15 minutes), in production unless `RATE_LIMITING_ENABLED=false` |
+| MCP `/api/mcp` | per API key (per IP without one) | 600 per 15 minutes, wherever the general limit is on (not counted by the general limiter) |
 | Login | per IP, failed attempts only | 10 per minute, then `429 too_many_requests` |
 | Forgot/reset password, change password | per IP, every request | 10 per minute |
 | Login lockout | per account | 5 wrong passwords, then `423 account_locked` for 15 minutes (cleared by a token reset or an admin reset) |
