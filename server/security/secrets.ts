@@ -8,15 +8,23 @@
 export type RequiredSecret = "SESSION_SECRET" | "JWT_SECRET";
 
 /**
- * A word that only appears in a copied-and-never-edited example value
- * ("your-super-secret-session-key", "...change-this-in-production",
- * "dev-only-session-secret-not-for-production"). A generated secret contains
- * none of these as a standalone word.
+ * Known placeholder prefixes: the start of every example value this repo and its docs
+ * ship ("your-super-secret-session-key", "replace-with-32b-hex",
+ * "long-random-string-for-session-encryption", "dev-only-session-secret-...").
+ * Case-insensitive and START-anchored on purpose: a generated secret starts with
+ * random characters, so it cannot be mistaken for one by a match in its middle.
  */
-const PLACEHOLDER_WORD = /(^|[^a-z])(your|change[-_ ]?me|changeme|replace[-_ ]?me|placeholder|dev-only|not-for-production|example)([^a-z]|$)/i;
+const PLACEHOLDER_PREFIX =
+  /^(your[-_ ]|change[-_ ]?me|replace[-_ ]?me|replace[-_ ]with|dev-only-|ticketflow-dev|long-random-string|placeholder|example|todo($|[-_ :]))/i; // "todo" needs a boundary: 4 random base64 letters spell it about once in a million
+/** Whole values that are placeholders. */
+const PLACEHOLDER_VALUE = /^(secret|password)$/i;
+
+/** Production refuses a secret shorter than this (`openssl rand -base64 32` is 44 characters, hex 64). */
+export const MIN_SECRET_LENGTH = 32;
 
 export function isPlaceholderSecret(value: string): boolean {
-  return PLACEHOLDER_WORD.test(value);
+  const v = value.trim();
+  return PLACEHOLDER_PREFIX.test(v) || PLACEHOLDER_VALUE.test(v);
 }
 
 /**
@@ -32,6 +40,10 @@ export function secretProblem(name: RequiredSecret, env: NodeJS.ProcessEnv = pro
   }
   if (isPlaceholderSecret(value)) {
     return `${name} is still a placeholder value. Set a random secret (for example openssl rand -base64 32).`;
+  }
+  // New in this change: before it, any non-blank value was accepted.
+  if (value.trim().length < MIN_SECRET_LENGTH) {
+    return `${name} is too short: use at least ${MIN_SECRET_LENGTH} characters (for example openssl rand -base64 32).`;
   }
   return null;
 }

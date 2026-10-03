@@ -148,7 +148,7 @@ script as not run, with the reason.
 |---|---|
 | `users.failed_login_attempts`, `users.locked_until` (login lockout) | `users` |
 | `users.must_change_password`, `users.password_changed_at` (forced change, session revocation) | `users` |
-| `users.is_active` is now `NOT NULL DEFAULT true` (0020). A NULL used to read as inactive everywhere; existing NULL rows become `false` (never `true`), so no account is switched on | `users` |
+| `users.is_active` is now `NOT NULL DEFAULT true` (0020). Sign-in, sessions and listings read a NULL as inactive, but the Teams webhook check (`IS NOT FALSE`) and the old last-admin check read it as active. Existing NULL rows become `false` (never `true`), so no account is switched on; the one visible effect is that a NULL user's Teams webhooks stop firing, the safe direction | `users` |
 | `users.role` default is now `customer` in the main table (legacy `user` means agent; the invitations table default is `agent`) | `users`, `user_invitations` |
 | `ticket_number_counters` (prefix, year, last_number; primary key prefix+year) | new table |
 | `sns_message_dedupe` (message_id, status, received_at) for inbound email | new table |
@@ -161,7 +161,7 @@ Required (production refuses to start without them):
 | Variable | Why |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string. |
-| `SESSION_SECRET` | Signs sessions. Missing in production is a startup error; there is no fallback. A value that is still an example placeholder (`your-...`, `change-me`, `dev-only-...`) is refused too. Checked before the seeders run. |
+| `SESSION_SECRET` | Signs sessions. Missing in production is a startup error; there is no fallback. A value that starts like an example placeholder (`your-`, `change-me`, `replace-with`, `dev-only-`, `long-random-string`, `example`, `todo`, ...) or is shorter than 32 characters is refused too. Checked before the seeders run. |
 | `JWT_SECRET` | The JWT module refuses to load in production without it, and refuses a placeholder value like `SESSION_SECRET`. |
 | `APP_BASE_URL` | **New (R34).** The public origin, e.g. `https://tickets.example.com` (http or https, no query, a trailing slash is fine). Password-reset and invitation emails, Teams card links and the Microsoft SSO redirect URI are built from it, never from the request's Host header. Production refuses to start without it (`Startup refused: APP_BASE_URL must be set in production ...`); a malformed value is refused in every environment. `MICROSOFT_REDIRECT_URL`, when set, still overrides the SSO redirect URI. In development it may be unset: links then use the origin the request came in on. |
 | `NODE_ENV=production` | The Dockerfile sets it; `npm start` does not. Unset means development mode, including a permissive Content-Security-Policy. |

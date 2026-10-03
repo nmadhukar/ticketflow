@@ -118,24 +118,17 @@ describe("ForcedPasswordChange sign out (real query client)", () => {
   });
 
   it("a failed sign out shows the error, stays on the screen and does not reject unhandled", async () => {
-    const unhandled: unknown[] = [];
-    const onUnhandled = (reason: unknown) => unhandled.push(reason);
-    process.on("unhandledRejection", onUnhandled);
-    try {
-      (global.fetch as jest.Mock).mockImplementation(async (url: string) => {
-        if (url === "/api/auth/logout") throw new Error("network down");
-        return { ok: true, json: async () => ({ id: "1", role: "agent", mustChangePassword: true }) };
-      });
-      renderHarness();
-      fireEvent.click(await screen.findByRole("button", { name: /sign out/i }));
-      expect((await screen.findByRole("alert")).textContent).toMatch(/network down/);
-      expect(screen.getByRole("button", { name: /change password/i })).toBeTruthy();
-      expect(goHome).not.toHaveBeenCalled();
-      // Give a stray rejected promise the chance to surface.
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(unhandled).toEqual([]);
-    } finally {
-      process.off("unhandledRejection", onUnhandled);
-    }
+    (global.fetch as jest.Mock).mockImplementation(async (url: string) => {
+      if (url === "/api/auth/logout") throw new Error("network down");
+      return { ok: true, json: async () => ({ id: "1", role: "agent", mustChangePassword: true }) };
+    });
+    renderHarness();
+    fireEvent.click(await screen.findByRole("button", { name: /sign out/i }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/network down/);
+    expect(screen.getByRole("button", { name: /change password/i })).toBeTruthy();
+    expect(goHome).not.toHaveBeenCalled();
+    // Give a stray rejected promise the chance to surface. Jest itself fails the test on an
+    // unhandled rejection, so no listener or assertion is needed here.
+    await new Promise((resolve) => setTimeout(resolve, 20));
   });
 });

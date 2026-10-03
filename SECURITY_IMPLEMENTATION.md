@@ -54,15 +54,14 @@ The TicketFlow helpdesk system now includes comprehensive enterprise-level secur
   - Separate configurations for different services
   - Security best practices and deployment instructions
 
-### 6. Enhanced Authentication (`server/security/secureAuth.ts`)
-- **Purpose**: Advanced authentication features beyond basic login/logout
+### 6. Authentication (`server/services/auth/`)
+- **Purpose**: The live sign-in path (the old `secureAuth.ts` module was never wired in and has been deleted)
 - **Features**:
-  - bcrypt password hashing (12 salt rounds)
-  - Account lockout protection (5 failed attempts = 15-minute lockout)
-  - Password complexity validation
-  - Password reset with secure tokens
+  - scrypt password hashing with a random salt
+  - Account lockout (5 failed attempts = 15-minute lockout), shared by login and change-password
+  - Password reset with hashed, expiring tokens; sessions end on any password change
   - User approval system for new registrations
-  - Comprehensive audit logging
+  - Security audit logging (`SECURITY_AUDIT:` lines naming the signed-in actor)
 
 ### 7. Security Middleware (`server/security/middleware.ts`)
 - **Purpose**: Route-level security controls for fine-grained access

@@ -24,8 +24,9 @@ export function findSecrets(body: unknown, path = "$"): string[] {
   if (body && typeof body === "object")
     return Object.entries(body).flatMap(([k, v]) => {
       // A validation error names the FIELD that failed (`fieldErrors: { password: ["Required"] }`):
-      // its keys are field names and its values are messages, never the value the user typed.
-      if (k === "fieldErrors") return [];
+      // its keys are field names (not flagged) but its values are still scanned.
+      if (k === "fieldErrors" && v && typeof v === "object" && !Array.isArray(v))
+        return Object.values(v).flatMap((fieldValue) => findSecrets(fieldValue, `${path}.fieldErrors`));
       return (FORBIDDEN.includes(k) ? [`${path}.${k}`] : []).concat(
         findSecrets(v, `${path}.${k}`)
       );
