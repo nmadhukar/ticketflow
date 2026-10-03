@@ -1,22 +1,53 @@
 #!/usr/bin/env bash
-# Runtime/design gate. Requires only bash, Docker CLI, and a sandbox DOCKER_HOST.
-# All tests/services execute in containers; nothing is installed on the host.
+# Runtime/design gate. Requires only bash, the Docker CLI and a sandbox DOCKER_HOST.
+# All tests and services run in containers; nothing is installed on the host.
 # Validation is deliberately read-only outside this file: product defects fail the gate.
+# See docs/gate.md.
+#
+# Contract with the harness (do not change): the last lines are
+#   TESTS[<GATE_NONCE>]: <n> passed, <m> skipped
+#   RESULT: PASS|FAIL
+# <n> and <m> come from Jest's own JSON report. Every project, container and volume
+# this script creates has a name unique to this invocation and is removed on exit.
 set -uo pipefail
+# Git Bash on Windows rewrites container paths such as /work into C:/Program Files/Git/work.
+# Harmless everywhere else.
+export MSYS_NO_PATHCONV=1
 REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+# With path conversion off, Docker needs the host's own spelling (C:/Users/... on Windows;
+# `pwd -W` does not exist elsewhere, where the plain path is already native).
+HOST_DIR="$(cd "$REPO_DIR" && { pwd -W 2>/dev/null || pwd; })"
+COMPOSE_FILE="$HOST_DIR/docker/gate/docker-compose.gate.yml"
 PROJECT="tfverify_${GATE_NONCE:-local}_$$"
 PROJECT="$(printf '%s' "$PROJECT" | tr -cd 'a-zA-Z0-9_-')"
 NETWORK="${PROJECT}_default"
 # Unique project/volumes avoid touching other sandbox validations.
 PREFIX="tfv_${GATE_NONCE:-local}_$$"
 PREFIX="$(printf '%s' "$PREFIX" | tr -cd 'a-zA-Z0-9_-')"
-NODE_IMAGE=node:20-slim
-BROWSER_IMAGE=mcr.microsoft.com/playwright:v1.55.0-noble
+# Node 24 matches the production image and package.json engines (>=22.12).
+NODE_IMAGE=node:24-slim
+# Must match @playwright/test in package.json (1.63.0): the browsers are baked into the image.
+BROWSER_IMAGE=mcr.microsoft.com/playwright:v1.63.0-noble
 PASS=0
 FAIL=0
 TEST_PASSED=0
 TEST_SKIPPED=0
 REPORT_VALID=0
+
+# Secrets are generated here, per run, and only ever exported to the containers.
+gen() { head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
+GATE_DB_PASSWORD="$(gen)"
+GATE_SESSION_SECRET="$(gen)"
+GATE_JWT_SECRET="$(gen)"
+GATE_ADMIN_PASSWORD="Gate-$(gen)"
+export GATE_DB_PASSWORD GATE_SESSION_SECRET GATE_JWT_SECRET GATE_ADMIN_PASSWORD
+ADMIN_EMAIL=gate-admin@example.test
+# Two throwaway databases in the same PostgreSQL: one for Jest, one for Playwright.
+# Their names contain "test", which the e2e config and the test helpers insist on.
+JEST_DB=ticketflow_test_gate
+E2E_DB=ticketflow_test_e2e
+db_url() { printf 'postgresql://ticketflow:%s@postgres:5432/%s' "$GATE_DB_PASSWORD" "$1"; }
+
 # Print the result after EXIT cleanup so the TESTS and RESULT lines remain last.
 finish() {
   rc=$?
@@ -36,24 +67,31 @@ finish() {
 
 ok() { printf 'PASS: %s\n' "$1"; PASS=$((PASS+1)); }
 bad() { printf 'FAIL: %s\n' "$1"; FAIL=$((FAIL+1)); }
+compose() { docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"; }
 cleanup() {
   printf '%s\n' '--- CLEANUP ---'
-  docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1 || true
+  compose down -v --remove-orphans >/dev/null 2>&1 || true
   # Only uniquely named resources created by this invocation are removed.
-  docker volume rm "${PREFIX}_deps" "${PREFIX}_npm" "${PREFIX}_reports" >/dev/null 2>&1 || true
+  docker volume rm "${PREFIX}_deps" "${PREFIX}_deps_e2e" "${PREFIX}_npm" "${PREFIX}_reports" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
   printf '%s\n' 'Cleanup complete.'
 }
 trap finish EXIT
 
-# Prevent overlapping jobs from being joined or deleted by a different gate run.
-run_node() {
-  docker run --rm --network "$NETWORK" -v "$REPO_DIR:$REPO_DIR:ro" \
-    -v "${PREFIX}_deps:$REPO_DIR/node_modules" -v "${PREFIX}_npm:/root/.npm" \
-    -v "${PREFIX}_reports:/gate-reports" -w "$REPO_DIR" \
-    -e GATE_NONCE="${GATE_NONCE:-local}" "$NODE_IMAGE" "$@"
+# Runs "$@" in a writable copy of the working tree (the mount itself is read-only, and
+# the build and Playwright write into the tree). node_modules lives in a per-run volume.
+# $1 = image, $2 = node_modules volume, rest = command.
+in_tree() {
+  local image="$1" deps="$2"; shift 2
+  docker run --rm --ipc=host --network "$NETWORK" -v "$HOST_DIR:/src:ro" \
+    -v "${deps}:/work/node_modules" -v "${PREFIX}_npm:/root/.npm" \
+    -v "${PREFIX}_reports:/gate-reports" -w /work \
+    -e GATE_NONCE="${GATE_NONCE:-local}" -e CI=true \
+    -e DATABASE_URL -e TEST_DATABASE_URL -e SESSION_SECRET -e JWT_SECRET \
+    "$image" sh -c 'tar -C /src --exclude=./node_modules --exclude=./.git --exclude=./dist -cf - . | tar -C /work -xf - && exec "$@"' sh "$@"
 }
-app_curl() { docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" exec -T app curl -fsS "$@"; }
+run_node() { in_tree "$NODE_IMAGE" "${PREFIX}_deps" "$@"; }
+app_curl() { compose exec -T app curl -fsS "$@"; }
 
 printf '%s\n' '=== TicketFlow design-conformance gate ==='
 printf 'Repository: %s\n' "$REPO_DIR"
@@ -65,19 +103,15 @@ else
 fi
 
 printf '%s\n' '--- STEP 1: stack ---'
-# Compose app/database expose fixed host ports. If another sandbox validation
-# owns those ports, record an environment failure rather than joining its stack.
-if docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" build app && \
-   docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" up -d postgres; then
+# The stack publishes no host ports, so another validation cannot collide with it.
+if compose build app && compose up -d postgres; then
   ok 'Compose app built and PostgreSQL started'
 else
   bad 'Compose build/database start'
 fi
-# Push schema before app startup; the app seeds users and templates immediately.
 PG_HEALTH=0
 for i in $(seq 1 30); do
-  if docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" exec -T postgres \
-    pg_isready -U ticketflow >/dev/null 2>&1; then PG_HEALTH=1; break; fi
+  if compose exec -T postgres pg_isready -U ticketflow -d ticketflow >/dev/null 2>&1; then PG_HEALTH=1; break; fi
   sleep 2
 done
 if [ "$PG_HEALTH" -eq 1 ]; then
@@ -85,30 +119,36 @@ if [ "$PG_HEALTH" -eq 1 ]; then
 else
   bad 'PostgreSQL unhealthy'
 fi
+for name in "$JEST_DB" "$E2E_DB"; do
+  compose exec -T postgres psql -U ticketflow -d ticketflow -qc "CREATE DATABASE $name" >/dev/null 2>&1 || true
+done
+# Schema before the app starts, the way production does it (R32): the hand-written
+# idempotent migrations first, then drizzle-kit push. The app seeds at startup.
 SCHEMA_COUNT=0
-if docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" run --rm -T --no-deps app npx drizzle-kit push --force; then
-  SCHEMA_COUNT="$(docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" exec -T postgres \
+if compose run --rm -T --no-deps app sh -c 'npm run db:migrate-sql && npm run db:push -- --force'; then
+  SCHEMA_COUNT="$(compose exec -T postgres \
     psql -U ticketflow -d ticketflow -Atc "select count(*) from information_schema.tables where table_name='users'" 2>/dev/null || printf 0)"
 fi
 if [ "$SCHEMA_COUNT" = 1 ]; then
-  ok 'Database schema pushed'
+  ok 'Database schema applied (db:migrate-sql, then db:push)'
 else
-  bad 'Database schema push'
+  bad 'Database schema apply'
 fi
-if docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" up -d app; then
+if compose up -d app; then
   ok 'Application container started'
 else
   bad 'Application container start'
 fi
 HEALTH=0
 for i in $(seq 1 30); do
-  if app_curl http://localhost:5000/api/security/health >/dev/null 2>&1; then HEALTH=1; break; fi
+  if app_curl http://localhost:5000/health >/dev/null 2>&1; then HEALTH=1; break; fi
   sleep 2
 done
 if [ "$HEALTH" -eq 1 ]; then ok 'Application HTTP health responds'; else bad 'Application HTTP health unavailable'; fi
+if app_curl http://localhost:5000/api/security/health >/dev/null 2>&1; then ok 'Security health responds'; else bad 'Security health unavailable'; fi
 if app_curl http://localhost:5000/ >/dev/null 2>&1; then ok 'UI entry point responds'; else bad 'UI entry point unavailable'; fi
 printf 'Stack images: %s; %s\n' "$NODE_IMAGE" "$BROWSER_IMAGE"
-docker compose -p "$PROJECT" -f "$REPO_DIR/docker-compose.yml" ps || true
+compose ps || true
 
 printf '%s\n' '--- STEP 2: genuine ticket workflow ---'
 # Use Node's built-in fetch, so no curl/python/jq are needed on the host.
@@ -116,6 +156,7 @@ printf '%s\n' '--- STEP 2: genuine ticket workflow ---'
 # later-stage persistence, authorisation and session-security evidence.
 workflow_probe() {
   docker run --rm --network "$NETWORK" -e GATE_NONCE="${GATE_NONCE:-local}" \
+    -e GATE_EMAIL="$ADMIN_EMAIL" -e GATE_PASSWORD="$GATE_ADMIN_PASSWORD" \
     "$NODE_IMAGE" node -e '
 (async()=>{
  const b="http://app:5000",headers={"content-type":"application/json"};
@@ -125,32 +166,27 @@ workflow_probe() {
   return {status:response.status,data,cookie:response.headers.get("set-cookie")?.split(";")[0]};
  };
  const assert=(condition,message)=>{if(!condition)throw Error(message)};
- const login=await check("POST","/api/auth/login",{email:"admin@ticketflow.local",password:"Admin123!"});
- assert(login.status===200&&login.cookie,"seeded admin login/session failed: "+JSON.stringify(login.data));
+ const login=await check("POST","/api/auth/login",{email:process.env.GATE_EMAIL,password:process.env.GATE_PASSWORD});
+ assert(login.status===200&&login.cookie,"bootstrap admin login/session failed: HTTP "+login.status);
  const cookie=login.cookie, nonce=process.env.GATE_NONCE||"local";
- const first=await check("POST","/api/tasks",{title:"Gate "+nonce,description:"Entered only once",category:"bug",priority:"high"},cookie);
- if(first.status!==201)console.error("Documented create without ticketNumber: HTTP "+first.status+" "+JSON.stringify(first.data));
- // Continue the workflow without weakening the create assertion: send the
- // otherwise-invalid client ticketNumber to expose subsequent defects.
- const created=first.status===201?first:await check("POST","/api/tasks",{ticketNumber:"client-unused",title:"Gate "+nonce,description:"Entered only once",category:"bug",priority:"high"},cookie);
- assert(created.status===201,"fallback create HTTP "+created.status+" "+JSON.stringify(created.data));
+ const created=await check("POST","/api/tasks",{title:"Gate "+nonce,description:"Entered only once",category:"bug",priority:"high"},cookie);
+ assert(created.status===201,"documented create (no ticketNumber) HTTP "+created.status+" "+JSON.stringify(created.data));
  const id=created.data.id;
  const assigned=await check("PATCH","/api/tasks/"+id,{assigneeId:login.data.id},cookie);
- assert(assigned.status===200&&assigned.data.assigneeId===login.data.id,"assignment failed");
+ assert(assigned.status===200&&assigned.data.assigneeId===login.data.id,"assignment failed: HTTP "+assigned.status+" "+JSON.stringify(assigned.data));
  const mine=await check("GET","/api/tasks/my",undefined,cookie);
- assert(mine.status===200&&mine.data.some(t=>t.id===id),"assignment not visible in My Tasks");
+ assert(mine.status===200&&Array.isArray(mine.data)&&mine.data.some(t=>t.id===id),"assignment not visible in My Tasks");
  const commented=await check("POST","/api/tasks/"+id+"/comments",{content:"Progress on original description"},cookie);
- assert(commented.status===201,"comment failed");
+ assert(commented.status===201,"comment HTTP "+commented.status+" "+JSON.stringify(commented.data));
  for(const status of ["in_progress","on_hold","resolved","closed","open"]){
   const changed=await check("PATCH","/api/tasks/"+id,{status},cookie);
-  assert(changed.status===200,"stage "+status+" HTTP "+changed.status);
+  assert(changed.status===200,"stage "+status+" HTTP "+changed.status+" "+JSON.stringify(changed.data));
   assert(changed.data.status===status&&changed.data.description==="Entered only once","early details lost at "+status);
   if(status==="resolved")assert(changed.data.resolvedAt,"resolvedAt not stamped");
   if(status==="closed")assert(changed.data.closedAt,"closedAt not stamped");
  }
  const reread=await check("GET","/api/tasks/"+id,undefined,cookie);
  assert(reread.status===200&&reread.data.description==="Entered only once","early details not retained on GET");
- assert(first.status===201,"documented create rejected with HTTP "+first.status);
  console.log("Ticket "+id+" passed all workflow stages without re-entry");
 })().catch(e=>{console.error(e.message);process.exit(1)})
   '
@@ -161,43 +197,54 @@ else
   bad 'Create and walk all workflow stages without re-entry'
 fi
 # Independent checks are required even when the workflow has failed.
-if docker run --rm --network "$NETWORK" "$NODE_IMAGE" node -e '
+if docker run --rm --network "$NETWORK" -e GATE_EMAIL="$ADMIN_EMAIL" -e GATE_PASSWORD="$GATE_ADMIN_PASSWORD" \
+  "$NODE_IMAGE" node -e '
 (async()=>{const b="http://app:5000",h={"content-type":"application/json"};
- const anon=await fetch(b+"/api/tasks");if(anon.status!==401)throw Error("anonymous tasks HTTP "+anon.status);
- const bad=await fetch(b+"/api/auth/login",{method:"POST",headers:h,body:JSON.stringify({email:"admin@ticketflow.local",password:"incorrect"})});
- if(bad.status!==401)throw Error("wrong password HTTP "+bad.status);
- const good=await fetch(b+"/api/auth/login",{method:"POST",headers:h,body:JSON.stringify({email:"admin@ticketflow.local",password:"Admin123!"})});
+ // Every error answers the contract {error, message}.
+ const contract=async(res,what)=>{const j=await res.json().catch(()=>({}));if(typeof j.error!=="string"||typeof j.message!=="string")throw Error(what+" does not follow the error contract: "+JSON.stringify(j).slice(0,120))};
+ const anon=await fetch(b+"/api/tasks");if(anon.status!==401)throw Error("anonymous tasks HTTP "+anon.status);await contract(anon,"anonymous 401");
+ const bad=await fetch(b+"/api/auth/login",{method:"POST",headers:h,body:JSON.stringify({email:process.env.GATE_EMAIL,password:"incorrect"})});
+ if(bad.status!==401)throw Error("wrong password HTTP "+bad.status);await contract(bad,"wrong password 401");
+ const good=await fetch(b+"/api/auth/login",{method:"POST",headers:h,body:JSON.stringify({email:process.env.GATE_EMAIL,password:process.env.GATE_PASSWORD})});
  if(good.status!==200)throw Error("login HTTP "+good.status);
  const cookie=good.headers.get("set-cookie")?.split(";")[0];if(!cookie)throw Error("session cookie missing");
  const who=await fetch(b+"/api/auth/user",{headers:{cookie}});if(who.status!==200)throw Error("session user HTTP "+who.status);
+ const body=await who.json();if("password" in body)throw Error("session user leaks the password hash");
  const out=await fetch(b+"/api/auth/logout",{method:"POST",headers:{cookie}});if(out.status!==200)throw Error("logout HTTP "+out.status);
  const expired=await fetch(b+"/api/auth/user",{headers:{cookie}});if(expired.status!==401)throw Error("logout session still active");
- console.log("anonymous / invalid login / session / logout assertions passed");
+ console.log("anonymous / invalid login / session / logout / error-contract assertions passed");
 })().catch(e=>{console.error(e.message);process.exit(1)})'; then
-  ok 'Authentication and anonymous isolation runtime probes'
+  ok 'Authentication, error contract and anonymous isolation runtime probes'
 else
-  bad 'Authentication and anonymous isolation runtime probes'
+  bad 'Authentication, error contract and anonymous isolation runtime probes'
 fi
 
 printf '%s\n' '--- STEP 3: frozen install, lint, typecheck, unit/integration/e2e ---'
 if run_node sh -c 'npm ci --no-audit --no-fund'; then ok 'npm ci frozen install'; else bad 'npm ci frozen install'; fi
 if run_node sh -c 'npm run lint'; then ok 'lint'; else bad 'lint'; fi
-if run_node sh -c 'npm run check -- --noEmit'; then ok 'typecheck'; else bad 'typecheck'; fi
-# Keep the tracked Jest configuration unchanged; the runner JSON, not stdout,
-# supplies the test counts. Every discovered test runs, including unit, integration,
-# AI, load, client and server end-to-end suites.
-if run_node sh -c 'npm exec --no -- jest --config jest.config.js --runInBand --json --outputFile=/gate-reports/jest.json'; then
-  ok 'all Jest suites (unit, integration, AI, load, e2e)'
+if run_node sh -c 'npm run check'; then ok 'typecheck'; else bad 'typecheck'; fi
+# Integration tests run against a real PostgreSQL: push the schema into the Jest database first.
+TEST_DATABASE_URL="$(db_url "$JEST_DB")"; export TEST_DATABASE_URL
+DATABASE_URL="$TEST_DATABASE_URL"; export DATABASE_URL
+if run_node sh -c 'npm run db:migrate-sql && npm run db:push -- --force'; then
+  ok 'Jest database schema applied'
 else
-  bad 'all Jest suites (unit, integration, AI, load, e2e)'
+  bad 'Jest database schema apply'
+fi
+# Keep the tracked Jest configuration unchanged; the runner JSON, not stdout,
+# supplies the test counts. Every discovered test runs: unit, AI, integration
+# (against PostgreSQL) and client.
+if run_node sh -c 'npm exec --no -- jest --runInBand --json --outputFile=/gate-reports/jest.json'; then
+  ok 'all Jest suites (unit, AI, integration, client)'
+else
+  bad 'all Jest suites (unit, AI, integration, client)'
 fi
 # Read only Jest's own JSON report. A missing report fails, never fabricates
-# test results. Runner-reported zero tests is honest when config never loads.
-# A config-loading failure cannot be interpreted as an empty successful suite.
+# test results. A config-loading failure cannot be read as an empty successful suite.
 COUNTS="$(run_node node -e '
 const fs=require("fs");let r;try{r=JSON.parse(fs.readFileSync("/gate-reports/jest.json","utf8"))}catch(e){console.error(`no valid Jest JSON: ${e.message}`);process.exit(1)}
 for(const k of ["numPassedTests","numPendingTests","numFailedTests","numTotalTests"]){if(!Number.isSafeInteger(r[k])||r[k]<0)throw Error(`invalid ${k}`)}
-if(r.numPassedTests+r.numPendingTests+r.numFailedTests!==r.numTotalTests)throw Error("inconsistent runner counts");
+if(r.numPassedTests+r.numPendingTests+r.numFailedTests+(r.numTodoTests||0)!==r.numTotalTests)throw Error("inconsistent runner counts");
 console.log(`${r.numPassedTests} ${r.numPendingTests}`);
 ')" && REPORT_VALID=1
 if [ "$REPORT_VALID" -eq 1 ]; then
@@ -206,11 +253,11 @@ if [ "$REPORT_VALID" -eq 1 ]; then
 else
   bad 'Jest runner JSON report absent or invalid'
 fi
-# This repository has no Playwright dependency/spec or pinned browser version.
-# Still invoke the official pinned browser image and check actual e2e script;
-# the absence is a gate failure, not a skip or fabricated test count.
-if docker run --rm --network "$NETWORK" -v "$REPO_DIR:$REPO_DIR:ro" -w "$REPO_DIR" \
-  "$BROWSER_IMAGE" sh -c 'node -e '\''const p=require("./package.json");if(!p.scripts?.e2e)throw Error("no e2e script in package.json")'\'' && npm run e2e'; then
+# Playwright runs in the official image pinned to the @playwright/test version, against its
+# own database. The config builds and starts the production bundle itself.
+E2E_URL="$(db_url "$E2E_DB")"
+DATABASE_URL="$E2E_URL"; TEST_DATABASE_URL="$E2E_URL"; export DATABASE_URL TEST_DATABASE_URL
+if in_tree "$BROWSER_IMAGE" "${PREFIX}_deps_e2e" sh -c 'npm ci --no-audit --no-fund && npm run db:migrate-sql && npm run db:push -- --force && npm run e2e'; then
   ok 'official pinned-image browser e2e suite'
 else
   bad 'official pinned-image browser e2e suite'

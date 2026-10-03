@@ -1,44 +1,40 @@
+# The verification gate's stack (scripts/ai/verify.sh). Never the production compose
+# file, which is docker-compose.yml at the repository root (Ruling R39).
+#
+# Nothing is published on the host: the gate reaches the app and the database over
+# the compose network, so two gate runs (or a gate and a developer stack) never fight
+# over a port. Every ${VAR} comes from verify.sh, which generates the secrets per run.
 services:
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ticketflow
-      POSTGRES_PASSWORD: ticketflow
+      POSTGRES_PASSWORD: ${GATE_DB_PASSWORD}
       POSTGRES_DB: ticketflow
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ticketflow"]
+      test: ["CMD-SHELL", "pg_isready -U ticketflow -d ticketflow"]
       interval: 2s
       timeout: 5s
-      retries: 10
+      retries: 30
 
   app:
     build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "5000:5000"
-    environment:
-      DATABASE_URL: postgresql://ticketflow:ticketflow@postgres:5432/ticketflow
-      SESSION_SECRET: ticketflow-dev-session-secret-not-for-prod
-      NODE_ENV: development
-      PORT: "5000"
-      REPLIT_DOMAINS: localhost:5000
-      REPL_ID: ticketflow-dev
+      context: ../..
+      dockerfile: docker/gate/Dockerfile.gate
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - ./shared:/app/shared:ro
-      - ./client:/app/client:ro
-      - ./migrations:/app/migrations:ro
-      - ./drizzle.config.ts:/app/drizzle.config.ts:ro
-      - ./tsconfig.json:/app/tsconfig.json:ro
-      - ./vite.config.ts:/app/vite.config.ts:ro
-      - /app/node_modules
-
-volumes:
-  pgdata:
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      DATABASE_URL: postgresql://ticketflow:${GATE_DB_PASSWORD}@postgres:5432/ticketflow
+      # Required by a production boot (R34, R29): links are built from APP_BASE_URL.
+      APP_BASE_URL: http://app:5000
+      SESSION_SECRET: ${GATE_SESSION_SECRET}
+      JWT_SECRET: ${GATE_JWT_SECRET}
+      # Plain HTTP inside the gate network, so the session cookie cannot be Secure.
+      COOKIE_SECURE: "false"
+      # First-run admin, created because the database has none.
+      ADMIN_EMAIL: gate-admin@example.test
+      ADMIN_PASSWORD: ${GATE_ADMIN_PASSWORD}
+      SEED_DEMO_DATA: "false"

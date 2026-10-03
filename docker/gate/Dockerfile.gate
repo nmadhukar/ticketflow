@@ -1,25 +1,25 @@
-FROM node:20-slim
+# Image for the verification gate (scripts/ai/verify.sh). Not the production image:
+# that is the Dockerfile at the repository root and it is left alone (Ruling R39).
+#
+# It builds the same bundle the production image builds and runs it the same way
+# (node dist/index.js), and adds curl so the gate can probe the running container.
+FROM node:24-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 make g++ curl \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# Exactly the locked tree, dev dependencies included: vite and esbuild build the
+# bundle, drizzle-kit and pg run the schema steps.
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --include=dev --no-audit --no-fund
 
-# Install pg for local postgres (replaces @neondatabase/serverless)
-RUN npm install pg @types/pg
-
-# Copy the local-db adapter that replaces server/db.ts
-COPY docker/db.ts /app/server/db.ts
-
-# Copy everything else
 COPY . .
+ENV NODE_ENV=production \
+    PORT=5000
+RUN npm run build
 
-# Overwrite again just in case (COPY . . might overwrite)
-COPY docker/db.ts /app/server/db.ts
-
-# Default command
-CMD ["npx", "tsx", "server/index.ts"]
+EXPOSE 5000
+CMD ["node", "dist/index.js"]
