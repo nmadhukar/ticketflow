@@ -10,6 +10,23 @@ export function isDevelopmentEnv(nodeEnv: string | undefined = process.env.NODE_
 }
 
 /**
+ * R49: how many reverse proxies sit in front of the app (Express "trust proxy" as a hop count).
+ * TRUST_PROXY_HOPS is an integer of 0 or more; unset means 1 (nginx alone); 2 is Coolify/Traefik
+ * in front of nginx; 0 trusts no proxy header at all. Junk or a negative value logs one line and
+ * uses 1. The one place `trust proxy` is set is server/index.ts.
+ */
+export function parseTrustProxyHops(
+  raw: string | undefined = process.env.TRUST_PROXY_HOPS,
+  warn: (line: string) => void = (line) => console.warn(line),
+): number {
+  if (raw === undefined || raw.trim() === "") return 1;
+  const value = raw.trim();
+  if (/^\d+$/.test(value) && Number.isSafeInteger(Number(value))) return Number(value);
+  warn("TRUST_PROXY_HOPS must be an integer of 0 or more; using 1.");
+  return 1;
+}
+
+/**
  * FU5: the built server (`node dist/index.js`, i.e. `npm start`) with NODE_ENV unset
  * would run in development mode, including the permissive CSP. Returns the one line to
  * log when that is the case, or null. `npm run dev` runs `server/index.ts` through tsx,

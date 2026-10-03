@@ -21,11 +21,11 @@ function positiveInt(raw: string | undefined, fallback: number): number {
   return raw !== undefined && raw.trim() !== "" && Number.isInteger(n) && n > 0 ? n : fallback;
 }
 
-/** RATE_LIMIT_MAX_REQUESTS (default 100) per RATE_LIMIT_WINDOW_MS (default 15 minutes); a non-positive or non-integer value falls back to the default. */
+/** RATE_LIMIT_MAX_REQUESTS (default 600, R52) per RATE_LIMIT_WINDOW_MS (default 15 minutes); a non-positive or non-integer value falls back to the default. */
 export function generalRateLimitConfig(env: NodeJS.ProcessEnv = process.env): { windowMs: number; max: number } {
   return {
     windowMs: positiveInt(env.RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),
-    max: positiveInt(env.RATE_LIMIT_MAX_REQUESTS, 100),
+    max: positiveInt(env.RATE_LIMIT_MAX_REQUESTS, 600),
   };
 }
 
@@ -39,7 +39,7 @@ export function createGeneralRateLimit(env: NodeJS.ProcessEnv = process.env): Re
     standardHeaders: true,
     legacyHeaders: false,
     // Key on req.ip, never on the client-supplied X-Forwarded-For. The app sets
-    // `trust proxy` = 1, so req.ip is the address the reverse proxy saw.
+    // `trust proxy` is TRUST_PROXY_HOPS (default 1), so req.ip is the address the trusted proxy chain saw.
     keyGenerator: (req) => ipKeyGenerator(req.ip ?? ""),
   });
 }
@@ -324,7 +324,8 @@ export const createCustomRateLimit = (options: {
       options.keyGenerator ||
       ((req: Request) => {
         const authReq = req as AuthenticatedRequest;
-        return String((authReq.user?.userId as string) || req.ip);
+        const u = authReq.user as { id?: string; userId?: string } | undefined;
+        return String(u?.id ?? u?.userId ?? req.ip);
       }),
     skip: options.skip,
     standardHeaders: true,

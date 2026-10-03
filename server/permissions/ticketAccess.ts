@@ -27,8 +27,17 @@ export const queuedToTeamSql = sql`${tasks.assigneeType} = 'team'`;
  *  a reassignment grants nothing. */
 export function ticketVisibilityWhere(user: AccessUser): SQL {
   const role = normalizeRole(user?.role);
-  const me = user?.id;
-  if (!role || typeof me !== "string" || me === "") return sql`FALSE`;
+  const id = user?.id;
+  if (!role || typeof id !== "string" || id === "") return sql`FALSE`;
+  return roleRule(role, sql`${id}`);
+}
+
+/**
+ * The rule of one role, written against `me` (a SQL expression for the user id: a bound parameter for
+ * one user, a column of the candidate set for many). ticketVisibilityWhere and the set-based
+ * usersWhoCanAccessTask both build from this, so there is exactly one rule.
+ */
+function roleRule(role: "admin" | "manager" | "agent" | "customer", me: SQL): SQL {
   if (role === "admin") return sql`TRUE`;
   if (role === "customer") return sql`${tasks.createdBy} = ${me}`;
 
@@ -70,24 +79,34 @@ export async function canAccessTask(user: AccessUser, taskId: number): Promise<b
   return rows.length > 0;
 }
 
-/** Visibility branches per query in usersWhoCanAccessTask. */
-const ACCESS_CHUNK = 200;
-
 /**
- * Which of `candidates` can see ticket `taskId`: the same rule as canAccessTask, but one
- * query (a UNION ALL of `SELECT <id> FROM tasks WHERE id = <ticket> AND <rule>` branches)
- * per ACCESS_CHUNK users instead of one per user. Returns the allowed user ids.
+ * Which of `candidates` can see ticket `taskId`: the same rule as canAccessTask, in ONE
+ * set-based query however many candidates there are (R51). The eligible (id, role) pairs go in as
+ * two arrays, `unnest($ids::text[], $roles::text[])` makes them rows, and the per-role rule
+ * (roleRule, the one ticketVisibilityWhere uses) is written against the row's id and role.
+ * Returns the allowed user ids.
  */
 export async function usersWhoCanAccessTask(candidates: AccessUser[], taskId: number): Promise<Set<string>> {
-  const allowed = new Set<string>();
-  for (let i = 0; i < candidates.length; i += ACCESS_CHUNK) {
-    const branches = candidates.slice(i, i + ACCESS_CHUNK).map(
-      (u) => sql`(SELECT ${u.id}::text AS uid FROM ${tasks} WHERE ${tasks.id} = ${taskId} AND ${ticketVisibilityWhere(u)})`
-    );
-    if (branches.length === 0) continue;
-    const result = await db.execute(sql.join(branches, sql` UNION ALL `));
-    for (const row of result.rows as Array<{ uid: string }>) allowed.add(row.uid);
+  const roleOf = new Map<string, "admin" | "manager" | "agent" | "customer">();
+  for (const u of candidates) {
+    const role = normalizeRole(u?.role);
+    if (role && typeof u?.id === "string" && u.id !== "") roleOf.set(u.id, role);
   }
+  const allowed = new Set<string>();
+  if (roleOf.size === 0) return allowed;
+
+  const ids = Array.from(roleOf.keys());
+  const roles = ids.map((id) => roleOf.get(id)!);
+  const me = sql`c.id`;
+  const rule = sql`(c.role = 'admin'
+    OR (c.role = 'customer' AND ${roleRule("customer", me)})
+    OR (c.role = 'manager' AND ${roleRule("manager", me)})
+    OR (c.role = 'agent' AND ${roleRule("agent", me)}))`;
+  const result = await db.execute(sql`
+    SELECT c.id AS uid
+    FROM unnest(${sql.param(ids)}::text[], ${sql.param(roles)}::text[]) AS c(id, role)
+    WHERE EXISTS (SELECT 1 FROM ${tasks} WHERE ${tasks.id} = ${taskId} AND ${rule})`);
+  for (const row of result.rows as Array<{ uid: string }>) allowed.add(row.uid);
   return allowed;
 }
 

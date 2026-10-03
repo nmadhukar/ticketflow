@@ -10,8 +10,8 @@
  *
  * Ticket events go only to connected users for whom the ticket is visible by the
  * one access rule (ticketVisibilityWhere, the rule behind canAccessTask), judged
- * on the user's CURRENT row (role, active, approved, password change), not what
- * was true at connect time: a user who no longer qualifies has their sockets
+ * on the user's CURRENT row (role, active, approved, password change, read at most
+ * 1 s ago: R51), not what was true at connect time: a user who no longer qualifies has their sockets
  * closed with 1008 the next time an event is routed, or at once through
  * disconnectUser from the code paths that change a user.
  *
@@ -21,7 +21,7 @@
  */
 import type { IncomingMessage, Server } from "http";
 import type { Duplex } from "stream";
-import { inArray } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { WebSocketServer } from "ws";
 import { users } from "@shared/schema";
 import { db } from "../storage/db";
@@ -33,6 +33,7 @@ import {
   addConnection,
   allConnections,
   clearConnections,
+  connectionEpoch,
   removeConnection,
   sendTo,
   type Connection,
@@ -42,8 +43,6 @@ export { connectionCount, disconnectUser } from "./connections";
 
 export const WS_PATH = "/ws";
 const HEARTBEAT_MS = 30_000;
-/** Visibility branches / user rows per query. */
-const RECIPIENT_CHUNK = 200;
 /** Clients send nothing we read; anything bigger than a ping-sized frame is abuse. */
 const MAX_PAYLOAD = 1024;
 
@@ -88,8 +87,8 @@ function allowedOrigins(): string[] {
 
 /**
  * Whether X-Forwarded-Host is believed. It is only the proxy's word when the app was told
- * a proxy sits in front (Express "trust proxy", which server/index.ts sets to 1 for the
- * deployed reverse proxy); on a direct connection any client can send that header and
+ * a proxy sits in front (Express "trust proxy", which server/index.ts sets from
+ * TRUST_PROXY_HOPS; 0 means none); on a direct connection any client can send that header and
  * choose its own "same origin". attachRealtime(server, { trustProxy }) sets this from the app.
  */
 let trustForwardedHost = false;
@@ -195,13 +194,51 @@ export async function closeRealtime(): Promise<void> {
  */
 async function currentlyEligibleUsers(): Promise<AccessUser[]> {
   const conns = allConnections();
+  const key = connectionSetKey(conns);
+  const epoch = connectionEpoch();
+  const now = Date.now();
+  const hit = eligibilityCache;
+  if (hit && hit.key === key && hit.epoch === epoch && now - hit.at < ELIGIBILITY_TTL_MS) return hit.value;
+  const value = readEligibleUsers(conns);
+  const entry = { key, epoch, at: now, value };
+  eligibilityCache = entry;
+  // A failed read is never served again.
+  value.catch(() => {
+    if (eligibilityCache === entry) eligibilityCache = undefined;
+  });
+  return value;
+}
+
+/**
+ * R51: the result of currentlyEligibleUsers is reused for at most ELIGIBILITY_TTL_MS, and only
+ * while the connected set is unchanged: the key is the sorted user ids plus their session stamps
+ * (authAt, pwdAt), so a connect, a close or a different session misses by itself, and the
+ * connection epoch (bumped by disconnectUser, which is how approve disconnects with 1012, and by
+ * clearConnections) invalidates it explicitly. A burst of events therefore reads the users once.
+ * Concurrent callers share the one in-flight read.
+ */
+const ELIGIBILITY_TTL_MS = 1000;
+let eligibilityCache:
+  | { key: string; epoch: number; at: number; value: Promise<AccessUser[]> }
+  | undefined;
+
+function connectionSetKey(conns: Connection[]): string {
+  const stamp = (v: unknown) => (v instanceof Date ? String(v.getTime()) : String(v ?? ""));
+  return conns
+    .map((c) => `${c.user.id}\u0000${stamp(c.authAt)}\u0000${stamp(c.pwdAt)}`)
+    .sort()
+    .join("\u0001");
+}
+
+async function readEligibleUsers(conns: Connection[]): Promise<AccessUser[]> {
   const ids = Array.from(new Set(conns.map((c) => c.user.id)));
   const rows = new Map<string, typeof users.$inferSelect>();
-  for (let i = 0; i < ids.length; i += RECIPIENT_CHUNK) {
+  if (ids.length > 0) {
+    // One read for every connected user.
     const found = await db
       .select()
       .from(users)
-      .where(inArray(users.id, ids.slice(i, i + RECIPIENT_CHUNK)));
+      .where(sql`${users.id} = ANY(${sql.param(ids)}::text[])`);
     for (const r of found) rows.set(r.id, r);
   }
   const eligible = new Map<string, AccessUser>();
@@ -232,11 +269,10 @@ async function currentlyEligibleUsers(): Promise<AccessUser[]> {
 }
 
 /**
- * The connected users who can see ticket `ticketId` right now. Two queries per
- * RECIPIENT_CHUNK connected users: one re-reads the user rows (current role and
- * state), one (usersWhoCanAccessTask) is a UNION ALL of
- * `SELECT <id> FROM tasks WHERE id = <ticket> AND <ticketVisibilityWhere(user)>`
- * branches, so the rule is exactly the one canAccessTask applies.
+ * The connected users who can see ticket `ticketId` right now. At most two queries however
+ * many users are connected: the user rows (current role and state; cached for up to 1 s, see
+ * currentlyEligibleUsers) and ONE set-based visibility query (usersWhoCanAccessTask), whose
+ * per-role rule is the one canAccessTask applies.
  */
 export async function ticketRecipients(ticketId: number): Promise<string[]> {
   const candidates = await currentlyEligibleUsers();
