@@ -1,0 +1,3 @@
+# The gate runs in Linux containers (and under bash on Windows): LF only, whatever autocrlf says.
+scripts/ai/verify.sh text eol=lf
+docker/gate/* text eol=lf
