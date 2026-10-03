@@ -405,7 +405,7 @@ export function setupAuth(app: Express) {
       if (!role) return done(null, false);
       done(null, { ...user, role });
     } catch (error) {
-      console.error("Deserialize user error:", error);
+      logRouteError("Deserialize user error", error);
       done(null, false);
     }
   });
@@ -592,7 +592,7 @@ export function setupAuth(app: Express) {
   app.get("/api/logout", (req, res) => {
     req.logout((err) => {
       if (err) {
-        console.error("Logout error:", err);
+        logRouteError("Logout error", err);
       }
       res.redirect("/");
     });

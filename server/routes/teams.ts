@@ -197,7 +197,16 @@ export function registerTeamsRoutes(app: Express): void {
         );
       }
 
-      const team = await storage.createTeam(teamData);
+      // R61: the team and the creator's member row (role "admin") land together or not at all.
+      const team = await db.transaction(async (tx) => {
+        const [created] = await tx.insert(teams).values(teamData).returning();
+        await tx.insert(teamMembers).values({
+          teamId: created.id,
+          userId,
+          role: "admin",
+        });
+        return created;
+      });
       res.status(201).json(team);
     } catch (error) {
       if (error instanceof z.ZodError) {

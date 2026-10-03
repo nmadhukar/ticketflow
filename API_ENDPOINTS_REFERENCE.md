@@ -472,7 +472,7 @@ Secrets are **never returned**. The response says only whether one is stored.
 | Users | `GET /api/users` (staff only, 403 for customers; no secret fields; system accounts hidden). `GET|PATCH /api/user/preferences`. |
 | Admin users | `GET /api/admin/users`, `PATCH /api/admin/users/:userId` (role/profile; 409 `last_admin` when it would leave no active admin, 409 `self_demotion` for your own account, 409 `email_in_use`, 400 `invalid_role`), `POST .../toggle-status`, `POST .../approve`, `POST .../reset-password` (session only; returns `{tempPassword}` once with `Cache-Control: no-store`, sets `mustChangePassword`, ends the user's sessions; 409 `no_local_password` for SSO or system accounts). |
 | Invitations | Admin: `GET|POST /api/admin/invitations` (`role` whitelist, `expiresAt` must be in the future and within 30 days, default 7 days; 400 `invalid_expiry` / `invalid_role`), `DELETE /api/admin/invitations/:id`, `POST .../:id/resend`. Public: `GET /api/invitations/:token`, `POST /api/invitations/:token/accept` (an anonymous caller gets `{registrationRequired:true, email, registerPath}` and no account; a signed-in user whose email matches is promoted). Claiming an invitation is atomic. Tokens are 32 random bytes and are redacted from request logs. The admin responses never include the token (R33): it travels only in the emailed link, built on `APP_BASE_URL` (R34). |
-| Statistics | `GET /api/stats`, `GET /api/stats/agent`, `GET /api/stats/manager`, `GET /api/stats/global` (admin only), `GET /api/admin/stats` (admin only), `GET /api/activity?limit=` (only events of tickets the caller can see). Counts follow the same visibility rule as the lists. |
+| Statistics | `GET /api/stats`, `GET /api/stats/agent`, `GET /api/stats/manager`, `GET /api/stats/global` (admin only), `GET /api/admin/stats` (admin only), `GET /api/activity?limit=` (only events of tickets the caller can see). Counts follow the same visibility rule as the lists. `GET /api/stats/manager` returns `totalTickets`, `priorityDistribution` and `categoryBreakdown` over the manager's `/api/stats` scope (tickets they created, are assigned, or that are queued or assigned within their departments), plus `personal: {assignedToMe, createdByMe}`; its `department` and `teamPerformance` blocks count only tickets queued to the department's teams. |
 | Notifications | `GET /api/notifications`, `PATCH /api/notifications/:id/read`, `PATCH /api/notifications/read-all`. |
 | Email templates | `GET /api/email-templates`, `PUT /api/email-templates/:name`. |
 | Health | `GET /health`, `GET /api/security/health` (outside `/api` JSON contract; no auth). |
@@ -560,18 +560,25 @@ Tool results are JSON text. On success `isError` is absent. On failure the resul
 
 Wrong values reach the service and come back as `VALIDATION`, not a protocol error.
 
+A ticket `id` is a positive integer, as a number or as a string of plain digits (`"12"` is 12): no sign,
+space, leading zero or decimal point, at most 2147483647. Anything else (`"abc"`, `"1.5"`, `""`, `" 12"`,
+`0`, `-1`) is `VALIDATION` with `details.fieldErrors.id`. `limit` and `offset` take a number or a numeric
+string the same way; a value out of range or not numeric is `VALIDATION` with `details.fieldErrors.limit`
+or `.offset`.
+
 | Tool | Arguments | Returns |
 |---|---|---|
 | `create_ticket` | `title`, `category` (required); `description`, `priority`, `severity`, `notes`, `assigneeId`, `assigneeType`, `assigneeTeamId`, `dueDate`, `tags`, `estimatedHours`, `actualHours` (staff only) | The ticket (status `open`, created as the key owner). A `status` argument is rejected. |
 | `get_ticket` | `id`; `includeComments?` | The ticket, optionally with comments. |
-| `list_tickets` | `status`, `priority`, `category`, `assigneeId`, `search`, `limit` (1-100, default 25), `offset` (default 0) | `{tickets, total, returned, limit, offset, hasMore}`. `total` counts all matching visible tickets; page with `offset + returned` while `hasMore`. An invalid filter is `VALIDATION`, never an empty list. |
+| `list_tickets` | `status`, `priority`, `category`, `assigneeId`, `search`, `limit` (1-100, default 25; number or numeric string), `offset` (0 or more, default 0; number or numeric string) | `{tickets, total, returned, limit, offset, hasMore}`. `total` counts all matching visible tickets; page with `offset + returned` while `hasMore`. An invalid filter is `VALIDATION`, never an empty list. |
 | `update_ticket` | `id` plus any updatable field and `status` | `{ticket, appliedFields, ignoredFields}`. |
 | `close_ticket` | `id` | The ticket. Staff only; an already closed ticket is `INVALID_STATE`. |
 | `reopen_ticket` | `id` | The ticket back to `open`. Staff, or the customer who created it; an open ticket is `INVALID_STATE`. |
 | `delete_ticket` | `id`, `confirm` (must be the boolean `true`) | `{deleted:true, id, ticketNumber}`. Admin only (manager only with `ALLOW_MANAGER_DELETE=true`). Without a literal `true` it is `VALIDATION` and nothing is deleted. |
 | `add_comment` | `id`, `content` (1-10000 characters) | The comment. |
 
-A refused status change over MCP is written to the security audit log like the REST one.
+A refused status change over MCP is written to the security audit log like the REST one, with the
+caller's IP and `channel: "mcp"`.
 The MCP page size cap (100) is lower than the REST cap (500).
 
 Example call (placeholders only):

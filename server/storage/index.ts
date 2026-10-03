@@ -1,5 +1,5 @@
 import { randomBytes } from "crypto";
-import { HttpError } from "../http/errors";
+import { HttpError, describeError } from "../http/errors";
 import { disconnectUser } from "../realtime/connections";
 import {
   users,
@@ -619,14 +619,16 @@ export class DatabaseStorage implements IStorage {
         teamName: sql<
           string | null
         >`CASE WHEN ${tasks.assigneeType} = 'team' THEN ${teams.name} ELSE NULL END`,
-        lastUpdatedBy: sql<string>`(
-          SELECT ${displayNameSql("u.first_name", "u.last_name", "u.role")}
+        // The list's rule (R59): no name for a missing user, '' when there is no history, ties by id.
+        lastUpdatedBy: sql<string>`COALESCE((
+          SELECT CASE WHEN u.id IS NULL THEN NULL
+            ELSE ${displayNameSql("u.first_name", "u.last_name", "u.role")} END
           FROM ${taskHistory} th
           LEFT JOIN ${users} u ON u.id = th.user_id
           WHERE th.task_id = ${tasks.id}
-          ORDER BY th.created_at DESC
+          ORDER BY th.created_at DESC, th.id DESC
           LIMIT 1
-        )`,
+        ), '')`,
       })
       .from(tasks)
       .leftJoin(sql`${users} as creator`, sql`creator.id = ${tasks.createdBy}`)
@@ -771,127 +773,6 @@ export class DatabaseStorage implements IStorage {
     return rows;
   }
 
-  async getTasks(
-    filters: {
-      status?: string;
-      category?: string;
-      assigneeId?: string;
-      createdBy?: string;
-      search?: string;
-      limit?: number;
-      offset?: number;
-    } = {}
-  ): Promise<any[]> {
-    const conditions = [];
-
-    if (filters.status) {
-      conditions.push(eq(tasks.status, filters.status));
-    }
-
-    if (filters.category) {
-      conditions.push(eq(tasks.category, filters.category));
-    }
-
-    if (filters.assigneeId) {
-      conditions.push(eq(tasks.assigneeId, filters.assigneeId));
-    }
-    // Note: team-scoped visibility is handled by a dedicated join-based method
-    if (filters.createdBy) {
-      conditions.push(eq(tasks.createdBy, filters.createdBy));
-    }
-
-    if (filters.search) {
-      conditions.push(
-        or(
-          ilike(tasks.title, containsPattern(filters.search)),
-          ilike(tasks.description, containsPattern(filters.search))
-        )
-      );
-    }
-
-    // First get the tasks
-    let taskQuery: any = db.select().from(tasks);
-
-    if (conditions.length > 0) {
-      taskQuery = (taskQuery as any).where(and(...conditions));
-    }
-
-    // id breaks createdAt ties so paging by offset reaches every row exactly once.
-    taskQuery = (taskQuery as any).orderBy(desc(tasks.createdAt), desc(tasks.id));
-
-    if (filters.limit) {
-      taskQuery = (taskQuery as any).limit(filters.limit);
-    }
-
-    if (filters.offset) {
-      taskQuery = (taskQuery as any).offset(filters.offset);
-    }
-
-    const taskResults = await taskQuery;
-
-    // Now enhance with creator and assignee names
-    const enhancedTasks = [];
-    for (const task of taskResults) {
-      let creatorName = "Unknown";
-      let assigneeName = "";
-
-      // Get creator name
-      if (task.createdBy) {
-        const [creator] = await db
-          .select()
-          .from(users)
-          .where(eq(users.id, task.createdBy));
-        if (creator) {
-          creatorName = displayNameOf(creator);
-        }
-      }
-
-      // Get assignee name (team via assigneeTeamId, user via assigneeId)
-      if (task.assigneeType === "team" && (task as any).assigneeTeamId) {
-        const [team] = await db
-          .select()
-          .from(teams)
-          .where(eq(teams.id, (task as any).assigneeTeamId));
-        if (team) {
-          assigneeName = team.name;
-        }
-      } else if (task.assigneeId) {
-        const [assignee] = await db
-          .select()
-          .from(users)
-          .where(eq(users.id, task.assigneeId));
-        if (assignee) {
-          assigneeName = displayNameOf(assignee);
-        }
-      }
-
-      // Get last updated by info
-      let lastUpdatedBy = null;
-      const [lastUpdate] = await db
-        .select({
-          userName: sql<string>`${displayNameSql(sql`${users.firstName}`, sql`${users.lastName}`, sql`${users.role}`)}`,
-        })
-        .from(taskHistory)
-        .leftJoin(users, eq(taskHistory.userId, users.id))
-        .where(eq(taskHistory.taskId, task.id))
-        .orderBy(desc(taskHistory.createdAt))
-        .limit(1);
-
-      if (lastUpdate) {
-        lastUpdatedBy = lastUpdate.userName;
-      }
-
-      enhancedTasks.push({
-        ...task,
-        creatorName,
-        assigneeName,
-        lastUpdatedBy,
-      });
-    }
-
-    return enhancedTasks;
-  }
-
   async updateTask(
     id: number,
     updates: Partial<InsertTask>,
@@ -1033,11 +914,8 @@ export class DatabaseStorage implements IStorage {
         );
       }
     } catch (error) {
-      console.error(
-        `Failed to delete S3 objects after ticket ${id} was deleted: ${
-          error instanceof Error ? error.message : "unknown error"
-        }`
-      );
+      // The type only (R63): the text of an SDK error can carry request data.
+      console.error(`Failed to delete S3 objects after ticket ${id} was deleted: ${describeError(error)}`);
     }
   }
 
@@ -1064,17 +942,9 @@ export class DatabaseStorage implements IStorage {
 
   // Team operations
   async createTeam(team: InsertTeam): Promise<Team> {
+    // R61: inserts the team only. Membership is the caller's decision: POST /api/teams adds the
+    // creator's member row in the same transaction as the team.
     const [createdTeam] = await db.insert(teams).values(team).returning();
-
-    // Add creator as admin
-    if (team.createdBy) {
-      await db.insert(teamMembers).values({
-        teamId: createdTeam.id,
-        userId: team.createdBy,
-        role: "admin",
-      });
-    }
-
     return createdTeam;
   }
 
@@ -1638,26 +1508,6 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async toggleUserStatus(userId: string): Promise<PublicUser> {
-    const [currentUser] = await db
-      .select({ isActive: users.isActive })
-      .from(users)
-      .where(eq(users.id, userId));
-
-    const [updatedUser] = await db
-      .update(users)
-      .set({
-        isActive: !currentUser.isActive,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, userId))
-      .returning(publicUserColumns);
-
-    if (updatedUser && !updatedUser.isActive) disconnectUser(userId);
-
-    return updatedUser;
-  }
-
   async approveUser(userId: string): Promise<PublicUser> {
     const [updatedUser] = await db
       .update(users)
@@ -1881,7 +1731,7 @@ export class DatabaseStorage implements IStorage {
         }
       } catch (error) {
         // Skip sessions with invalid data
-        console.error("Error parsing session data:", error);
+        console.error("Error parsing session data:", describeError(error));
       }
     }
 
@@ -3241,6 +3091,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getManagerStats(userId: string): Promise<{
+    totalTickets: number;
+    personal: { assignedToMe: number; createdByMe: number };
     department: Array<{
       departmentId: number;
       departmentName: string;
@@ -3305,7 +3157,11 @@ export class DatabaseStorage implements IStorage {
         : [];
     const teamIds = deptTeams.map((t) => t.id);
 
-    // A department's tickets are the ones queued to one of its teams.
+    // R45: `totalTickets`, `priorityDistribution`, `categoryBreakdown` and `personal` use the scope
+    // GET /api/stats gives this manager (ticketVisibilityWhere: created, assigned, queued, teammates).
+    // The `department` and `teamPerformance` blocks below are deliberately TEAM-QUEUE based: a
+    // department's tickets are the ones queued to one of its teams.
+    const managerScope = ticketVisibilityWhere({ id: userId, role: "manager" });
     const inDeptTeams: SQL =
       teamIds.length > 0
         ? (and(inArray(tasks.assigneeTeamId, teamIds), eq(tasks.assigneeType, "team")) as SQL)
@@ -3355,11 +3211,11 @@ export class DatabaseStorage implements IStorage {
       };
     });
 
-    // Priority distribution across all department tickets
+    // Priority distribution across every ticket the manager can see (the /api/stats scope)
     const priorityResult = await db
       .select({ priority: tasks.priority, count: count() })
       .from(tasks)
-      .where(inDeptTeams)
+      .where(managerScope)
       .groupBy(tasks.priority);
 
     const priorityDistribution = {
@@ -3378,11 +3234,20 @@ export class DatabaseStorage implements IStorage {
       else if (priority === "low") priorityDistribution.low = n;
     }
 
-    // Category breakdown
+    const [totals] = await db
+      .select({
+        total: count(),
+        assignedToMe: countWhere(sql`${assignedToUserSql} AND ${tasks.assigneeId} = ${userId}`),
+        createdByMe: countWhere(sql`${tasks.createdBy} = ${userId}`),
+      })
+      .from(tasks)
+      .where(managerScope);
+
+    // Category breakdown (same scope)
     const categoryResult = await db
       .select({ category: tasks.category, count: count() })
       .from(tasks)
-      .where(inDeptTeams)
+      .where(managerScope)
       .groupBy(tasks.category);
 
     const totalCategoryTickets = categoryResult.reduce(
@@ -3469,6 +3334,11 @@ export class DatabaseStorage implements IStorage {
     });
 
     return {
+      totalTickets: Number(totals?.total ?? 0),
+      personal: {
+        assignedToMe: totals?.assignedToMe ?? 0,
+        createdByMe: totals?.createdByMe ?? 0,
+      },
       department: departmentStats,
       priorityDistribution,
       categoryBreakdown,

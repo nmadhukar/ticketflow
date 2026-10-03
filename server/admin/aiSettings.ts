@@ -1,5 +1,6 @@
 import { AISettings } from "@shared/interfaces";
 import { storage } from "../storage";
+import { logRouteError } from "../http/errors";
 
 const DEFAULT_SETTINGS: AISettings = {
   autoResponseEnabled: true,
@@ -43,7 +44,7 @@ export async function getAISettings(): Promise<AISettings> {
       maxTokens: settings.maxTokens || 2000,
     };
   } catch (error) {
-    console.error("Error loading AI settings:", error);
+    logRouteError("Error loading AI settings", error);
     return DEFAULT_SETTINGS;
   }
 }

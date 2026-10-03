@@ -24,7 +24,8 @@ describe("DatabaseStorage against Postgres", () => {
     expect(first.ticketNumber).toMatch(/^TKT-/);
     expect(second.ticketNumber).not.toBe(first.ticketNumber);
 
-    const open = await storage.getTasks({ status: "open" });
+    const admin = await createUser({ role: "admin" });
+    const open = await storage.getVisibleTasksForUser({ userId: admin.id, role: "admin", status: "open" });
     expect(open.map((t) => t.id)).toEqual([first.id]);
   });
 

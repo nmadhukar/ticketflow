@@ -90,4 +90,31 @@ describe("list_tickets paging", () => {
       expect(res.data.code).toBe("VALIDATION");
     }
   });
+
+  it("limit and offset accept a number or a numeric string (R47)", async () => {
+    const str = await call("list_tickets", { limit: "10", offset: "5" });
+    expect(str.isError).toBe(false);
+    const num = await call("list_tickets", { limit: 10, offset: 5 });
+    expect(str.data).toEqual(num.data);
+    expect(str.data).toMatchObject({ limit: 10, offset: 5, returned: 10 });
+  });
+
+  it("a bad limit or offset is VALIDATION with fieldErrors on that field (R47)", async () => {
+    const cases: Array<[object, string]> = [
+      [{ limit: "abc" }, "limit"],
+      [{ limit: "0" }, "limit"],
+      [{ limit: 101 }, "limit"],
+      [{ limit: "101" }, "limit"],
+      [{ limit: "1.5" }, "limit"],
+      [{ offset: "x" }, "offset"],
+      [{ offset: "-1" }, "offset"],
+      [{ offset: " 3" }, "offset"],
+      [{ offset: 1.5 }, "offset"],
+    ];
+    for (const [args, field] of cases) {
+      const res = await call("list_tickets", args);
+      expect([args, res.isError, res.data.code]).toEqual([args, true, "VALIDATION"]);
+      expect(res.data.details.fieldErrors[field]).toBeDefined();
+    }
+  });
 });

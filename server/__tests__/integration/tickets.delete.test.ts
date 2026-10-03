@@ -122,13 +122,14 @@ describe("DELETE /api/tasks/:id", () => {
     ]);
   });
 
-  it("a failing S3 delete is logged (key and message, no Error object) and does not undo the delete", async () => {
+  it("a failing S3 delete is logged (key and error type, no message, no Error object) and does not undo the delete", async () => {
     const admin = await createUser({ role: "admin" });
     const adminA = await loginAs(ctx.app, admin);
     const { id } = await ticketWithEverything(admin, adminA);
+    // deleteFiles reports the error TYPE in `failed[].error` (see the deleteFiles test below).
     jest.spyOn(s3Service, "deleteFiles").mockResolvedValue({
       deleted: ["Acme/sep-10-2025/b.txt"],
-      failed: [{ key: "Acme/sep-10-2025/a.txt", error: "s3 down" }],
+      failed: [{ key: "Acme/sep-10-2025/a.txt", error: "RangeError" }],
     });
     const logged = jest.spyOn(console, "error").mockImplementation(() => undefined);
 
@@ -138,7 +139,8 @@ describe("DELETE /api/tasks/:id", () => {
 
     const lines = logged.mock.calls.filter((c) => String(c[0]).includes("Acme/sep-10-2025/a.txt"));
     expect(lines).toHaveLength(1);
-    expect(String(lines[0][0])).toContain("s3 down");
+    expect(String(lines[0][0])).toContain("RangeError");
+    expect(logged.mock.calls.some((c) => c.some((a) => String(a).includes("s3 down")))).toBe(false);
     // One string argument per call: no Error object or stack reaches the logger.
     for (const call of logged.mock.calls) {
       expect(call.every((arg) => typeof arg === "string")).toBe(true);
@@ -146,15 +148,32 @@ describe("DELETE /api/tasks/:id", () => {
     }
   });
 
-  it("a whole-batch S3 failure (deleteFiles throws) is logged by message and does not undo the delete", async () => {
+  it("deleteFiles reports a failed key with the error's type, never its text (R63)", async () => {
+    const svc = s3Service as any;
+    const saved = { bucketName: svc.bucketName, client: svc.client };
+    svc.bucketName = "test-bucket";
+    svc.client = {};
+    jest.spyOn(svc, "getAwsCredentials").mockResolvedValue(undefined);
+    jest.spyOn(s3Service, "deleteFile").mockRejectedValue(new RangeError("s3 down: secret request detail"));
+    try {
+      const result = await s3Service.deleteFiles(["k1"]);
+      expect(result.failed).toEqual([{ key: "k1", error: "RangeError" }]);
+    } finally {
+      svc.bucketName = saved.bucketName;
+      svc.client = saved.client;
+    }
+  });
+
+  it("a whole-batch S3 failure (deleteFiles throws) is logged by error type, not text, and does not undo the delete", async () => {
     const admin = await createUser({ role: "admin" });
     const adminA = await loginAs(ctx.app, admin);
     const { id } = await ticketWithEverything(admin, adminA);
-    jest.spyOn(s3Service, "deleteFiles").mockRejectedValue(new Error("bucket not configured"));
+    jest.spyOn(s3Service, "deleteFiles").mockRejectedValue(new TypeError("bucket not configured"));
     const logged = jest.spyOn(console, "error").mockImplementation(() => undefined);
     expect((await adminA.delete(`/api/tasks/${id}`)).status).toBe(204);
     expect(await db.select().from(tasks).where(eq(tasks.id, id))).toHaveLength(0);
-    expect(logged.mock.calls.some((c) => String(c[0]).includes("bucket not configured"))).toBe(true);
+    expect(logged.mock.calls.some((c) => String(c[0]).includes("TypeError"))).toBe(true);
+    expect(logged.mock.calls.some((c) => String(c[0]).includes("bucket not configured"))).toBe(false);
     expect(logged.mock.calls.every((c) => c.every((a) => typeof a === "string"))).toBe(true);
   });
 
