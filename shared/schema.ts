@@ -70,7 +70,9 @@ export const users = pgTable("users", {
   profileImageUrl: varchar("profile_image_url"),
   role: varchar("role", { length: 50 }).notNull().default("customer"), // admin, manager, agent, customer (legacy "user" means agent)
   phone: varchar("phone", { length: 50 }),
-  isActive: boolean("is_active").default(true),
+  // NOT NULL (migration 0020): a NULL here used to read as "inactive" in every check, a row
+  // that silently could not sign in.
+  isActive: boolean("is_active").notNull().default(true),
   isApproved: boolean("is_approved").default(false), // Admin must approve before login
   passwordResetToken: varchar("password_reset_token"),
   passwordResetExpires: timestamp("password_reset_expires"),

@@ -11,6 +11,30 @@ describe("requireSecret", () => {
     ).toThrow(/JWT_SECRET/);
   });
 
+  it("throws in production for a placeholder from the example files, without printing it", () => {
+    const placeholder = "your-super-secret-session-key-change-this-in-production";
+    let message = "";
+    try {
+      requireSecret("SESSION_SECRET", {
+        env: { NODE_ENV: "production", SESSION_SECRET: placeholder },
+        devFallback: "dev",
+      });
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/SESSION_SECRET is still a placeholder/);
+    expect(message).not.toContain(placeholder);
+    // ...but a placeholder outside production is the developer's own business.
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    expect(
+      requireSecret("SESSION_SECRET", {
+        env: { NODE_ENV: "development", SESSION_SECRET: placeholder },
+        devFallback: "dev",
+      })
+    ).toBe(placeholder);
+    warn.mockRestore();
+  });
+
   it("returns the configured value in production", () => {
     expect(
       requireSecret("JWT_SECRET", {

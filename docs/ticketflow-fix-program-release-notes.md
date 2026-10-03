@@ -118,7 +118,7 @@ ORDER BY 1;
 
 ### After the deploy: verify
 
-1. The container log shows `sql-migrations: done, 9 applied, 1 not run` (on a brand-new
+1. The container log shows `sql-migrations: done, 10 applied, 1 not run` (on a brand-new
    database: `fresh database ... nothing to apply`) and push's `[✓] Changes applied`. If the push output contains a question ("created or renamed",
    "data-loss statements", "Do you still want to push changes?"), push applied nothing: run the
    drift check again.
@@ -139,7 +139,7 @@ ORDER BY 1;
 5. An API key gets 200 on `GET /api/tasks` and 403 `session_required` on `GET /api/users` (R33).
 
 The numbered SQL files in `migrations/` from 0007 (0007, 0009, 0010, 0011, 0012, 0013, 0014,
-0018, 0019) are applied by `npm run db:migrate-sql` on every deploy; 0008 is listed in the
+0018, 0019, 0020) are applied by `npm run db:migrate-sql` on every deploy; 0008 is listed in the
 script as not run, with the reason.
 
 ### New tables and columns (created by `npm run db:migrate-sql`, and declared for push)
@@ -148,6 +148,7 @@ script as not run, with the reason.
 |---|---|
 | `users.failed_login_attempts`, `users.locked_until` (login lockout) | `users` |
 | `users.must_change_password`, `users.password_changed_at` (forced change, session revocation) | `users` |
+| `users.is_active` is now `NOT NULL DEFAULT true` (0020). A NULL used to read as inactive everywhere; existing NULL rows become `false` (never `true`), so no account is switched on | `users` |
 | `users.role` default is now `customer` in the main table (legacy `user` means agent; the invitations table default is `agent`) | `users`, `user_invitations` |
 | `ticket_number_counters` (prefix, year, last_number; primary key prefix+year) | new table |
 | `sns_message_dedupe` (message_id, status, received_at) for inbound email | new table |
@@ -160,8 +161,8 @@ Required (production refuses to start without them):
 | Variable | Why |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string. |
-| `SESSION_SECRET` | Signs sessions. Missing in production is a startup error; there is no fallback. |
-| `JWT_SECRET` | The JWT module refuses to load in production without it. |
+| `SESSION_SECRET` | Signs sessions. Missing in production is a startup error; there is no fallback. A value that is still an example placeholder (`your-...`, `change-me`, `dev-only-...`) is refused too. Checked before the seeders run. |
+| `JWT_SECRET` | The JWT module refuses to load in production without it, and refuses a placeholder value like `SESSION_SECRET`. |
 | `APP_BASE_URL` | **New (R34).** The public origin, e.g. `https://tickets.example.com` (http or https, no query, a trailing slash is fine). Password-reset and invitation emails, Teams card links and the Microsoft SSO redirect URI are built from it, never from the request's Host header. Production refuses to start without it (`Startup refused: APP_BASE_URL must be set in production ...`); a malformed value is refused in every environment. `MICROSOFT_REDIRECT_URL`, when set, still overrides the SSO redirect URI. In development it may be unset: links then use the origin the request came in on. |
 | `NODE_ENV=production` | The Dockerfile sets it; `npm start` does not. Unset means development mode, including a permissive Content-Security-Policy. |
 
@@ -401,12 +402,13 @@ The owner chose to defer the minors below instead of running a cleanup pass. One
 ledger entry ("Task N" is the plan task). Nothing here blocks the release.
 
 ### From the final whole-branch review (documented, not fixed)
-- Startup now fails fast on required seed steps (M8). If a row with an id other than `system`
-  already holds `system@ticketflow.local`, `seedSystemUser` hits a unique violation and the
-  container restarts in a loop; check with
-  `SELECT id FROM users WHERE email = 'system@ticketflow.local'` before deploying (it must be
-  `system` or absent). A transient database error during a required step also restarts the
-  container until the database answers.
+- Startup now fails fast on required seed steps (M8). FU2: if a row with an id other than
+  `system` already holds `system@ticketflow.local`, `seedSystemUser` no longer hits a unique
+  violation and restarts the container in a loop; like the AI user it logs one line (ids only),
+  creates no `system` row and leaves the other account untouched (rows that need the system
+  user then cannot be attributed to it until the clash is resolved; check with
+  `SELECT id FROM users WHERE email = 'system@ticketflow.local'`). A transient database error
+  during a required step still restarts the container until the database answers.
 - Coolify must deploy with the compose file: the Dockerfile `CMD` alone runs neither
   `db:migrate-sql` nor `db:push`, and the schema check then refuses to boot (fails safe).
 - `pg` is needed at run time by `scripts/apply-sql-migrations.mjs` but is a devDependency; it
@@ -455,6 +457,24 @@ ledger entry ("Task N" is the plan task). Nothing here blocks the release.
 - Task 23: Playwright trace retain-on-failure records test passwords in the gitignored `test-results` (do not upload in CI); the CSP listener attaches after login in later tests; the 404 matcher is loose.
 
 ### Authentication, sessions and accounts
+**FU2 status:** every line below was handled in the `fix(auth): follow-ups` commit except the
+items under "Still open after FU2". The original lines are kept as the record. Fixed: change-password
+spends the lockout budget; forgot, reset and change-password have separate rate-limit budgets;
+the revoked cookie is cleared; the session stores the verified row's change stamp (`pwdAt`,
+closes the `authAt` race); the `bearerFailures` table is capped; `/apixyz` is no bearer path;
+a blank SES secret is refused for a key id that is not the server's own, with `fieldErrors`;
+`secureAuth.ts`, `sanitizeForSQL` and `sanitizeText` are deleted; placeholder secrets are refused
+in production and `SESSION_SECRET` is checked before the seeders; `users.is_active` is NOT NULL
+(0020); the audit line names the signed-in actor; the second session stack and the logged
+authorize URL / MSAL error object are gone; the forced screen signs out like the header menu.
+**Still open after FU2:** `phone` stays visible to every agent (owner question);
+`invitation.departmentId` is never applied (users have no department link); the failure counter
+does not decay (documented in `lockout.ts`); the changer's in-flight request can save old stamps
+(fails closed) and multi-instance clock skew (documented in `isSessionRevoked`); the SMTP adapter
+is not implemented, so a blank SMTP password simply stores none; `trust proxy 1` assumes one proxy
+(commented at the setting); SSO sign-ups still default to customer (owner note); `--runInBand` stays
+global; CRLF churn items are not touched (R37); `generateTokens`' 7-day JWTs cannot be bearers
+(R29, accepted).
 - Task 4: `/api/users` 403 body lacks an error code; duplicate requester lookup routes (`:371`/`:190`); `toPublicUser` unused in production; the staff-role test lacks legacy `user` and `forTeamMemberSelection` for manager and agent; the secrets hook covers only `createTestApp` apps; `--runInBand` is global; `phone` is visible to all agents (an owner question).
 - Task 5: legacy error shapes in register/create handlers; a duplicate email should be 409 (deferred to Task 7).
 - Task 5: tests assert status, not error codes; no test for role or `isApproved` in the register body; `invitation.departmentId` is never applied (pre-existing).

@@ -119,9 +119,11 @@ export function authRateLimitWindowMs(env: NodeJS.ProcessEnv = process.env): num
   return env.NODE_ENV === "test" && override > 0 ? override : 60 * 1000;
 }
 
-// Auth endpoints (login, forgot-password, reset-password): per IP, always on
-// (every environment). Window and limit are read per request so tests can
-// raise them via AUTH_RATE_LIMIT_MAX; the limiter cannot be switched off.
+// Auth endpoints (login, forgot-password, reset-password, change-password): per IP,
+// always on (every environment). The limit is read per request so tests can raise it
+// via AUTH_RATE_LIMIT_MAX; the window is read once, when the module loads. The limiter
+// cannot be switched off. Each call makes a limiter with its OWN counters, so one
+// endpoint's traffic never spends another's budget.
 function authLimiter(skipSuccessfulRequests: boolean) {
   return rateLimit({
     windowMs: authRateLimitWindowMs(),
@@ -139,8 +141,12 @@ function authLimiter(skipSuccessfulRequests: boolean) {
 
 /** Login: wrong passwords count, successful logins do not. */
 export const authRateLimit = authLimiter(true);
-/** forgot-password / reset-password answer 200 even for unknown emails, so every request counts. */
-export const authRequestRateLimit = authLimiter(false);
+/** forgot-password answers 200 even for unknown emails, so every request counts. */
+export const forgotPasswordRateLimit = authLimiter(false);
+/** reset-password: every request counts (a guessed token is a failure, a good one is rare). */
+export const resetPasswordRateLimit = authLimiter(false);
+/** change-password: every request counts; separate from the other two so a signed-in user is not locked out by anonymous traffic from the same address. */
+export const changePasswordRateLimit = authLimiter(false);
 
 /**
  * Bearer credential failures (API keys, JWTs): per IP, same limit and window as
@@ -148,8 +154,22 @@ export const authRequestRateLimit = authLimiter(false);
  * bearer is rejected, so valid traffic, sequential or concurrent, never
  * consumes the budget. Once an IP is at the limit every bearer from it,
  * valid ones included, gets 429 until the window ends (intended).
+ *
+ * The table is bounded: at most BEARER_FAILURES_MAX addresses (oldest first out), and the
+ * sweep of expired entries runs at most once a second, not on every failure. Known and
+ * accepted: the counters live in this process only (several instances each keep their
+ * own, so the effective limit is per instance), and a flood from more than
+ * BEARER_FAILURES_MAX distinct addresses can push a throttled address out early.
  */
+export const BEARER_FAILURES_MAX = 10_000;
+const BEARER_SWEEP_INTERVAL_MS = 1000;
 const bearerFailures = new Map<string, { count: number; resetAt: number }>();
+let lastBearerSweep = 0;
+
+/** Number of addresses currently tracked (for tests). */
+export function bearerFailureEntryCount(): number {
+  return bearerFailures.size;
+}
 
 function bearerKey(req: Pick<Request, "ip">): string {
   return ipKeyGenerator(req.ip ?? "");
@@ -165,13 +185,27 @@ export function bearerRetryAfterSeconds(req: Pick<Request, "ip">): number {
 
 export function recordBearerFailure(req: Pick<Request, "ip">): void {
   const now = Date.now();
-  bearerFailures.forEach((entry, k) => {
-    if (entry.resetAt <= now) bearerFailures.delete(k);
-  });
+  if (now - lastBearerSweep >= BEARER_SWEEP_INTERVAL_MS) {
+    lastBearerSweep = now;
+    bearerFailures.forEach((entry, k) => {
+      if (entry.resetAt <= now) bearerFailures.delete(k);
+    });
+  }
   const key = bearerKey(req);
   const entry = bearerFailures.get(key);
-  if (entry && entry.resetAt > now) entry.count += 1;
-  else bearerFailures.set(key, { count: 1, resetAt: now + authRateLimitWindowMs() });
+  if (entry && entry.resetAt > now) {
+    entry.count += 1;
+    return;
+  }
+  // A new window for this address: it goes to the back of the insertion order, and the
+  // oldest addresses are dropped once the table is full.
+  bearerFailures.delete(key);
+  bearerFailures.set(key, { count: 1, resetAt: now + authRateLimitWindowMs() });
+  while (bearerFailures.size > BEARER_FAILURES_MAX) {
+    const oldest = bearerFailures.keys().next().value;
+    if (oldest === undefined) break;
+    bearerFailures.delete(oldest);
+  }
 }
 
 // Password reset rate limiting

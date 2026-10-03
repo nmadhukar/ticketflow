@@ -77,4 +77,13 @@ describe("maskSecrets", () => {
       expect(out[k]).toBe("[redacted]");
     }
   });
+
+  it("masks by word, in any case style, and leaves look-alikes readable", () => {
+    const secretKeys = ["awsSecretAccessKey", "refresh_token", "x-api-key", "Authorization", "passwordResetToken", "PASSWORD", "clientSecret"];
+    const harmless = ["totalTokens", "inputTokens", "keywords", "tokenizer", "monkey", "hashtags"];
+    const body = Object.fromEntries([...secretKeys, ...harmless].map((k) => [k, "v"]));
+    const out = JSON.parse(JSON.stringify(body, maskSecrets));
+    for (const k of secretKeys) expect({ k, v: out[k] }).toEqual({ k, v: "[redacted]" });
+    for (const k of harmless) expect({ k, v: out[k] }).toEqual({ k, v: "v" });
+  });
 });

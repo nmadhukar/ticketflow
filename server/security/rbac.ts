@@ -55,7 +55,8 @@ export const logSecurityEvent = (
 ) => {
   const logEntry = {
     timestamp: new Date().toISOString(),
-    userId: req.user?.userId || "anonymous",
+    // Sessions (and bearer users) carry the row's `id`; `userId` is the JWT payload's name for it.
+    userId: req.user?.userId || (req.user as { id?: string } | undefined)?.id || "anonymous",
     userRole: req.user?.role || "none",
     action,
     resource,

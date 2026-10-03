@@ -1,21 +1,6 @@
 import Joi from "joi";
 import { body, param, query, validationResult } from "express-validator";
 import { Request, Response, NextFunction } from "express";
-import DOMPurify from "isomorphic-dompurify";
-
-// Custom sanitizer for text content
-export const sanitizeText = (text: string): string => {
-  if (typeof text !== "string") return "";
-
-  // Remove script tags and dangerous HTML
-  const cleaned = DOMPurify.sanitize(text, {
-    ALLOWED_TAGS: ["b", "i", "em", "strong", "p", "br", "ul", "ol", "li"],
-    ALLOWED_ATTR: [],
-  });
-
-  // Trim whitespace
-  return cleaned.trim();
-};
 
 // Input validation schemas using Joi
 export const validationSchemas = {
@@ -373,20 +358,6 @@ export const validateFileUpload = (allowedTypes: string[], maxSize: number) => {
 
     next();
   };
-};
-
-// SQL injection prevention for raw queries
-export const sanitizeForSQL = (input: string): string => {
-  if (typeof input !== "string") return "";
-
-  // Remove or escape potentially dangerous characters
-  return input
-    .replace(/'/g, "''") // Escape single quotes
-    .replace(/;/g, "") // Remove semicolons
-    .replace(/--/g, "") // Remove SQL comments
-    .replace(/\/\*/g, "") // Remove SQL block comments start
-    .replace(/\*\//g, "") // Remove SQL block comments end
-    .trim();
 };
 
 // XSS prevention middleware

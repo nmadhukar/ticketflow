@@ -34,6 +34,19 @@ describe("GET /api/auth/microsoft when configured", () => {
     expect(location.searchParams.get("state")).toBeTruthy();
   });
 
+  it("never logs the authorize URL: it carries the CSRF state", async () => {
+    const res = await request(ctx.app).get("/api/auth/microsoft").redirects(0);
+    const state = new URL(res.headers.location).searchParams.get("state")!;
+    expect(state.length).toBeGreaterThan(10);
+    const logged = (["log", "info", "warn", "error"] as const)
+      .flatMap((fn) => ((console[fn] as unknown as jest.Mock).mock?.calls ?? []) as unknown[][])
+      .map((call) => call.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "))
+      .join("\n");
+    expect(logged).toContain("Redirecting to Microsoft login");
+    expect(logged).not.toContain(state);
+    expect(logged).not.toContain("login.microsoftonline.com/00000000-0000-0000-0000-000000000002/oauth2");
+  });
+
   it("R34: the redirect URI is APP_BASE_URL's callback, not the request's Host", async () => {
     process.env.APP_BASE_URL = "https://tickets.example.test";
     try {

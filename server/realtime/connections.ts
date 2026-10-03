@@ -14,6 +14,8 @@ export interface Connection {
   user: ConnectionUser;
   /** The session's authAt at upgrade time (for the password-change revocation rule). */
   authAt: unknown;
+  /** The session's pwdAt at upgrade time (the verified row's passwordChangedAt stamp). */
+  pwdAt?: unknown;
   alive: boolean;
 }
 

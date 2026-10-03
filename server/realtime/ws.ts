@@ -106,7 +106,7 @@ export function originAllowed(req: IncomingMessage): boolean {
 }
 
 async function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
-  let auth: { user: AccessUser; authAt: unknown } | null = null;
+  let auth: { user: AccessUser; authAt: unknown; pwdAt: unknown } | null = null;
   if (originAllowed(req)) {
     try {
       auth = await authenticateUpgrade(req);
@@ -129,6 +129,7 @@ async function handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer)
       ws,
       user: { id: auth.user.id, role: auth.user.role },
       authAt: auth.authAt,
+      pwdAt: auth.pwdAt,
       alive: true,
     };
     ws.on("pong", () => {
@@ -199,7 +200,7 @@ async function currentlyEligibleUsers(): Promise<AccessUser[]> {
       row.isApproved &&
       !row.mustChangePassword &&
       !isAiSystemUserId(row.id) &&
-      !isSessionRevoked(row, { authAt: c.authAt });
+      !isSessionRevoked(row, { authAt: c.authAt, pwdAt: c.pwdAt });
     if (!ok) {
       try {
         c.ws.close(1008, "unauthorized");

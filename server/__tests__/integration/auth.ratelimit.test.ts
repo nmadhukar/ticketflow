@@ -64,6 +64,15 @@ describe("auth rate limit", () => {
     expect(statuses[10]).toBe(429);
   });
 
+  it("forgot-password, reset-password and change-password each have their own budget", async () => {
+    const ip = "198.51.100.40";
+    expect(await postTimes("post", "/api/auth/forgot-password", 10, ip)).not.toContain(429);
+    expect((await postTimes("post", "/api/auth/forgot-password", 1, ip))[0]).toBe(429);
+    // The other two are untouched by those ten requests.
+    expect((await postTimes("post", "/api/auth/reset-password", 1, ip))[0]).not.toBe(429);
+    expect((await postTimes("post", "/api/auth/change-password", 1, ip))[0]).not.toBe(429);
+  });
+
   it("forgot-password and reset-password are limited too", async () => {
     for (const path of ["/api/auth/forgot-password", "/api/auth/reset-password"]) {
       const statuses: number[] = [];

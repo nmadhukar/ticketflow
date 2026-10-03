@@ -58,5 +58,22 @@ describe("email send failures do not log the request body", () => {
     const ok = await ses.sendEmail({ to: "a@b.test", from: "f@b.test", subject: "s", html: BODY, awsAccessKeyId: "k", awsSecretAccessKey: "s" });
     expect(ok).toBe(false);
     expect(loggedText()).not.toContain(TOKEN);
+    // Positive: the failure is still reported, with its status.
+    expect(loggedText()).toContain("AWS SES email error");
+    expect(loggedText()).toContain("401");
+  });
+});
+
+describe("safeErrorSummary", () => {
+  it("keeps an AWS-style error name and says what kind of value a non-Error was", async () => {
+    const { safeErrorSummary } = await import("../../utils/safeError");
+    const aws: any = new Error("Email address is not verified.");
+    aws.name = "MessageRejected";
+    aws.$metadata = { httpStatusCode: 400 };
+    expect(safeErrorSummary(aws)).toBe("MessageRejected: Email address is not verified. (HTTP 400)");
+    expect(safeErrorSummary(new Error("boom"))).toBe("boom");
+    expect(safeErrorSummary("secret-token-in-a-string")).toBe("non-Error value thrown (string)");
+    expect(safeErrorSummary(null)).toBe("non-Error value thrown (null)");
+    expect(safeErrorSummary({ config: { data: TOKEN } })).not.toContain(TOKEN);
   });
 });
