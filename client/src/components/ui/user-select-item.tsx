@@ -4,8 +4,16 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { User } from "@shared/schema";
 
+/**
+ * A full user row, or the narrow `{ id, displayName }` the server sends a
+ * customer (no email, no role) in the ticket meta.
+ */
+export type SelectableUser = Partial<Pick<User, "firstName" | "lastName" | "email" | "role">> & {
+  displayName?: string | null;
+};
+
 interface UserSelectItemProps {
-  user: User;
+  user: SelectableUser;
   value: string;
   showEmail?: boolean;
   showRoleBadge?: boolean;
@@ -24,7 +32,7 @@ export function UserSelectItem({
   className,
 }: UserSelectItemProps) {
   const fullName = `${user.firstName || ""} ${user.lastName || ""}`.trim();
-  const displayName = fullName || user.email || "Unknown User";
+  const displayName = user.displayName || fullName || user.email || "Unknown User";
 
   const getRoleBadgeStyles = (role: string) => {
     switch (role) {

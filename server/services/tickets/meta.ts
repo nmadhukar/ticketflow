@@ -1,4 +1,4 @@
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { db } from "../../storage/db";
 import { storage } from "../../storage";
 import { departments, teams, users } from "@shared/schema";
@@ -6,6 +6,7 @@ import { TICKET_CATEGORIES, TICKET_PRIORITIES, TICKET_STATUSES } from "@shared/c
 import { normalizeRole } from "../../permissions/roles";
 import { deriveAllowedFields } from "../../permissions/tickets";
 import { excludeSystemAccounts } from "../../utils/aiSystemUser";
+import { displayNameOf } from "../../utils/displayName";
 
 /**
  * The create/edit modal meta: enumerations, role-scoped department/team/user
@@ -123,17 +124,31 @@ export async function buildTicketMeta(user: { id: string; role: unknown } | unde
         departmentId: teams.departmentId,
       })
       .from(teams);
-    // Provide assignable users (exclude customers)
-    assignableUsers = await db
+    // Staff a customer may address a ticket to: active, approved managers and
+    // agents (legacy "user" reads as agent), as `{ id, displayName }` only. A
+    // customer never receives staff emails or roles, nor inactive accounts
+    // (ruling R19's narrower projection; final review I2).
+    const staffRows = await db
       .select({
         id: users.id,
         firstName: users.firstName,
         lastName: users.lastName,
-        email: users.email,
         role: users.role,
       })
       .from(users)
-      .where(and(excludeSystemAccounts(), or(eq(users.role, "manager"), eq(users.role, "agent"))));
+      .where(
+        and(
+          excludeSystemAccounts(),
+          eq(users.isActive, true),
+          eq(users.isApproved, true),
+          inArray(users.role, ["manager", "agent", "user"])
+        )
+      );
+    assignableUsers = staffRows
+      .map((u) => ({ u, role: normalizeRole(u.role) }))
+      .filter(({ role }) => role === "manager" || role === "agent")
+      .map(({ u, role }) => ({ id: u.id, displayName: displayNameOf({ ...u, role }) }))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
     basePermissions.canAssign = true;
     basePermissions.canChangeStatus = false;
     basePermissions.allowedAssigneeTypes = ["user", "team"];

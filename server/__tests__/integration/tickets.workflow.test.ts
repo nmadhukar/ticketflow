@@ -236,6 +236,44 @@ describe("ticket workflow, meta route and search", () => {
     expect(await buildTicketMeta({ id: odd.id, role: "superuser" })).toBeNull();
   });
 
+  it("I2: a customer's meta lists active staff as {id, displayName} only: no email, no role, no inactive staff", async () => {
+    const { customerA, agent, admin } = await actors();
+    const manager = await createUser({ role: "manager", email: "manager.person@example.test" });
+    const inactive = await createUser({ role: "agent", isActive: false });
+    const unapproved = await createUser({ role: "agent", isApproved: false });
+    const legacy = await createUser({ role: "agent" });
+    await db.execute(sql`UPDATE users SET role = 'user', first_name = 'Lee', last_name = 'Legacy' WHERE id = ${legacy.id}`);
+    const nameless = await createUser({ role: "agent" });
+    await db.execute(sql`UPDATE users SET first_name = NULL, last_name = NULL WHERE id = ${nameless.id}`);
+    const nullActive = await createUser({ role: "agent" });
+    await db.execute(sql`UPDATE users SET is_active = NULL WHERE id = ${nullActive.id}`);
+
+    const res = await customerA.get("/api/tickets/meta");
+    expect(res.status).toBe(200);
+    const listed = res.body.assignableUsers as Array<Record<string, unknown>>;
+    expect(JSON.stringify(listed)).not.toContain("@");
+    for (const u of listed) expect(Object.keys(u).sort()).toEqual(["displayName", "id"]);
+    const ids = listed.map((u) => u.id);
+    expect(ids).toEqual(expect.arrayContaining([agent.id, manager.id, legacy.id, nameless.id]));
+    for (const hidden of [inactive.id, unapproved.id, nullActive.id, admin.id]) expect(ids).not.toContain(hidden);
+    expect(listed.find((u) => u.id === legacy.id)?.displayName).toBe("Lee Legacy");
+    expect(listed.find((u) => u.id === nameless.id)?.displayName).toBe("Support agent");
+
+    // The same customer can still create a ticket addressed to a listed agent.
+    const created = await createTicketAs(customerA, { assigneeType: "user", assigneeId: agent.id });
+    expect(created.status).toBe(201);
+    expect(created.body.assigneeId).toBe(agent.id);
+    const perTicket = await customerA.get(`/api/tickets/${created.body.id}/meta`);
+    expect(perTicket.status).toBe(200);
+    expect(JSON.stringify(perTicket.body.assignableUsers)).not.toContain("@");
+
+    // Staff still get the full list (unchanged).
+    const staff = await (await loginAs(ctx.app, admin)).get("/api/tickets/meta");
+    expect(staff.body.assignableUsers.find((u: { id: string }) => u.id === manager.id)?.email).toBe(
+      "manager.person@example.test"
+    );
+  });
+
   it("meta makes no outbound request and ignores a forged Host header", async () => {
     const { adminA, agentA } = await actors();
     const t = (await createTicketAs(agentA)).body;
