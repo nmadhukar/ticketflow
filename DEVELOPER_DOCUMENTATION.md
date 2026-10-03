@@ -573,9 +573,18 @@ export default defineConfig({
 - **Network**: HTTPS required for production
 
 #### Dependencies
-- Node.js 18+ with npm
+- Node.js 22.12+ with npm (the Docker image is `node:24-alpine`)
 - PostgreSQL 13+ with extensions: `uuid-ossp`, `pg_trgm`
 - SSL certificate for production deployment
+
+#### Production start and required environment
+- Deploy with `docker-compose.yml`. Its command is
+  `npm run db:migrate-sql && npm run db:push && node dist/index.js`; the Dockerfile `CMD` alone
+  skips both schema steps and the server then refuses to boot (fails safe).
+- Required: `NODE_ENV=production` (the built server refuses to start when it is unset; `npm run dev`
+  is unaffected), `DATABASE_URL`, `SESSION_SECRET`, `JWT_SECRET`, and `APP_BASE_URL` in production.
+- `scripts/apply-sql-migrations.mjs` re-runs every `migrations/0007+` file on each deploy, so each must
+  be idempotent; one that is not goes in that script's `NOT_RUN` map with the reason (see its header).
 
 ## Maintenance Guidelines
 

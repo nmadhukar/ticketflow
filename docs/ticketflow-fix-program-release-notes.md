@@ -409,15 +409,18 @@ ledger entry ("Task N" is the plan task). Nothing here blocks the release.
   container until the database answers.
 - Coolify must deploy with the compose file: the Dockerfile `CMD` alone runs neither
   `db:migrate-sql` nor `db:push`, and the schema check then refuses to boot (fails safe).
-- `pg` is needed at run time by `scripts/apply-sql-migrations.mjs` but is a devDependency; it
-  works because the image keeps dev dependencies (drizzle-kit needs them too).
-- An existing ticket prefix longer than 6 characters keeps numbering tickets, but the Tickets
-  settings tab cannot be saved until the prefix is shortened (M5).
+- `pg` is needed at run time by `scripts/apply-sql-migrations.mjs`. Fixed (FU5): it is now a
+  `dependencies` entry (same version).
+- An existing ticket prefix longer than 6 characters keeps numbering tickets. Fixed (FU5): the
+  prefix is validated only when a request changes it, so the Tickets settings tab saves the other
+  fields (M5).
 - The general /api limit stays 100 requests per 15 minutes per IP; `RATE_LIMIT_MAX_REQUESTS`
   now takes effect, so raise it if staff share one NAT address.
 - Teams cards for tickets created or updated through MCP carry no link (the service could use
   the APP_BASE_URL helper).
-- README and DEVELOPER_DOCUMENTATION still show the old compose command.
+- README and DEVELOPER_DOCUMENTATION showed the old compose command. Fixed (FU5): both now give
+  the current one, the required environment and the Node 24 image; the Dockerfile `CMD` carries a
+  comment that it skips the schema steps.
 - M2: tickets created from email, and customer tickets created with no user or team assignee
   (unassigned, or routed to a department only), are visible among staff only to admins (and to
   the customer who opened them) until someone triages them: manager and agent scope reaches a
@@ -430,12 +433,11 @@ ledger entry ("Task N" is the plan task). Nothing here blocks the release.
   query per page.
 - The general per-IP limit (100 per 15 minutes) is low for one busy office behind a single NAT
   address; raise `RATE_LIMIT_MAX_REQUESTS` if staff see 429s.
-- `pg` is a devDependency but the server bundle needs it at run time; it is present because the
-  image installs dev dependencies (needed for `drizzle-kit`). Move it to `dependencies` when the
-  image is slimmed to production dependencies.
+- `pg` as a devDependency: done (FU5), see above.
 - The migration script re-runs every 0007+ file on each deploy (they are idempotent by
   design); a future non-idempotent file must be added to its `NOT_RUN` list or made idempotent,
-  or every deploy fails.
+  or every deploy fails. This guidance is now in the header of `scripts/apply-sql-migrations.mjs`
+  and in README and DEVELOPER_DOCUMENTATION (FU5).
 
 ### Build, lint and test tooling
 - Task 1: `jest.config.mjs` tsJest transform regex `'^.+\.tsx?$'` is unescaped (`\.`).
@@ -491,7 +493,8 @@ ledger entry ("Task N" is the plan task). Nothing here blocks the release.
 - Task 16: display names containing `@` or a backslash are refused (safe direction); a fenced-out late holder only logs; the done mark is not in the same transaction as the create (`createTask` has no transaction); the 64 KB header cap may refuse long Received or ARC chains (check real sizes after deploy).
 
 ### Security hardening and deployment
-- Task 13: `NODE_ENV` unset means development mode including a permissive CSP (the Dockerfile sets production, `npm start` does not); consider failing loudly when it is unset and `dist` exists; a subtree deeper than 20 is not walked; `sanitizeForSQL` and `sanitizeText` are dead; existing 404s lack an error code (to Task 17).
+- FU5: the built server (`node dist/index.js`, so `npm start`) now refuses to boot with one log line when `NODE_ENV` is unset (`npm run dev` through tsx still defaults to development; `npm start` needs `NODE_ENV=production`); the request sanitiser now walks iteratively with no depth limit (still linear).
+- Task 13: still open: `NODE_ENV` unset in other entry points means development mode; a subtree deeper than 20 (fixed by FU5, above); `sanitizeForSQL` and `sanitizeText` are dead; existing 404s lack an error code (to Task 17).
 
 ### MCP
 - Tasks 21 and 22: the MCP list limit is capped at 100 versus REST 500; the invented-status test accepts `VALIDATION` or `INVALID_STATE`; the isolation suite's last test is order-dependent; a non-numeric id gives the SDK's plain-text error; `get_ticket` FORBIDDEN discloses existence (REST parity).

@@ -43,6 +43,25 @@ describe("PATCH /api/company-settings/tickets ticketPrefix", () => {
     expect(created.body.ticketNumber).toMatch(/^123456-\d{4}-\d{4,}$/);
   });
 
+  it("FU5: a legacy prefix over 6 characters does not block saving other fields, but cannot be changed to another bad value", async () => {
+    const admin = await createUser({ role: "admin" });
+    await storage.updateCompanySettings({ ticketPrefix: "LEGACY789" } as never, admin.id);
+    const agent = await loginAs(ctx.app, admin);
+    // The form sends the unchanged legacy prefix back with the other fields.
+    const same = await agent
+      .patch("/api/company-settings/tickets")
+      .send({ ticketPrefix: "LEGACY789", defaultTicketPriority: "high" });
+    expect(same.status).toBe(200);
+    expect(same.body.defaultTicketPriority).toBe("high");
+    expect(same.body.ticketPrefix).toBe("LEGACY789");
+    // Changing it is still validated.
+    const bad = await agent.patch("/api/company-settings/tickets").send({ ticketPrefix: "ANOTHER10" });
+    expect(bad.status).toBe(400);
+    expect((await storage.getCompanySettings())?.ticketPrefix).toBe("LEGACY789");
+    const good = await agent.patch("/api/company-settings/tickets").send({ ticketPrefix: "OK" });
+    expect(good.status).toBe(200);
+  });
+
   it("a request without ticketPrefix still updates the other fields", async () => {
     const admin = await createUser({ role: "admin" });
     const agent = await loginAs(ctx.app, admin);

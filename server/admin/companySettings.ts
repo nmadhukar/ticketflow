@@ -139,8 +139,16 @@ export function registerCompanySettingsRoutes(app: Express): void {
         // M5: ticket numbers are PREFIX-YYYY-NNNN, matched by the inbound-email tag and
         // the counter's backfill as [A-Za-z0-9]+; anything else would make numbers that
         // no reply can reference.
+        // FU5: validated only when the request changes it, so a legacy prefix longer
+        // than 6 characters (which keeps numbering tickets) does not block saving the
+        // other fields when the settings form sends it back unchanged.
+        const currentPrefix =
+          req.body.ticketPrefix !== undefined
+            ? ((await storage.getCompanySettings())?.ticketPrefix ?? "TKT")
+            : undefined;
         if (
           req.body.ticketPrefix !== undefined &&
+          req.body.ticketPrefix !== currentPrefix &&
           (typeof req.body.ticketPrefix !== "string" || !TICKET_PREFIX_PATTERN.test(req.body.ticketPrefix))
         ) {
           return fail(res, 400, "ticketPrefix must be 1 to 6 letters or digits", {
