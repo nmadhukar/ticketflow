@@ -563,6 +563,7 @@ export interface IStorage {
       totalTickets: number;
       openTickets: number;
       inProgress: number;
+      onHold: number;
       resolved: number;
       closed: number;
       highPriority: number;
@@ -575,6 +576,7 @@ export interface IStorage {
       totalTickets: number;
       openTickets: number;
       inProgress: number;
+      onHold: number;
       resolved: number;
       closed: number;
       highPriority: number;

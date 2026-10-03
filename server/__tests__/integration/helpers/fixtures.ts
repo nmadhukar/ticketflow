@@ -6,7 +6,8 @@ import { db } from "../../../storage/db";
 import { hashPassword } from "../../../services/auth";
 import { departments, type Team, type User } from "@shared/schema";
 
-export type TestRole = "admin" | "manager" | "agent" | "customer";
+/** `user` is the legacy role: the server treats it as an agent. */
+export type TestRole = "admin" | "manager" | "agent" | "customer" | "user";
 
 export const DEFAULT_PASSWORD = "Passw0rd!test";
 

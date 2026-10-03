@@ -53,6 +53,14 @@ app.use(requestLogger(log));
       console.error(startupFailureLine(error));
       process.exit(1);
     }
+
+    // R36: validate DEFAULT_TRIAGE_TEAM_ID once. A bad value is logged and ignored, never fatal.
+    try {
+      const { initDefaultTriageTeam } = await import("./services/tickets/triage");
+      await initDefaultTriageTeam();
+    } catch (error) {
+      console.error(`DEFAULT_TRIAGE_TEAM_ID check failed [${describeError(error)}]; ignoring it`);
+    }
   } catch (error) {
     console.error(`Startup error [${describeError(error)}]`);
     process.exit(1);

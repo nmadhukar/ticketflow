@@ -55,7 +55,8 @@ export const logSecurityEvent = (
 ) => {
   const logEntry = {
     timestamp: new Date().toISOString(),
-    userId: req.user?.userId || "anonymous",
+    // Sessions carry the id as `id`; `userId` is the JWT payload's name for it.
+    userId: (req.user as { id?: string } | undefined)?.id || req.user?.userId || "anonymous",
     userRole: req.user?.role || "none",
     action,
     resource,

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { insertTaskCommentSchema, insertTaskSchema, tasks, type User } from "@shared/schema";
 import { TICKET_CATEGORIES, TICKET_PRIORITIES, TICKET_STATUSES } from "@shared/constants";
 import { db } from "../../storage/db";
@@ -15,6 +15,8 @@ import { STAFF_ONLY_TICKET_FIELDS, createTicketSchema } from "./schemas";
 import { afterTicketUpdated, isReassignment, notifyCommentAdded, notifyTicketDeleted, recipientsNow } from "./notifier";
 import { toCommentDTO, toTicketDTO, type CommentDTO, type TicketDTO } from "./serializers";
 import { TicketError, guard } from "./ticketError";
+import { defaultTriageAssignment } from "./triage";
+import { HttpError } from "../../http/errors";
 
 export { TicketError } from "./ticketError";
 export type { TicketDTO, CommentDTO } from "./serializers";
@@ -60,16 +62,73 @@ function fieldError(field: string, message: string): TicketError {
   return new TicketError("VALIDATION", message, { formErrors: [], fieldErrors: { [field]: [message] } });
 }
 
+function badRequest(message: string): HttpError {
+  return new HttpError(400, "validation_failed", message);
+}
+
+/**
+ * The customer's routing choice (a user, a team, a department only, or nothing) turned into
+ * the assignment columns. REST and MCP share it. A customer with no user or team assignee
+ * (nothing chosen, or a department only) goes to DEFAULT_TRIAGE_TEAM_ID when that is set (R36).
+ * Mutates and returns `fields`.
+ */
+async function applyCustomerRouting(fields: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const { assigneeType, assigneeId } = fields;
+  const teamId = (fields.teamId as number | null | undefined) ?? undefined;
+  const departmentId = (fields.departmentId as number | null | undefined) ?? undefined;
+
+  if (assigneeType === "user") {
+    if (!assigneeId) throw badRequest("assigneeId is required for user assignment");
+    fields.assigneeId = String(assigneeId);
+    fields.assigneeTeamId = null;
+    fields.teamId = undefined;
+  } else if (assigneeType === "team" || teamId) {
+    if (!teamId) throw badRequest("teamId is required for team assignment");
+    const team = await storage.getTeam(teamId);
+    if (!team) throw badRequest("Invalid team");
+    if (departmentId) {
+      const dept = await storage.getDepartmentById(departmentId);
+      if (!dept || (dept as { isActive?: boolean }).isActive === false) {
+        throw badRequest("Invalid or inactive department");
+      }
+      const teamDept = (team as { departmentId?: number | null }).departmentId;
+      if (teamDept && teamDept !== departmentId) {
+        throw badRequest("Team does not belong to the selected department");
+      }
+    }
+    fields.assigneeType = "team";
+    fields.assigneeTeamId = teamId;
+    fields.assigneeId = null;
+    const teamDept = (team as { departmentId?: number | null }).departmentId;
+    if (!departmentId && teamDept) fields.departmentId = teamDept;
+  } else {
+    if (departmentId) {
+      const dept = await storage.getDepartmentById(departmentId);
+      if (!dept || (dept as { isActive?: boolean }).isActive === false) {
+        throw badRequest("Invalid or inactive department");
+      }
+      // Department-only routing: clear team and assignee fields
+      fields.teamId = null;
+    } else {
+      // Unassigned: clear all assignment fields
+      fields.departmentId = null;
+      fields.teamId = null;
+    }
+    fields.assigneeId = null;
+    fields.assigneeTeamId = null;
+    const triage = await defaultTriageAssignment();
+    if (triage) Object.assign(fields, triage);
+  }
+  return fields;
+}
+
 /**
  * Validation and assignee rules for a new ticket, with no write. Returns the
- * final field set. REST runs this before uploading attachments, and again on
- * the body its customer routing rewrote.
+ * final field set (a customer's routing already applied), ready for createTicket
+ * through `opts.prepared`, so REST validates before it uploads attachments and
+ * does not do the work twice.
  */
-export async function prepareTicketCreate(
-  user: User,
-  input: unknown,
-  opts: { skipAssignment?: boolean } = {}
-): Promise<Record<string, unknown>> {
+export async function prepareTicketCreate(user: User, input: unknown): Promise<Record<string, unknown>> {
   return guard(async () => {
     // Server-owned fields (status, resolvedAt, closedAt, createdBy, ticketNumber) are rejected.
     const submitted = createTicketSchema.parse(input ?? {});
@@ -84,10 +143,10 @@ export async function prepareTicketCreate(
         });
       }
     }
-    // One assignee kind, the assignee exists, and ruling R16 for agents. (REST skips this for
-    // customers on the raw body: its customer routing rewrites the assignment first.)
+    // A customer's routing choice becomes the assignment first; then one assignee kind,
+    // the assignee exists, and ruling R16 for agents.
     const fields: Record<string, unknown> = { ...submitted };
-    if (opts.skipAssignment) return fields;
+    if (isCustomer) await applyCustomerRouting(fields);
     normalizeAssigneeUpdate(fields);
     await assertAssigneesExist(fields);
     await assertAgentMayAssign({ id: user.id, role: user.role }, fields);
@@ -98,9 +157,9 @@ export async function prepareTicketCreate(
 export async function createTicket(
   user: User,
   input: unknown,
-  opts: { runHooks?: boolean; actionBaseUrl?: string | null } = {}
+  opts: { runHooks?: boolean; actionBaseUrl?: string | null; prepared?: Record<string, unknown> } = {}
 ): Promise<TicketDTO> {
-  const fields = await prepareTicketCreate(user, input);
+  const fields = opts.prepared ?? (await prepareTicketCreate(user, input));
   const task = await guard(() => createTicketRecord(fields, user.id));
   if (opts.runHooks !== false) {
     await runTicketCreatedHooks(task, user.id, opts.actionBaseUrl ?? null);
@@ -173,21 +232,15 @@ export async function listTickets(
     const where = and(...filters);
 
     const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(tasks).where(where);
-    const idRows = await db
-      .select({ id: tasks.id })
-      .from(tasks)
-      .where(where)
-      .orderBy(desc(tasks.createdAt), desc(tasks.id))
-      .limit(limit)
-      .offset(offset);
-    const rows = await Promise.all(idRows.map((r) => storage.getTask(r.id)));
-    const page = rows.filter((r): r is NonNullable<typeof r> => !!r).map((r) => toTicketDTO(r));
+    // M9: the page and its joined names in ONE query (not one getTask per row).
+    const rows = await storage.getTaskPage(where, limit, offset);
+    const page = rows.map((r) => toTicketDTO(r));
     return {
       tickets: page,
       limit,
       offset,
       returned: page.length,
-      hasMore: offset + idRows.length < n,
+      hasMore: offset + rows.length < n,
       total: n,
     };
   });
@@ -227,7 +280,8 @@ export async function updateTicket(
 
     let verdict;
     try {
-      verdict = await canUpdateTicket({ user, ticket: task, payload });
+      // assertTaskAccess above is the one access check; the verdict need not repeat it.
+      verdict = await canUpdateTicket({ user, ticket: task, payload, accessChecked: true });
     } catch (e) {
       // An illegal staff transition (409): audited like a refusal.
       if (e instanceof Object && (e as { status?: number }).status === 409) refused(payload.status);

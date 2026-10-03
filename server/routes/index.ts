@@ -87,7 +87,6 @@ import {
   sum,
   sql,
   inArray,
-  ne,
   getTableColumns,
 } from "drizzle-orm";
 import { teams, departments, users } from "@shared/schema";
@@ -548,7 +547,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res, next) => {
+  // The by-id routes below that call ticketService (GET, PATCH, DELETE, POST comments) do not
+  // add requireTaskAccess(): the service checks access once, as its first step.
+  app.get("/api/tasks/:id", isAuthenticated, async (req: any, res, next) => {
     try {
       const taskId = parseInt(req.params.id);
       res.json(await getTicket(req.user, taskId));
@@ -622,13 +623,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const userId = getUserId(req);
         const files = req.files as Express.Multer.File[] | undefined;
         const user = req.user as User;
-        const isCustomer = user?.role === "customer";
 
         // Validate before anything is uploaded or written (ticketService owns the rules):
-        // server-owned fields are rejected, customers cannot set hours, and assignee checks
-        // (existence, ruling R16) run. The customer flow rewrites its assignment below, so
-        // its assignment is checked on the final body.
-        await prepareTicketCreate(user, req.body ?? {}, { skipAssignment: isCustomer });
+        // server-owned fields are rejected, customers cannot set hours, a customer's routing
+        // choice becomes the assignment (with the R36 triage team), and assignee checks
+        // (existence, ruling R16) run. createTicket reuses this result below.
+        const prepared = await prepareTicketCreate(user, req.body ?? {});
 
         // 1. Validate S3 configuration if files provided
         if (files && files.length > 0) {
@@ -706,71 +706,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
 
-        // Customer create: support user, team, department-only, unassigned
-        if (isCustomer) {
-          const { assigneeType, assigneeId, teamId, departmentId } =
-            req.body || {};
-          const parsedTeamId = teamId ? parseInt(teamId) : undefined;
-          const parsedDeptId = departmentId
-            ? parseInt(departmentId)
-            : undefined;
-
-          if (assigneeType === "user") {
-            if (!assigneeId) {
-              return fail(res, 400, "assigneeId is required for user assignment");
-            }
-            req.body.assigneeId = String(assigneeId);
-            req.body.assigneeTeamId = null;
-            req.body.teamId = undefined;
-            // departmentId optional
-          } else if (assigneeType === "team" || parsedTeamId) {
-            if (!parsedTeamId) {
-              return fail(res, 400, "teamId is required for team assignment");
-            }
-            const team = await storage.getTeam(parsedTeamId);
-            if (!team) return fail(res, 400, "Invalid team");
-            if (parsedDeptId) {
-              const dept = await storage.getDepartmentById(parsedDeptId);
-              if (!dept || (dept as any).isActive === false) {
-                return fail(res, 400, "Invalid or inactive department");
-              }
-              if (
-                (team as any).departmentId &&
-                (team as any).departmentId !== parsedDeptId
-              ) {
-                return fail(res, 400, "Team does not belong to the selected department");
-              }
-            }
-            req.body.assigneeType = "team";
-            req.body.assigneeTeamId = parsedTeamId;
-            req.body.assigneeId = null;
-            // If department not provided, try deriving from team
-            if (!parsedDeptId && (team as any).departmentId) {
-              req.body.departmentId = (team as any).departmentId;
-            }
-          } else if (parsedDeptId) {
-            const dept = await storage.getDepartmentById(parsedDeptId);
-            if (!dept || (dept as any).isActive === false) {
-              return fail(res, 400, "Invalid or inactive department");
-            }
-            // Department-only routing: clear team and assignee fields
-            req.body.teamId = null;
-            req.body.assigneeId = null;
-            req.body.assigneeTeamId = null;
-            // assigneeType can be omitted
-          } else {
-            // Unassigned: clear all assignment fields
-            req.body.assigneeId = null;
-            req.body.assigneeTeamId = null;
-            req.body.departmentId = null;
-            req.body.teamId = null;
-          }
-        }
-
-        // The customer routing above may have rewritten the body: validate the
-        // final shape, then keep one assignee kind (the same rule as update).
-        // Hooks run after the attachments are linked, below.
-        const task = await createTicket(user, req.body, { runHooks: false });
+        // The fields were validated and routed above; the write follows. Hooks run after
+        // the attachments are linked, below.
+        const task = await createTicket(user, req.body, { runHooks: false, prepared });
 
         // 4. Create attachment records (if files provided)
         const attachmentErrors: string[] = [];
@@ -820,7 +758,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
-  app.patch("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res, next) => {
+  app.patch("/api/tasks/:id", isAuthenticated, async (req: any, res, next) => {
     try {
       // Access, the role's field table, the status workflow, the write and its
       // notifications are ticketService.updateTicket; this is the HTTP adapter.
@@ -840,7 +778,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/tasks/:id", isAuthenticated, requireTaskAccess(), async (req: any, res, next) => {
+  app.delete("/api/tasks/:id", isAuthenticated, async (req: any, res, next) => {
     try {
       await deleteTicket(req.user, parseInt(req.params.id), true);
       res.status(204).send();
@@ -883,7 +821,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/tasks/:id/comments",
     isAuthenticated,
-    requireTaskAccess(),
     async (req: any, res, next) => {
       try {
         // ticketService.addComment: the body is only `content` (trimmed, 1..10000
@@ -966,35 +903,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           throw new HttpError(404, "user_not_found", "User not found");
         }
 
-        // An active admin must stay: never leave zero, and never let an admin
-        // demote or deactivate themselves.
-        const losesAdmin =
-          target.role === "admin" &&
-          target.isActive !== false &&
-          ((updates.role !== undefined && updates.role !== "admin") ||
-            updates.isActive === false);
-        if (losesAdmin) {
-          const [others] = await db
-            .select({ n: sql<number>`count(*)::int` })
-            .from(users)
-            .where(
-              and(
-                eq(users.role, "admin"),
-                eq(users.isActive, true),
-                ne(users.id, userId),
-                excludeSystemAccounts()
-              )
-            );
-          if (!others || others.n === 0) {
-            throw new HttpError(409, "last_admin", "This is the last active administrator");
-          }
-          if (userId === getUserId(req)) {
-            throw new HttpError(409, "self_demotion", "You cannot demote or deactivate your own account");
-          }
-        }
-
-        // updateUserProfile also drops the user's open sockets on a role change.
-        const updatedUser = await storage.updateUserProfile(userId, updates);
+        // An active admin must stay: never leave zero, and never let an admin demote or
+        // deactivate themselves. The check and the write share one transaction that locks
+        // the admin rows, so two requests at once cannot both pass it. It also drops the
+        // user's open sockets on a role or status change.
+        const updatedUser = await storage.updateUserKeepingAnAdmin(userId, updates, getUserId(req));
         res.json(updatedUser);
       } catch (error) {
         if ((error as { code?: string })?.code === "23505") {
@@ -1008,7 +921,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/admin/users/:userId/toggle-status",
     isAuthenticated,
-    async (req: any, res) => {
+    async (req: any, res, next) => {
       try {
         const user = await storage.getUser(getUserId(req));
         if (user?.role !== "admin") {
@@ -1016,9 +929,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const { userId } = req.params;
-        const updatedUser = await storage.toggleUserStatus(userId);
+        const target = await storage.getUser(userId);
+        if (!target) {
+          throw new HttpError(404, "user_not_found", "User not found");
+        }
+        // The same last-admin rule as PATCH (NULL isActive reads as inactive, so a toggle activates it).
+        const updatedUser = await storage.updateUserKeepingAnAdmin(
+          userId,
+          { isActive: target.isActive !== true },
+          getUserId(req)
+        );
         res.json(updatedUser);
       } catch (error) {
+        if (error instanceof HttpError) return next(error);
         logRouteError("Error toggling user status", error);
         fail(res, 500, "Failed to toggle user status");
       }
@@ -3233,9 +3156,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           (t) => t.status === "resolved"
         ).length;
         closedTickets = deptTasks.filter((t) => t.status === "closed").length;
-        highPriorityTickets = deptTasks.filter(
-          (t) => t.priority === "high" || t.priority === "urgent"
-        ).length;
+        // Priority high only: the same definition /api/stats and the manager stats use.
+        highPriorityTickets = deptTasks.filter((t) => t.priority === "high").length;
       }
 
       res.json({
@@ -5332,7 +5254,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return fail(res, 404, "User not found", { code: "user_not_found" });
       }
 
-      if (user.role !== "agent") {
+      // The legacy role `user` is an agent (owner decision), so it gets agent stats too.
+      if (normalizeRole(user.role) !== "agent") {
         return fail(res, 403, "Access denied. Agent role required.");
       }
 
