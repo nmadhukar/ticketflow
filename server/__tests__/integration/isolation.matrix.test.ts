@@ -338,6 +338,15 @@ describe("ticket isolation matrix", () => {
       }
     });
 
+    it("the legacy role 'user' is judged as an agent, by both queries", async () => {
+      for (const t of TICKETS) {
+        const legacy = { id: users.A1.id, role: "user" };
+        const viaSet = (await usersWhoCanAccessTask([legacy], ids[t])).has(users.A1.id);
+        expect({ t, viaSet }).toEqual({ t, viaSet: await canAccessTask(legacy, ids[t]) });
+        expect({ t, viaSet }).toEqual({ t, viaSet: MATRIX.A1[TICKETS.indexOf(t)] });
+      }
+    });
+
     it("a single candidate, a duplicate, an unknown role, a blank id and no candidates", async () => {
       expect(Array.from(await usersWhoCanAccessTask([{ id: users.A1.id, role: "agent" }], ids.t1))).toEqual([users.A1.id]);
       const dup = await usersWhoCanAccessTask(

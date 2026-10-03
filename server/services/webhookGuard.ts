@@ -182,9 +182,10 @@ const MAX_RESPONSE_BYTES = 64 * 1024;
  * The one HTTPS POST: connects to the address the pinned `lookup` validated, with TLS
  * SNI and certificate verification on the original host name, no redirects followed,
  * a timeout, and a bounded response read. Resolves with the status code.
- * `extra` is for tests only (a local CA, port and lookup); production passes nothing.
+ * `extra` (a local CA, port and lookup) is reachable only through `webhookGuardTesting`; the
+ * production entry points (sendPinnedJson, postWebhookJson) cannot override the pinned lookup.
  */
-export function sendPinnedJson(
+function sendWith(
   url: URL,
   body: string,
   extra: { lookup?: ReturnType<typeof createPinnedLookup>; ca?: string | Buffer; port?: number } = {}
@@ -222,6 +223,14 @@ export function sendPinnedJson(
   });
 }
 
+/** The pinned POST, with no way to override the lookup or TLS trust. */
+export function sendPinnedJson(url: URL, body: string): Promise<number> {
+  return sendWith(url, body);
+}
+
+/** Test-only: the same POST with a local CA, port and lookup. Not used by production code. */
+export const webhookGuardTesting = { sendWith };
+
 /**
  * POSTs JSON to a Teams webhook. Returns true on a 2xx; false on any refusal,
  * redirect, timeout or error (the reason is logged with the host only).
@@ -229,6 +238,8 @@ export function sendPinnedJson(
 export async function postWebhookJson(rawUrl: string, payload: unknown): Promise<boolean> {
   let host = "unknown";
   try {
+    // R84, defense in depth: the callers check the flag too.
+    if (!teamsWebhooksEnabled()) throw new HttpError(503, "teams_webhooks_disabled", TEAMS_WEBHOOKS_DISABLED_MESSAGE);
     const url = validateWebhookUrl(rawUrl);
     host = url.hostname;
     const status = await sendPinnedJson(url, JSON.stringify(payload));

@@ -47,6 +47,17 @@ describe("R56: audit log and custom limiter read the session user's id", () => {
     expect(entry(lines, "SECURITY_ACCESS:").userId).toBe("jwt-7");
   });
 
+  it("an anonymous request is keyed by IP (IPv6 addresses by their /56 prefix)", async () => {
+    const app = express();
+    app.set("trust proxy", 1);
+    app.use(createCustomRateLimit({ windowMs: 60000, max: 1 }));
+    app.get("/x", (_req, res) => res.sendStatus(200));
+    const hit = (ip: string) => request(app).get("/x").set("X-Forwarded-For", ip);
+    expect((await hit("2001:db8:1:1::1")).status).toBe(200);
+    expect((await hit("2001:db8:1:1::ffff")).status).toBe(429); // same /56
+    expect((await hit("203.0.113.5")).status).toBe(200);
+  });
+
   it("a custom limiter with no keyGenerator keys two session users on one IP separately", async () => {
     const app = express();
     app.use(asSessionUser, createCustomRateLimit({ windowMs: 60000, max: 1 }));

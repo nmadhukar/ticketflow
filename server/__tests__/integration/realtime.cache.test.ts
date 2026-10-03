@@ -113,11 +113,16 @@ describe("realtime eligibility cache and one visibility query", () => {
     const a = await open(sa.cookie);
     await open(sg.cookie);
 
-    const started = Date.now();
-    const qs = await queriesDuring(async () => {
-      for (let i = 0; i < 10; i++) await notifyTicket(ticketId, "updated");
-    });
-    expect(Date.now() - started).toBeLessThan(1000);
+    // The clock is held still so a slow machine cannot let the 1 s window lapse mid-burst.
+    const frozen = jest.spyOn(Date, "now").mockReturnValue(Date.now());
+    let qs: string[];
+    try {
+      qs = await queriesDuring(async () => {
+        for (let i = 0; i < 10; i++) await notifyTicket(ticketId, "updated");
+      });
+    } finally {
+      frozen.mockRestore();
+    }
     expect(usersReads(qs)).toHaveLength(1);
     expect(visibilityQueries(qs)).toHaveLength(10); // one visibility query per event
     await quiet();
@@ -217,6 +222,29 @@ describe("realtime eligibility cache and one visibility query", () => {
     await notifyTicket(ticketId, "updated");
     await quiet(200);
     expect(again.messages.filter((m) => m.ticketId === ticketId)).toHaveLength(1);
+  });
+
+  it("a demotion through the admin API (disconnectUser epoch) is not served from the cache after an immediate reconnect", async () => {
+    const admin = await createUser({ role: "admin" });
+    const boss = await createUser({ role: "admin" });
+    const other = await createUser({ role: "agent" });
+    const sa = await login(admin);
+    const sb = await login(boss);
+    const so = await login(other);
+    // A ticket the agent-scoped admin cannot see once demoted.
+    const ticketId = (await createTicketAs(so.agent)).body.id as number;
+    const first = await open(sa.cookie);
+    await notifyTicket(ticketId, "updated"); // warms the cache: admin is eligible, role admin
+    await quiet(100);
+    expect(first.messages.filter((m) => m.ticketId === ticketId)).toHaveLength(1);
+
+    await sb.agent.patch(`/api/admin/users/${admin.id}`).send({ role: "agent" }).expect(200);
+    expect(await first.closed).toBe(1012);
+    // Same user, same session stamps, same connected-set key: only the epoch tells the cache to drop.
+    const again = await open(sa.cookie);
+    await notifyTicket(ticketId, "updated");
+    await quiet(300);
+    expect(again.messages).toEqual([]);
   });
 
   it("a socket that connects inside the cache window is judged by the next event", async () => {

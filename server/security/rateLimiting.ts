@@ -325,7 +325,8 @@ export const createCustomRateLimit = (options: {
       ((req: Request) => {
         const authReq = req as AuthenticatedRequest;
         const u = authReq.user as { id?: string; userId?: string } | undefined;
-        return String(u?.id ?? u?.userId ?? req.ip);
+        const who = u?.id ?? u?.userId;
+        return who ? String(who) : ipKeyGenerator(req.ip ?? "");
       }),
     skip: options.skip,
     standardHeaders: true,

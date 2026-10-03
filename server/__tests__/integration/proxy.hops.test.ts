@@ -59,6 +59,17 @@ describe("R49: TRUST_PROXY_HOPS decides which X-Forwarded-For entry is the clien
     expect(statuses[10]).toBe(429);
   });
 
+  it("with 2, requests that differ only in the second-to-last entry are different clients (no 429)", async () => {
+    ctx.app.set("trust proxy", parseTrustProxyHops("2", () => {}));
+    for (let i = 0; i < 12; i++) {
+      const res = await request(ctx.app)
+        .post("/api/auth/reset-password")
+        .set("X-Forwarded-For", `203.0.113.9, 198.51.100.${100 + i}, 10.0.0.1`)
+        .send({ email: "nobody@example.test", token: "x", password: "whatever-long" });
+      expect(res.status).not.toBe(429);
+    }
+  });
+
   it("with 0, the auth limiter ignores X-Forwarded-For and keys on the connection", async () => {
     ctx.app.set("trust proxy", parseTrustProxyHops("0", () => {}));
     const statuses: number[] = [];

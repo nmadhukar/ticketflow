@@ -7,7 +7,7 @@ import {
   createPinnedLookup,
   isPrivateAddress,
   postWebhookJson,
-  sendPinnedJson,
+  webhookGuardTesting,
   validateWebhookUrl,
   WEBHOOK_TIMEOUT_MS,
 } from "../../services/webhookGuard";
@@ -139,7 +139,24 @@ describe("createPinnedLookup (R44)", () => {
 });
 
 describe("postWebhookJson", () => {
-  afterEach(() => jest.restoreAllMocks());
+  // R84: off unless TEAMS_WEBHOOKS_ENABLED is exactly "true"; these tests exercise the feature.
+  const savedFlag = process.env.TEAMS_WEBHOOKS_ENABLED;
+  beforeEach(() => {
+    process.env.TEAMS_WEBHOOKS_ENABLED = "true";
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+    if (savedFlag === undefined) delete process.env.TEAMS_WEBHOOKS_ENABLED;
+    else process.env.TEAMS_WEBHOOKS_ENABLED = savedFlag;
+  });
+
+  it.each([undefined, "", "false", "TRUE"])("flag %j: sends nothing (defense in depth)", async (flag) => {
+    const net = fakeWebhookTransport();
+    if (flag === undefined) delete process.env.TEAMS_WEBHOOKS_ENABLED;
+    else process.env.TEAMS_WEBHOOKS_ENABLED = flag;
+    await expect(postWebhookJson(GOOD, {})).resolves.toBe(false);
+    expect(net.calls).toHaveLength(0);
+  });
 
   it("sends through https.request with the pinned lookup, SNI on the host, a timeout and no redirect handling", async () => {
     const net = fakeWebhookTransport();
@@ -265,7 +282,7 @@ describe("sendPinnedJson against a real local HTTPS server (R44)", () => {
     cb(null, [{ address: "127.0.0.1", family: 4 }])) as never;
 
   it("a normal public host works: connects to the pinned address, certificate checked against the name", async () => {
-    const status = await sendPinnedJson(new URL(`https://${HOST}/hook/x`), '{"a":1}', { lookup: toLocal, ca: cert, port });
+    const status = await webhookGuardTesting.sendWith(new URL(`https://${HOST}/hook/x`), '{"a":1}', { lookup: toLocal, ca: cert, port });
     expect(status).toBe(200);
     expect(seen).toHaveLength(1);
     expect(seen[0].host).toBe(`${HOST}:${port}`); // the Host header keeps the name, not 127.0.0.1
@@ -274,25 +291,25 @@ describe("sendPinnedJson against a real local HTTPS server (R44)", () => {
   });
 
   it("works with the array lookup form Node's autoSelectFamily uses", async () => {
-    const status = await sendPinnedJson(new URL(`https://${HOST}/hook/x`), "{}", { lookup: toLocalAll, ca: cert, port });
+    const status = await webhookGuardTesting.sendWith(new URL(`https://${HOST}/hook/x`), "{}", { lookup: toLocalAll, ca: cert, port });
     expect(status).toBe(200);
   });
 
   it("verifies the certificate against the ORIGINAL host name, not the address", async () => {
     await expect(
-      sendPinnedJson(new URL("https://other.webhook.office.com/hook/x"), "{}", { lookup: toLocal, ca: cert, port })
+      webhookGuardTesting.sendWith(new URL("https://other.webhook.office.com/hook/x"), "{}", { lookup: toLocal, ca: cert, port })
     ).rejects.toMatchObject({ code: "ERR_TLS_CERT_ALTNAME_INVALID" });
     expect(seen).toHaveLength(0);
   });
 
   it("rejects a certificate it does not trust", async () => {
-    await expect(sendPinnedJson(new URL(`https://${HOST}/hook/x`), "{}", { lookup: toLocal, port })).rejects.toBeTruthy();
+    await expect(webhookGuardTesting.sendWith(new URL(`https://${HOST}/hook/x`), "{}", { lookup: toLocal, port })).rejects.toBeTruthy();
     expect(seen).toHaveLength(0);
   });
 
   it("reports a redirect as its status and never follows it", async () => {
     respondWith = { status: 302, headers: { location: `https://${HOST}:${port}/elsewhere` } };
-    const status = await sendPinnedJson(new URL(`https://${HOST}/hook/x`), "{}", { lookup: toLocal, ca: cert, port });
+    const status = await webhookGuardTesting.sendWith(new URL(`https://${HOST}/hook/x`), "{}", { lookup: toLocal, ca: cert, port });
     expect(status).toBe(302);
     expect(seen).toHaveLength(1);
   });
