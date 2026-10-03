@@ -177,15 +177,6 @@ export interface IStorage {
   // Task operations
   createTask(task: InsertTask): Promise<Task>;
   getTask(id: number): Promise<Task | undefined>;
-  getTasks(filters?: {
-    status?: string;
-    category?: string;
-    assigneeId?: string;
-    createdBy?: string;
-    search?: string;
-    limit?: number;
-    offset?: number;
-  }): Promise<Task[]>;
   updateTask(
     id: number,
     updates: Partial<InsertTask>,
@@ -288,7 +279,6 @@ export interface IStorage {
       isActive?: boolean;
     }
   ): Promise<PublicUser>;
-  toggleUserStatus(userId: string): Promise<PublicUser>;
   approveUser(userId: string): Promise<PublicUser>;
   assignUserToTeam(
     userId: string,
@@ -571,6 +561,8 @@ export interface IStorage {
     }>;
   }>;
   getManagerStats(userId: string): Promise<{
+    totalTickets: number;
+    personal: { assignedToMe: number; createdByMe: number };
     department: Array<{
       departmentId: number;
       departmentName: string;

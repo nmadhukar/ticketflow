@@ -76,6 +76,33 @@ describe("team creation and membership (R12)", () => {
       expect((await db.select().from(teamAdmins).where(eq(teamAdmins.userId, w.a2.id)))).toHaveLength(0);
     });
 
+    it("storage.createTeam alone inserts the team and no member row (R61)", async () => {
+      const w = await world();
+      const team = await storage.createTeam({ name: "bare", departmentId: w.d1.id, createdBy: w.m1.id });
+      expect(await db.select().from(teamMembers).where(eq(teamMembers.teamId, team.id))).toHaveLength(0);
+    });
+
+    it("the route enrols the creator as team admin, for an admin and for the department's manager (R61)", async () => {
+      const w = await world();
+      for (const who of ["admin", "m1"] as const) {
+        const agent = await loginAs(ctx.app, w[who]);
+        const res = await agent.post("/api/teams").send({ name: `by ${who}`, departmentId: w.d1.id });
+        expect(res.status).toBe(201);
+        const rows = await db.select().from(teamMembers).where(eq(teamMembers.teamId, res.body.id));
+        expect(rows.map((r) => [r.userId, r.role])).toEqual([[w[who].id, "admin"]]);
+      }
+    });
+
+    it("a refused agent writes no team and no member row (R61)", async () => {
+      const w = await world();
+      const teamsBefore = (await db.select().from(teams)).length;
+      const membersBefore = (await db.select().from(teamMembers)).length;
+      const agent = await loginAs(ctx.app, w.a2);
+      await agent.post("/api/teams").send({ name: "grab", departmentId: w.d1.id }).expect(403);
+      expect((await db.select().from(teams)).length).toBe(teamsBefore);
+      expect((await db.select().from(teamMembers)).length).toBe(membersBefore);
+    });
+
     it("a missing department is 400 for an admin", async () => {
       const w = await world();
       const agent = await loginAs(ctx.app, w.admin);

@@ -4,7 +4,7 @@ import type { Express } from "express";
 import { storage } from "../../../storage";
 import { db } from "../../../storage/db";
 import { hashPassword } from "../../../services/auth";
-import { departments, type Team, type User } from "@shared/schema";
+import { departments, teamMembers, type Team, type User } from "@shared/schema";
 
 /** `user` is the legacy role: the server treats it as an agent. */
 export type TestRole = "admin" | "manager" | "agent" | "customer" | "user";
@@ -72,11 +72,14 @@ export async function createTeam(
       .returning();
     departmentId = department.id;
   }
-  return storage.createTeam({
+  const team = await storage.createTeam({
     name: opts.name ?? `Team ${randomUUID().slice(0, 8)}`,
     departmentId,
     createdBy: managerOrAdmin.id,
   });
+  // storage.createTeam inserts the team only (R61); POST /api/teams enrols the creator, so does the fixture.
+  await db.insert(teamMembers).values({ teamId: team.id, userId: managerOrAdmin.id, role: "admin" });
+  return team;
 }
 
 /** POSTs /api/tasks as the logged-in agent and returns the raw response. */

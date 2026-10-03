@@ -217,4 +217,33 @@ describe("MCP status-change audit", () => {
     });
     expect((await storage.getTask(task.id))?.status).toBe("open");
   });
+
+  it("the audit line carries the caller's IP, not a literal 'mcp' (R60)", async () => {
+    const customer = await createUser({ role: "customer" });
+    const task = await storage.createTask({ title: "mine", category: "support", createdBy: customer.id } as never);
+    const { plaintext } = await issueApiKey({ userId: customer.id, name: "k" });
+    const callerIp = "198.51.100.222";
+    const spy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    let calls: unknown[][];
+    try {
+      await request(ctx.app)
+        .post("/api/mcp")
+        .set("X-Forwarded-For", callerIp)
+        .set("Accept", "application/json, text/event-stream")
+        .set("Authorization", `Bearer ${plaintext}`)
+        .send({
+          jsonrpc: "2.0",
+          id: 9,
+          method: "tools/call",
+          params: { name: "close_ticket", arguments: { id: task.id } },
+        });
+    } finally {
+      calls = [...spy.mock.calls];
+      spy.mockRestore();
+    }
+    const lines = calls.filter((c) => c[0] === "SECURITY_AUDIT:").map((c) => JSON.parse(String(c[1])));
+    expect(lines).toHaveLength(1);
+    expect(lines[0].ip).toBe(callerIp);
+    expect(lines[0].details.channel).toBe("mcp");
+  });
 });

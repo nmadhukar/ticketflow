@@ -288,7 +288,7 @@ describe("ticket workflow, meta route and search", () => {
   });
 
   it("search is case-insensitive in both search paths", async () => {
-    const { adminA } = await actors();
+    const { adminA, admin } = await actors();
     const t = (await createTicketAs(adminA, { title: "printer jam" })).body;
     await createTicketAs(adminA, { title: "unrelated" });
 
@@ -297,7 +297,7 @@ describe("ticket workflow, meta route and search", () => {
     const rows: any[] = Array.isArray(list.body) ? list.body : (list.body.tasks ?? []);
     expect(rows.map((x) => x.id)).toEqual([t.id]);
 
-    const filtered = await storage.getTasks({ search: "PRINTER" });
+    const filtered = await storage.getVisibleTasksForUser({ userId: admin.id, role: "admin", search: "PRINTER" });
     expect(filtered.map((x: any) => x.id)).toEqual([t.id]);
   });
 });

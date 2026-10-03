@@ -16,15 +16,18 @@ import { logSecurityEvent } from "../security/rbac";
 import { publicBaseUrl } from "../utils/appBaseUrl";
 import { runTool } from "./errors";
 
-/** Audit a refused status change like REST does, without an HTTP request. */
-function mcpWriteContext(user: User): WriteContext {
+/**
+ * Audit a refused status change like REST does, without an HTTP request. `ip` is the caller's
+ * address from the HTTP request that carried the tool call (R60); `channel: "mcp"` stays.
+ */
+function mcpWriteContext(user: User, ip?: string): WriteContext {
   return {
     // The Teams card's link: APP_BASE_URL (there is no request to take an origin from);
     // null when it is unset or unusable, and the card then has no link. Read per call.
     actionBaseUrl: publicBaseUrl(),
     onStatusRefusal: ({ from, to, taskId }) =>
       logSecurityEvent(
-        { user: { id: user.id, role: user.role }, ip: "mcp", get: () => undefined } as never,
+        { user: { id: user.id, role: user.role }, ip, get: () => undefined } as never,
         "change_status",
         "ticket",
         false,
@@ -45,12 +48,27 @@ function mcpWriteContext(user: User): WriteContext {
  * A number OR a string in the schema, on purpose: with `z.number()` the SDK rejects a
  * non-numeric id itself, with a plain-text protocol error and no code. Accepting both lets
  * the value reach the service, whose assertId answers a coded VALIDATION
- * (`fieldErrors.id`) for anything that is not a positive integer, "12" and "abc" alike.
- * The model still sees `number | string` and the description. `ticketId` narrows the
- * type for the service, which re-checks it at run time.
+ * (`fieldErrors.id`) for anything that is not a positive integer.
+ *
+ * R47: a model often sends the id as a string, so a string of plain digits (no sign, space,
+ * leading zero or decimal point) up to 2147483647 is that number. Everything else, "abc", "1.5",
+ * "", " 12", stays a VALIDATION. `ticketId` narrows the type for the service, which re-checks
+ * it at run time.
  */
-const id = z.union([z.number(), z.string()]).describe("Ticket id (positive integer)");
-const ticketId = (v: string | number): number => v as number;
+const id = z
+  .union([z.number(), z.string()])
+  .describe('Ticket id: a positive integer, as a number or a string of digits such as "12"');
+
+const MAX_INT = 2147483647;
+const ID_PATTERN = /^[1-9][0-9]{0,9}$/;
+const ticketId = (v: string | number): number => {
+  if (typeof v === "string" && ID_PATTERN.test(v) && Number(v) <= MAX_INT) return Number(v);
+  return v as number;
+};
+
+/** limit/offset: a number, or a string of plain digits that is that number; anything else is left for the service to refuse. */
+const pagingValue = (v: string | number | undefined): string | number | undefined =>
+  typeof v === "string" && /^(0|[1-9][0-9]{0,9})$/.test(v) && Number(v) <= MAX_INT ? Number(v) : v;
 
 const ticketFields = {
   title: z.string().describe("Short summary (1-255 characters)").optional(),
@@ -82,12 +100,18 @@ const listArgs = z
     category: z.string().optional(),
     assigneeId: z.string().describe("Only tickets assigned to this user id").optional(),
     search: z.string().describe("Text to find in the title or description").optional(),
-    limit: z.number().describe("Page size, 1-100 (default 25)").optional(),
-    offset: z.number().describe("Rows to skip (default 0)").optional(),
+    limit: z
+      .union([z.number(), z.string()])
+      .describe('Page size, 1-100 (default 25); a number or a numeric string such as "10"')
+      .optional(),
+    offset: z
+      .union([z.number(), z.string()])
+      .describe('Rows to skip, 0 or more (default 0); a number or a numeric string')
+      .optional(),
   })
   .passthrough();
 
-export function registerTicketTools(server: McpServer, user: User): void {
+export function registerTicketTools(server: McpServer, user: User, ip?: string): void {
   server.registerTool(
     "create_ticket",
     {
@@ -114,7 +138,14 @@ export function registerTicketTools(server: McpServer, user: User): void {
         "List the tickets the key's owner can see, newest first. Returns total (all matching), returned, limit, offset and hasMore: when hasMore is true, call again with offset + returned. Invalid filter values are errors, never an empty list.",
       inputSchema: listArgs,
     },
-    (args) => runTool(() => listTickets(user, args))
+    (args) =>
+      runTool(() =>
+        listTickets(user, {
+          ...args,
+          limit: pagingValue(args.limit) as number | undefined,
+          offset: pagingValue(args.offset) as number | undefined,
+        })
+      )
   );
 
   server.registerTool(
@@ -126,14 +157,14 @@ export function registerTicketTools(server: McpServer, user: User): void {
     },
     (args) => {
       const { id: rawId, ...patch } = args;
-      return runTool(() => updateTicket(user, ticketId(rawId), patch, mcpWriteContext(user)));
+      return runTool(() => updateTicket(user, ticketId(rawId), patch, mcpWriteContext(user, ip)));
     }
   );
 
   server.registerTool(
     "close_ticket",
     { description: "Close a ticket (staff only). Closing an already closed ticket is an INVALID_STATE error.", inputSchema: byId },
-    (args) => runTool(() => closeTicket(user, ticketId(args.id),mcpWriteContext(user)))
+    (args) => runTool(() => closeTicket(user, ticketId(args.id), mcpWriteContext(user, ip)))
   );
 
   server.registerTool(
@@ -142,7 +173,7 @@ export function registerTicketTools(server: McpServer, user: User): void {
       description: "Reopen a resolved or closed ticket (back to open). Staff, or the customer who created it.",
       inputSchema: byId,
     },
-    (args) => runTool(() => reopenTicket(user, ticketId(args.id),mcpWriteContext(user)))
+    (args) => runTool(() => reopenTicket(user, ticketId(args.id), mcpWriteContext(user, ip)))
   );
 
   server.registerTool(

@@ -50,7 +50,7 @@ export function registerCompanySettingsRoutes(app: Express): void {
             );
             s.logoUrl = presignedUrl;
           } catch (error) {
-            console.warn("Failed to generate presigned URL for logo:", error);
+            logRouteError("Failed to generate presigned URL for logo", error);
             // Keep original URL/key if presigned URL generation fails
           }
         }
@@ -310,7 +310,7 @@ export function registerCompanySettingsRoutes(app: Express): void {
             const oldKey = s3Service.extractKeyFromUrl(currentSettings.logoUrl);
             if (oldKey !== s3Key) await s3Service.deleteFile(oldKey);
           } catch (error) {
-            console.warn("Failed to delete old logo from S3:", error);
+            logRouteError("Failed to delete old logo from S3", error);
             // The new logo is already live; a leftover object is harmless
           }
         }
