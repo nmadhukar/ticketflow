@@ -45,6 +45,8 @@ export default defineConfig({
     reuseExistingServer: false,
     env: {
       NODE_ENV: "production",
+      // Production refuses to boot without it (Ruling R34): links are built from it.
+      APP_BASE_URL: BASE_URL,
       PORT: String(PORT),
       DATABASE_URL,
       SESSION_SECRET: process.env.E2E_SESSION_SECRET!,

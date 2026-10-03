@@ -401,6 +401,23 @@ The owner chose to defer the minors below instead of running a cleanup pass. One
 ledger entry ("Task N" is the plan task). Nothing here blocks the release.
 
 ### From the final whole-branch review (documented, not fixed)
+- Startup now fails fast on required seed steps (M8). If a row with an id other than `system`
+  already holds `system@ticketflow.local`, `seedSystemUser` hits a unique violation and the
+  container restarts in a loop; check with
+  `SELECT id FROM users WHERE email = 'system@ticketflow.local'` before deploying (it must be
+  `system` or absent). A transient database error during a required step also restarts the
+  container until the database answers.
+- Coolify must deploy with the compose file: the Dockerfile `CMD` alone runs neither
+  `db:migrate-sql` nor `db:push`, and the schema check then refuses to boot (fails safe).
+- `pg` is needed at run time by `scripts/apply-sql-migrations.mjs` but is a devDependency; it
+  works because the image keeps dev dependencies (drizzle-kit needs them too).
+- An existing ticket prefix longer than 6 characters keeps numbering tickets, but the Tickets
+  settings tab cannot be saved until the prefix is shortened (M5).
+- The general /api limit stays 100 requests per 15 minutes per IP; `RATE_LIMIT_MAX_REQUESTS`
+  now takes effect, so raise it if staff share one NAT address.
+- Teams cards for tickets created or updated through MCP carry no link (the service could use
+  the APP_BASE_URL helper).
+- README and DEVELOPER_DOCUMENTATION still show the old compose command.
 - M2: tickets created from email, and customer tickets created with no user or team assignee
   (unassigned, or routed to a department only), are visible among staff only to admins (and to
   the customer who opened them) until someone triages them: manager and agent scope reaches a
