@@ -1,6 +1,57 @@
 import { jest } from "@jest/globals";
 import { randomBytes } from "crypto";
+import { execFileSync } from "child_process";
+import { readdirSync, readFileSync, statSync } from "fs";
+import { join, relative } from "path";
 import { requireSecret, secretProblem } from "../../security/secrets";
+
+const REPO_ROOT = join(__dirname, "../../..");
+
+/** Tracked docs, examples, compose files and env files (git), or a directory walk when there is no .git. */
+function trackedSampleFiles(): string[] {
+  try {
+    const out = execFileSync(
+      "git",
+      ["ls-files", "-z", "--", "*.md", "*.example", "*docker-compose*.yml", "*.env*"],
+      { cwd: REPO_ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    );
+    const files = out.split("\0").filter(Boolean);
+    if (files.length > 0) return files;
+  } catch {
+    // no git (a source tarball, a container without .git): walk instead
+  }
+  const found: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      if (["node_modules", ".git", "dist", "coverage"].includes(entry)) continue;
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) walk(full);
+      // Example and doc files only: never a real `.env` (or `.env.local`) a developer keeps here.
+      else if (/\.(md|example)$|docker-compose.*\.yml$|^\.env\..*example/.test(entry)) found.push(relative(REPO_ROOT, full));
+    }
+  };
+  walk(REPO_ROOT);
+  return found;
+}
+
+/**
+ * Every `SESSION_SECRET=` / `JWT_SECRET=` (or `:` in YAML) sample value on a line of its own in the
+ * repo's tracked docs and examples. A `${...}` reference and an empty value are not samples.
+ */
+function collectRepoSecretSamples(): Array<{ file: string; line: number; name: "SESSION_SECRET" | "JWT_SECRET"; value: string }> {
+  const samples: Array<{ file: string; line: number; name: "SESSION_SECRET" | "JWT_SECRET"; value: string }> = [];
+  for (const file of Array.from(new Set(trackedSampleFiles()))) {
+    const lines = readFileSync(join(REPO_ROOT, file), "utf8").split(/\r?\n/);
+    lines.forEach((text, index) => {
+      const m = /^\s*(?:export\s+)?(SESSION_SECRET|JWT_SECRET)\s*[:=]\s*(.*)$/.exec(text);
+      if (!m) return;
+      const value = m[2].replace(/\s+#.*$/, "").trim().replace(/^["'`]|["'`]$/g, "").trim();
+      if (!value || value.includes("${")) return;
+      samples.push({ file, line: index + 1, name: m[1] as "SESSION_SECRET" | "JWT_SECRET", value });
+    });
+  }
+  return samples;
+}
 
 describe("requireSecret", () => {
   it("throws in production when the secret is unset or blank", () => {
@@ -74,6 +125,20 @@ describe("requireSecret", () => {
           });
         }
       }
+    });
+    it("refuses every SESSION_SECRET / JWT_SECRET sample found in the repo's tracked docs and examples (R57)", () => {
+      const samples = collectRepoSecretSamples();
+      // The scan itself must work: the repo's own examples are in there.
+      expect(samples.length).toBeGreaterThanOrEqual(5);
+      const accepted = samples
+        .filter(({ name, value }) =>
+          [value, value.toUpperCase()].some(
+            (v) => secretProblem(name, { NODE_ENV: "production", [name]: v }) === null
+          )
+        )
+        // The file and line only: never the value, even a sample one.
+        .map(({ file, line, name }) => `${file}:${line} (${name})`);
+      expect({ acceptedInProduction: accepted }).toEqual({ acceptedInProduction: [] });
     });
     it("accepts 10,000 random base64 and 10,000 random hex secrets (no false positives)", () => {
       for (let i = 0; i < 10000; i++) {

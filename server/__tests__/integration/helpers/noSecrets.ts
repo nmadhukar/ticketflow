@@ -6,6 +6,7 @@ const FORBIDDEN = [
   "passwordResetExpires",
   "failedLoginAttempts",
   "lockedUntil",
+  "lastFailedLoginAt",
   "passwordChangedAt",
   "keyHash",
   "clientSecret",

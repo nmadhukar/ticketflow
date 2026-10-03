@@ -37,17 +37,33 @@ export function toPublicUser<T extends Partial<User>>(u: T): PublicUser {
   return out as PublicUser;
 }
 
+/** Who is looking: their id (to recognise their own row) and role. */
+export interface Viewer {
+  id?: string | null;
+  role?: unknown;
+}
+
 /**
  * The one projection of "another user" for a response, chosen by who is
- * looking. Staff (admin, manager, agent) get the public projection; anyone
- * else, a customer or an unknown role, gets only the customer-visible fields.
+ * looking (R41):
+ * - admin and manager get the public projection, `phone` included;
+ * - a staff member sees their OWN row with `phone`;
+ * - an agent sees every other user's public projection without `phone`;
+ * - anyone else, a customer or an unknown role, gets only the
+ *   customer-visible fields.
  */
 export function projectUserForViewer<T extends Partial<User>>(
-  viewerRole: unknown,
+  viewer: Viewer | null | undefined,
   u: T
 ): PublicUser | CustomerVisibleUser {
-  const role = normalizeRole(viewerRole);
-  if (role === "admin" || role === "manager" || role === "agent") return toPublicUser(u);
+  const role = normalizeRole(viewer?.role);
+  if (role === "admin" || role === "manager") return toPublicUser(u);
+  if (role === "agent") {
+    const full = toPublicUser(u);
+    if (viewer?.id != null && u.id === viewer.id) return full;
+    const { phone: _phone, ...withoutPhone } = full;
+    return withoutPhone as PublicUser;
+  }
   const out: Record<string, unknown> = {};
   for (const k of CUSTOMER_VISIBLE_USER_FIELDS) {
     if (k in u) out[k] = (u as Record<string, unknown>)[k];

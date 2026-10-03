@@ -134,18 +134,19 @@ const changePasswordSchema = z.object({
 /** express-session's default cookie name, stated so the revocation path can clear it by name. */
 const SESSION_COOKIE_NAME = "connect.sid";
 
-let activeSessionStore: InstanceType<ReturnType<typeof connectPg>> | undefined;
+// R55: every store setupAuth creates, so a second call no longer leaks the first one's pool.
+const activeSessionStores = new Set<InstanceType<ReturnType<typeof connectPg>>>();
 let activeSessionMiddleware: RequestHandler | undefined;
 
 /**
- * Closes the session store's own connection pool (created by setupAuth).
- * Used by the test harness so Jest can exit without --forceExit.
+ * Closes the connection pool of EVERY session store setupAuth created, then
+ * forgets them. Used by the test harness so Jest can exit without --forceExit.
  */
 export async function closeAuth(): Promise<void> {
-  const store = activeSessionStore;
-  activeSessionStore = undefined;
+  const stores = Array.from(activeSessionStores);
+  activeSessionStores.clear();
   activeSessionMiddleware = undefined;
-  await store?.close();
+  await Promise.all(stores.map((store) => store.close()));
 }
 
 /** The two stamps a session carries for the password-change revocation rule. */
@@ -242,7 +243,7 @@ export function setupAuth(app: Express) {
   const cookieSecure =
     (process.env.COOKIE_SECURE || "").toLowerCase() === "true";
 
-  activeSessionStore = sessionStore;
+  activeSessionStores.add(sessionStore);
 
   // Also the options a cookie is cleared with: they must match the ones it was set with.
   const sessionCookieOptions = {

@@ -174,10 +174,18 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async upsertUser(userData: UpsertUser): Promise<User> {
+  /**
+   * `onInsert` holds values for a NEW row only (an SSO sign-up's role): they
+   * are not in the conflict update, so a later call never touches the role or
+   * approval of an account that already exists.
+   */
+  async upsertUser(
+    userData: UpsertUser,
+    onInsert?: Partial<Pick<UpsertUser, "role" | "isApproved">>
+  ): Promise<User> {
     const [user] = await db
       .insert(users)
-      .values(userData)
+      .values({ ...userData, ...onInsert })
       .onConflictDoUpdate({
         target: users.id,
         set: {
@@ -208,11 +216,15 @@ export class DatabaseStorage implements IStorage {
   async claimLoginAttempt(userId: string, now: Date = new Date()): Promise<number | null> {
     const nowTs = sql`${now.toISOString()}::timestamp`;
     const lockUntil = new Date(now.getTime() + LOCKOUT_MINUTES * 60 * 1000);
-    const next = sql`(CASE WHEN ${users.lockedUntil} IS NOT NULL AND ${users.lockedUntil} <= ${nowTs} THEN 1 ELSE ${users.failedLoginAttempts} + 1 END)`;
+    // R53: the count restarts at 1 after an expired lock, or when the last failure is a
+    // whole lockout window old. A NULL stamp (a row from before 0022) counts as before.
+    const windowStart = sql`${new Date(now.getTime() - LOCKOUT_MINUTES * 60 * 1000).toISOString()}::timestamp`;
+    const next = sql`(CASE WHEN (${users.lockedUntil} IS NOT NULL AND ${users.lockedUntil} <= ${nowTs}) OR (${users.lastFailedLoginAt} IS NOT NULL AND ${users.lastFailedLoginAt} <= ${windowStart}) THEN 1 ELSE ${users.failedLoginAttempts} + 1 END)`;
     const rows = await db
       .update(users)
       .set({
         failedLoginAttempts: next,
+        lastFailedLoginAt: nowTs,
         lockedUntil: sql`CASE WHEN ${next} >= ${MAX_FAILED_LOGINS} THEN ${lockUntil.toISOString()}::timestamp ELSE NULL END`,
       })
       .where(
@@ -229,7 +241,7 @@ export class DatabaseStorage implements IStorage {
   async resetFailedLogins(userId: string): Promise<void> {
     await db
       .update(users)
-      .set({ failedLoginAttempts: 0, lockedUntil: null })
+      .set({ failedLoginAttempts: 0, lockedUntil: null, lastFailedLoginAt: null })
       .where(eq(users.id, userId));
   }
 
@@ -305,6 +317,7 @@ export class DatabaseStorage implements IStorage {
         passwordChangedAt: new Date(),
         failedLoginAttempts: 0,
         lockedUntil: null,
+        lastFailedLoginAt: null,
         passwordResetToken: null,
         passwordResetExpires: null,
         updatedAt: new Date(),
@@ -1508,7 +1521,7 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async approveUser(userId: string): Promise<PublicUser> {
+  async approveUser(userId: string): Promise<PublicUser | undefined> {
     const [updatedUser] = await db
       .update(users)
       .set({

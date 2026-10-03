@@ -78,6 +78,8 @@ export const users = pgTable("users", {
   // Login lockout (server/services/auth/lockout.ts). Never sent to clients.
   failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
   lockedUntil: timestamp("locked_until"),
+  // R53: when the last failed attempt was claimed; the counter restarts once the lockout window passes.
+  lastFailedLoginAt: timestamp("last_failed_login_at"),
   // Set by an admin reset; cleared when the user sets their own password.
   mustChangePassword: boolean("must_change_password").notNull().default(false),
   // Sessions that authenticated before this instant are refused (server/services/auth).
@@ -908,6 +910,9 @@ export const insertUserInvitationSchema = createInsertSchema(userInvitations)
     invitationToken: true,
     acceptedAt: true,
     createdAt: true,
+    // R43: the department does nothing; zod strips it from a body that carries it.
+    department: true,
+    departmentId: true,
   })
   .extend({
     expiresAt: z.string().datetime(),

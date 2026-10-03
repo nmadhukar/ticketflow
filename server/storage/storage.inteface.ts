@@ -103,7 +103,10 @@ export interface IStorage {
    * @param user - User data to insert or update
    * @returns Updated user object
    */
-  upsertUser(user: UpsertUser): Promise<User>;
+  upsertUser(
+    user: UpsertUser,
+    onInsert?: Partial<Pick<UpsertUser, "role" | "isApproved">>
+  ): Promise<User>;
 
   /**
    * Retrieves all users in the system
@@ -279,7 +282,7 @@ export interface IStorage {
       isActive?: boolean;
     }
   ): Promise<PublicUser>;
-  approveUser(userId: string): Promise<PublicUser>;
+  approveUser(userId: string): Promise<PublicUser | undefined>;
   assignUserToTeam(
     userId: string,
     teamId: number,

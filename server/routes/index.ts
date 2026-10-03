@@ -276,6 +276,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ) {
         return fail(res, 403, "Forbidden");
       }
+      // R41: an agent sees no other user's phone (their own row keeps it).
+      const viewer = { id: getUserId(req), role: requesterRole };
       const forTeamMemberSelection =
         req.query.forTeamMemberSelection === "true";
 
@@ -308,12 +310,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const filteredUsers = await query;
-        return res.json(filteredUsers);
+        return res.json(filteredUsers.map((u) => projectUserForViewer(viewer, u)));
       }
 
       // Default: return all users (backward compatible)
       const allUsers = await storage.getAllUsers();
-      res.json(allUsers);
+      res.json(allUsers.map((u) => projectUserForViewer(viewer, u)));
     } catch (error) {
       logRouteError("Error fetching users", error);
       fail(res, 500, "Failed to fetch users");
@@ -798,7 +800,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(
         history.map((h) => ({
           ...h,
-          user: h.user ? projectUserForViewer(req.user?.role, h.user) : undefined,
+          user: h.user ? projectUserForViewer(req.user, h.user) : undefined,
         }))
       );
     } catch (error) {
@@ -814,7 +816,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(
         comments.map((c) => ({
           ...c,
-          user: c.user ? projectUserForViewer(req.user?.role, c.user) : undefined,
+          user: c.user ? projectUserForViewer(req.user, c.user) : undefined,
         }))
       );
     } catch (error) {
@@ -956,7 +958,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/admin/users/:userId/approve",
     isAuthenticated,
-    async (req: any, res) => {
+    async (req: any, res, next) => {
       try {
         const user = await storage.getUser(getUserId(req));
         if (user?.role !== "admin") {
@@ -965,8 +967,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const { userId } = req.params;
         const updatedUser = await storage.approveUser(userId);
+        // R68: an unknown id used to answer 200 with an empty body.
+        if (!updatedUser) {
+          throw new HttpError(404, "user_not_found", "User not found");
+        }
         res.json(updatedUser);
       } catch (error) {
+        if (error instanceof HttpError) return next(error);
         logRouteError("Error approving user", error);
         fail(res, 500, "Failed to approve user");
       }
@@ -2788,9 +2795,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             invitation.email
           )}&token=${invitation.invitationToken}`;
 
-          const department = invitation.departmentId
-            ? await storage.getDepartmentById(invitation.departmentId)
-            : null;
           const inviter = await storage.getUser(invitation.invitedBy);
 
           // Get fromEmail and fromName: prioritize email provider, fallback to company settings, then defaults
@@ -2828,7 +2832,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 role:
                   invitation.role.charAt(0).toUpperCase() +
                   invitation.role.slice(1),
-                department: department?.name || "Not assigned",
+                department: "", // R43: a stored template's {{department}} renders empty
                 registrationUrl: inviteUrl,
                 year: new Date().getFullYear().toString(),
               },
@@ -2860,7 +2864,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 role:
                   invitation.role.charAt(0).toUpperCase() +
                   invitation.role.slice(1),
-                department: department?.name || "Not assigned",
+                department: "", // R43: a stored template's {{department}} renders empty
                 registrationUrl: inviteUrl,
                 year: new Date().getFullYear().toString(),
               },
@@ -2868,6 +2872,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
               fromName,
               ...awsCredentials,
             });
+          } else {
+            // R58: a stored SMTP, Mailgun, SendGrid or Custom row has no adapter.
+            console.warn(
+              `Invitation email not sent: email provider ${emailProvider.provider} is not implemented`
+            );
           }
         }
 
@@ -3315,8 +3324,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         role: inviteRole,
         firstName: req.body.firstName,
         lastName: req.body.lastName,
-        department: req.body.department,
-        departmentId: req.body.departmentId,
+        // R43: no department. `department` and `departmentId` in the body are
+        // ignored (stripped, not a 400, so old clients still work).
         ...(expiresAt ? { expiresAt } : {}),
         invitedBy: userId,
       } as any);
@@ -3333,10 +3342,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const inviteUrl = `${inviteBase}/auth?mode=register&email=${encodeURIComponent(
           invitation.email
         )}&token=${invitation.invitationToken}`;
-
-        const department = invitation.departmentId
-          ? await storage.getDepartmentById(invitation.departmentId)
-          : null;
 
         // Get fromEmail and fromName: prioritize email provider, fallback to company settings, then defaults
         const fromName =
@@ -3372,7 +3377,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               role:
                 invitation.role.charAt(0).toUpperCase() +
                 invitation.role.slice(1),
-              department: department?.name || "Not assigned",
+              department: "", // R43: a stored template's {{department}} renders empty
               registrationUrl: inviteUrl,
               year: new Date().getFullYear().toString(),
             },
@@ -3404,7 +3409,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               role:
                 invitation.role.charAt(0).toUpperCase() +
                 invitation.role.slice(1),
-              department: department?.name || "Not assigned",
+              department: "", // R43: a stored template's {{department}} renders empty
               registrationUrl: inviteUrl,
               year: new Date().getFullYear().toString(),
             },
@@ -3412,6 +3417,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             fromName,
             ...awsCredentials,
           });
+        } else {
+          // R58: a stored SMTP, Mailgun, SendGrid or Custom row has no adapter.
+          console.warn(
+            `Invitation email not sent: email provider ${emailProvider.provider} is not implemented`
+          );
         }
       }
 
@@ -3506,7 +3516,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         email: invitation.email,
         role: invitation.role,
-        departmentId: invitation.departmentId,
       });
     } catch (error) {
       logRouteError("Error validating invitation", error);

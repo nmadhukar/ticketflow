@@ -69,8 +69,7 @@ export const defaultEmailTemplates = [
         <div class="details">
             <strong>Your invitation details:</strong><br>
             Email: {{email}}<br>
-            Role: {{role}}<br>
-            Department: {{department}}
+            Role: {{role}}
         </div>
         
         <p>To get started, please click the button below to create your account:</p>
@@ -108,7 +107,6 @@ export const defaultEmailTemplates = [
       "inviterName",
       "email",
       "role",
-      "department",
       "registrationUrl",
       "year",
     ],

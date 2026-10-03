@@ -13,6 +13,7 @@ import { AI_SYSTEM_USER_EMAIL } from "../../utils/aiSystemUserId";
 import { randomBytes } from "crypto";
 import { fail, logRouteError } from "../../http/errors";
 import { publicBaseUrl } from "../../utils/appBaseUrl";
+import { resolveSsoDefaultRole } from "./ssoRole";
 
 interface MicrosoftProfile {
   sub: string;
@@ -131,6 +132,9 @@ export async function setupMicrosoftAuth(app: Express) {
   };
 
   const msalClient = new ConfidentialClientApplication(msalConfig);
+
+  // Read SSO_DEFAULT_ROLE now so a bad value is reported at startup, not at the first sign-up.
+  resolveSsoDefaultRole();
 
   console.log("Microsoft Auth Configuration:");
   console.log("- Client ID:", clientId);
@@ -264,7 +268,13 @@ export async function setupMicrosoftAuth(app: Express) {
         profileImageUrl: null,
       };
 
-      const user = await storage.upsertUser(userData);
+      // R42: a NEW account takes SSO_DEFAULT_ROLE and waits for approval. An existing
+      // account's role and approval are never touched by a later sign-in (the role is
+      // an insert-only value, not part of the conflict update).
+      const user = await storage.upsertUser(userData, {
+        role: resolveSsoDefaultRole(),
+        isApproved: false,
+      });
 
       // No session for a deactivated or not-yet-approved account.
       const blocked = loginBlockReason(user);

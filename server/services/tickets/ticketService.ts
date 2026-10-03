@@ -193,7 +193,7 @@ export async function getTicket(
       ...task,
       comments: comments.map((c) => ({
         ...c,
-        user: c.user ? projectUserForViewer(user.role, c.user) : undefined,
+        user: c.user ? projectUserForViewer(user, c.user) : undefined,
       })),
     });
   });

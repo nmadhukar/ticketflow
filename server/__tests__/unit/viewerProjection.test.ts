@@ -21,9 +21,9 @@ const staffRow = {
 };
 
 describe("projectUserForViewer", () => {
-  it("staff viewers get the public projection (and never a secret)", () => {
-    for (const role of ["admin", "manager", "agent", "user"]) {
-      const out = projectUserForViewer(role, staffRow) as Record<string, unknown>;
+  it("admin and manager viewers get the public projection with phone (and never a secret)", () => {
+    for (const role of ["admin", "manager"]) {
+      const out = projectUserForViewer({ id: "viewer", role }, staffRow) as Record<string, unknown>;
       expect(out.email).toBe("staff@example.test");
       expect(out.phone).toBe("555-0100");
       expect(out).not.toHaveProperty("password");
@@ -31,18 +31,33 @@ describe("projectUserForViewer", () => {
     }
   });
 
+  it("an agent (and the legacy role 'user') gets the projection without phone, except on their own row", () => {
+    for (const role of ["agent", "user"]) {
+      const other = projectUserForViewer({ id: "viewer", role }, staffRow) as Record<string, unknown>;
+      expect(other.email).toBe("staff@example.test");
+      expect(other).not.toHaveProperty("phone");
+      expect(other).not.toHaveProperty("password");
+      const own = projectUserForViewer({ id: "u1", role }, staffRow) as Record<string, unknown>;
+      expect(own.phone).toBe("555-0100");
+      expect(own).not.toHaveProperty("password");
+    }
+  });
+
   it("a customer gets id, name and picture only", () => {
-    const out = projectUserForViewer("customer", staffRow);
+    const out = projectUserForViewer({ id: "c1", role: "customer" }, staffRow);
     expect(Object.keys(out).sort()).toEqual([...CUSTOMER_VISIBLE_USER_FIELDS].sort());
     expect(JSON.stringify(out)).not.toMatch(/staff@example|555-0100|admin/);
   });
 
   it("an unknown or missing viewer role is treated as a customer", () => {
     for (const role of ["superuser", "", null, undefined, 7]) {
-      expect(Object.keys(projectUserForViewer(role, staffRow)).sort()).toEqual(
+      expect(Object.keys(projectUserForViewer({ id: "u1", role }, staffRow)).sort()).toEqual(
         [...CUSTOMER_VISIBLE_USER_FIELDS].sort()
       );
     }
+    expect(Object.keys(projectUserForViewer(undefined, staffRow)).sort()).toEqual(
+      [...CUSTOMER_VISIBLE_USER_FIELDS].sort()
+    );
   });
 });
 
