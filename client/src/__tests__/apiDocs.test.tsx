@@ -25,18 +25,34 @@ describe("API docs page (P2)", () => {
     expect(tabs).toEqual(["Authentication", "Tasks", "Teams", "Webhooks"]);
   });
 
-  it("the Tasks section lists the ticket endpoints: list, create and update", () => {
+  it("the Tasks section lists the ticket endpoints: list, create, get, update, comment and delete", () => {
     openTab("Tasks");
     const text = document.body.textContent ?? "";
-    for (const title of ["List Tasks", "Create Task", "Update Task"]) expect(text).toContain(title);
+    for (const title of ["List Tasks", "Create Task", "Get Task", "Update Task", "Add Comment", "Delete Task"]) {
+      expect(text).toContain(title);
+    }
 
     const pairs = Array.from(document.querySelectorAll("code"))
       .map((c) => c.textContent)
       .filter((t): t is string => !!t && t.startsWith("/api/tasks"));
-    expect(pairs).toEqual(["/api/tasks", "/api/tasks", "/api/tasks/:id"]);
+    expect(pairs).toEqual([
+      "/api/tasks",
+      "/api/tasks",
+      "/api/tasks/:id",
+      "/api/tasks/:id",
+      "/api/tasks/:id/comments",
+      "/api/tasks/:id",
+    ]);
 
     const methods = screen.getAllByText(/^(GET|POST|PATCH|PUT|DELETE)$/).map((b) => b.textContent);
-    expect(methods).toEqual(["GET", "POST", "PATCH"]);
+    expect(methods).toEqual(["GET", "POST", "GET", "PATCH", "POST", "DELETE"]);
+  });
+
+  it("documents the comment body ({content}) and that delete is admin only", () => {
+    openTab("Tasks");
+    const text = document.body.textContent ?? "";
+    expect(text).toContain('"content"');
+    expect(text).toMatch(/admin/i);
   });
 
   it("documents the ticket create body the server accepts (title, category, priority) and PATCH, not PUT", () => {

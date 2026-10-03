@@ -98,6 +98,11 @@ export function errorMiddleware(err: unknown, _req: Request, res: Response, _nex
       .status(400)
       .json({ error: "validation_failed", message: "Invalid input", details: err.flatten() });
   }
+  // multer's per-file size limit (MAX_FILE_UPLOAD_SIZE_MB) has a code but no status: it is
+  // the documented 413, not an unhandled 500 (T15).
+  if ((err as { code?: unknown } | null)?.code === "LIMIT_FILE_SIZE") {
+    return res.status(413).json({ error: "payload_too_large", message: "File is too large" });
+  }
   // body-parser / http-errors failures carry a 4xx status and a type.
   const e = err as { status?: number; statusCode?: number; type?: string } | null;
   const status = e?.status ?? e?.statusCode;

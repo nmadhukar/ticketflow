@@ -224,10 +224,13 @@ export async function recordUsage(
  */
 export async function getDailyUsage(date?: string): Promise<DailyUsage> {
   const targetDate = date || new Date().toISOString().split("T")[0];
+  // `targetDate` is a UTC calendar date ("2026-10-03" parses as UTC midnight), so the day's
+  // bounds are UTC too. setHours (local) put the window on the PREVIOUS local day on any host
+  // west of UTC, so today's usage read as 0 and the daily cap never counted it.
   const startDate = new Date(targetDate);
-  startDate.setHours(0, 0, 0, 0);
+  startDate.setUTCHours(0, 0, 0, 0);
   const endDate = new Date(targetDate);
-  endDate.setHours(23, 59, 59, 999);
+  endDate.setUTCHours(23, 59, 59, 999);
 
   const records = await storage.getAIUsage({
     startDate,

@@ -2774,6 +2774,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (invitation.status === "accepted") {
           return fail(res, 400, "Cannot resend accepted invitation");
         }
+        // A cancelled invitation's link is dead (GET 404, accept and register 400): mailing
+        // it again would send a link that cannot work.
+        if (invitation.status === "cancelled") {
+          return fail(res, 400, "Cannot resend a cancelled invitation");
+        }
 
         // Send invitation email using the template
         const emailTemplate = await storage.getEmailTemplate("user_invitation");
@@ -4134,6 +4139,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const articleId = parseInt(req.params.id);
+        if (!(await storage.getKnowledgeArticle(articleId))) {
+          return fail(res, 404, "Knowledge article not found");
+        }
         await storage.deleteKnowledgeArticle(articleId);
         res.json({ message: "Knowledge article deleted successfully" });
       } catch (error) {
