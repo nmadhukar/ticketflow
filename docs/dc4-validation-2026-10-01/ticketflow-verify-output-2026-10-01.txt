@@ -1,0 +1,625 @@
+=== TicketFlow design-conformance gate ===
+Repository: /home/agent/workspace/nmadhukar/ticketflow
+PASS: Docker daemon available
+--- STEP 1: stack ---
+ Image tfverify_runtime-phase2_17763-app Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 568B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 30B
+#2 transferring dockerfile: 628B 0.0s done
+#2 DONE 0.2s
+
+#3 [internal] load metadata for docker.io/library/node:20-slim
+#3 DONE 0.2s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B 0.0s done
+#4 DONE 0.1s
+
+#5 [internal] load build context
+#5 ...
+
+#6 [1/9] FROM docker.io/library/node:20-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0
+#6 resolve docker.io/library/node:20-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 0.1s done
+#6 DONE 0.2s
+
+#5 [internal] load build context
+#5 transferring context: 2.84MB 4.9s
+#5 transferring context: 4.05MB 8.0s done
+#5 DONE 8.2s
+
+#7 [2/9] WORKDIR /app
+#7 CACHED
+
+#8 [3/9] RUN apt-get update && apt-get install -y --no-install-recommends     python3 make g++ curl     && rm -rf /var/lib/apt/lists/*
+#8 CACHED
+
+#9 [4/9] COPY package.json package-lock.json ./
+#9 CACHED
+
+#10 [5/9] RUN npm ci
+#10 CACHED
+
+#11 [6/9] RUN npm install pg @types/pg
+#11 CACHED
+
+#12 [7/9] COPY docker/db.ts /app/server/db.ts
+#12 CACHED
+
+#13 [8/9] COPY . .
+#13 DONE 33.7s
+
+#14 [9/9] COPY docker/db.ts /app/server/db.ts
+#14 DONE 1.9s
+
+#15 exporting to image
+#15 exporting layers
+#15 exporting layers 61.7s done
+#15 exporting manifest sha256:311be6f9dc3ae03a9d3d672b9e4ddfcb83472b686febf855be6ba1356c8eba5f 0.1s done
+#15 exporting config sha256:f461f70cbf6428ec372e6fb7e5b1a71a236e216f732088fb9ac40ef32d70c145 0.1s done
+#15 exporting attestation manifest sha256:b810b7c99863a4679b21a638c978329bbeedd62eb1aab6f8308b4ae39d6eb1a7 0.1s done
+#15 exporting manifest list sha256:8aef95f8f3fb758039b60462ea9ffd8eeda0d6994a34f122bdfefef670baa6a4
+#15 exporting manifest list sha256:8aef95f8f3fb758039b60462ea9ffd8eeda0d6994a34f122bdfefef670baa6a4 0.1s done
+#15 naming to docker.io/library/tfverify_runtime-phase2_17763-app:latest 0.0s done
+#15 unpacking to docker.io/library/tfverify_runtime-phase2_17763-app:latest
+#15 unpacking to docker.io/library/tfverify_runtime-phase2_17763-app:latest 48.9s done
+#15 DONE 111.1s
+
+#16 resolving provenance for metadata file
+#16 DONE 0.0s
+ Image tfverify_runtime-phase2_17763-app Built 
+ Network tfverify_runtime-phase2_17763_default Creating 
+ Network tfverify_runtime-phase2_17763_default Creating 
+ Volume tfverify_runtime-phase2_17763_pgdata Creating 
+ Volume tfverify_runtime-phase2_17763_pgdata Creating 
+ Volume tfverify_runtime-phase2_17763_pgdata Created 
+ Volume tfverify_runtime-phase2_17763_pgdata Created 
+ Network tfverify_runtime-phase2_17763_default Created 
+ Network tfverify_runtime-phase2_17763_default Created 
+ Container tfverify_runtime-phase2_17763-postgres-1 Creating 
+ Container tfverify_runtime-phase2_17763-postgres-1 Created 
+ Container tfverify_runtime-phase2_17763-postgres-1 Starting 
+ Container tfverify_runtime-phase2_17763-postgres-1 Started 
+PASS: Compose app built and PostgreSQL started
+PASS: PostgreSQL healthy
+ Container tfverify_runtime-phase2_17763-app-run-80b1d8f2c166 Creating 
+ Container tfverify_runtime-phase2_17763-app-run-80b1d8f2c166 Created 
+No config path provided, using default 'drizzle.config.ts'
+Reading config file '/app/drizzle.config.ts'
+Using 'pg' driver for database querying
+[⣷] Pulling schema from database...
+[2K[1G[✓] Pulling schema from database...
+[✓] Changes applied
+PASS: Database schema pushed
+ Container tfverify_runtime-phase2_17763-postgres-1 Running 
+ Container tfverify_runtime-phase2_17763-app-1 Creating 
+ Container tfverify_runtime-phase2_17763-app-1 Created 
+ Container tfverify_runtime-phase2_17763-postgres-1 Waiting 
+ Container tfverify_runtime-phase2_17763-postgres-1 Healthy 
+ Container tfverify_runtime-phase2_17763-app-1 Starting 
+ Container tfverify_runtime-phase2_17763-app-1 Started 
+PASS: Application container started
+PASS: Application HTTP health responds
+PASS: UI entry point responds
+Stack images: node:20-slim; mcr.microsoft.com/playwright:v1.55.0-noble
+NAME                                       IMAGE                               COMMAND                  SERVICE    CREATED              STATUS                        PORTS
+tfverify_runtime-phase2_17763-app-1        tfverify_runtime-phase2_17763-app   "docker-entrypoint.s…"   app        44 seconds ago       Up 12 seconds                 0.0.0.0:5000->5000/tcp, [::]:5000->5000/tcp
+tfverify_runtime-phase2_17763-postgres-1   postgres:16-alpine                  "docker-entrypoint.s…"   postgres   About a minute ago   Up About a minute (healthy)   0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp
+--- STEP 2: genuine ticket workflow ---
+Documented create without ticketNumber: HTTP 400 {"message":"Invalid task data","errors":[{"code":"invalid_type","expected":"string","received":"undefined","path":["ticketNumber"],"message":"Required"}]}
+resolvedAt not stamped
+FAIL: Create and walk all workflow stages without re-entry
+anonymous / invalid login / session / logout assertions passed
+PASS: Authentication and anonymous isolation runtime probes
+--- STEP 3: frozen install, lint, typecheck, unit/integration/e2e ---
+npm warn deprecated rimraf@2.4.5: Rimraf versions prior to v4 are no longer supported
+npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+npm warn deprecated passport-azure-ad@4.3.5: This package is deprecated and no longer supported. For more please visit https://github.com/AzureAD/passport-azure-ad?tab=readme-ov-file#node-js-validation-replacement-for-passportjs
+npm warn deprecated @esbuild-kit/core-utils@3.3.2: Merged into tsx: https://tsx.is
+npm warn deprecated @esbuild-kit/esm-loader@2.6.5: Merged into tsx: https://tsx.is
+npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported
+npm warn deprecated glob@6.0.4: Glob versions prior to v9 are no longer supported
+
+added 1104 packages in 37s
+npm notice
+npm notice New major version of npm available! 10.8.2 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+PASS: npm ci frozen install
+npm error Missing script: "lint"
+npm error
+npm error Did you mean this?
+npm error   npm link # Symlink a package folder
+npm error
+npm error To see a list of scripts, run:
+npm error   npm run
+npm error A complete log of this run can be found in: /root/.npm/_logs/2026-10-01T19_26_37_754Z-debug-0.log
+FAIL: lint
+
+> rest-express@1.0.0 check
+> tsc --noEmit
+
+client/src/__tests__/useAuth.test.tsx(7,16): error TS2304: Cannot find name 'jest'.
+client/src/__tests__/useAuth.test.tsx(23,1): error TS2593: Cannot find name 'describe'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha` and then add 'jest' or 'mocha' to the types field in your tsconfig.
+client/src/__tests__/useAuth.test.tsx(24,3): error TS2304: Cannot find name 'beforeEach'.
+client/src/__tests__/useAuth.test.tsx(25,5): error TS2304: Cannot find name 'jest'.
+client/src/__tests__/useAuth.test.tsx(28,3): error TS2593: Cannot find name 'it'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha` and then add 'jest' or 'mocha' to the types field in your tsconfig.
+client/src/__tests__/useAuth.test.tsx(37,22): error TS2503: Cannot find namespace 'jest'.
+client/src/__tests__/useAuth.test.tsx(47,5): error TS2304: Cannot find name 'expect'.
+client/src/__tests__/useAuth.test.tsx(48,5): error TS2304: Cannot find name 'expect'.
+client/src/__tests__/useAuth.test.tsx(52,7): error TS2304: Cannot find name 'expect'.
+client/src/__tests__/useAuth.test.tsx(55,5): error TS2304: Cannot find name 'expect'.
+client/src/__tests__/useAuth.test.tsx(56,5): error TS2304: Cannot find name 'expect'.
+client/src/__tests__/useAuth.test.tsx(59,3): error TS2593: Cannot find name 'it'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha` and then add 'jest' or 'mocha' to the types field in your tsconfig.
+client/src/__tests__/useAuth.test.tsx(60,22): error TS2503: Cannot find namespace 'jest'.
+client/src/__tests__/useAuth.test.tsx(71,7): error TS2304: Cannot find name 'expect'.
+client/src/__tests__/useAuth.test.tsx(74,5): error TS2304: Cannot find name 'expect'.
+client/src/__tests__/useAuth.test.tsx(75,5): error TS2304: Cannot find name 'expect'.
+client/src/__tests__/useAuth.test.tsx(78,3): error TS2593: Cannot find name 'it'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha` and then add 'jest' or 'mocha' to the types field in your tsconfig.
+client/src/__tests__/useAuth.test.tsx(79,22): error TS2503: Cannot find namespace 'jest'.
+client/src/__tests__/useAuth.test.tsx(86,7): error TS2304: Cannot find name 'expect'.
+client/src/__tests__/useAuth.test.tsx(89,5): error TS2304: Cannot find name 'expect'.
+client/src/__tests__/useAuth.test.tsx(90,5): error TS2304: Cannot find name 'expect'.
+client/src/components/__tests__/task-modal.test.tsx(5,10): error TS2614: Module '"../task-modal"' has no exported member 'TaskModal'. Did you mean to use 'import TaskModal from "../task-modal"' instead?
+client/src/components/__tests__/task-modal.test.tsx(6,20): error TS2307: Cannot find module 'vitest' or its corresponding type declarations.
+client/src/components/__tests__/task-modal.test.tsx(36,1): error TS2593: Cannot find name 'describe'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha` and then add 'jest' or 'mocha' to the types field in your tsconfig.
+client/src/components/__tests__/task-modal.test.tsx(43,3): error TS2304: Cannot find name 'beforeEach'.
+client/src/components/__tests__/task-modal.test.tsx(47,3): error TS2593: Cannot find name 'it'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha` and then add 'jest' or 'mocha' to the types field in your tsconfig.
+client/src/components/__tests__/task-modal.test.tsx(53,5): error TS2304: Cannot find name 'expect'.
+client/src/components/__tests__/task-modal.test.tsx(54,5): error TS2304: Cannot find name 'expect'.
+client/src/components/__tests__/task-modal.test.tsx(55,5): error TS2304: Cannot find name 'expect'.
+client/src/components/__tests__/task-modal.test.tsx(56,5): error TS2304: Cannot find name 'expect'.
+client/src/components/__tests__/task-modal.test.tsx(59,3): error TS2593: Cannot find name 'it'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha` and then add 'jest' or 'mocha' to the types field in your tsconfig.
+client/src/components/__tests__/task-modal.test.tsx(76,5): error TS2304: Cannot find name 'expect'.
+client/src/components/__tests__/task-modal.test.tsx(77,5): error TS2304: Cannot find name 'expect'.
+client/src/components/__tests__/task-modal.test.tsx(78,5): error TS2304: Cannot find name 'expect'.
+client/src/components/__tests__/task-modal.test.tsx(81,3): error TS2593: Cannot find name 'it'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha` and then add 'jest' or 'mocha' to the types field in your tsconfig.
+client/src/components/__tests__/task-modal.test.tsx(94,7): error TS2304: Cannot find name 'expect'.
+client/src/components/__tests__/task-modal.test.tsx(98,3): error TS2593: Cannot find name 'it'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha` and then add 'jest' or 'mocha' to the types field in your tsconfig.
+client/src/components/__tests__/task-modal.test.tsx(118,5): error TS2304: Cannot find name 'expect'.
+client/src/components/__tests__/task-modal.test.tsx(119,7): error TS2304: Cannot find name 'expect'.
+client/src/components/__tests__/task-modal.test.tsx(127,3): error TS2593: Cannot find name 'it'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha` and then add 'jest' or 'mocha' to the types field in your tsconfig.
+client/src/components/__tests__/task-modal.test.tsx(146,5): error TS2304: Cannot find name 'expect'.
+client/src/components/__tests__/task-modal.test.tsx(152,5): error TS2304: Cannot find name 'expect'.
+client/src/components/__tests__/task-modal.test.tsx(155,3): error TS2593: Cannot find name 'it'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha` and then add 'jest' or 'mocha' to the types field in your tsconfig.
+client/src/components/__tests__/task-modal.test.tsx(181,5): error TS2304: Cannot find name 'expect'.
+client/src/components/__tests__/task-modal.test.tsx(187,3): error TS2593: Cannot find name 'it'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha` and then add 'jest' or 'mocha' to the types field in your tsconfig.
+client/src/components/__tests__/task-modal.test.tsx(198,5): error TS2304: Cannot find name 'expect'.
+client/src/components/__tests__/task-modal.test.tsx(201,3): error TS2593: Cannot find name 'it'. Do you need to install type definitions for a test runner? Try `npm i --save-dev @types/jest` or `npm i --save-dev @types/mocha` and then add 'jest' or 'mocha' to the types field in your tsconfig.
+client/src/components/__tests__/task-modal.test.tsx(226,5): error TS2304: Cannot find name 'expect'.
+client/src/components/protected-route.tsx(18,13): error TS2339: Property 'role' does not exist on type '{}'.
+client/src/components/protected-route.tsx(24,29): error TS2339: Property 'role' does not exist on type '{}'.
+client/src/components/protected-route.tsx(24,65): error TS2339: Property 'role' does not exist on type '{}'.
+client/src/components/task-modal.tsx(528,49): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/components/task-modal.tsx(528,75): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/components/task-modal.tsx(535,55): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/components/task-modal.tsx(535,84): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/components/task-modal.tsx(794,41): error TS2339: Property 'map' does not exist on type '{}'.
+client/src/components/task-modal.tsx(823,41): error TS2339: Property 'map' does not exist on type '{}'.
+client/src/components/task-modal.tsx(962,40): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/components/task-modal.tsx(963,27): error TS18046: 'taskComments' is of type 'unknown'.
+client/src/components/task-modal.tsx(1033,43): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/components/task-modal.tsx(1034,27): error TS18046: 'taskAttachments' is of type 'unknown'.
+client/src/components/ticket-detail.tsx(187,7): error TS2322: Type 'unknown' is not assignable to type 'ReactNode'.
+client/src/components/ticket-detail.tsx(192,60): error TS2339: Property 'ticketNumber' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(193,57): error TS2339: Property 'status' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(194,27): error TS2339: Property 'status' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(196,59): error TS2339: Property 'priority' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(197,27): error TS2339: Property 'priority' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(200,61): error TS2339: Property 'title' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(201,60): error TS2339: Property 'description' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(214,50): error TS2339: Property 'createdByName' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(218,66): error TS2339: Property 'createdAt' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(222,50): error TS2339: Property 'assignedToName' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(222,75): error TS2339: Property 'teamName' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(226,48): error TS2339: Property 'category' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(229,19): error TS2339: Property 'tags' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(229,34): error TS2339: Property 'tags' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(232,23): error TS2339: Property 'tags' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(243,7): error TS2322: Type 'unknown' is not assignable to type 'ReactNode'.
+client/src/components/ticket-detail.tsx(243,34): error TS2339: Property 'wasApplied' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(255,84): error TS2339: Property 'confidenceScore' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(256,52): error TS2339: Property 'confidenceScore' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(256,90): error TS2339: Property 'confidenceScore' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(259,45): error TS2339: Property 'confidenceScore' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(268,83): error TS2339: Property 'confidenceScore' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(274,64): error TS2339: Property 'aiResponse' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(276,27): error TS2339: Property 'suggestedArticles' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(276,59): error TS2339: Property 'suggestedArticles' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(280,33): error TS2339: Property 'suggestedArticles' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(300,42): error TS2339: Property 'id' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(322,38): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(323,24): error TS2339: Property 'map' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(373,27): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/components/ticket-detail.tsx(383,24): error TS2339: Property 'map' does not exist on type '{}'.
+client/src/components/ticket-list.tsx(128,36): error TS2339: Property 'filter' does not exist on type '{}'.
+client/src/hooks/useWebSocket.tsx(38,19): error TS2339: Property 'id' does not exist on type '{}'.
+client/src/hooks/useWebSocket.tsx(41,26): error TS2339: Property 'id' does not exist on type '{}'.
+client/src/pages/admin.tsx(94,13): error TS2339: Property 'role' does not exist on type '{}'.
+client/src/pages/admin.tsx(126,5): error TS2769: No overload matches this call.
+  Overload 1 of 3, '(options: DefinedInitialDataOptions<unknown, Error, unknown, string[]>, queryClient?: QueryClient | undefined): DefinedUseQueryResult<unknown, Error>', gave the following error.
+    Object literal may only specify known properties, and 'onSuccess' does not exist in type 'DefinedInitialDataOptions<unknown, Error, unknown, string[]>'.
+  Overload 2 of 3, '(options: UndefinedInitialDataOptions<unknown, Error, unknown, string[]>, queryClient?: QueryClient | undefined): UseQueryResult<unknown, Error>', gave the following error.
+    Object literal may only specify known properties, and 'onSuccess' does not exist in type 'UndefinedInitialDataOptions<unknown, Error, unknown, string[]>'.
+  Overload 3 of 3, '(options: UseQueryOptions<unknown, Error, unknown, string[]>, queryClient?: QueryClient | undefined): UseQueryResult<unknown, Error>', gave the following error.
+    Object literal may only specify known properties, and 'onSuccess' does not exist in type 'UseQueryOptions<unknown, Error, unknown, string[]>'.
+client/src/pages/admin.tsx(126,17): error TS7006: Parameter 'data' implicitly has an 'any' type.
+client/src/pages/admin.tsx(141,5): error TS2769: No overload matches this call.
+  Overload 1 of 3, '(options: DefinedInitialDataOptions<unknown, Error, unknown, string[]>, queryClient?: QueryClient | undefined): DefinedUseQueryResult<unknown, Error>', gave the following error.
+    Object literal may only specify known properties, and 'onSuccess' does not exist in type 'DefinedInitialDataOptions<unknown, Error, unknown, string[]>'.
+  Overload 2 of 3, '(options: UndefinedInitialDataOptions<unknown, Error, unknown, string[]>, queryClient?: QueryClient | undefined): UseQueryResult<unknown, Error>', gave the following error.
+    Object literal may only specify known properties, and 'onSuccess' does not exist in type 'UndefinedInitialDataOptions<unknown, Error, unknown, string[]>'.
+  Overload 3 of 3, '(options: UseQueryOptions<unknown, Error, unknown, string[]>, queryClient?: QueryClient | undefined): UseQueryResult<unknown, Error>', gave the following error.
+    Object literal may only specify known properties, and 'onSuccess' does not exist in type 'UseQueryOptions<unknown, Error, unknown, string[]>'.
+client/src/pages/admin.tsx(141,17): error TS7006: Parameter 'data' implicitly has an 'any' type.
+client/src/pages/admin.tsx(155,5): error TS2769: No overload matches this call.
+  Overload 1 of 3, '(options: DefinedInitialDataOptions<unknown, Error, unknown, string[]>, queryClient?: QueryClient | undefined): DefinedUseQueryResult<unknown, Error>', gave the following error.
+    Object literal may only specify known properties, and 'onSuccess' does not exist in type 'DefinedInitialDataOptions<unknown, Error, unknown, string[]>'.
+  Overload 2 of 3, '(options: UndefinedInitialDataOptions<unknown, Error, unknown, string[]>, queryClient?: QueryClient | undefined): UseQueryResult<unknown, Error>', gave the following error.
+    Object literal may only specify known properties, and 'onSuccess' does not exist in type 'UndefinedInitialDataOptions<unknown, Error, unknown, string[]>'.
+  Overload 3 of 3, '(options: UseQueryOptions<unknown, Error, unknown, string[]>, queryClient?: QueryClient | undefined): UseQueryResult<unknown, Error>', gave the following error.
+    Object literal may only specify known properties, and 'onSuccess' does not exist in type 'UseQueryOptions<unknown, Error, unknown, string[]>'.
+client/src/pages/admin.tsx(155,17): error TS7006: Parameter 'data' implicitly has an 'any' type.
+client/src/pages/admin.tsx(282,50): error TS2339: Property 'tempPassword' does not exist on type 'Response'.
+client/src/pages/admin.tsx(438,26): error TS2339: Property 'plainKey' does not exist on type 'Response'.
+client/src/pages/admin.tsx(527,63): error TS2339: Property 'totalUsers' does not exist on type '{}'.
+client/src/pages/admin.tsx(529,29): error TS2339: Property 'activeUsers' does not exist on type '{}'.
+client/src/pages/admin.tsx(541,63): error TS2339: Property 'totalTeams' does not exist on type '{}'.
+client/src/pages/admin.tsx(555,63): error TS2339: Property 'openTickets' does not exist on type '{}'.
+client/src/pages/admin.tsx(557,29): error TS2339: Property 'urgentTickets' does not exist on type '{}'.
+client/src/pages/admin.tsx(569,63): error TS2339: Property 'avgResolutionTime' does not exist on type '{}'.
+client/src/pages/admin.tsx(815,27): error TS2339: Property 'filter' does not exist on type '{}'.
+client/src/pages/admin.tsx(843,34): error TS2322: Type '"success" | "warning"' is not assignable to type '"default" | "destructive" | "outline" | "secondary" | null | undefined'.
+  Type '"success"' is not assignable to type '"default" | "destructive" | "outline" | "secondary" | null | undefined'.
+client/src/pages/admin.tsx(876,39): error TS2339: Property 'map' does not exist on type '{}'.
+client/src/pages/admin.tsx(903,31): error TS2322: Type '"success"' is not assignable to type '"link" | "default" | "destructive" | "outline" | "secondary" | "ghost" | null | undefined'.
+client/src/pages/admin.tsx(965,27): error TS2339: Property 'map' does not exist on type '{}'.
+client/src/pages/admin.tsx(1075,37): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/pages/admin.tsx(1077,30): error TS2339: Property 'map' does not exist on type '{}'.
+client/src/pages/admin.tsx(1183,43): error TS2339: Property 'ticketPrefix' does not exist on type '{}'.
+client/src/pages/admin.tsx(1186,21): error TS2552: Cannot find name 'setCompanySettings'. Did you mean 'companySettings'?
+client/src/pages/admin.tsx(1186,42): error TS2698: Spread types may only be created from object types.
+client/src/pages/admin.tsx(1218,19): error TS2698: Spread types may only be created from object types.
+client/src/pages/admin.tsx(1219,50): error TS2339: Property 'ticketPrefix' does not exist on type '{}'.
+client/src/pages/admin.tsx(1249,109): error TS2339: Property 'companyName' does not exist on type '{}'.
+client/src/pages/admin.tsx(1259,39): error TS2339: Property 'logoUrl' does not exist on type '{}'.
+client/src/pages/admin.tsx(1262,48): error TS2339: Property 'logoUrl' does not exist on type '{}'.
+client/src/pages/admin.tsx(1514,36): error TS2339: Property 'success' does not exist on type 'Response'.
+client/src/pages/admin.tsx(1517,49): error TS2339: Property 'message' does not exist on type 'Response'.
+client/src/pages/admin.tsx(1522,49): error TS2339: Property 'message' does not exist on type 'Response'.
+client/src/pages/admin.tsx(1801,58): error TS2339: Property 'find' does not exist on type '{}'.
+client/src/pages/admin.tsx(1983,35): error TS2339: Property 'map' does not exist on type '{}'.
+client/src/pages/ai-analytics.tsx(137,34): error TS2339: Property 'awsCredentials' does not exist on type '{}'.
+client/src/pages/ai-analytics.tsx(175,26): error TS2339: Property 'bedrockAvailable' does not exist on type '{}'.
+client/src/pages/ai-analytics.tsx(190,26): error TS2339: Property 'features' does not exist on type '{}'.
+client/src/pages/ai-analytics.tsx(205,26): error TS2339: Property 'features' does not exist on type '{}'.
+client/src/pages/ai-analytics.tsx(220,26): error TS2339: Property 'features' does not exist on type '{}'.
+client/src/pages/ai-analytics.tsx(294,75): error TS2339: Property 'features' does not exist on type '{}'.
+client/src/pages/ai-analytics.tsx(302,109): error TS2339: Property 'features' does not exist on type '{}'.
+client/src/pages/ai-analytics.tsx(417,80): error TS2339: Property 'features' does not exist on type '{}'.
+client/src/pages/ai-settings.tsx(310,19): error TS2345: Argument of type '{}' is not assignable to parameter of type 'SetStateAction<AISettings>'.
+client/src/pages/dashboard.tsx(118,38): error TS2339: Property 'filter' does not exist on type '{}'.
+client/src/pages/dashboard.tsx(190,31): error TS2339: Property 'total' does not exist on type '{}'.
+client/src/pages/dashboard.tsx(205,31): error TS2339: Property 'inProgress' does not exist on type '{}'.
+client/src/pages/dashboard.tsx(220,32): error TS2339: Property 'resolved' does not exist on type '{}'.
+client/src/pages/dashboard.tsx(220,57): error TS2339: Property 'closed' does not exist on type '{}'.
+client/src/pages/dashboard.tsx(235,31): error TS2339: Property 'highPriority' does not exist on type '{}'.
+client/src/pages/dashboard.tsx(272,50): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/pages/dashboard.tsx(273,33): error TS2339: Property 'slice' does not exist on type '{}'.
+client/src/pages/dashboard.tsx(302,44): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/pages/dashboard.tsx(303,30): error TS2339: Property 'slice' does not exist on type '{}'.
+client/src/pages/dashboard.tsx(309,53): error TS2339: Property 'find' does not exist on type '{}'.
+client/src/pages/dashboard.tsx(359,11): error TS2322: Type '{ task: any; isOpen: boolean; onClose: () => void; onUpdate: () => void; }' is not assignable to type 'IntrinsicAttributes & TaskModalProps'.
+  Property 'onUpdate' does not exist on type 'IntrinsicAttributes & TaskModalProps'.
+client/src/pages/departments.tsx(210,28): error TS18046: 'users' is of type 'unknown'.
+client/src/pages/departments.tsx(236,10): error TS18046: 'departments' is of type 'unknown'.
+client/src/pages/departments.tsx(237,27): error TS18046: 'users' is of type 'unknown'.
+client/src/pages/departments.tsx(338,33): error TS2339: Property 'filter' does not exist on type '{}'.
+client/src/pages/my-tasks.tsx(135,32): error TS2339: Property 'filter' does not exist on type '{}'.
+client/src/pages/my-tasks.tsx(266,61): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/pages/notifications.tsx(124,5): error TS2769: No overload matches this call.
+  Overload 1 of 3, '(options: DefinedInitialDataOptions<Notification[], Error, Notification[], string[]>, queryClient?: QueryClient | undefined): DefinedUseQueryResult<...>', gave the following error.
+    Object literal may only specify known properties, and 'onSuccess' does not exist in type 'DefinedInitialDataOptions<Notification[], Error, Notification[], string[]>'.
+  Overload 2 of 3, '(options: UndefinedInitialDataOptions<Notification[], Error, Notification[], string[]>, queryClient?: QueryClient | undefined): UseQueryResult<...>', gave the following error.
+    Object literal may only specify known properties, and 'onSuccess' does not exist in type 'UndefinedInitialDataOptions<Notification[], Error, Notification[], string[]>'.
+  Overload 3 of 3, '(options: UseQueryOptions<Notification[], Error, Notification[], string[]>, queryClient?: QueryClient | undefined): UseQueryResult<...>', gave the following error.
+    Object literal may only specify known properties, and 'onSuccess' does not exist in type 'UseQueryOptions<Notification[], Error, Notification[], string[]>'.
+client/src/pages/settings.tsx(70,24): error TS2339: Property 'profileImageUrl' does not exist on type '{}'.
+client/src/pages/settings.tsx(72,31): error TS2339: Property 'profileImageUrl' does not exist on type '{}'.
+client/src/pages/settings.tsx(73,31): error TS2339: Property 'firstName' does not exist on type '{}'.
+client/src/pages/settings.tsx(83,28): error TS2339: Property 'firstName' does not exist on type '{}'.
+client/src/pages/settings.tsx(83,46): error TS2339: Property 'lastName' does not exist on type '{}'.
+client/src/pages/settings.tsx(85,63): error TS2339: Property 'email' does not exist on type '{}'.
+client/src/pages/settings.tsx(87,28): error TS2339: Property 'role' does not exist on type '{}'.
+client/src/pages/settings.tsx(98,28): error TS2339: Property 'department' does not exist on type '{}'.
+client/src/pages/settings.tsx(104,28): error TS2339: Property 'phone' does not exist on type '{}'.
+client/src/pages/settings.tsx(320,60): error TS2339: Property 'password' does not exist on type '{}'.
+client/src/pages/settings.tsx(350,30): error TS2339: Property 'createdAt' does not exist on type '{}'.
+client/src/pages/settings.tsx(351,59): error TS2339: Property 'createdAt' does not exist on type '{}'.
+client/src/pages/settings.tsx(352,52): error TS2339: Property 'email' does not exist on type '{}'.
+client/src/pages/tasks.tsx(176,32): error TS2339: Property 'filter' does not exist on type '{}'.
+client/src/pages/tasks.tsx(296,61): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/pages/team-detail.tsx(186,36): error TS2339: Property 'filter' does not exist on type '{}'.
+client/src/pages/team-detail.tsx(187,15): error TS2339: Property 'some' does not exist on type '{}'.
+client/src/pages/team-detail.tsx(193,24): error TS2339: Property 'name' does not exist on type '{}'.
+client/src/pages/team-detail.tsx(194,27): error TS2339: Property 'description' does not exist on type '{}'.
+client/src/pages/team-detail.tsx(215,50): error TS2339: Property 'name' does not exist on type '{}'.
+client/src/pages/team-detail.tsx(282,64): error TS2339: Property 'name' does not exist on type '{}'.
+client/src/pages/team-detail.tsx(284,34): error TS2339: Property 'description' does not exist on type '{}'.
+client/src/pages/team-detail.tsx(290,47): error TS2339: Property 'createdAt' does not exist on type '{}'.
+client/src/pages/team-detail.tsx(299,54): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/pages/team-detail.tsx(307,42): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/pages/team-detail.tsx(309,32): error TS2339: Property 'map' does not exist on type '{}'.
+client/src/pages/teams-integration.tsx(48,59): error TS2345: Argument of type '{ method: string; body: string; }' is not assignable to parameter of type 'string'.
+client/src/pages/teams-integration.tsx(71,59): error TS2345: Argument of type '{ method: string; }' is not assignable to parameter of type 'string'.
+client/src/pages/teams-integration.tsx(86,55): error TS2345: Argument of type '{ method: string; }' is not assignable to parameter of type 'string'.
+client/src/pages/teams-integration.tsx(143,18): error TS2339: Property 'enabled' does not exist on type '{}'.
+client/src/pages/teams-integration.tsx(182,50): error TS2339: Property 'webhookUrl' does not exist on type '{}'.
+client/src/pages/teams-integration.tsx(207,37): error TS2339: Property 'notificationTypes' does not exist on type '{}'.
+client/src/pages/teams-integration.tsx(241,28): error TS2339: Property 'enabled' does not exist on type '{}'.
+client/src/pages/teams.tsx(182,36): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/pages/teams.tsx(184,26): error TS2339: Property 'map' does not exist on type '{}'.
+client/src/pages/teams.tsx(246,32): error TS2339: Property 'length' does not exist on type '{}'.
+client/src/pages/teams.tsx(248,24): error TS2339: Property 'map' does not exist on type '{}'.
+client/src/pages/user-guides.tsx(216,42): error TS2769: No overload matches this call.
+  Overload 1 of 4, '(value: string | number | Date): Date', gave the following error.
+    Argument of type 'Date | null' is not assignable to parameter of type 'string | number | Date'.
+      Type 'null' is not assignable to type 'string | number | Date'.
+  Overload 2 of 4, '(value: string | number): Date', gave the following error.
+    Argument of type 'Date | null' is not assignable to parameter of type 'string | number'.
+      Type 'null' is not assignable to type 'string | number'.
+client/src/pages/user-guides.tsx(310,28): error TS18046: 'categoryGuides' is of type 'unknown'.
+server/__tests__/utils/test-reporter.ts(21,55): error TS2339: Property 'suite' does not exist on type 'TestResult'.
+server/__tests__/utils/test-runner.ts(80,29): error TS7006: Parameter 'match' implicitly has an 'any' type.
+server/__tests__/utils/test-runner.ts(93,29): error TS7006: Parameter 'match' implicitly has an 'any' type.
+server/__tests__/utils/test-runner.ts(107,29): error TS7006: Parameter 'match' implicitly has an 'any' type.
+server/aiAutoResponse.ts(6,10): error TS2305: Module '"./knowledgeBaseLearning"' has no exported member 'getKnowledgeLearningService'.
+server/aiAutoResponse.ts(146,36): error TS7006: Parameter 'r' implicitly has an 'any' type.
+server/aiAutoResponse.ts(201,23): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ urgent: number; high: number; medium: number; low: number; }'.
+  No index signature with a parameter of type 'string' was found on type '{ urgent: number; high: number; medium: number; low: number; }'.
+server/aiAutoResponse.ts(230,9): error TS2561: Object literal may only specify known properties, but 'response' does not exist in type '{ ticketId: number; confidenceScore: string; aiResponse: string; wasApplied?: boolean | null | undefined; wasHelpful?: boolean | null | undefined; respondedBy?: string | null | undefined; }'. Did you mean to write 'aiResponse'?
+server/aiAutoResponse.ts(249,42): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { title: string | SQL<unknown> | Placeholder<string, any>; content: string | SQL<unknown> | Placeholder<string, any>; summary?: string | SQL<unknown> | Placeholder<...> | null | undefined; ... 9 more ...; effectivenessScore?: string | ... 3 more ... | undefined; }): PgInsertBase<...>', gave the following error.
+    Object literal may only specify known properties, but 'sourceTicketId' does not exist in type '{ title: string | SQL<unknown> | Placeholder<string, any>; content: string | SQL<unknown> | Placeholder<string, any>; summary?: string | SQL<unknown> | Placeholder<...> | null | undefined; ... 9 more ...; effectivenessScore?: string | ... 3 more ... | undefined; }'. Did you mean to write 'sourceTicketIds'?
+  Overload 2 of 2, '(values: { title: string | SQL<unknown> | Placeholder<string, any>; content: string | SQL<unknown> | Placeholder<string, any>; summary?: string | SQL<unknown> | Placeholder<...> | null | undefined; ... 9 more ...; effectivenessScore?: string | ... 3 more ... | undefined; }[]): PgInsertBase<...>', gave the following error.
+    Object literal may only specify known properties, and 'title' does not exist in type '{ title: string | SQL<unknown> | Placeholder<string, any>; content: string | SQL<unknown> | Placeholder<string, any>; summary?: string | SQL<unknown> | Placeholder<...> | null | undefined; ... 9 more ...; effectivenessScore?: string | ... 3 more ... | undefined; }[]'.
+server/knowledgeBase.ts(22,27): error TS2339: Property 'key' does not exist on type '{}'.
+server/knowledgeBase.ts(22,50): error TS2339: Property 'secret' does not exist on type '{}'.
+server/knowledgeBase.ts(22,76): error TS2339: Property 'region' does not exist on type '{}'.
+server/knowledgeBase.ts(28,31): error TS2339: Property 'region' does not exist on type '{}'.
+server/knowledgeBase.ts(30,38): error TS2339: Property 'key' does not exist on type '{}'.
+server/knowledgeBase.ts(31,42): error TS2339: Property 'secret' does not exist on type '{}'.
+server/knowledgeBase.ts(161,16): error TS2802: Type 'Set<string>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+server/knowledgeBaseLearning.ts(295,11): error TS18046: 'tickets' is of type 'unknown'.
+server/knowledgeBaseLearning.ts(297,32): error TS18046: 'tickets' is of type 'unknown'.
+server/knowledgeBaseLearning.ts(299,53): error TS2345: Argument of type 'unknown' is not assignable to parameter of type '{ id: number; title: string; description: string; category: string; priority: string; resolution: string; resolutionTime: number; comments: { content: string; userId: string; createdAt: Date; }[]; }[]'.
+server/knowledgeBaseLearning.ts(305,36): error TS18046: 'tickets' is of type 'unknown'.
+server/knowledgeBaseLearning.ts(306,21): error TS7006: Parameter 't' implicitly has an 'any' type.
+server/knowledgeBaseLearning.ts(308,18): error TS7006: Parameter 't' implicitly has an 'any' type.
+server/knowledgeBaseLearning.ts(320,17): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(article: { title: string; content: string; summary?: string | null | undefined; tags?: string[] | null | undefined; category?: string | null | undefined; createdBy?: string | null | undefined; isPublished?: boolean | ... 1 more ... | undefined; sourceTicketIds?: number[] | ... 1 more ... | undefined; effectivenessScore?: string | ... 1 more ... | undefined; }): Promise<...>', gave the following error.
+    Object literal may only specify known properties, and 'createdAt' does not exist in type '{ title: string; content: string; summary?: string | null | undefined; tags?: string[] | null | undefined; category?: string | null | undefined; createdBy?: string | null | undefined; isPublished?: boolean | ... 1 more ... | undefined; sourceTicketIds?: number[] | ... 1 more ... | undefined; effectivenessScore?: str...'.
+  Overload 2 of 2, '(article: { title: string; content: string; summary?: string | null | undefined; tags?: string[] | null | undefined; category?: string | null | undefined; createdBy?: string | null | undefined; isPublished?: boolean | ... 1 more ... | undefined; sourceTicketIds?: number[] | ... 1 more ... | undefined; effectivenessScore?: string | ... 1 more ... | undefined; }): Promise<...>', gave the following error.
+    Object literal may only specify known properties, and 'createdAt' does not exist in type '{ title: string; content: string; summary?: string | null | undefined; tags?: string[] | null | undefined; category?: string | null | undefined; createdBy?: string | null | undefined; isPublished?: boolean | ... 1 more ... | undefined; sourceTicketIds?: number[] | ... 1 more ... | undefined; effectivenessScore?: str...'.
+server/knowledgeBaseLearning.ts(546,11): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(id: number, article: Partial<{ title: string; content: string; summary?: string | null | undefined; tags?: string[] | null | undefined; category?: string | null | undefined; createdBy?: string | null | undefined; isPublished?: boolean | ... 1 more ... | undefined; sourceTicketIds?: number[] | ... 1 more ... | undefined; effectivenessScore?: string | ... 1 more ... | undefined; }>): Promise<...>', gave the following error.
+    Object literal may only specify known properties, and 'updatedAt' does not exist in type 'Partial<{ title: string; content: string; summary?: string | null | undefined; tags?: string[] | null | undefined; category?: string | null | undefined; createdBy?: string | null | undefined; isPublished?: boolean | ... 1 more ... | undefined; sourceTicketIds?: number[] | ... 1 more ... | undefined; effectivenessSco...'.
+  Overload 2 of 2, '(id: number, article: Partial<{ title: string; content: string; summary?: string | null | undefined; tags?: string[] | null | undefined; category?: string | null | undefined; createdBy?: string | null | undefined; isPublished?: boolean | ... 1 more ... | undefined; sourceTicketIds?: number[] | ... 1 more ... | undefined; effectivenessScore?: string | ... 1 more ... | undefined; }>): Promise<...>', gave the following error.
+    Object literal may only specify known properties, and 'updatedAt' does not exist in type 'Partial<{ title: string; content: string; summary?: string | null | undefined; tags?: string[] | null | undefined; category?: string | null | undefined; createdBy?: string | null | undefined; isPublished?: boolean | ... 1 more ... | undefined; sourceTicketIds?: number[] | ... 1 more ... | undefined; effectivenessSco...'.
+server/microsoftAuth.ts(3,56): error TS7016: Could not find a declaration file for module 'passport-azure-ad'. '/home/agent/workspace/nmadhukar/ticketflow/node_modules/passport-azure-ad/lib/index.js' implicitly has an 'any' type.
+  Try `npm i --save-dev @types/passport-azure-ad` if it exists or add a new declaration (.d.ts) file containing `declare module 'passport-azure-ad';`
+server/microsoftAuth.ts(103,61): error TS2339: Property 'name' does not exist on type 'MicrosoftProfile'.
+server/microsoftAuth.ts(104,61): error TS2339: Property 'name' does not exist on type 'MicrosoftProfile'.
+server/replitAuth.ts(84,20): error TS2345: Argument of type '{}' is not assignable to parameter of type 'false | User | null | undefined'.
+server/routes.ts(253,25): error TS2551: Property 'createTaskComment' does not exist on type 'DatabaseStorage'. Did you mean 'getTaskComments'?
+server/routes.ts(987,11): error TS2353: Object literal may only specify known properties, and 'keyHash' does not exist in type '{ name: string; userId: string; isActive?: boolean | null | undefined; permissions?: string[] | null | undefined; expiresAt?: string | null | undefined; }'.
+server/routes.ts(1179,20): error TS18046: 'fetchError' is of type 'unknown'.
+server/routes.ts(1918,34): error TS2339: Property 'bedrockModelId' does not exist on type '{ id: number; companyName: string; ticketPrefix: string; logoUrl: string | null; updatedAt: Date | null; primaryColor: string | null; updatedBy: string | null; }'.
+server/routes.ts(1919,41): error TS2339: Property 'bedrockModelId' does not exist on type '{ id: number; companyName: string; ticketPrefix: string; logoUrl: string | null; updatedAt: Date | null; primaryColor: string | null; updatedBy: string | null; }'.
+server/routes.ts(2612,11): error TS2322: Type 'string | null' is not assignable to type 'string | undefined'.
+  Type 'null' is not assignable to type 'string | undefined'.
+server/routes.ts(2769,11): error TS2322: Type 'string | null' is not assignable to type 'string | undefined'.
+  Type 'null' is not assignable to type 'string | undefined'.
+server/routes.ts(2917,12): error TS2304: Cannot find name 'Task'.
+server/routes.ts(3378,63): error TS2345: Argument of type 'null' is not assignable to parameter of type 'string | undefined'.
+server/routes.ts(3509,23): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
+  Type 'null' is not assignable to type 'string'.
+server/routes.ts(3723,9): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(article: { title: string; content: string; summary?: string | null | undefined; tags?: string[] | null | undefined; category?: string | null | undefined; createdBy?: string | null | undefined; isPublished?: boolean | ... 1 more ... | undefined; sourceTicketIds?: number[] | ... 1 more ... | undefined; effectivenessScore?: string | ... 1 more ... | undefined; }): Promise<...>', gave the following error.
+    Object literal may only specify known properties, and 'source' does not exist in type '{ title: string; content: string; summary?: string | null | undefined; tags?: string[] | null | undefined; category?: string | null | undefined; createdBy?: string | null | undefined; isPublished?: boolean | ... 1 more ... | undefined; sourceTicketIds?: number[] | ... 1 more ... | undefined; effectivenessScore?: str...'.
+  Overload 2 of 2, '(article: { title: string; content: string; summary?: string | null | undefined; tags?: string[] | null | undefined; category?: string | null | undefined; createdBy?: string | null | undefined; isPublished?: boolean | ... 1 more ... | undefined; sourceTicketIds?: number[] | ... 1 more ... | undefined; effectivenessScore?: string | ... 1 more ... | undefined; }): Promise<...>', gave the following error.
+    Object literal may only specify known properties, and 'source' does not exist in type '{ title: string; content: string; summary?: string | null | undefined; tags?: string[] | null | undefined; category?: string | null | undefined; createdBy?: string | null | undefined; isPublished?: boolean | ... 1 more ... | undefined; sourceTicketIds?: number[] | ... 1 more ... | undefined; effectivenessScore?: str...'.
+server/security/index.ts(277,3): error TS2304: Cannot find name 'generateTokens'.
+server/security/index.ts(278,3): error TS2304: Cannot find name 'verifyToken'.
+server/security/index.ts(279,3): error TS2304: Cannot find name 'refreshAccessToken'.
+server/security/index.ts(286,3): error TS2552: Cannot find name 'hasPermission'. Did you mean 'Permissions'?
+server/security/jwt.ts(16,18): error TS2430: Interface 'AuthenticatedRequest' incorrectly extends interface 'Request<ParamsDictionary, any, any, ParsedQs, Record<string, any>>'.
+  Types of property 'user' are incompatible.
+    Type 'JWTPayload | undefined' is not assignable to type 'User | undefined'.
+      Type 'JWTPayload' is missing the following properties from type '{ id: string; role: string; email: string | null; password: string | null; isActive: boolean | null; createdAt: Date | null; profileImageUrl: string | null; firstName: string | null; ... 6 more ...; updatedAt: Date | null; }': id, password, isActive, createdAt, and 9 more.
+server/security/jwt.ts(22,27): error TS2769: No overload matches this call.
+  Overload 1 of 5, '(payload: string | object | Buffer, secretOrPrivateKey: null, options?: (SignOptions & { algorithm: "none"; }) | undefined): string', gave the following error.
+    Argument of type 'string' is not assignable to parameter of type 'null'.
+  Overload 2 of 5, '(payload: string | object | Buffer, secretOrPrivateKey: Secret | PrivateKeyInput | JsonWebKeyInput, options?: SignOptions | undefined): string', gave the following error.
+    Type 'string' is not assignable to type 'number | StringValue | undefined'.
+  Overload 3 of 5, '(payload: string | object | Buffer, secretOrPrivateKey: Secret | PrivateKeyInput | JsonWebKeyInput, callback: SignCallback): void', gave the following error.
+    Object literal may only specify known properties, and 'expiresIn' does not exist in type 'SignCallback'.
+server/security/jwt.ts(28,28): error TS2769: No overload matches this call.
+  Overload 1 of 5, '(payload: string | object | Buffer, secretOrPrivateKey: null, options?: (SignOptions & { algorithm: "none"; }) | undefined): string', gave the following error.
+    Argument of type 'string' is not assignable to parameter of type 'null'.
+  Overload 2 of 5, '(payload: string | object | Buffer, secretOrPrivateKey: Secret | PrivateKeyInput | JsonWebKeyInput, options?: SignOptions | undefined): string', gave the following error.
+    Type 'string' is not assignable to type 'number | StringValue | undefined'.
+  Overload 3 of 5, '(payload: string | object | Buffer, secretOrPrivateKey: Secret | PrivateKeyInput | JsonWebKeyInput, callback: SignCallback): void', gave the following error.
+    Object literal may only specify known properties, and 'expiresIn' does not exist in type 'SignCallback'.
+server/security/middleware.ts(9,14): error TS2323: Cannot redeclare exported variable 'enhancedAuth'.
+server/security/middleware.ts(14,5): error TS2322: Type '{ userId: any; email: any; role: any; }' is not assignable to type 'JWTPayload & User'.
+  Type '{ userId: any; email: any; role: any; }' is missing the following properties from type '{ id: string; role: string; email: string | null; password: string | null; isActive: boolean | null; createdAt: Date | null; profileImageUrl: string | null; firstName: string | null; ... 6 more ...; updatedAt: Date | null; }': id, password, isActive, createdAt, and 9 more.
+server/security/middleware.ts(27,14): error TS2323: Cannot redeclare exported variable 'ticketAccessControl'.
+server/security/middleware.ts(77,11): error TS2367: This comparison appears to be unintentional because the types '"customer" | "agent"' and '"admin"' have no overlap.
+server/security/middleware.ts(94,14): error TS2323: Cannot redeclare exported variable 'knowledgeAccessControl'.
+server/security/middleware.ts(130,14): error TS2323: Cannot redeclare exported variable 'aiApiAccessControl'.
+server/security/middleware.ts(141,14): error TS2323: Cannot redeclare exported variable 'adminOnly'.
+server/security/middleware.ts(155,14): error TS2323: Cannot redeclare exported variable 'agentOrAdmin'.
+server/security/middleware.ts(169,14): error TS2323: Cannot redeclare exported variable 'teamAccessControl'.
+server/security/middleware.ts(185,14): error TS2323: Cannot redeclare exported variable 'fileUploadAccessControl'.
+server/security/middleware.ts(199,9): error TS2339: Property 'maxFileSize' does not exist on type 'AuthenticatedRequest'.
+server/security/middleware.ts(205,14): error TS2323: Cannot redeclare exported variable 'searchAccessControl'.
+server/security/middleware.ts(209,9): error TS2339: Property 'enhancedSearch' does not exist on type 'AuthenticatedRequest'.
+server/security/middleware.ts(240,14): error TS2323: Cannot redeclare exported variable 'securityHeaders'.
+server/security/middleware.ts(260,14): error TS2323: Cannot redeclare exported variable 'securityAuditLog'.
+server/security/middleware.ts(305,3): error TS2323: Cannot redeclare exported variable 'enhancedAuth'.
+server/security/middleware.ts(305,3): error TS2484: Export declaration conflicts with exported declaration of 'enhancedAuth'.
+server/security/middleware.ts(306,3): error TS2323: Cannot redeclare exported variable 'ticketAccessControl'.
+server/security/middleware.ts(306,3): error TS2484: Export declaration conflicts with exported declaration of 'ticketAccessControl'.
+server/security/middleware.ts(307,3): error TS2323: Cannot redeclare exported variable 'knowledgeAccessControl'.
+server/security/middleware.ts(307,3): error TS2484: Export declaration conflicts with exported declaration of 'knowledgeAccessControl'.
+server/security/middleware.ts(308,3): error TS2323: Cannot redeclare exported variable 'aiApiAccessControl'.
+server/security/middleware.ts(308,3): error TS2484: Export declaration conflicts with exported declaration of 'aiApiAccessControl'.
+server/security/middleware.ts(309,3): error TS2323: Cannot redeclare exported variable 'adminOnly'.
+server/security/middleware.ts(309,3): error TS2484: Export declaration conflicts with exported declaration of 'adminOnly'.
+server/security/middleware.ts(310,3): error TS2323: Cannot redeclare exported variable 'agentOrAdmin'.
+server/security/middleware.ts(310,3): error TS2484: Export declaration conflicts with exported declaration of 'agentOrAdmin'.
+server/security/middleware.ts(311,3): error TS2323: Cannot redeclare exported variable 'teamAccessControl'.
+server/security/middleware.ts(311,3): error TS2484: Export declaration conflicts with exported declaration of 'teamAccessControl'.
+server/security/middleware.ts(312,3): error TS2323: Cannot redeclare exported variable 'fileUploadAccessControl'.
+server/security/middleware.ts(312,3): error TS2484: Export declaration conflicts with exported declaration of 'fileUploadAccessControl'.
+server/security/middleware.ts(313,3): error TS2323: Cannot redeclare exported variable 'searchAccessControl'.
+server/security/middleware.ts(313,3): error TS2484: Export declaration conflicts with exported declaration of 'searchAccessControl'.
+server/security/middleware.ts(314,3): error TS2323: Cannot redeclare exported variable 'securityHeaders'.
+server/security/middleware.ts(314,3): error TS2484: Export declaration conflicts with exported declaration of 'securityHeaders'.
+server/security/middleware.ts(315,3): error TS2323: Cannot redeclare exported variable 'securityAuditLog'.
+server/security/middleware.ts(315,3): error TS2484: Export declaration conflicts with exported declaration of 'securityAuditLog'.
+server/security/rateLimiting.ts(103,38): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+server/security/rateLimiting.ts(128,24): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+server/security/rateLimiting.ts(228,5): error TS2322: Type '(req: Request) => string | undefined' is not assignable to type 'ValueDeterminingMiddleware<string>'.
+  Type 'string | undefined' is not assignable to type 'string | Promise<string>'.
+    Type 'undefined' is not assignable to type 'string | Promise<string>'.
+server/security/rateLimiting.ts(241,35): error TS2802: Type 'MapIterator<[string, { count: number; resetTime: number; }]>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+server/security/secureAuth.ts(223,15): error TS2339: Property 'isApproved' does not exist on type 'never'.
+server/security/secureAuth.ts(225,22): error TS2339: Property 'id' does not exist on type 'never'.
+server/security/secureAuth.ts(240,65): error TS2339: Property 'password' does not exist on type 'never'.
+server/security/secureAuth.ts(244,22): error TS2339: Property 'id' does not exist on type 'never'.
+server/security/secureAuth.ts(263,20): error TS2339: Property 'id' does not exist on type 'never'.
+server/security/secureAuth.ts(264,19): error TS2339: Property 'email' does not exist on type 'never'.
+server/security/secureAuth.ts(265,18): error TS2339: Property 'role' does not exist on type 'never'.
+server/security/secureAuth.ts(273,20): error TS2339: Property 'id' does not exist on type 'never'.
+server/security/secureAuth.ts(284,18): error TS2339: Property 'id' does not exist on type 'never'.
+server/security/secureAuth.ts(285,21): error TS2339: Property 'email' does not exist on type 'never'.
+server/security/secureAuth.ts(286,20): error TS2339: Property 'role' does not exist on type 'never'.
+server/security/secureAuth.ts(287,25): error TS2339: Property 'firstName' does not exist on type 'never'.
+server/security/secureAuth.ts(288,24): error TS2339: Property 'lastName' does not exist on type 'never'.
+server/security/secureAuth.ts(319,19): error TS2551: Property 'savePasswordResetToken' does not exist on type 'DatabaseStorage'. Did you mean 'setPasswordResetToken'?
+server/security/secureAuth.ts(372,7): error TS2322: Type 'string | null' is not assignable to type 'string | undefined'.
+  Type 'null' is not assignable to type 'string | undefined'.
+server/security/secureAuth.ts(428,9): error TS2322: Type 'string | null' is not assignable to type 'string | undefined'.
+  Type 'null' is not assignable to type 'string | undefined'.
+server/security/secureAuth.ts(442,35): error TS2802: Type 'MapIterator<[string, { count: number; lastAttempt: number; lockedUntil?: number | undefined; }]>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+server/storage.ts(578,7): error TS2740: Type 'Omit<PgSelectBase<"tasks", { id: PgColumn<{ name: "id"; tableName: "tasks"; dataType: "number"; columnType: "PgSerial"; data: number; driverParam: number; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, {}>; ... 19 more ...; updatedAt: PgColum...' is missing the following properties from type 'PgSelectBase<"tasks", { id: PgColumn<{ name: "id"; tableName: "tasks"; dataType: "number"; columnType: "PgSerial"; data: number; driverParam: number; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, {}>; ... 19 more ...; updatedAt: PgColumn<......': config, joinsNotNullableMap, tableName, isPartialSelect, and 5 more.
+server/storage.ts(581,5): error TS2740: Type 'Omit<PgSelectBase<"tasks", { id: PgColumn<{ name: "id"; tableName: "tasks"; dataType: "number"; columnType: "PgSerial"; data: number; driverParam: number; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, {}>; ... 19 more ...; updatedAt: PgColum...' is missing the following properties from type 'PgSelectBase<"tasks", { id: PgColumn<{ name: "id"; tableName: "tasks"; dataType: "number"; columnType: "PgSerial"; data: number; driverParam: number; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, {}>; ... 19 more ...; updatedAt: PgColumn<......': config, joinsNotNullableMap, tableName, isPartialSelect, and 5 more.
+server/storage.ts(584,7): error TS2740: Type 'Omit<PgSelectBase<"tasks", { id: PgColumn<{ name: "id"; tableName: "tasks"; dataType: "number"; columnType: "PgSerial"; data: number; driverParam: number; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, {}>; ... 19 more ...; updatedAt: PgColum...' is missing the following properties from type 'PgSelectBase<"tasks", { id: PgColumn<{ name: "id"; tableName: "tasks"; dataType: "number"; columnType: "PgSerial"; data: number; driverParam: number; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, {}>; ... 19 more ...; updatedAt: PgColumn<......': config, joinsNotNullableMap, tableName, isPartialSelect, and 5 more.
+server/storage.ts(588,7): error TS2740: Type 'Omit<PgSelectBase<"tasks", { id: PgColumn<{ name: "id"; tableName: "tasks"; dataType: "number"; columnType: "PgSerial"; data: number; driverParam: number; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, {}>; ... 19 more ...; updatedAt: PgColum...' is missing the following properties from type 'PgSelectBase<"tasks", { id: PgColumn<{ name: "id"; tableName: "tasks"; dataType: "number"; columnType: "PgSerial"; data: number; driverParam: number; notNull: true; hasDefault: true; isPrimaryKey: true; isAutoincrement: false; ... 4 more ...; generated: undefined; }, {}, {}>; ... 19 more ...; updatedAt: PgColumn<......': config, joinsNotNullableMap, tableName, isPartialSelect, and 5 more.
+server/storage.ts(1059,45): error TS2339: Property 'where' does not exist on type 'Omit<PgSelectBase<"tasks", { count: SQL<number>; }, "partial", Record<"tasks", "not-null">, false, "where", { count: number; }[], { count: DrizzleTypeError<"You cannot reference this field without assigning it an alias first - use `.as(<alias>)`">; }>, "where">'.
+server/storage.ts(1184,8): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { name: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; keyHash: string | SQL<unknown> | Placeholder<...>; ... 6 more ...; expiresAt?: Date | ... 3 more ... | undefined; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{ keyHash: string; keyPrefix: string; name: string; userId: string; isActive?: boolean | null | undefined; permissions?: string[] | null | undefined; expiresAt?: string | null | undefined; }' is not assignable to parameter of type '{ name: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; keyHash: string | SQL<unknown> | Placeholder<string, any>; ... 6 more ...; expiresAt?: Date | ... 3 more ... | undefined; }'.
+      Types of property 'expiresAt' are incompatible.
+        Type 'string | null | undefined' is not assignable to type 'Date | SQL<unknown> | Placeholder<string, any> | null | undefined'.
+          Type 'string' is not assignable to type 'Date | SQL<unknown> | Placeholder<string, any> | null | undefined'.
+  Overload 2 of 2, '(values: { name: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; keyHash: string | SQL<unknown> | Placeholder<...>; ... 6 more ...; expiresAt?: Date | ... 3 more ... | undefined; }[]): PgInsertBase<...>', gave the following error.
+    Object literal may only specify known properties, and 'keyHash' does not exist in type '{ name: string | SQL<unknown> | Placeholder<string, any>; userId: string | SQL<unknown> | Placeholder<string, any>; keyHash: string | SQL<unknown> | Placeholder<string, any>; ... 6 more ...; expiresAt?: Date | ... 3 more ... | undefined; }[]'.
+server/storage.ts(1492,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1517,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1527,8): error TS2769: No overload matches this call.
+  Overload 1 of 2, '(value: { email: string | SQL<unknown> | Placeholder<string, any>; expiresAt: Date | SQL<unknown> | Placeholder<string, any>; invitedBy: string | SQL<...> | Placeholder<...>; ... 9 more ...; acceptedAt?: Date | ... 3 more ... | undefined; }): PgInsertBase<...>', gave the following error.
+    Argument of type '{ invitationToken: string; email: string; expiresAt: string; invitedBy: string; role?: string | undefined; status?: string | undefined; firstName?: string | null | undefined; lastName?: string | null | undefined; department?: string | ... 1 more ... | undefined; departmentId?: number | ... 1 more ... | undefined; }' is not assignable to parameter of type '{ email: string | SQL<unknown> | Placeholder<string, any>; expiresAt: Date | SQL<unknown> | Placeholder<string, any>; invitedBy: string | SQL<unknown> | Placeholder<...>; ... 9 more ...; acceptedAt?: Date | ... 3 more ... | undefined; }'.
+      Types of property 'expiresAt' are incompatible.
+        Type 'string' is not assignable to type 'Date | SQL<unknown> | Placeholder<string, any>'.
+  Overload 2 of 2, '(values: { email: string | SQL<unknown> | Placeholder<string, any>; expiresAt: Date | SQL<unknown> | Placeholder<string, any>; invitedBy: string | SQL<...> | Placeholder<...>; ... 9 more ...; acceptedAt?: Date | ... 3 more ... | undefined; }[]): PgInsertBase<...>', gave the following error.
+    Object literal may only specify known properties, and 'invitationToken' does not exist in type '{ email: string | SQL<unknown> | Placeholder<string, any>; expiresAt: Date | SQL<unknown> | Placeholder<string, any>; invitedBy: string | SQL<unknown> | Placeholder<...>; ... 9 more ...; acceptedAt?: Date | ... 3 more ... | undefined; }[]'.
+server/storage.ts(1659,21): error TS2339: Property 'where' does not exist on type 'Omit<PgSelectBase<"bedrock_usage", { id: PgColumn<{ name: "id"; tableName: "bedrock_usage"; dataType: "number"; columnType: "PgSerial"; data: number; driverParam: number; notNull: true; hasDefault: true; isPrimaryKey: true; ... 5 more ...; generated: undefined; }, {}, {}>; ... 7 more ...; createdAt: PgColumn<...>; }...'.
+server/storage.ts(1662,21): error TS2339: Property 'where' does not exist on type 'Omit<PgSelectBase<"bedrock_usage", { id: PgColumn<{ name: "id"; tableName: "bedrock_usage"; dataType: "number"; columnType: "PgSerial"; data: number; driverParam: number; notNull: true; hasDefault: true; isPrimaryKey: true; ... 5 more ...; generated: undefined; }, {}, {}>; ... 7 more ...; createdAt: PgColumn<...>; }...'.
+server/storage.ts(1806,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1811,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1816,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1821,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1826,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1833,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1845,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1857,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1861,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1869,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1894,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1901,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1909,11): error TS2304: Cannot find name 'ilike'.
+server/storage.ts(1910,11): error TS2304: Cannot find name 'ilike'.
+server/storage.ts(1911,11): error TS2304: Cannot find name 'ilike'.
+server/storage.ts(1938,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1946,7): error TS2304: Cannot find name 'ilike'.
+server/storage.ts(1958,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1975,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1984,9): error TS2393: Duplicate function implementation.
+server/storage.ts(1990,23): error TS2365: Operator '+' cannot be applied to types 'string | number' and 'number'.
+server/storage.ts(2002,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2035,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2057,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2061,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2065,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2069,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2074,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2084,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2096,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2100,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2108,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2134,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2148,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2169,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2183,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2200,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2205,9): error TS2353: Object literal may only specify known properties, and 'lastUsed' does not exist in type '{ title?: string | SQL<unknown> | PgColumn<ColumnBaseConfig<ColumnDataType, string>, {}, {}> | undefined; content?: string | SQL<unknown> | PgColumn<...> | undefined; ... 10 more ...; effectivenessScore?: string | ... 3 more ... | undefined; }'.
+server/storage.ts(2210,9): error TS2393: Duplicate function implementation.
+server/storage.ts(2229,9): error TS2393: Duplicate function implementation.
+FAIL: typecheck
+ReferenceError: module is not defined in ES module scope
+This file is being treated as an ES module because it has a '.js' file extension and '/home/agent/workspace/nmadhukar/ticketflow/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+    at file:///home/agent/workspace/nmadhukar/ticketflow/jest.config.js:1:1
+    at ModuleJobSync.runSync (node:internal/modules/esm/module_job:437:37)
+    at ModuleLoader.importSyncForRequire (node:internal/modules/esm/loader:389:47)
+    at loadESMFromCJS (node:internal/modules/cjs/loader:1363:24)
+    at Module._compile (node:internal/modules/cjs/loader:1503:5)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1623:10)
+    at Module.load (node:internal/modules/cjs/loader:1266:32)
+    at Module._load (node:internal/modules/cjs/loader:1091:12)
+    at Module.require (node:internal/modules/cjs/loader:1289:19)
+    at require (node:internal/modules/helpers:182:18)
+FAIL: all Jest suites (unit, integration, AI, load, e2e)
+no valid Jest JSON: ENOENT: no such file or directory, open '/gate-reports/jest.json'
+FAIL: Jest runner JSON report absent or invalid
+[eval]:1
+const p=require("./package.json");if(!p.scripts?.e2e)throw Error("no e2e script in package.json")
+                                                     ^
+
+Error: no e2e script in package.json
+    at [eval]:1:60
+    at runScriptInThisContext (node:internal/vm:209:10)
+    at node:internal/process/execution:446:12
+    at [eval]-wrapper:6:24
+    at runScriptInContext (node:internal/process/execution:444:60)
+    at evalFunction (node:internal/process/execution:279:30)
+    at evalTypeScript (node:internal/process/execution:291:3)
+    at node:internal/main/eval_string:74:3
+
+Node.js v22.18.0
+FAIL: official pinned-image browser e2e suite
+--- CLEANUP ---
+Cleanup complete.
+--- RESULTS ---
+PASS: 9
+FAIL: 6
+TESTS[runtime-phase2]: 0 passed, 0 skipped
+RESULT: FAIL

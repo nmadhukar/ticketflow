@@ -119,13 +119,12 @@ Content-Type: application/json`}
 {`{
   "title": "New bug report",
   "description": "Detailed description here",
-  "status": "open",
   "priority": "medium",
   "severity": "normal",
   "category": "bug",
   "tags": ["frontend", "ui"],
+  "assigneeType": "user",
   "assigneeId": "user123",
-  "assigneeTeamId": 1,
   "dueDate": "2024-02-01T00:00:00Z"
 }`}
                     </pre>

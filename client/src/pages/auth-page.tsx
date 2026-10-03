@@ -1,15 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { CheckCircle, AlertCircle, Building2 } from "lucide-react";
-import { useMutation } from "@tanstack/react-query";
+import { CheckCircle, AlertCircle } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
@@ -20,29 +20,33 @@ const loginSchema = z.object({
   password: z.string().min(1, "Password is required"),
 });
 
-const registerSchema = z.object({
-  email: z.string().email("Invalid email address"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
-  confirmPassword: z.string(),
-  firstName: z.string().min(1, "First name is required"),
-  lastName: z.string().min(1, "Last name is required"),
-}).refine((data) => data.password === data.confirmPassword, {
-  message: "Passwords don't match",
-  path: ["confirmPassword"],
-});
+const registerSchema = z
+  .object({
+    email: z.string().email("Invalid email address"),
+    password: z.string().min(8, "Password must be at least 8 characters"),
+    confirmPassword: z.string(),
+    firstName: z.string().min(1, "First name is required"),
+    lastName: z.string().min(1, "Last name is required"),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: "Passwords don't match",
+    path: ["confirmPassword"],
+  });
 
 const forgotPasswordSchema = z.object({
   email: z.string().email("Invalid email address"),
 });
 
-const resetPasswordSchema = z.object({
-  token: z.string(),
-  password: z.string().min(8, "Password must be at least 8 characters"),
-  confirmPassword: z.string(),
-}).refine((data) => data.password === data.confirmPassword, {
-  message: "Passwords don't match",
-  path: ["confirmPassword"],
-});
+const resetPasswordSchema = z
+  .object({
+    token: z.string(),
+    password: z.string().min(8, "Password must be at least 8 characters"),
+    confirmPassword: z.string(),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: "Passwords don't match",
+    path: ["confirmPassword"],
+  });
 
 type LoginForm = z.infer<typeof loginSchema>;
 type RegisterForm = z.infer<typeof registerSchema>;
@@ -52,45 +56,70 @@ type ResetPasswordForm = z.infer<typeof resetPasswordSchema>;
 export default function AuthPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  
+
   // Check for URL params
   const urlParams = new URLSearchParams(window.location.search);
-  const error = urlParams.get('error');
-  const mode = urlParams.get('mode');
-  const invitationEmail = urlParams.get('email');
-  const invitationToken = urlParams.get('token');
-  
+  const error = urlParams.get("error");
+  const mode = urlParams.get("mode");
+  const invitationEmail = urlParams.get("email");
+  const invitationToken = urlParams.get("token");
+
   // Set initial tab based on mode parameter
   const [activeTab, setActiveTab] = useState<"signin" | "register" | "forgot">(
-    mode === 'register' ? 'register' : 'signin'
+    mode === "register" ? "register" : "signin"
   );
-  
-  // Show error message based on error type
-  const getErrorMessage = (error: string | null) => {
-    switch (error) {
-      case 'microsoft_auth_failed':
-        return 'Microsoft authentication failed. Please check your credentials and try again.';
-      case 'microsoft_auth_error':
-        return 'An error occurred during Microsoft authentication. Please try again.';
-      case 'microsoft_no_user':
-        return 'Unable to retrieve user information from Microsoft. Please try again.';
-      case 'login_failed':
-        return 'Login failed. Please try again.';
-      default:
-        return null;
-    }
+
+  // Show generic error message (SSO-specific messages removed for now)
+  const getErrorMessage = (err: string | null) => {
+    if (!err) return null;
+    if (err === "login_failed") return "Login failed. Please try again.";
+    if (err === "pending_approval")
+      return "Your account is pending admin approval.";
+    if (err === "account_inactive") return "Your account is deactivated.";
+    return null;
   };
-  
+
   const errorMessage = getErrorMessage(error);
   const [resetToken, setResetToken] = useState<string>("");
+  const [invitationError, setInvitationError] = useState<string | null>(null);
+  const [isValidatingInvitation, setIsValidatingInvitation] = useState(false);
 
-  // Login form
-  const loginForm = useForm<LoginForm>({
-    resolver: zodResolver(loginSchema),
-    defaultValues: {
-      email: "",
-      password: "",
+  // Support password reset deep-link: ?mode=reset&token=...
+  // Extract token from URL params
+  useEffect(() => {
+    if (mode === "reset") {
+      const t = urlParams.get("token");
+      if (t && !resetToken) {
+        setResetToken(t);
+      }
+    }
+  }, [mode, resetToken, urlParams]);
+
+  // Validate invitation token when page loads with invitation params
+  const { data: invitationData } = useQuery({
+    queryKey: ["/api/invitations", invitationToken],
+    queryFn: async () => {
+      if (!invitationToken) return null;
+      setIsValidatingInvitation(true);
+      try {
+        const res = await apiRequest(
+          "GET",
+          `/api/invitations/${invitationToken}`
+        );
+        if (!res.ok) {
+          const error = await res.json();
+          throw new Error(error.message || "Invalid invitation token");
+        }
+        return res.json();
+      } catch (error: any) {
+        setInvitationError(error.message || "Invalid or expired invitation");
+        throw error;
+      } finally {
+        setIsValidatingInvitation(false);
+      }
     },
+    enabled: !!invitationToken && mode === "register",
+    retry: false,
   });
 
   // Register form
@@ -123,14 +152,33 @@ export default function AuthPage() {
     },
   });
 
+  // Update token in form when resetToken changes
+  useEffect(() => {
+    if (resetToken) {
+      resetForm.setValue("token", resetToken);
+    }
+  }, [resetToken, resetForm]);
+
+  // Update email in form when invitation is validated
+  useEffect(() => {
+    if (invitationData && invitationEmail) {
+      registerForm.setValue("email", invitationEmail);
+    }
+  }, [invitationData, invitationEmail, registerForm]);
+
+  // Login form
+  const loginForm = useForm<LoginForm>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: {
+      email: "",
+      password: "",
+    },
+  });
+
   // Login mutation
   const loginMutation = useMutation({
     mutationFn: async (data: LoginForm) => {
       const res = await apiRequest("POST", "/api/auth/login", data);
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Login failed");
-      }
       return res.json();
     },
     onSuccess: (user) => {
@@ -158,11 +206,8 @@ export default function AuthPage() {
         password: data.password,
         firstName: data.firstName,
         lastName: data.lastName,
+        ...(invitationToken ? { inviteToken: invitationToken } : {}),
       });
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Registration failed");
-      }
       return res.json();
     },
     onSuccess: (data) => {
@@ -186,10 +231,6 @@ export default function AuthPage() {
   const forgotMutation = useMutation({
     mutationFn: async (data: ForgotPasswordForm) => {
       const res = await apiRequest("POST", "/api/auth/forgot-password", data);
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Failed to send reset email");
-      }
       return res.json();
     },
     onSuccess: () => {
@@ -212,10 +253,6 @@ export default function AuthPage() {
   const resetMutation = useMutation({
     mutationFn: async (data: Omit<ResetPasswordForm, "confirmPassword">) => {
       const res = await apiRequest("POST", "/api/auth/reset-password", data);
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Failed to reset password");
-      }
       return res.json();
     },
     onSuccess: () => {
@@ -248,8 +285,12 @@ export default function AuthPage() {
                   <CheckCircle className="text-white w-6 h-6" />
                 </div>
                 <div>
-                  <CardTitle className="text-2xl font-bold">TicketFlow</CardTitle>
-                  <CardDescription>Professional Ticketing System</CardDescription>
+                  <CardTitle className="text-2xl font-bold">
+                    TicketFlow
+                  </CardTitle>
+                  <CardDescription>
+                    Professional Ticketing System
+                  </CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -260,25 +301,40 @@ export default function AuthPage() {
                   <AlertDescription>{errorMessage}</AlertDescription>
                 </Alert>
               )}
-              
+
               {resetToken ? (
                 // Reset Password Form
-                <form onSubmit={resetForm.handleSubmit((data) => resetMutation.mutate(data))}>
+                <form
+                  onSubmit={resetForm.handleSubmit((data) =>
+                    resetMutation.mutate(data)
+                  )}
+                >
                   <div className="space-y-4">
+                    <Alert>
+                      <CheckCircle className="h-4 w-4" />
+                      <AlertDescription>
+                        Enter your new password below. This reset link will
+                        expire in 1 hour.
+                      </AlertDescription>
+                    </Alert>
                     <div className="space-y-2">
                       <Label htmlFor="reset-password">New Password</Label>
                       <Input
                         id="reset-password"
                         type="password"
-                        placeholder="Enter new password"
+                        placeholder="Enter new password (min 8 characters)"
                         {...resetForm.register("password")}
                       />
                       {resetForm.formState.errors.password && (
-                        <p className="text-sm text-destructive">{resetForm.formState.errors.password.message}</p>
+                        <p className="text-sm text-destructive">
+                          {resetForm.formState.errors.password.message}
+                        </p>
                       )}
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="reset-confirm-password">Confirm Password</Label>
+                      <Label htmlFor="reset-confirm-password">
+                        Confirm Password
+                      </Label>
                       <Input
                         id="reset-confirm-password"
                         type="password"
@@ -286,7 +342,9 @@ export default function AuthPage() {
                         {...resetForm.register("confirmPassword")}
                       />
                       {resetForm.formState.errors.confirmPassword && (
-                        <p className="text-sm text-destructive">{resetForm.formState.errors.confirmPassword.message}</p>
+                        <p className="text-sm text-destructive">
+                          {resetForm.formState.errors.confirmPassword.message}
+                        </p>
                       )}
                     </div>
                     <Button
@@ -294,7 +352,9 @@ export default function AuthPage() {
                       className="w-full"
                       disabled={resetMutation.isPending}
                     >
-                      {resetMutation.isPending ? "Resetting..." : "Reset Password"}
+                      {resetMutation.isPending
+                        ? "Resetting..."
+                        : "Reset Password"}
                     </Button>
                     <Button
                       type="button"
@@ -310,7 +370,10 @@ export default function AuthPage() {
                   </div>
                 </form>
               ) : (
-                <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as any)}>
+                <Tabs
+                  value={activeTab}
+                  onValueChange={(value) => setActiveTab(value as any)}
+                >
                   <TabsList className="grid w-full grid-cols-3">
                     <TabsTrigger value="signin">Sign In</TabsTrigger>
                     <TabsTrigger value="register">Register</TabsTrigger>
@@ -319,7 +382,11 @@ export default function AuthPage() {
 
                   {/* Sign In Tab */}
                   <TabsContent value="signin">
-                    <form onSubmit={loginForm.handleSubmit((data) => loginMutation.mutate(data))}>
+                    <form
+                      onSubmit={loginForm.handleSubmit((data) =>
+                        loginMutation.mutate(data)
+                      )}
+                    >
                       <div className="space-y-4">
                         <div className="space-y-2">
                           <Label htmlFor="login-email">Email</Label>
@@ -330,7 +397,9 @@ export default function AuthPage() {
                             {...loginForm.register("email")}
                           />
                           {loginForm.formState.errors.email && (
-                            <p className="text-sm text-destructive">{loginForm.formState.errors.email.message}</p>
+                            <p className="text-sm text-destructive">
+                              {loginForm.formState.errors.email.message}
+                            </p>
                           )}
                         </div>
                         <div className="space-y-2">
@@ -342,7 +411,9 @@ export default function AuthPage() {
                             {...loginForm.register("password")}
                           />
                           {loginForm.formState.errors.password && (
-                            <p className="text-sm text-destructive">{loginForm.formState.errors.password.message}</p>
+                            <p className="text-sm text-destructive">
+                              {loginForm.formState.errors.password.message}
+                            </p>
                           )}
                         </div>
                         <Button
@@ -350,7 +421,9 @@ export default function AuthPage() {
                           className="w-full"
                           disabled={loginMutation.isPending}
                         >
-                          {loginMutation.isPending ? "Signing in..." : "Sign In"}
+                          {loginMutation.isPending
+                            ? "Signing in..."
+                            : "Sign In"}
                         </Button>
                       </div>
                     </form>
@@ -358,26 +431,57 @@ export default function AuthPage() {
 
                   {/* Register Tab */}
                   <TabsContent value="register">
-                    <form onSubmit={registerForm.handleSubmit((data) => registerMutation.mutate(data))}>
+                    <form
+                      onSubmit={registerForm.handleSubmit((data) =>
+                        registerMutation.mutate(data)
+                      )}
+                    >
                       <div className="space-y-4">
                         {invitationEmail && invitationToken && (
-                          <Alert>
-                            <CheckCircle className="h-4 w-4" />
-                            <AlertDescription>
-                              You've been invited to join TicketFlow! Complete the form below to create your account.
-                            </AlertDescription>
-                          </Alert>
+                          <>
+                            {isValidatingInvitation ? (
+                              <Alert>
+                                <AlertCircle className="h-4 w-4 animate-spin" />
+                                <AlertDescription>
+                                  Validating invitation...
+                                </AlertDescription>
+                              </Alert>
+                            ) : invitationError ? (
+                              <Alert variant="destructive">
+                                <AlertCircle className="h-4 w-4" />
+                                <AlertDescription>
+                                  {invitationError}
+                                </AlertDescription>
+                              </Alert>
+                            ) : invitationData ? (
+                              <Alert>
+                                <CheckCircle className="h-4 w-4" />
+                                <AlertDescription>
+                                  You've been invited to join TicketFlow!
+                                  Complete the form below to create your
+                                  account.
+                                </AlertDescription>
+                              </Alert>
+                            ) : null}
+                          </>
                         )}
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-2">
-                            <Label htmlFor="register-firstName">First Name</Label>
+                            <Label htmlFor="register-firstName">
+                              First Name
+                            </Label>
                             <Input
                               id="register-firstName"
                               placeholder="John"
                               {...registerForm.register("firstName")}
                             />
                             {registerForm.formState.errors.firstName && (
-                              <p className="text-sm text-destructive">{registerForm.formState.errors.firstName.message}</p>
+                              <p className="text-sm text-destructive">
+                                {
+                                  registerForm.formState.errors.firstName
+                                    .message
+                                }
+                              </p>
                             )}
                           </div>
                           <div className="space-y-2">
@@ -388,7 +492,9 @@ export default function AuthPage() {
                               {...registerForm.register("lastName")}
                             />
                             {registerForm.formState.errors.lastName && (
-                              <p className="text-sm text-destructive">{registerForm.formState.errors.lastName.message}</p>
+                              <p className="text-sm text-destructive">
+                                {registerForm.formState.errors.lastName.message}
+                              </p>
                             )}
                           </div>
                         </div>
@@ -402,7 +508,9 @@ export default function AuthPage() {
                             disabled={!!invitationEmail}
                           />
                           {registerForm.formState.errors.email && (
-                            <p className="text-sm text-destructive">{registerForm.formState.errors.email.message}</p>
+                            <p className="text-sm text-destructive">
+                              {registerForm.formState.errors.email.message}
+                            </p>
                           )}
                         </div>
                         <div className="space-y-2">
@@ -414,11 +522,15 @@ export default function AuthPage() {
                             {...registerForm.register("password")}
                           />
                           {registerForm.formState.errors.password && (
-                            <p className="text-sm text-destructive">{registerForm.formState.errors.password.message}</p>
+                            <p className="text-sm text-destructive">
+                              {registerForm.formState.errors.password.message}
+                            </p>
                           )}
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="register-confirmPassword">Confirm Password</Label>
+                          <Label htmlFor="register-confirmPassword">
+                            Confirm Password
+                          </Label>
                           <Input
                             id="register-confirmPassword"
                             type="password"
@@ -426,15 +538,28 @@ export default function AuthPage() {
                             {...registerForm.register("confirmPassword")}
                           />
                           {registerForm.formState.errors.confirmPassword && (
-                            <p className="text-sm text-destructive">{registerForm.formState.errors.confirmPassword.message}</p>
+                            <p className="text-sm text-destructive">
+                              {
+                                registerForm.formState.errors.confirmPassword
+                                  .message
+                              }
+                            </p>
                           )}
                         </div>
                         <Button
                           type="submit"
                           className="w-full"
-                          disabled={registerMutation.isPending}
+                          disabled={
+                            !!(
+                              registerMutation.isPending ||
+                              isValidatingInvitation ||
+                              (invitationToken && !!invitationError)
+                            )
+                          }
                         >
-                          {registerMutation.isPending ? "Creating account..." : "Create Account"}
+                          {registerMutation.isPending
+                            ? "Creating account..."
+                            : "Create Account"}
                         </Button>
                       </div>
                     </form>
@@ -442,12 +567,17 @@ export default function AuthPage() {
 
                   {/* Forgot Password Tab */}
                   <TabsContent value="forgot">
-                    <form onSubmit={forgotForm.handleSubmit((data) => forgotMutation.mutate(data))}>
+                    <form
+                      onSubmit={forgotForm.handleSubmit((data) =>
+                        forgotMutation.mutate(data)
+                      )}
+                    >
                       <div className="space-y-4">
                         <Alert>
                           <AlertCircle className="h-4 w-4" />
                           <AlertDescription>
-                            Enter your email address and we'll send you instructions to reset your password.
+                            Enter your email address and we'll send you
+                            instructions to reset your password.
                           </AlertDescription>
                         </Alert>
                         <div className="space-y-2">
@@ -459,7 +589,9 @@ export default function AuthPage() {
                             {...forgotForm.register("email")}
                           />
                           {forgotForm.formState.errors.email && (
-                            <p className="text-sm text-destructive">{forgotForm.formState.errors.email.message}</p>
+                            <p className="text-sm text-destructive">
+                              {forgotForm.formState.errors.email.message}
+                            </p>
                           )}
                         </div>
                         <Button
@@ -467,7 +599,9 @@ export default function AuthPage() {
                           className="w-full"
                           disabled={forgotMutation.isPending}
                         >
-                          {forgotMutation.isPending ? "Sending..." : "Send Reset Instructions"}
+                          {forgotMutation.isPending
+                            ? "Sending..."
+                            : "Send Reset Instructions"}
                         </Button>
                       </div>
                     </form>
@@ -475,27 +609,8 @@ export default function AuthPage() {
                 </Tabs>
               )}
             </CardContent>
-            <CardFooter className="flex flex-col space-y-4">
-              <div className="relative w-full">
-                <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-background px-2 text-muted-foreground">Or continue with</span>
-                </div>
-              </div>
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => {
-                  // Directly redirect to Microsoft authentication
-                  window.location.href = "/api/auth/microsoft";
-                }}
-              >
-                <Building2 className="mr-2 h-4 w-4" />
-                Microsoft 365
-              </Button>
-            </CardFooter>
+            {/* SSO providers temporarily disabled */}
+            {/* <CardFooter className="flex flex-col space-y-4"> ... </CardFooter> */}
           </Card>
         </div>
 
@@ -505,29 +620,43 @@ export default function AuthPage() {
             Welcome to TicketFlow
           </h1>
           <p className="text-lg text-slate-600 mb-8">
-            The professional ticketing system designed for small businesses. 
-            Streamline your support, track issues, and collaborate with your team.
+            The professional ticketing system designed for small businesses.
+            Streamline your support, track issues, and collaborate with your
+            team.
           </p>
           <div className="space-y-4">
             <div className="flex items-start space-x-3">
               <CheckCircle className="h-6 w-6 text-primary mt-0.5" />
               <div>
-                <h3 className="font-semibold text-slate-900">Complete Ticket Management</h3>
-                <p className="text-slate-600">Track issues from creation to resolution with full audit trails</p>
+                <h3 className="font-semibold text-slate-900">
+                  Complete Ticket Management
+                </h3>
+                <p className="text-slate-600">
+                  Track issues from creation to resolution with full audit
+                  trails
+                </p>
               </div>
             </div>
             <div className="flex items-start space-x-3">
               <CheckCircle className="h-6 w-6 text-primary mt-0.5" />
               <div>
-                <h3 className="font-semibold text-slate-900">Team Collaboration</h3>
-                <p className="text-slate-600">Assign tickets to teams, add comments, and track progress</p>
+                <h3 className="font-semibold text-slate-900">
+                  Team Collaboration
+                </h3>
+                <p className="text-slate-600">
+                  Assign tickets to teams, add comments, and track progress
+                </p>
               </div>
             </div>
             <div className="flex items-start space-x-3">
               <CheckCircle className="h-6 w-6 text-primary mt-0.5" />
               <div>
-                <h3 className="font-semibold text-slate-900">Enterprise Integration</h3>
-                <p className="text-slate-600">Integrate with Microsoft 365 and Teams for seamless workflow</p>
+                <h3 className="font-semibold text-slate-900">
+                  Enterprise Integration
+                </h3>
+                <p className="text-slate-600">
+                  Integrate with Microsoft 365 and Teams for seamless workflow
+                </p>
               </div>
             </div>
           </div>

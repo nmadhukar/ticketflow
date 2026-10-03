@@ -1,0 +1,59 @@
+{
+  "drawer": {
+    "title": "Statistiques",
+    "close": "Fermer",
+    "refresh": "Actualiser"
+  },
+  "agent": {
+    "title": "Mes Statistiques",
+    "personal": {
+      "title": "Statistiques Personnelles",
+      "assignedToMe": "Assignées à Moi",
+      "createdByMe": "Créées par Moi",
+      "resolutionRate": "Taux de Résolution",
+      "avgResolutionTime": "Temps Moyen de Résolution"
+    },
+    "team": {
+      "title": "Aperçu de l'Équipe",
+      "selectTeam": "Sélectionner l'Équipe",
+      "totalTickets": "Total des Tickets",
+      "openTickets": "Tickets Ouverts",
+      "inProgress": "En Cours",
+      "resolved": "Résolus",
+      "highPriority": "Haute Priorité",
+      "noTeam": "Vous n'êtes assigné à aucune équipe"
+    }
+  },
+  "manager": {
+    "title": "Statistiques du Département",
+    "department": {
+      "title": "Aperçu du Département",
+      "selectDepartment": "Sélectionner le Département",
+      "totalTickets": "Total des Tickets",
+      "openTickets": "Tickets Ouverts",
+      "inProgress": "En Cours",
+      "resolved": "Résolus",
+      "highPriority": "Haute Priorité",
+      "avgResolutionTime": "Temps Moyen de Résolution"
+    },
+    "priority": {
+      "title": "Distribution des Priorités"
+    },
+    "category": {
+      "title": "Répartition par Catégorie"
+    },
+    "teams": {
+      "title": "Performance de l'Équipe",
+      "memberStats": "Statistiques des Membres de l'Équipe"
+    }
+  },
+  "common": {
+    "loading": "Chargement des statistiques...",
+    "error": "Échec du chargement des statistiques",
+    "noData": "Aucune donnée disponible",
+    "hours": "heures",
+    "days": "jours",
+    "percentage": "{{value}}%"
+  }
+}
+

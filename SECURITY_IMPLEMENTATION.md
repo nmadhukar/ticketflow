@@ -21,10 +21,8 @@ The TicketFlow helpdesk system now includes comprehensive enterprise-level secur
   - **Customer**: Limited access to own tickets and published knowledge base
   - **Agent**: Extended ticket management and knowledge base creation
   - **Admin**: Full system access including user and system management
-- **Permission System**:
-  - Action-based permissions (create, read, update, delete, manage)
-  - Resource-based permissions (ticket, knowledge, user, team, etc.)
-  - Conditional permissions with ownership and assignment checks
+- **Ticket access**: not in this file. The single ticket visibility rule is
+  `server/permissions/ticketAccess.ts` (`ticketVisibilityWhere`, `assertTaskAccess`).
 
 ### 3. Input Validation & Sanitization (`server/security/validation.ts`)
 - **Purpose**: Prevent injection attacks and ensure data integrity
@@ -186,15 +184,15 @@ const customTicketSchema = validationSchemas.ticketCreation.extend({
 });
 ```
 
-### Checking Permissions in Code
+### Checking Ticket Access in Code
+Every ticket read or write goes through one rule, `server/permissions/ticketAccess.ts`
+(there is no per-role permission table):
 ```typescript
-import { hasPermission } from '../security/rbac';
+import { assertTaskAccess, requireTaskAccess, ticketVisibilityWhere } from '../permissions/ticketAccess';
 
-if (hasPermission(user.role, 'delete', 'ticket')) {
-  // Allow deletion
-} else {
-  // Deny access
-}
+app.get('/api/tasks/:id', isAuthenticated, requireTaskAccess(), handler); // 404 missing, 403 out of scope
+await assertTaskAccess(req.user, ticketId);                               // inside a handler
+db.select().from(tasks).where(ticketVisibilityWhere(req.user));           // any ticket list
 ```
 
 ## Security Best Practices Implemented

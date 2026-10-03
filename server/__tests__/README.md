@@ -168,14 +168,17 @@ const loadData = TestDataGenerator.generateLoadTestData(1000, 50);
 
 ### AWS Bedrock Mocks
 
-Provides consistent mock responses for testing:
+`mocks/aws-bedrock.mock.ts` fakes AWS at the SDK boundary (`BedrockRuntimeClient.prototype.send`), so the real `bedrockIntegration`, cost monitoring and `calculateConfidence` run. It re-implements no production rule:
 
 ```typescript
-import { createMockBedrockClient, setMockResponse } from './mocks/aws-bedrock.mock';
+import { bedrockMock, MOCK_MODEL_ID } from './mocks/aws-bedrock.mock';
 
-const mockClient = createMockBedrockClient();
-setMockResponse(mockClient, 'highConfidence');
+beforeEach(() => bedrockMock.reset());               // after any jest.restoreAllMocks()
+bedrockMock.handler = (prompt) => '{"response":"..."}'; // or return an Error to make the call throw
+expect(bedrockMock.totalCalls()).toBe(0);            // prompts seen: bedrockMock.prompts / seen()
 ```
+
+Store `bedrockModelId: MOCK_MODEL_ID` in the Bedrock settings so the Claude reply format is used. See `integration/ai.routes.test.ts`.
 
 ### Test Reporter
 

@@ -1,8 +1,8 @@
 /**
  * TicketFlow Database Schema Definition
- * 
+ *
  * This module defines the complete database schema using Drizzle ORM with PostgreSQL.
- * 
+ *
  * The schema includes:
  * - User management with authentication and roles
  * - Ticket/task management with full workflow support
@@ -11,7 +11,7 @@
  * - Administrative features (settings, API keys, templates)
  * - Security features (audit trails, session management)
  * - Integration support (Microsoft Teams, email notifications)
- * 
+ *
  * Key Design Principles:
  * - Strong typing with TypeScript integration
  * - Referential integrity with foreign key constraints
@@ -19,7 +19,7 @@
  * - Flexible role-based access control
  * - Optimized indexes for performance
  * - Support for future extensibility
- * 
+ *
  * Table Relationships:
  * - Users belong to departments and teams
  * - Tasks can be assigned to users or teams
@@ -40,10 +40,14 @@ import {
   integer,
   boolean,
   decimal,
+  unique,
+  uniqueIndex,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
+import "./constants";
 
 // Session storage table for Replit Auth
 export const sessions = pgTable(
@@ -53,7 +57,7 @@ export const sessions = pgTable(
     sess: jsonb("sess").notNull(),
     expire: timestamp("expire").notNull(),
   },
-  (table) => [index("IDX_session_expire").on(table.expire)],
+  (table) => [index("IDX_session_expire").on(table.expire)]
 );
 
 // User storage table
@@ -64,13 +68,41 @@ export const users = pgTable("users", {
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   profileImageUrl: varchar("profile_image_url"),
-  role: varchar("role", { length: 50 }).notNull().default("user"), // user, admin, manager, customer
-  department: varchar("department", { length: 100 }),
+  role: varchar("role", { length: 50 }).notNull().default("customer"), // admin, manager, agent, customer (legacy "user" means agent)
   phone: varchar("phone", { length: 50 }),
   isActive: boolean("is_active").default(true),
   isApproved: boolean("is_approved").default(false), // Admin must approve before login
   passwordResetToken: varchar("password_reset_token"),
   passwordResetExpires: timestamp("password_reset_expires"),
+  // Login lockout (server/services/auth/lockout.ts). Never sent to clients.
+  failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
+  lockedUntil: timestamp("locked_until"),
+  // Set by an admin reset; cleared when the user sets their own password.
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
+  // Sessions that authenticated before this instant are refused (server/services/auth).
+  // Never sent to clients.
+  passwordChangedAt: timestamp("password_changed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// User preferences table
+export const userPreferences = pgTable("user_preferences", {
+  userId: varchar("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  // Display Preferences
+  theme: varchar("theme", { length: 20 }).default("light"), // light, dark, system
+  language: varchar("language", { length: 10 }).default("en"), // en, es, fr, de, zh
+  timezone: varchar("timezone", { length: 100 }).default("UTC"), // IANA format
+  dateFormat: varchar("date_format", { length: 20 }).default("MM/DD/YYYY"),
+  // Notification Preferences
+  emailNotifications: boolean("email_notifications").default(true),
+  pushNotifications: boolean("push_notifications").default(false),
+  taskUpdates: boolean("task_updates").default(true),
+  teamUpdates: boolean("team_updates").default(true),
+  mentions: boolean("mentions").default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -91,6 +123,9 @@ export const teams = pgTable("teams", {
   id: serial("id").primaryKey(),
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
+  departmentId: integer("department_id")
+    .references(() => departments.id)
+    .notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   createdBy: varchar("created_by").references(() => users.id),
 });
@@ -98,10 +133,101 @@ export const teams = pgTable("teams", {
 // Team members junction table
 export const teamMembers = pgTable("team_members", {
   id: serial("id").primaryKey(),
-  teamId: integer("team_id").references(() => teams.id).notNull(),
-  userId: varchar("user_id").references(() => users.id).notNull(),
-  role: varchar("role", { length: 50 }).default("member"), // admin, member
+  teamId: integer("team_id")
+    .references(() => teams.id)
+    .notNull(),
+  userId: varchar("user_id")
+    .references(() => users.id)
+    .notNull(),
+  role: varchar("role", { length: 50 }).default("member"), // admin, member (deprecated - will be removed)
   joinedAt: timestamp("joined_at").defaultNow(),
+});
+
+// Team admins table
+export const teamAdmins = pgTable(
+  "team_admins",
+  {
+    id: serial("id").primaryKey(),
+    teamId: integer("team_id")
+      .references(() => teams.id, { onDelete: "cascade" })
+      .notNull(),
+    userId: varchar("user_id")
+      .references(() => users.id, { onDelete: "cascade" })
+      .notNull(),
+    grantedBy: varchar("granted_by")
+      .references(() => users.id, { onDelete: "restrict" })
+      .notNull(),
+    grantedAt: timestamp("granted_at").defaultNow(),
+    permissions: text("permissions").array(), // Optional: for future extensibility
+  },
+  (table) => [
+    unique("unique_team_admin").on(table.userId, table.teamId),
+    index("idx_team_admins_team_user").on(table.teamId, table.userId),
+    index("idx_team_admins_user").on(table.userId),
+    index("idx_team_admins_team").on(table.teamId),
+  ]
+);
+
+// Team task assignments table
+export const teamTaskAssignments = pgTable(
+  "team_task_assignments",
+  {
+    id: serial("id").primaryKey(),
+    taskId: integer("task_id")
+      .references(() => tasks.id, { onDelete: "cascade" })
+      .notNull(),
+    teamId: integer("team_id")
+      .references(() => teams.id, { onDelete: "cascade" })
+      .notNull(),
+    assignedUserId: varchar("assigned_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    assignedBy: varchar("assigned_by")
+      .references(() => users.id, { onDelete: "set null" })
+      .notNull(),
+    assignedAt: timestamp("assigned_at").defaultNow(),
+    status: varchar("status", { length: 20 }).default("active").notNull(), // 'active', 'completed', 'reassigned', 'cancelled'
+    completedAt: timestamp("completed_at"),
+    notes: text("notes"),
+    priority: varchar("priority", { length: 20 }),
+  },
+  (table) => [
+    index("idx_team_task_assignments_task").on(table.taskId),
+    index("idx_team_task_assignments_user").on(table.assignedUserId),
+    index("idx_team_task_assignments_team").on(table.teamId),
+    index("idx_team_task_assignments_task_status").on(
+      table.taskId,
+      table.status
+    ),
+    index("idx_team_task_assignments_team_user").on(
+      table.teamId,
+      table.assignedUserId
+    ),
+  ]
+);
+
+// Per-prefix, per-year ticket number counter. getNextTicketNumber increments the
+// row under a row lock (and seeds it from the numeric max when absent), so two
+// concurrent creates never get the same number.
+export const ticketNumberCounters = pgTable(
+  "ticket_number_counters",
+  {
+    prefix: varchar("prefix", { length: 20 }).notNull(),
+    year: integer("year").notNull(),
+    lastNumber: integer("last_number").notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.prefix, table.year] })]
+);
+
+// SNS MessageIds already handled by POST /api/email/inbound. SNS delivers at least once,
+// so the endpoint claims the id first (INSERT ... ON CONFLICT DO NOTHING); a duplicate
+// delivery finds the row and does nothing. See migrations/0018_sns_message_dedupe.sql.
+export const snsMessageDedupe = pgTable("sns_message_dedupe", {
+  messageId: varchar("message_id", { length: 200 }).primaryKey(),
+  // 'processing' (claimed, may be re-claimed after 10 minutes) or 'done' (final). Migration 0019.
+  status: varchar("status", { length: 20 }).notNull().default("done"),
+  // When the current claim was taken.
+  receivedAt: timestamp("received_at").defaultNow().notNull(),
 });
 
 // Tasks table
@@ -118,7 +244,9 @@ export const tasks = pgTable("tasks", {
   assigneeId: varchar("assignee_id").references(() => users.id),
   assigneeType: varchar("assignee_type", { length: 20 }).default("user"), // user, team
   assigneeTeamId: integer("assignee_team_id").references(() => teams.id),
-  createdBy: varchar("created_by").references(() => users.id).notNull(),
+  createdBy: varchar("created_by")
+    .references(() => users.id)
+    .notNull(),
   dueDate: timestamp("due_date"),
   resolvedAt: timestamp("resolved_at"),
   closedAt: timestamp("closed_at"),
@@ -132,8 +260,12 @@ export const tasks = pgTable("tasks", {
 // Task comments/notes
 export const taskComments = pgTable("task_comments", {
   id: serial("id").primaryKey(),
-  taskId: integer("task_id").references(() => tasks.id).notNull(),
-  userId: varchar("user_id").references(() => users.id).notNull(),
+  taskId: integer("task_id")
+    .references(() => tasks.id)
+    .notNull(),
+  userId: varchar("user_id")
+    .references(() => users.id)
+    .notNull(),
   content: text("content").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -141,8 +273,12 @@ export const taskComments = pgTable("task_comments", {
 // Task history for audit trail
 export const taskHistory = pgTable("task_history", {
   id: serial("id").primaryKey(),
-  taskId: integer("task_id").references(() => tasks.id).notNull(),
-  userId: varchar("user_id").references(() => users.id).notNull(),
+  taskId: integer("task_id")
+    .references(() => tasks.id)
+    .notNull(),
+  userId: varchar("user_id")
+    .references(() => users.id)
+    .notNull(),
   action: varchar("action", { length: 50 }).notNull(), // created, updated, assigned, status_changed, etc.
   oldValue: text("old_value"),
   newValue: text("new_value"),
@@ -153,8 +289,12 @@ export const taskHistory = pgTable("task_history", {
 // File attachments for tasks
 export const taskAttachments = pgTable("task_attachments", {
   id: serial("id").primaryKey(),
-  taskId: integer("task_id").references(() => tasks.id).notNull(),
-  userId: varchar("user_id").references(() => users.id).notNull(),
+  taskId: integer("task_id")
+    .references(() => tasks.id)
+    .notNull(),
+  userId: varchar("user_id")
+    .references(() => users.id)
+    .notNull(),
   fileName: varchar("file_name", { length: 255 }).notNull(),
   fileSize: integer("file_size").notNull(), // in bytes
   fileType: varchar("file_type", { length: 100 }).notNull(),
@@ -165,52 +305,126 @@ export const taskAttachments = pgTable("task_attachments", {
 // Company settings (for branding)
 export const companySettings = pgTable("company_settings", {
   id: serial("id").primaryKey(),
-  companyName: varchar("company_name", { length: 255 }).notNull().default("TicketFlow"),
+  companyName: varchar("company_name", { length: 255 })
+    .notNull()
+    .default("TicketFlow"),
   logoUrl: text("logo_url"),
   primaryColor: varchar("primary_color", { length: 7 }).default("#3b82f6"), // hex color
-  ticketPrefix: varchar("ticket_prefix", { length: 10 }).notNull().default("TKT"), // Configurable ticket prefix
+  ticketPrefix: varchar("ticket_prefix", { length: 10 })
+    .notNull()
+    .default("TKT"), // Configurable ticket prefix
+  defaultTicketPriority: varchar("default_ticket_priority", { length: 20 })
+    .notNull()
+    .default("medium"), // low, medium, high, urgent
+  autoCloseDays: integer("auto_close_days").default(7), // Days after resolved to auto-close (null = disabled)
+  timezone: varchar("timezone", { length: 50 }).default("UTC"), // Company timezone (e.g., 'America/New_York', 'Europe/London')
+  dateFormat: varchar("date_format", { length: 20 }).default("YYYY-MM-DD"), // Date display format
+  timeFormat: varchar("time_format", { length: 10 }).default("24h"), // '12h' or '24h'
+  maxFileUploadSize: integer("max_file_upload_size").default(10), // Maximum file upload size in MB
+  maintenanceMode: boolean("maintenance_mode").default(false), // System maintenance flag
   updatedBy: varchar("updated_by").references(() => users.id),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 // API keys for third-party integrations
-export const apiKeys = pgTable("api_keys", {
-  id: serial("id").primaryKey(),
-  userId: varchar("user_id").references(() => users.id).notNull(),
-  name: varchar("name", { length: 255 }).notNull(),
-  keyHash: varchar("key_hash", { length: 255 }).notNull(), // hashed API key
-  keyPrefix: varchar("key_prefix", { length: 10 }).notNull(), // first few chars for identification
-  permissions: text("permissions").array().default([]), // array of permission strings
-  lastUsedAt: timestamp("last_used_at"),
-  expiresAt: timestamp("expires_at"),
-  isActive: boolean("is_active").default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: serial("id").primaryKey(),
+    userId: varchar("user_id")
+      .references(() => users.id)
+      .notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    keyHash: varchar("key_hash", { length: 255 }).notNull(), // "sha256:" + hex of the key; never the key
+    keyPrefix: varchar("key_prefix", { length: 10 }).notNull(), // first few chars for identification
+    permissions: text("permissions").array().default([]), // array of permission strings
+    lastUsedAt: timestamp("last_used_at"),
+    expiresAt: timestamp("expires_at"),
+    isActive: boolean("is_active").default(true),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    // drizzle-kit push ignores a changed `where`: changing the predicate needs a NEW index name.
+    // Partial on purpose: `drizzle-kit push` applies this to databases that still
+    // hold legacy rows (key_hash = plaintext, possibly duplicated), and a full
+    // unique index would fail on them. Legacy values never start with "sha256:".
+    uniqueIndex("api_keys_key_hash_sha256_uniq")
+      .on(table.keyHash)
+      .where(sql`${table.keyHash} LIKE 'sha256:%'`),
+  ]
+);
 
-// SMTP settings for email notifications (also used for AWS SES)
-export const smtpSettings = pgTable("smtp_settings", {
+// AWS Bedrock settings for AI features (consolidated - includes credentials, cost limits, and AI settings)
+export const bedrockSettings = pgTable("bedrock_settings", {
   id: serial("id").primaryKey(),
-  // AWS SES settings
-  awsAccessKeyId: varchar("aws_access_key_id", { length: 255 }),
-  awsSecretAccessKey: varchar("aws_secret_access_key", { length: 255 }), // encrypted
-  awsRegion: varchar("aws_region", { length: 50 }).default("us-east-1"),
-  // AWS Bedrock settings (separate from SES)
+  // AWS Bedrock credentials
   bedrockAccessKeyId: varchar("bedrock_access_key_id", { length: 255 }),
   bedrockSecretAccessKey: varchar("bedrock_secret_access_key", { length: 255 }), // encrypted
   bedrockRegion: varchar("bedrock_region", { length: 50 }).default("us-east-1"),
-  bedrockModelId: varchar("bedrock_model_id", { length: 100 }).default("anthropic.claude-instant-v1"),
-  // SMTP settings (can be used as fallback) - nullable for AWS SES usage
-  host: varchar("host", { length: 255 }),
-  port: integer("port").default(587),
-  username: varchar("username", { length: 255 }),
-  password: varchar("password", { length: 255 }), // encrypted
-  fromEmail: varchar("from_email", { length: 255 }).notNull(),
-  fromName: varchar("from_name", { length: 255 }).notNull().default("TicketFlow"),
-  encryption: varchar("encryption", { length: 10 }).default("tls"), // tls, ssl, none
-  useAwsSes: boolean("use_aws_ses").default(true), // Toggle between AWS SES and SMTP
+  bedrockModelId: varchar("bedrock_model_id", { length: 100 }).default(
+    "amazon.titan-text-express-v1"
+  ),
+  // Cost Limits (from cost-limits.json)
+  dailyLimitUsd: decimal("daily_limit_usd", {
+    precision: 10,
+    scale: 2,
+  }).default("50.0"),
+  monthlyLimitUsd: decimal("monthly_limit_usd", {
+    precision: 10,
+    scale: 2,
+  }).default("100.0"),
+  maxTokensPerRequest: integer("max_tokens_per_request").default(3000),
+  // AI Settings - Auto-Response (from ai-settings.json)
+  autoResponseEnabled: boolean("auto_response_enabled").default(true),
+  confidenceThreshold: decimal("confidence_threshold", {
+    precision: 3,
+    scale: 2,
+  }).default("0.7"),
+  maxResponseLength: integer("max_response_length").default(1000),
+  responseTimeout: integer("response_timeout").default(30),
+  // AI Settings - Knowledge Base (from ai-settings.json)
+  autoLearnEnabled: boolean("auto_learn_enabled").default(true),
+  minResolutionScore: decimal("min_resolution_score", {
+    precision: 3,
+    scale: 2,
+  }).default("0.8"),
+  articleApprovalRequired: boolean("article_approval_required").default(true),
+  // AI Settings - Escalation (from ai-settings.json)
+  complexityThreshold: integer("complexity_threshold").default(70),
+  escalationEnabled: boolean("escalation_enabled").default(true),
+  escalationTeamId: integer("escalation_team_id").references(() => teams.id),
+  // AI Settings - Model Configuration (from ai-settings.json)
+  temperature: decimal("temperature", { precision: 3, scale: 2 }).default(
+    "0.3"
+  ),
+  maxTokens: integer("max_tokens").default(2000),
+  maxRequestsPerMinute: integer("max_requests_per_minute").default(20),
+  // Configuration metadata
   isActive: boolean("is_active").default(true),
   updatedBy: varchar("updated_by").references(() => users.id),
   updatedAt: timestamp("updated_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Multi-provider email configuration
+export const emailProviders = pgTable("email_providers", {
+  id: serial("id").primaryKey(),
+  // one active provider at a time
+  provider: varchar("provider", { length: 20 }) // mailtrap | aws-ses | smtp | mailgun | sendgrid | custom
+    .notNull()
+    .default("mailtrap"),
+  fromEmail: varchar("from_email", { length: 255 }).notNull(),
+  fromName: varchar("from_name", { length: 255 })
+    .notNull()
+    .default("TicketFlow"),
+  metadata: jsonb("metadata")
+    .$type<Record<string, any>>()
+    .notNull()
+    .default({}),
+  isActive: boolean("is_active").notNull().default(true),
+  updatedBy: varchar("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 // Email templates
@@ -230,10 +444,18 @@ export const usersRelations = relations(users, ({ many }) => ({
   createdTasks: many(tasks, { relationName: "taskCreator" }),
   assignedTasks: many(tasks, { relationName: "taskAssignee" }),
   teamMemberships: many(teamMembers),
+  teamAdmins: many(teamAdmins, { relationName: "teamAdminUser" }),
+  teamAdminGrantedBy: many(teamAdmins, { relationName: "teamAdminGrantedBy" }),
   comments: many(taskComments),
   history: many(taskHistory),
   attachments: many(taskAttachments),
   apiKeys: many(apiKeys),
+  assignedTaskAssignments: many(teamTaskAssignments, {
+    relationName: "assignedUser",
+  }),
+  assignedByTaskAssignments: many(teamTaskAssignments, {
+    relationName: "assignedByUser",
+  }),
 }));
 
 export const teamsRelations = relations(teams, ({ one, many }) => ({
@@ -241,8 +463,14 @@ export const teamsRelations = relations(teams, ({ one, many }) => ({
     fields: [teams.createdBy],
     references: [users.id],
   }),
+  department: one(departments, {
+    fields: [teams.departmentId],
+    references: [departments.id],
+  }),
   members: many(teamMembers),
+  admins: many(teamAdmins),
   assignedTasks: many(tasks, { relationName: "teamAssignedTasks" }),
+  taskAssignments: many(teamTaskAssignments),
 }));
 
 export const teamMembersRelations = relations(teamMembers, ({ one }) => ({
@@ -255,6 +483,47 @@ export const teamMembersRelations = relations(teamMembers, ({ one }) => ({
     references: [users.id],
   }),
 }));
+
+export const teamAdminsRelations = relations(teamAdmins, ({ one }) => ({
+  team: one(teams, {
+    fields: [teamAdmins.teamId],
+    references: [teams.id],
+  }),
+  user: one(users, {
+    fields: [teamAdmins.userId],
+    references: [users.id],
+    relationName: "teamAdminUser",
+  }),
+  grantedByUser: one(users, {
+    fields: [teamAdmins.grantedBy],
+    references: [users.id],
+    relationName: "teamAdminGrantedBy",
+  }),
+}));
+
+export const teamTaskAssignmentsRelations = relations(
+  teamTaskAssignments,
+  ({ one }) => ({
+    task: one(tasks, {
+      fields: [teamTaskAssignments.taskId],
+      references: [tasks.id],
+    }),
+    team: one(teams, {
+      fields: [teamTaskAssignments.teamId],
+      references: [teams.id],
+    }),
+    assignedUser: one(users, {
+      fields: [teamTaskAssignments.assignedUserId],
+      references: [users.id],
+      relationName: "assignedUser",
+    }),
+    assignedByUser: one(users, {
+      fields: [teamTaskAssignments.assignedBy],
+      references: [users.id],
+      relationName: "assignedByUser",
+    }),
+  })
+);
 
 export const tasksRelations = relations(tasks, ({ one, many }) => ({
   creator: one(users, {
@@ -275,6 +544,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   comments: many(taskComments),
   history: many(taskHistory),
   attachments: many(taskAttachments),
+  teamTaskAssignments: many(teamTaskAssignments),
 }));
 
 export const taskCommentsRelations = relations(taskComments, ({ one }) => ({
@@ -299,16 +569,19 @@ export const taskHistoryRelations = relations(taskHistory, ({ one }) => ({
   }),
 }));
 
-export const taskAttachmentsRelations = relations(taskAttachments, ({ one }) => ({
-  task: one(tasks, {
-    fields: [taskAttachments.taskId],
-    references: [tasks.id],
-  }),
-  user: one(users, {
-    fields: [taskAttachments.userId],
-    references: [users.id],
-  }),
-}));
+export const taskAttachmentsRelations = relations(
+  taskAttachments,
+  ({ one }) => ({
+    task: one(tasks, {
+      fields: [taskAttachments.taskId],
+      references: [tasks.id],
+    }),
+    user: one(users, {
+      fields: [taskAttachments.userId],
+      references: [users.id],
+    }),
+  })
+);
 
 export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
   user: one(users, {
@@ -318,15 +591,26 @@ export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
 }));
 
 // Zod schemas
-export const insertTaskSchema = createInsertSchema(tasks).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-}).extend({
-  assigneeId: z.string().nullable().optional(),
-  assigneeTeamId: z.number().nullable().optional(),
-  dueDate: z.string().datetime().nullable().optional().or(z.string().nullable().optional()),
-});
+export const insertTaskSchema = createInsertSchema(tasks)
+  .omit({
+    id: true,
+    ticketNumber: true, // server-generated
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    assigneeId: z.string().nullable().optional(),
+    assigneeTeamId: z.number().nullable().optional(),
+    // Enforced here and by the startup fixup, not by a column constraint:
+    // production applies the schema before the fixup runs.
+    assigneeType: z.enum(["user", "team"]).optional(),
+    dueDate: z
+      .string()
+      .datetime()
+      .nullable()
+      .optional()
+      .or(z.string().nullable().optional()),
+  });
 
 export const insertTeamSchema = createInsertSchema(teams).omit({
   id: true,
@@ -344,37 +628,42 @@ export const insertTeamMemberSchema = createInsertSchema(teamMembers).omit({
 });
 
 // Insert schemas for new tables
-export const insertTaskAttachmentSchema = createInsertSchema(taskAttachments).omit({
+export const insertTaskAttachmentSchema = createInsertSchema(
+  taskAttachments
+).omit({
   id: true,
   createdAt: true,
 });
 
-export const insertCompanySettingsSchema = createInsertSchema(companySettings).omit({
+export const insertCompanySettingsSchema = createInsertSchema(
+  companySettings
+).omit({
   id: true,
   updatedAt: true,
 });
 
-export const insertApiKeySchema = createInsertSchema(apiKeys).omit({
+export const insertBedrockSettingsSchema = createInsertSchema(
+  bedrockSettings
+).omit({
+  id: true,
+  updatedAt: true,
+  createdAt: true,
+});
+
+export const insertEmailProviderSchema = createInsertSchema(
+  emailProviders
+).omit({
   id: true,
   createdAt: true,
-  lastUsedAt: true,
-  keyHash: true,
-  keyPrefix: true,
-}).extend({
-  expiresAt: z.string().datetime().nullable().optional(),
-});
-
-export const insertSmtpSettingsSchema = createInsertSchema(smtpSettings).omit({
-  id: true,
   updatedAt: true,
 });
 
-export const insertEmailTemplateSchema = createInsertSchema(emailTemplates).omit({
+export const insertEmailTemplateSchema = createInsertSchema(
+  emailTemplates
+).omit({
   id: true,
   updatedAt: true,
 });
-
-
 
 // User insert schema
 export const insertUserSchema = createInsertSchema(users).omit({
@@ -388,6 +677,10 @@ export const insertUserSchema = createInsertSchema(users).omit({
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
+export type UserPreferences = typeof userPreferences.$inferSelect;
+export type InsertUserPreferences = typeof userPreferences.$inferInsert;
+export type EmailProvider = typeof emailProviders.$inferSelect;
+export type InsertEmailProvider = z.infer<typeof insertEmailProviderSchema>;
 
 // Help documentation table
 export const helpDocuments = pgTable("help_documents", {
@@ -395,10 +688,7 @@ export const helpDocuments = pgTable("help_documents", {
   title: varchar("title").notNull(),
   filename: varchar("filename").notNull(),
   content: text("content").notNull(), // Extracted text content for search
-  fileUrl: text("file_url").notNull(), // S3 URL to the file
-  s3Key: text("s3_key").notNull(), // S3 object key for management
-  fileSize: integer("file_size"), // File size in bytes
-  mimeType: varchar("mime_type", { length: 100 }), // MIME type
+  fileData: text("file_data").notNull(), // Base64 encoded file data
   uploadedBy: varchar("uploaded_by").references(() => users.id),
   category: varchar("category"),
   tags: text("tags").array(),
@@ -410,7 +700,9 @@ export const helpDocuments = pgTable("help_documents", {
 // AI Chat messages table
 export const aiChatMessages = pgTable("ai_chat_messages", {
   id: serial("id").primaryKey(),
-  userId: varchar("user_id").references(() => users.id).notNull(),
+  userId: varchar("user_id")
+    .references(() => users.id)
+    .notNull(),
   sessionId: varchar("session_id").notNull(), // Group messages by chat session
   role: varchar("role", { length: 20 }).notNull(), // 'user' or 'assistant'
   content: text("content").notNull(),
@@ -424,10 +716,12 @@ export const userInvitations = pgTable("user_invitations", {
   email: varchar("email").notNull(),
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
-  role: varchar("role", { length: 50 }).notNull().default("user"),
+  role: varchar("role", { length: 50 }).notNull().default("agent"),
   department: varchar("department", { length: 100 }),
   departmentId: integer("department_id").references(() => departments.id),
-  invitedBy: varchar("invited_by").references(() => users.id).notNull(),
+  invitedBy: varchar("invited_by")
+    .references(() => users.id)
+    .notNull(),
   invitationToken: varchar("invitation_token").unique().notNull(),
   status: varchar("status", { length: 20 }).notNull().default("pending"), // pending, accepted, expired
   expiresAt: timestamp("expires_at").notNull(),
@@ -438,7 +732,10 @@ export const userInvitations = pgTable("user_invitations", {
 // Microsoft Teams integration settings
 export const teamsIntegrationSettings = pgTable("teams_integration_settings", {
   id: serial("id").primaryKey(),
-  userId: varchar("user_id").references(() => users.id).notNull().unique(),
+  userId: varchar("user_id")
+    .references(() => users.id)
+    .notNull()
+    .unique(),
   enabled: boolean("enabled").default(false),
   teamId: varchar("team_id"),
   teamName: varchar("team_name"),
@@ -450,18 +747,36 @@ export const teamsIntegrationSettings = pgTable("teams_integration_settings", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-// Bedrock usage tracking
-export const bedrockUsage = pgTable("bedrock_usage", {
-  id: serial("id").primaryKey(),
-  userId: varchar("user_id").references(() => users.id).notNull(),
-  sessionId: varchar("session_id", { length: 255 }).notNull(),
-  inputTokens: integer("input_tokens").notNull(),
-  outputTokens: integer("output_tokens").notNull(),
-  totalTokens: integer("total_tokens").notNull(),
-  modelId: varchar("model_id", { length: 255 }).notNull(),
-  cost: decimal("cost", { precision: 10, scale: 6 }).notNull(), // Cost in USD
-  createdAt: timestamp("created_at").defaultNow(),
-});
+// AI usage tracking (from bedrock-usage.json)
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    id: serial("id").primaryKey(),
+    timestamp: timestamp("timestamp").notNull().defaultNow(),
+    modelId: varchar("model_id", { length: 255 }).notNull(),
+    inputTokens: integer("input_tokens").notNull(),
+    outputTokens: integer("output_tokens").notNull(),
+    estimatedCost: decimal("estimated_cost", {
+      precision: 10,
+      scale: 6,
+    }).notNull(),
+    operation: varchar("operation", { length: 100 }).notNull(),
+    userId: varchar("user_id").references(() => users.id),
+    ticketId: integer("ticket_id").references(() => tasks.id),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    index("idx_ai_usage_timestamp").on(table.timestamp),
+    index("idx_ai_usage_operation").on(table.operation),
+    index("idx_ai_usage_user_id").on(table.userId),
+    index("idx_ai_usage_ticket_id").on(table.ticketId),
+    index("idx_ai_usage_model_id").on(table.modelId),
+    index("idx_ai_usage_timestamp_operation").on(
+      table.timestamp,
+      table.operation
+    ),
+  ]
+);
 
 // FAQ cache for frequently asked questions
 export const faqCache = pgTable("faq_cache", {
@@ -481,12 +796,13 @@ export const companyPolicies = pgTable("company_policies", {
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description"),
   content: text("content"), // Extracted text content for search (nullable for binary files)
-  fileUrl: text("file_url").notNull(), // S3 URL to the file
-  s3Key: text("s3_key").notNull(), // S3 object key for management
+  fileData: text("file_data").notNull(), // Base64 encoded file data
   fileName: varchar("file_name", { length: 255 }).notNull(),
   fileSize: integer("file_size").notNull(),
   mimeType: varchar("mime_type", { length: 100 }).notNull(),
-  uploadedBy: varchar("uploaded_by").notNull().references(() => users.id),
+  uploadedBy: varchar("uploaded_by")
+    .notNull()
+    .references(() => users.id),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -504,15 +820,21 @@ export type TaskComment = typeof taskComments.$inferSelect;
 export type InsertTaskComment = z.infer<typeof insertTaskCommentSchema>;
 export type TeamMember = typeof teamMembers.$inferSelect;
 export type InsertTeamMember = z.infer<typeof insertTeamMemberSchema>;
+export type TeamAdmin = typeof teamAdmins.$inferSelect;
+export type InsertTeamAdmin = typeof teamAdmins.$inferInsert;
+export type TeamTaskAssignment = typeof teamTaskAssignments.$inferSelect;
+export type InsertTeamTaskAssignment = typeof teamTaskAssignments.$inferInsert;
 export type TaskHistory = typeof taskHistory.$inferSelect;
 export type TaskAttachment = typeof taskAttachments.$inferSelect;
 export type InsertTaskAttachment = z.infer<typeof insertTaskAttachmentSchema>;
 export type CompanySettings = typeof companySettings.$inferSelect;
 export type InsertCompanySettings = z.infer<typeof insertCompanySettingsSchema>;
 export type ApiKey = typeof apiKeys.$inferSelect;
-export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
-export type SmtpSettings = typeof smtpSettings.$inferSelect;
-export type InsertSmtpSettings = z.infer<typeof insertSmtpSettingsSchema>;
+// No zod insert schema on purpose: a key row is built by the server only
+// (server/services/auth/apiKeys.ts), never parsed from a request body.
+export type InsertApiKey = typeof apiKeys.$inferInsert;
+export type BedrockSettings = typeof bedrockSettings.$inferSelect;
+export type InsertBedrockSettings = z.infer<typeof insertBedrockSettingsSchema>;
 export type EmailTemplate = typeof emailTemplates.$inferSelect;
 export type InsertEmailTemplate = z.infer<typeof insertEmailTemplateSchema>;
 
@@ -529,7 +851,9 @@ export const userGuides = pgTable("user_guides", {
   tags: text("tags").array(), // For searchability
   isPublished: boolean("is_published").default(true),
   viewCount: integer("view_count").default(0),
-  createdBy: varchar("created_by").references(() => users.id).notNull(),
+  createdBy: varchar("created_by")
+    .references(() => users.id)
+    .notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -552,7 +876,9 @@ export const insertUserGuideSchema = createInsertSchema(userGuides).omit({
   updatedAt: true,
 });
 
-export const insertUserGuideCategorySchema = createInsertSchema(userGuideCategories).omit({
+export const insertUserGuideCategorySchema = createInsertSchema(
+  userGuideCategories
+).omit({
   id: true,
   createdAt: true,
 });
@@ -560,7 +886,9 @@ export const insertUserGuideCategorySchema = createInsertSchema(userGuideCategor
 export type UserGuide = typeof userGuides.$inferSelect;
 export type InsertUserGuide = z.infer<typeof insertUserGuideSchema>;
 export type UserGuideCategory = typeof userGuideCategories.$inferSelect;
-export type InsertUserGuideCategory = z.infer<typeof insertUserGuideCategorySchema>;
+export type InsertUserGuideCategory = z.infer<
+  typeof insertUserGuideCategorySchema
+>;
 
 // Department schemas and types
 export const insertDepartmentSchema = createInsertSchema(departments).omit({
@@ -573,57 +901,67 @@ export type Department = typeof departments.$inferSelect;
 export type InsertDepartment = z.infer<typeof insertDepartmentSchema>;
 
 // User invitation schemas and types
-export const insertUserInvitationSchema = createInsertSchema(userInvitations).omit({
-  id: true,
-  invitationToken: true,
-  acceptedAt: true,
-  createdAt: true,
-}).extend({
-  expiresAt: z.string().datetime(),
-});
+export const insertUserInvitationSchema = createInsertSchema(userInvitations)
+  .omit({
+    id: true,
+    invitationToken: true,
+    acceptedAt: true,
+    createdAt: true,
+  })
+  .extend({
+    expiresAt: z.string().datetime(),
+  });
 
 export type UserInvitation = typeof userInvitations.$inferSelect;
 export type InsertUserInvitation = z.infer<typeof insertUserInvitationSchema>;
 
 // Teams integration schemas and types
-export const insertTeamsIntegrationSettingsSchema = createInsertSchema(teamsIntegrationSettings).omit({
+export const insertTeamsIntegrationSettingsSchema = createInsertSchema(
+  teamsIntegrationSettings
+).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
 });
 
-export type TeamsIntegrationSettings = typeof teamsIntegrationSettings.$inferSelect;
-export type InsertTeamsIntegrationSettings = z.infer<typeof insertTeamsIntegrationSettingsSchema>;
+export type TeamsIntegrationSettings =
+  typeof teamsIntegrationSettings.$inferSelect;
+export type InsertTeamsIntegrationSettings = z.infer<
+  typeof insertTeamsIntegrationSettingsSchema
+>;
 
 // SSO Configuration table for storing Microsoft 365 SSO settings
-export const ssoConfiguration = pgTable('sso_configuration', {
-  id: serial('id').primaryKey(),
-  clientId: varchar('client_id'),
-  clientSecret: varchar('client_secret'),
-  tenantId: varchar('tenant_id'),
-  updatedBy: varchar('updated_by').references(() => users.id),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow(),
+export const ssoConfiguration = pgTable("sso_configuration", {
+  id: serial("id").primaryKey(),
+  clientId: varchar("client_id"),
+  clientSecret: varchar("client_secret"),
+  tenantId: varchar("tenant_id"),
+  updatedBy: varchar("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 // SSO configuration schemas and types
-export const insertSsoConfigurationSchema = createInsertSchema(ssoConfiguration).omit({
+export const insertSsoConfigurationSchema = createInsertSchema(
+  ssoConfiguration
+).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
 });
 
 export type SsoConfiguration = typeof ssoConfiguration.$inferSelect;
-export type InsertSsoConfiguration = z.infer<typeof insertSsoConfigurationSchema>;
+export type InsertSsoConfiguration = z.infer<
+  typeof insertSsoConfigurationSchema
+>;
 
-// Bedrock usage schemas and types
-export const insertBedrockUsageSchema = createInsertSchema(bedrockUsage).omit({
+// AI usage schemas and types
+export const insertAIUsageSchema = createInsertSchema(aiUsage).omit({
   id: true,
   createdAt: true,
 });
-
-export type BedrockUsage = typeof bedrockUsage.$inferSelect;
-export type InsertBedrockUsage = z.infer<typeof insertBedrockUsageSchema>;
+export type AIUsage = typeof aiUsage.$inferSelect;
+export type InsertAIUsage = z.infer<typeof insertAIUsageSchema>;
 
 // FAQ cache schemas and types
 export const insertFaqCacheSchema = createInsertSchema(faqCache).omit({
@@ -637,7 +975,9 @@ export type FaqCache = typeof faqCache.$inferSelect;
 export type InsertFaqCache = z.infer<typeof insertFaqCacheSchema>;
 
 // Company Policy schemas and types
-export const insertCompanyPolicySchema = createInsertSchema(companyPolicies).omit({
+export const insertCompanyPolicySchema = createInsertSchema(
+  companyPolicies
+).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
@@ -649,9 +989,14 @@ export type CompanyPolicy = typeof companyPolicies.$inferSelect;
 // AI Auto-response system tables for smart helpdesk
 export const ticketAutoResponses = pgTable("ticket_auto_responses", {
   id: serial("id").primaryKey(),
-  ticketId: integer("ticket_id").references(() => tasks.id).notNull(),
+  ticketId: integer("ticket_id")
+    .references(() => tasks.id)
+    .notNull(),
   aiResponse: text("ai_response").notNull(),
-  confidenceScore: decimal("confidence_score", { precision: 3, scale: 2 }).notNull(),
+  confidenceScore: decimal("confidence_score", {
+    precision: 3,
+    scale: 2,
+  }).notNull(),
   wasHelpful: boolean("was_helpful"),
   wasApplied: boolean("was_applied").default(false),
   respondedBy: varchar("responded_by").references(() => users.id),
@@ -668,8 +1013,20 @@ export const knowledgeArticles = pgTable("knowledge_articles", {
   category: varchar("category", { length: 100 }),
   tags: varchar("tags", { length: 100 }).array(),
   usageCount: integer("usage_count").default(0),
-  effectivenessScore: decimal("effectiveness_score", { precision: 3, scale: 2 }),
+  effectivenessScore: decimal("effectiveness_score", {
+    precision: 3,
+    scale: 2,
+  }),
+  // Deprecated in favor of status; kept for backward compatibility
   isPublished: boolean("is_published").default(false),
+  // New lifecycle/status fields
+  status: varchar("status", { length: 20 }).default("draft"), // draft, published, archived
+  source: varchar("source", { length: 20 }).default("manual"), // manual, ai_generated
+  viewCount: integer("view_count").default(0),
+  helpfulVotes: integer("helpful_votes").default(0),
+  unhelpfulVotes: integer("unhelpful_votes").default(0),
+  archivedAt: timestamp("archived_at"),
+  lastUsed: timestamp("last_used"),
   createdBy: varchar("created_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -678,9 +1035,14 @@ export const knowledgeArticles = pgTable("knowledge_articles", {
 // Knowledge article embeddings for semantic search
 export const knowledgeEmbeddings = pgTable("knowledge_embeddings", {
   id: serial("id").primaryKey(),
-  articleId: integer("article_id").references(() => knowledgeArticles.id).notNull().unique(),
+  articleId: integer("article_id")
+    .references(() => knowledgeArticles.id)
+    .notNull()
+    .unique(),
   embedding: jsonb("embedding").notNull(), // Store vector as JSON array
-  embeddingModel: varchar("embedding_model", { length: 100 }).default("amazon.titan-embed-text-v1"),
+  embeddingModel: varchar("embedding_model", { length: 100 }).default(
+    "amazon.titan-embed-text-v1"
+  ),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -689,7 +1051,9 @@ export const aiFeedback = pgTable("ai_feedback", {
   id: serial("id").primaryKey(),
   feedbackType: varchar("feedback_type", { length: 50 }).notNull(), // 'auto_response', 'knowledge_article'
   referenceId: integer("reference_id").notNull(), // ID of the auto_response or knowledge_article
-  userId: varchar("user_id").references(() => users.id).notNull(),
+  userId: varchar("user_id")
+    .references(() => users.id)
+    .notNull(),
   rating: integer("rating").notNull(), // 1 (thumbs down) or 5 (thumbs up)
   comment: text("comment"),
   ticketId: integer("ticket_id").references(() => tasks.id),
@@ -711,7 +1075,9 @@ export const resolutionPatterns = pgTable("resolution_patterns", {
 // Knowledge base learning queue for batch processing
 export const learningQueue = pgTable("learning_queue", {
   id: serial("id").primaryKey(),
-  ticketId: integer("ticket_id").references(() => tasks.id).notNull(),
+  ticketId: integer("ticket_id")
+    .references(() => tasks.id)
+    .notNull(),
   processStatus: varchar("process_status", { length: 50 }).default("pending"), // pending, processing, completed, failed
   processingAttempts: integer("processing_attempts").default(0),
   processedAt: timestamp("processed_at"),
@@ -737,7 +1103,10 @@ export const escalationRules = pgTable("escalation_rules", {
 // Ticket complexity scores
 export const ticketComplexityScores = pgTable("ticket_complexity_scores", {
   id: serial("id").primaryKey(),
-  ticketId: integer("ticket_id").references(() => tasks.id).notNull().unique(),
+  ticketId: integer("ticket_id")
+    .references(() => tasks.id)
+    .notNull()
+    .unique(),
   complexityScore: integer("complexity_score").notNull(), // 0-100
   factors: jsonb("factors").notNull(), // Breakdown of complexity factors
   aiAnalysis: text("ai_analysis"),
@@ -745,40 +1114,75 @@ export const ticketComplexityScores = pgTable("ticket_complexity_scores", {
 });
 
 // Schemas for new smart helpdesk tables
-export const insertTicketAutoResponseSchema = createInsertSchema(ticketAutoResponses).omit({
+export const insertTicketAutoResponseSchema = createInsertSchema(
+  ticketAutoResponses
+).omit({
   id: true,
   createdAt: true,
 });
 
-export const insertKnowledgeArticleSchema = createInsertSchema(knowledgeArticles).omit({
+export const insertKnowledgeArticleSchema = createInsertSchema(
+  knowledgeArticles
+).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
   usageCount: true,
 });
 
-export const insertEscalationRuleSchema = createInsertSchema(escalationRules).omit({
+export const insertEscalationRuleSchema = createInsertSchema(
+  escalationRules
+).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
 });
 
-export const insertTicketComplexityScoreSchema = createInsertSchema(ticketComplexityScores).omit({
+export const insertTicketComplexityScoreSchema = createInsertSchema(
+  ticketComplexityScores
+).omit({
   id: true,
   calculatedAt: true,
 });
 
+// User notifications table (optional persistence for in-app notifications)
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id),
+  title: varchar("title", { length: 255 }).notNull(),
+  content: text("content").notNull(),
+  type: varchar("type", { length: 50 }).notNull(), // task_assigned, comment_added, system
+  relatedTaskId: integer("related_task_id"),
+  isRead: boolean("is_read").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Types for new smart helpdesk tables
 export type TicketAutoResponse = typeof ticketAutoResponses.$inferSelect;
-export type InsertTicketAutoResponse = z.infer<typeof insertTicketAutoResponseSchema>;
+export type InsertTicketAutoResponse = z.infer<
+  typeof insertTicketAutoResponseSchema
+>;
 export type KnowledgeArticle = typeof knowledgeArticles.$inferSelect;
-export type InsertKnowledgeArticle = z.infer<typeof insertKnowledgeArticleSchema>;
+export type InsertKnowledgeArticle = z.infer<
+  typeof insertKnowledgeArticleSchema
+>;
 export type EscalationRule = typeof escalationRules.$inferSelect;
 export type InsertEscalationRule = z.infer<typeof insertEscalationRuleSchema>;
 export type TicketComplexityScore = typeof ticketComplexityScores.$inferSelect;
-export type InsertTicketComplexityScore = z.infer<typeof insertTicketComplexityScoreSchema>;
+export type InsertTicketComplexityScore = z.infer<
+  typeof insertTicketComplexityScoreSchema
+>;
 
-export const insertKnowledgeEmbeddingSchema = createInsertSchema(knowledgeEmbeddings).omit({
+export const insertNotificationSchema = createInsertSchema(notifications).omit({
+  id: true,
+  createdAt: true,
+});
+export type Notification = typeof notifications.$inferSelect;
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+
+export const insertKnowledgeEmbeddingSchema = createInsertSchema(
+  knowledgeEmbeddings
+).omit({
   id: true,
   createdAt: true,
 });
@@ -788,24 +1192,32 @@ export const insertAiFeedbackSchema = createInsertSchema(aiFeedback).omit({
   createdAt: true,
 });
 
-export const insertResolutionPatternSchema = createInsertSchema(resolutionPatterns).omit({
+export const insertResolutionPatternSchema = createInsertSchema(
+  resolutionPatterns
+).omit({
   id: true,
   extractedAt: true,
   lastUsed: true,
 });
 
-export const insertLearningQueueSchema = createInsertSchema(learningQueue).omit({
-  id: true,
-  createdAt: true,
-  processedAt: true,
-});
+export const insertLearningQueueSchema = createInsertSchema(learningQueue).omit(
+  {
+    id: true,
+    createdAt: true,
+    processedAt: true,
+  }
+);
 
 // Types for knowledge base tables (removed duplicates)
 export type KnowledgeEmbedding = typeof knowledgeEmbeddings.$inferSelect;
-export type InsertKnowledgeEmbedding = z.infer<typeof insertKnowledgeEmbeddingSchema>;
+export type InsertKnowledgeEmbedding = z.infer<
+  typeof insertKnowledgeEmbeddingSchema
+>;
 export type AiFeedback = typeof aiFeedback.$inferSelect;
 export type InsertAiFeedback = z.infer<typeof insertAiFeedbackSchema>;
 export type ResolutionPattern = typeof resolutionPatterns.$inferSelect;
-export type InsertResolutionPattern = z.infer<typeof insertResolutionPatternSchema>;
+export type InsertResolutionPattern = z.infer<
+  typeof insertResolutionPatternSchema
+>;
 export type LearningQueue = typeof learningQueue.$inferSelect;
 export type InsertLearningQueue = z.infer<typeof insertLearningQueueSchema>;

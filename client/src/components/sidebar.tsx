@@ -1,48 +1,18 @@
-import React from "react";
-import { Link, useLocation } from "wouter";
-import { cn } from "@/lib/utils";
-import { useAuth } from "@/hooks/useAuth";
-import { useQuery } from "@tanstack/react-query";
-import {
-  LayoutDashboard,
-  CheckSquare,
-  Users,
-  Shield,
-  LogOut,
-  TicketIcon,
-  UserCircle,
-  FolderOpen,
-  Settings,
-  BookOpen,
-  MessageSquare,
-  Mail,
-  Brain,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { useAuth } from "@/hooks/useAuth";
+import { cn } from "@/lib/utils";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-
-const SignOutButton = React.forwardRef<HTMLButtonElement>((props, ref) => {
-  const { logout, isLoggingOut } = useAuth();
-  
-  return (
-    <Button
-      ref={ref}
-      variant="ghost"
-      className="w-full justify-start"
-      onClick={logout}
-      disabled={isLoggingOut}
-      {...props}
-    >
-      <LogOut className="mr-3 h-4 w-4" />
-      {isLoggingOut ? "Signing Out..." : "Sign Out"}
-    </Button>
-  );
-});
+  BookOpen,
+  Brain,
+  Building,
+  FolderOpen,
+  LayoutDashboard,
+  Plug,
+  Settings,
+  Users,
+} from "lucide-react";
+import { Link, useLocation } from "wouter";
+import { useTranslation } from "react-i18next";
 
 interface SidebarProps {
   className?: string;
@@ -51,55 +21,95 @@ interface SidebarProps {
 export function Sidebar({ className }: SidebarProps) {
   const [location] = useLocation();
   const { user } = useAuth();
-  
-  const { data: companySettings } = useQuery({
-    queryKey: ["/api/company-settings"],
-  });
+  const { t } = useTranslation("navigation");
 
-  const navigation = (user as any)?.role === 'customer' 
-    ? [
-        { name: "Dashboard", href: "/", icon: LayoutDashboard },
-        { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
-      ]
-    : [
-        { name: "Dashboard", href: "/", icon: LayoutDashboard },
-        { name: "All Tickets", href: "/tasks", icon: FolderOpen },
-        { name: "My Tickets", href: "/my-tasks", icon: CheckSquare },
-        { name: "Teams", href: "/teams", icon: Users },
-        { name: "Knowledge Base", href: "/knowledge-base", icon: BookOpen },
+  const navigation = (() => {
+    const role = (user as any)?.role;
+    if (role === "admin") {
+      return [
+        { name: t("dashboard"), href: "/", icon: LayoutDashboard },
+        { name: t("tickets"), href: "/tickets", icon: FolderOpen },
+        { name: t("knowledge_base"), href: "/knowledge-base", icon: BookOpen },
+        { name: t("departments"), href: "/departments", icon: Building },
       ];
+    }
+    if (role === "manager") {
+      return [
+        { name: t("tickets"), href: "/", icon: FolderOpen },
+        { name: t("departments"), href: "/departments", icon: Building },
+        { name: t("teams"), href: "/teams", icon: Users },
+      ];
+    }
+    if (role === "agent") {
+      return [
+        { name: t("tickets"), href: "/", icon: FolderOpen },
+        { name: t("teams"), href: "/teams", icon: Users },
+      ];
+    }
 
-  const adminNavigation = [
-    { name: "Admin Panel", href: "/admin", icon: Shield },
-    { name: "Invitations", href: "/admin/invitations", icon: Mail },
-    { name: "AI Settings", href: "/ai-settings", icon: Brain },
-  ];
+    return [{ name: t("tickets"), href: "/", icon: FolderOpen }];
+  })();
 
-  const bottomNavigation = [
-    { name: "User Guides", href: "/guides", icon: BookOpen },
-    { name: "Teams Integration", href: "/teams-integration", icon: MessageSquare },
-    { name: "Settings", href: "/settings", icon: Settings },
-  ];
+  const adminGroups = [
+    {
+      titleKey: "management_title",
+      icon: Users,
+      hrefBase: "/admin",
+      section: "management",
+      items: ["users", "invitations", "teams"],
+    },
+    {
+      titleKey: "configuration_title",
+      icon: Settings,
+      hrefBase: "/admin",
+      section: "configuration",
+      items: ["company-console", "ai-settings"],
+    },
+    {
+      titleKey: "analytics_title",
+      icon: Brain,
+      hrefBase: "/admin",
+      section: "analytics",
+      items: ["ai-analytics", "learning-queue"],
+    },
+    {
+      titleKey: "content_title",
+      icon: BookOpen,
+      hrefBase: "/admin",
+      section: "content",
+      items: ["help", "policies", "guidelines"],
+    },
+    {
+      titleKey: "integrations_title",
+      icon: Plug,
+      hrefBase: "/admin",
+      section: "integrations",
+      items: ["sso", "ms-teams-integration", "developer-resources"],
+    },
+  ] as const;
+
+  // items are already tab keys; no mapping needed
+
+  const itemAllowed: Record<string, Array<string>> = {
+    users: ["admin"],
+    invitations: ["admin"],
+    teams: ["admin"],
+    "company-console": ["admin"],
+    "developer-resources": ["admin"],
+    "ai-settings": ["admin"],
+    "ai-analytics": ["admin", "manager"],
+    "learning-queue": ["admin", "manager"],
+    help: ["admin", "manager"],
+    policies: ["admin", "manager"],
+    guidelines: ["admin", "manager"],
+    sso: ["admin"],
+    "ms-teams-integration": ["admin"],
+  };
 
   return (
-    <div className={cn("flex h-full w-64 flex-col border-r bg-background", className)}>
-      <div className="flex h-16 items-center px-6 border-b gradient-business-subtle">
-        <Link href="/">
-          <div className="flex items-center gap-2 font-semibold text-lg cursor-pointer">
-            {(companySettings as any)?.logoUrl ? (
-              <img 
-                src={(companySettings as any).logoUrl} 
-                alt={(companySettings as any).companyName || "Company Logo"}
-                className="h-8 w-auto object-contain max-w-[120px]"
-              />
-            ) : (
-              <TicketIcon className="h-6 w-6 text-primary" />
-            )}
-            <span className="text-foreground">{(companySettings as any)?.companyName || "TicketFlow"}</span>
-          </div>
-        </Link>
-      </div>
-      
+    <div
+      className={cn("flex h-full w-64 flex-col border-r bg-muted", className)}
+    >
       <div className="flex-1 overflow-y-auto py-4">
         <nav className="space-y-1 px-3">
           {navigation.map((item) => {
@@ -120,85 +130,46 @@ export function Sidebar({ className }: SidebarProps) {
               </Link>
             );
           })}
-          
-          {(user as any)?.role === "admin" && (
+
+          {(["admin"] as const).includes((user as any)?.role) && (
             <>
               <Separator className="my-4" />
-              <div className="px-3 pb-2">
-                <h3 className="mb-1 text-xs font-semibold text-muted-foreground uppercase">
-                  Administration
-                </h3>
-              </div>
-              {adminNavigation.map((item) => {
-                const isActive = location === item.href;
-                return (
-                  <Link key={item.name} href={item.href}>
-                    <div
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
-                        isActive
-                          ? "bg-primary text-primary-foreground"
-                          : "hover:bg-accent hover:text-accent-foreground"
-                      )}
-                    >
-                      <item.icon className="h-4 w-4" />
-                      {item.name}
-                    </div>
-                  </Link>
-                );
-              })}
+              {adminGroups.map((group) => (
+                <div key={group.section} className="px-3 pt-4 pb-2">
+                  <h3 className="mb-2 text-xs font-semibold text-muted-foreground uppercase flex items-center gap-3 line-clamp-1">
+                    <group.icon className="h-4 w-4" />
+                    {t(group.titleKey)}
+                  </h3>
+                  <div className="space-y-1">
+                    {group.items
+                      .filter((tabKey) =>
+                        itemAllowed[tabKey]?.includes((user as any)?.role)
+                      )
+                      .map((tabKey) => {
+                        const href = `${group.hrefBase}/${tabKey}?section=${group.section}`;
+                        const isActive = location.startsWith(
+                          href.split("?")[0]
+                        );
+                        return (
+                          <Link
+                            key={tabKey}
+                            href={href}
+                            className={cn(
+                              "flex items-center gap-3 rounded-lg px-4 py-1 text-sm font-medium transition-colors cursor-pointer line-clamp-1",
+                              isActive
+                                ? "bg-primary text-primary-foreground"
+                                : "hover:bg-accent hover:text-accent-foreground"
+                            )}
+                          >
+                            {t(tabKey)}
+                          </Link>
+                        );
+                      })}
+                  </div>
+                </div>
+              ))}
             </>
           )}
-        </nav>
-      </div>
-      
-      <div className="border-t p-4">
-        <div className="flex items-center gap-3 px-2 mb-4">
-          {(user as any)?.profileImageUrl ? (
-            <img
-              src={(user as any).profileImageUrl}
-              alt={(user as any).firstName || "User"}
-              className="h-8 w-8 rounded-full object-cover"
-            />
-          ) : (
-            <UserCircle className="h-8 w-8 text-muted-foreground" />
-          )}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">
-              {(user as any)?.firstName} {(user as any)?.lastName}
-            </p>
-            <p className="text-xs text-muted-foreground truncate">
-              {(user as any)?.email}
-            </p>
-          </div>
-        </div>
-        
-        <nav className="space-y-1">
-          {bottomNavigation.map((item) => {
-            const isActive = location === item.href;
-            return (
-              <Link key={item.name} href={item.href}>
-                <div
-                  className={cn(
-                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors cursor-pointer",
-                    isActive
-                      ? "bg-primary text-primary-foreground"
-                      : "hover:bg-accent hover:text-accent-foreground"
-                  )}
-                >
-                  <item.icon className="h-4 w-4" />
-                  {item.name}
-                </div>
-              </Link>
-            );
-          })}
-          
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <SignOutButton />
-            </TooltipTrigger>
-            <TooltipContent>Sign out of your account</TooltipContent>
-          </Tooltip>
         </nav>
       </div>
     </div>

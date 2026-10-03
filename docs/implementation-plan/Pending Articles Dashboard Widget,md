@@ -1,0 +1,138 @@
+# Pending Articles Dashboard Widget Implementation
+
+## Overview
+
+Add a dashboard widget showing the count of pending knowledge articles (draft status) awaiting approval. Reorganize dashboard cards into two rows as specified and make the pending articles card clickable to navigate to the knowledge base with draft filter.
+
+## Implementation Steps
+
+### 1. Update Server Stats Endpoint
+
+**File**: `server/storage/index.ts`
+
+- Update `getAdminStats()` method (around line 1033) to include:
+  - `totalDepartments`: Count of all departments from `departments` table
+  - `totalTickets`: Count of all tickets from `tasks` table
+  - `pendingArticles`: Count of draft articles where `status='draft'` OR `isPublished=false`
+- Query example for pending articles:
+  ```typescript
+  const [pendingArticlesCount] = await db
+    .select({ count: count() })
+    .from(knowledgeArticles)
+    .where(
+      or(
+        eq(knowledgeArticles.status, "draft"),
+        eq(knowledgeArticles.isPublished, false)
+      )
+    );
+  ```
+
+
+### 2. Update Dashboard UI - First Row
+
+**File**: `client/src/pages/dashboard.tsx`
+
+- Reorganize first row (around line 119) to show 4 cards:
+
+  1. Total Users (existing)
+  2. Total Departments (new - use `systemStats.totalDepartments`)
+  3. Total Teams (existing)
+  4. Total Tickets (new - use `systemStats.totalTickets`)
+
+- Add icon for Total Departments (use `Building` or `Briefcase` from lucide-react)
+- Add icon for Total Tickets (use `Ticket` or `FileText` from lucide-react)
+
+### 3. Update Dashboard UI - Second Row
+
+**File**: `client/src/pages/dashboard.tsx`
+
+- Reorganize second row (around line 198) to show 5 cards:
+
+  1. Open/In Progress/Completed (existing StatsCard with combined count or separate)
+  2. High Priority (new or existing)
+  3. Urgent Priority (existing from systemStats.urgentTickets)
+  4. Average Resolution Time (move from first row, use `systemStats.avgResolutionTime`)
+  5. Pending Articles (new card - use `systemStats.pendingArticles`)
+
+- Make Pending Articles card clickable to navigate to `/knowledge-base?status=draft`
+- Add icon for Pending Articles (use `FileCheck`, `FileText`, or `Clock` from lucide-react)
+- Style with appropriate color (e.g., amber/orange to indicate pending status)
+
+### 4. Add Navigation to Knowledge Base
+
+**File**: `client/src/pages/dashboard.tsx`
+
+- Import `useLocation` from `wouter` (if not already imported)
+- Add click handler for pending articles card:
+  ```typescript
+  onClick={() => {
+    window.location.href = "/knowledge-base?status=draft";
+  }}
+  ```
+
+- Or use `setLocation("/knowledge-base?status=draft")` if using wouter navigation
+
+### 5. Update Knowledge Base Page to Handle Query Parameter
+
+**File**: `client/src/pages/knowledge-base.tsx`
+
+- Add useEffect to read `status` query parameter from URL (around line 104)
+- If `status=draft` is present, set `statusFilter` to "draft" on component mount
+- Example:
+  ```typescript
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const statusParam = params.get("status");
+    if (statusParam === "draft") {
+      setStatusFilter("draft");
+    }
+  }, []);
+  ```
+
+
+### 6. Add Translation Keys
+
+**Files**:
+
+- `client/src/locales/en/dashboard.json`
+- `client/src/locales/es/dashboard.json` (if exists)
+- Add keys:
+  - `"totalDepartments": "Total Departments"`
+  - `"totalTickets": "Total Tickets"`
+  - `"pendingArticles": "Pending Articles"`
+  - `"pendingArticlesSubtitle": "Awaiting approval"` or similar
+
+### 7. Update TypeScript Types
+
+**File**: `server/storage/index.ts`
+
+- Update return type of `getAdminStats()` to include:
+  ```typescript
+  {
+    totalUsers: number;
+    activeUsers: number;
+    totalDepartments: number;  // new
+    totalTeams: number;
+    totalTickets: number;  // new
+    openTickets: number;
+    urgentTickets: number;
+    avgResolutionTime: number | null;
+    pendingArticles: number;  // new
+  }
+  ```
+
+
+## Files to Modify
+
+1. `server/storage/index.ts` - Add stats calculations
+2. `client/src/pages/dashboard.tsx` - Reorganize cards and add pending articles widget
+3. `client/src/pages/knowledge-base.tsx` - Handle status query parameter
+4. `client/src/locales/en/dashboard.json` - Add translation keys
+
+## Testing Considerations
+
+- Verify pending articles count matches actual draft articles in database
+- Test navigation from dashboard card to knowledge base with draft filter
+- Verify all dashboard cards display correct data
+- Test with empty state (0 pending articles)
+- Verify responsive layout on mobile devices

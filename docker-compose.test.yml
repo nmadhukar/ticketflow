@@ -1,0 +1,21 @@
+# Throwaway Postgres for the integration test suite. Data lives in tmpfs, so
+# `npm run test:db:down` leaves nothing behind.
+# Host port is 55433 (55432 is commonly taken by other local databases).
+name: ticketflow-test
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    ports:
+      - "55433:5432"
+    environment:
+      POSTGRES_DB: ticketflow_test
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d ticketflow_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

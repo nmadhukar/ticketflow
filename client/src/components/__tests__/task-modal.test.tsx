@@ -1,228 +1,152 @@
-import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { TaskModal } from '../task-modal';
-import { vi } from 'vitest';
+import React from "react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import TaskModal from "../task-modal";
 
-// Mock API calls
-const mockMutate = vi.fn();
-vi.mock('@tanstack/react-query', () => ({
-  ...vi.importActual('@tanstack/react-query'),
-  useMutation: () => ({
-    mutate: mockMutate,
-    isPending: false,
-  }),
-  useQuery: () => ({
-    data: [],
-    isLoading: false,
-  }),
+const mockApiRequest = jest.fn();
+const mockToast = jest.fn();
+
+jest.mock("@/lib/queryClient", () => ({
+  apiRequest: (...args: unknown[]) => mockApiRequest(...args),
 }));
+jest.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: mockToast }) }));
+jest.mock("@/hooks/useAuth", () => ({
+  useAuth: () => ({ user: { id: "u1", role: "admin" }, isAuthenticated: true }),
+}));
+// Translation keys are asserted as-is; no i18n bootstrap needed.
+jest.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+}));
+// Radix Select needs pointer-event APIs jsdom lacks; a native select keeps the
+// modal's own logic (value, onValueChange) under test.
+jest.mock("@/components/ui/select", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, no-useless-assignment -- jest.mock factories are hoisted above imports; React is needed by the JSX below
+  const React = require("react");
+  return {
+    Select: ({ value, onValueChange, children }: any) => (
+      <select value={value} onChange={(e) => onValueChange(e.target.value)}>
+        {children}
+      </select>
+    ),
+    SelectTrigger: () => null,
+    SelectValue: () => null,
+    SelectContent: ({ children }: any) => <>{children}</>,
+    SelectItem: ({ value }: any) => <option value={value}>{value}</option>,
+  };
+});
 
-const createWrapper = () => {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-    },
-  });
-  
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>
-      {children}
-    </QueryClientProvider>
-  );
+const META = {
+  departments: [],
+  teams: [],
+  assignableUsers: [],
+  categories: ["bug", "support"],
+  priorities: ["low", "medium", "high"],
+  permissions: {},
 };
 
-describe('TaskModal Component', () => {
-  const defaultProps = {
-    open: true,
-    onOpenChange: vi.fn(),
-    mode: 'create' as const,
-  };
+function json(body: unknown) {
+  return { json: async () => body };
+}
 
+function renderModal(props: Partial<React.ComponentProps<typeof TaskModal>> = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const onClose = jest.fn();
+  render(
+    <QueryClientProvider client={client}>
+      <TaskModal isOpen onClose={onClose} {...props} />
+    </QueryClientProvider>
+  );
+  return { onClose };
+}
+
+describe("TaskModal", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('should render create mode correctly', () => {
-    render(
-      <TaskModal {...defaultProps} />,
-      { wrapper: createWrapper() }
-    );
-
-    expect(screen.getByText('Create New Ticket')).toBeInTheDocument();
-    expect(screen.getByLabelText('Title')).toBeInTheDocument();
-    expect(screen.getByLabelText('Description')).toBeInTheDocument();
-    expect(screen.getByText('Create Ticket')).toBeInTheDocument();
-  });
-
-  it('should render edit mode correctly', () => {
-    const task = {
-      id: 1,
-      ticketNumber: 'TKT-2024-0001',
-      title: 'Test Ticket',
-      description: 'Test Description',
-      status: 'open' as const,
-      priority: 'medium' as const,
-      severity: 'normal' as const,
-      category: 'bug' as const,
-    };
-
-    render(
-      <TaskModal {...defaultProps} mode="edit" task={task} />,
-      { wrapper: createWrapper() }
-    );
-
-    expect(screen.getByText('Edit Ticket TKT-2024-0001')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Test Ticket')).toBeInTheDocument();
-    expect(screen.getByText('Save Changes')).toBeInTheDocument();
-  });
-
-  it('should validate required fields', async () => {
-    const user = userEvent.setup();
-    render(
-      <TaskModal {...defaultProps} />,
-      { wrapper: createWrapper() }
-    );
-
-    // Try to submit without filling required fields
-    const submitButton = screen.getByText('Create Ticket');
-    await user.click(submitButton);
-
-    // Should show validation errors
-    await waitFor(() => {
-      expect(screen.getByText(/title is required/i)).toBeInTheDocument();
+    jest.clearAllMocks();
+    mockApiRequest.mockImplementation(async (method: string, url: string) => {
+      if (method === "GET" && url === "/api/tickets/meta") return json(META);
+      if (method === "POST" && url === "/api/tasks") return json({ id: 1, ticketNumber: "TKT-1" });
+      throw new Error(`unexpected ${method} ${url}`);
     });
   });
 
-  it('should handle form submission', async () => {
-    const user = userEvent.setup();
-    render(
-      <TaskModal {...defaultProps} />,
-      { wrapper: createWrapper() }
-    );
+  it("renders the create form when open", async () => {
+    renderModal();
 
-    // Fill in the form
-    await user.type(screen.getByLabelText('Title'), 'New Bug Report');
-    await user.type(screen.getByLabelText('Description'), 'Description of the bug');
-    
-    // Select priority
-    const priorityButton = screen.getByRole('combobox', { name: /priority/i });
-    await user.click(priorityButton);
-    await user.click(screen.getByText('High'));
-
-    // Submit form
-    await user.click(screen.getByText('Create Ticket'));
-
-    // Check that mutation was called
-    expect(mockMutate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        title: 'New Bug Report',
-        description: 'Description of the bug',
-        priority: 'high',
-      })
-    );
+    expect(screen.getByText("tickets:modal.createTitle")).toBeInTheDocument();
+    expect(screen.getByLabelText("tickets:modal.fields.taskTitle")).toBeInTheDocument();
+    expect(screen.getByLabelText("tickets:modal.fields.description")).toBeInTheDocument();
+    expect(screen.getByText("tickets:modal.buttons.create")).toBeInTheDocument();
+    await waitFor(() => expect(mockApiRequest).toHaveBeenCalledWith("GET", "/api/tickets/meta"));
   });
 
-  it('should switch between tabs', async () => {
-    const user = userEvent.setup();
-    const task = {
-      id: 1,
-      ticketNumber: 'TKT-2024-0001',
-      title: 'Test Ticket',
-      description: 'Test Description',
-      status: 'open' as const,
-      priority: 'medium' as const,
-      severity: 'normal' as const,
-      category: 'bug' as const,
-    };
-
-    render(
-      <TaskModal {...defaultProps} mode="view" task={task} />,
-      { wrapper: createWrapper() }
-    );
-
-    // Should show details tab by default
-    expect(screen.getByText('Test Description')).toBeInTheDocument();
-
-    // Click on comments tab
-    await user.click(screen.getByText('Comments'));
-
-    // Should show comments section
-    expect(screen.getByPlaceholderText(/add a comment/i)).toBeInTheDocument();
+  it("renders nothing when closed", () => {
+    renderModal({ isOpen: false });
+    expect(screen.queryByText("tickets:modal.createTitle")).not.toBeInTheDocument();
   });
 
-  it('should handle status change in view mode', async () => {
-    const user = userEvent.setup();
-    const task = {
-      id: 1,
-      ticketNumber: 'TKT-2024-0001',
-      title: 'Test Ticket',
-      description: 'Test Description',
-      status: 'open' as const,
-      priority: 'medium' as const,
-      severity: 'normal' as const,
-      category: 'bug' as const,
-    };
+  it("calls onClose when Cancel is clicked", () => {
+    const { onClose } = renderModal();
+    fireEvent.click(screen.getByText("tickets:modal.buttons.cancel"));
+    expect(onClose).toHaveBeenCalled();
+  });
 
-    render(
-      <TaskModal {...defaultProps} mode="view" task={task} />,
-      { wrapper: createWrapper() }
+  it("blocks submit and reports a missing title", async () => {
+    renderModal();
+
+    fireEvent.click(screen.getByText("tickets:modal.buttons.create"));
+
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "Ticket title is required", variant: "destructive" })
     );
+    expect(mockApiRequest).not.toHaveBeenCalledWith("POST", "/api/tasks", expect.anything());
+  });
 
-    // Click on status dropdown
-    const statusButton = screen.getByRole('button', { name: /open/i });
-    await user.click(statusButton);
+  it("blocks submit and reports a missing category once a title is entered", async () => {
+    renderModal();
 
-    // Select new status
-    await user.click(screen.getByText('In Progress'));
-
-    // Should call mutation
-    expect(mockMutate).toHaveBeenCalledWith({
-      id: 1,
-      updates: { status: 'in_progress' },
+    fireEvent.change(screen.getByLabelText("tickets:modal.fields.taskTitle"), {
+      target: { value: "Printer is on fire" },
     });
+    fireEvent.click(screen.getByText("tickets:modal.buttons.create"));
+
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "Ticket category is required" })
+    );
+    expect(mockApiRequest).not.toHaveBeenCalledWith("POST", "/api/tasks", expect.anything());
   });
 
-  it('should close modal when cancel is clicked', async () => {
-    const user = userEvent.setup();
-    const onOpenChange = vi.fn();
-    
-    render(
-      <TaskModal {...defaultProps} onOpenChange={onOpenChange} />,
-      { wrapper: createWrapper() }
+  it("posts the entered values to /api/tasks on a valid submit", async () => {
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("tickets:modal.fields.taskTitle"), {
+      target: { value: "  Printer is on fire " },
+    });
+    fireEvent.change(screen.getByLabelText("tickets:modal.fields.description"), {
+      target: { value: "Third floor" },
+    });
+    const categorySelect = await waitFor(() => {
+      const select = screen
+        .getAllByRole("combobox")
+        .find((el) => within(el).queryByText("bug"));
+      expect(select).toBeDefined();
+      return select as HTMLElement;
+    });
+    fireEvent.change(categorySelect, { target: { value: "bug" } });
+
+    fireEvent.click(screen.getByText("tickets:modal.buttons.create"));
+
+    await waitFor(() =>
+      expect(mockApiRequest).toHaveBeenCalledWith(
+        "POST",
+        "/api/tasks",
+        expect.objectContaining({
+          title: "Printer is on fire", // trimmed
+          description: "Third floor",
+          category: "bug",
+          priority: "medium",
+        })
+      )
     );
-
-    await user.click(screen.getByText('Cancel'));
-
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-  });
-
-  it('should display file attachments in view mode', () => {
-    const task = {
-      id: 1,
-      ticketNumber: 'TKT-2024-0001',
-      title: 'Test Ticket',
-      description: 'Test Description',
-      status: 'open' as const,
-      priority: 'medium' as const,
-      severity: 'normal' as const,
-      category: 'bug' as const,
-      attachments: [
-        {
-          id: 1,
-          fileName: 'screenshot.png',
-          fileType: 'image/png',
-          fileSize: 123456,
-        },
-      ],
-    };
-
-    render(
-      <TaskModal {...defaultProps} mode="view" task={task} />,
-      { wrapper: createWrapper() }
-    );
-
-    expect(screen.getByText('screenshot.png')).toBeInTheDocument();
+    expect(mockToast).not.toHaveBeenCalledWith(expect.objectContaining({ variant: "destructive" }));
   });
 });

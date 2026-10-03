@@ -1,6 +1,7 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
+import { getQueryFn } from '@/lib/queryClient';
 import React from 'react';
 
 // Mock fetch
@@ -9,7 +10,8 @@ global.fetch = jest.fn();
 const createWrapper = () => {
   const queryClient = new QueryClient({
     defaultOptions: {
-      queries: { retry: false },
+      // Same default queryFn as the app's client (useAuth passes only a key).
+      queries: { retry: false, queryFn: getQueryFn({ on401: 'throw' }) },
     },
   });
   
@@ -31,7 +33,7 @@ describe('useAuth Hook', () => {
       email: 'test@example.com',
       firstName: 'Test',
       lastName: 'User',
-      role: 'user'
+      role: 'agent'
     };
 
     (global.fetch as jest.Mock).mockResolvedValueOnce({
@@ -60,6 +62,7 @@ describe('useAuth Hook', () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: false,
       status: 401,
+      headers: { get: () => 'application/json' },
       json: async () => ({ message: 'Not authenticated' }),
     });
 

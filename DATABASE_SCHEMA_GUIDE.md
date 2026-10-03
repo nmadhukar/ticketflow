@@ -38,6 +38,7 @@ CREATE INDEX idx_users_is_active ON users(is_active, is_approved);
 ```
 
 **Key Fields**:
+
 - `id`: Primary key, UUID from authentication provider
 - `role`: Determines access permissions (customer < user < manager < admin)
 - `is_approved`: New registrations require admin approval
@@ -57,24 +58,24 @@ CREATE TABLE tasks (
   status VARCHAR(50) DEFAULT 'open',             -- open, in_progress, resolved, etc.
   priority VARCHAR(20) DEFAULT 'medium',         -- low, medium, high, urgent
   severity VARCHAR(20) DEFAULT 'normal',         -- minor, normal, major, critical
-  
+
   -- Assignment
   assignee_id VARCHAR REFERENCES users(id),     -- Assigned user
   assignee_type VARCHAR(10) DEFAULT 'user',     -- 'user' or 'team'
   assigned_team_id INTEGER REFERENCES teams(id), -- Assigned team
-  
+
   -- Metadata
   created_by VARCHAR REFERENCES users(id) NOT NULL,
   last_updated_by VARCHAR REFERENCES users(id),
   due_date TIMESTAMP,
-  
+
   -- Time tracking
   estimated_hours DECIMAL(5,2),
   actual_hours DECIMAL(5,2),
-  
+
   -- Organization
   tags TEXT[],                                   -- Array of tags
-  
+
   -- Timestamps
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
@@ -99,6 +100,7 @@ CREATE INDEX idx_tasks_search ON tasks USING gin(
 ```
 
 **Key Features**:
+
 - Unique ticket numbering with year prefix
 - Flexible assignment (user or team)
 - Time tracking capabilities
@@ -127,7 +129,7 @@ CREATE TABLE team_members (
   user_id VARCHAR REFERENCES users(id) ON DELETE CASCADE,
   role VARCHAR(20) DEFAULT 'member',            -- member, admin
   joined_at TIMESTAMP DEFAULT NOW(),
-  
+
   UNIQUE(team_id, user_id)
 );
 
@@ -273,7 +275,7 @@ CREATE TABLE ai_analytics (
   metric_value DECIMAL(10,2),
   metadata JSONB,
   created_at TIMESTAMP DEFAULT NOW(),
-  
+
   UNIQUE(date, metric_name)
 );
 
@@ -295,21 +297,21 @@ CREATE TABLE company_settings (
   logo_data TEXT,                               -- Base64 encoded logo
   logo_mime_type VARCHAR(50),
   ticket_prefix VARCHAR(10) DEFAULT 'TKT',     -- Customizable ticket prefix
-  
+
   -- AWS Configuration
   aws_access_key_id_ses VARCHAR(100),          -- SES credentials
   aws_secret_access_key_ses VARCHAR(100),
   aws_region_ses VARCHAR(20) DEFAULT 'us-east-1',
-  
+
   aws_access_key_id_bedrock VARCHAR(100),      -- Bedrock credentials
   aws_secret_access_key_bedrock VARCHAR(100),
   aws_region_bedrock VARCHAR(20) DEFAULT 'us-east-1',
-  
+
   -- Microsoft SSO
   microsoft_client_id VARCHAR(100),
   microsoft_client_secret VARCHAR(100),
   microsoft_tenant_id VARCHAR(100),
-  
+
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
 );
@@ -323,7 +325,6 @@ CREATE TABLE company_settings (
 CREATE TABLE api_keys (
   id SERIAL PRIMARY KEY,
   name VARCHAR(100) NOT NULL,
-  service VARCHAR(50) NOT NULL,                -- aws_ses, aws_bedrock, teams, etc.
   key_hash VARCHAR(255) NOT NULL,              -- Hashed API key
   is_active BOOLEAN DEFAULT true,
   created_by VARCHAR REFERENCES users(id),
@@ -463,21 +464,21 @@ Users (1) ←→ (N) User_Invitations (invited_by)
 
 ```sql
 -- User relationships
-ALTER TABLE tasks ADD CONSTRAINT fk_tasks_assignee 
+ALTER TABLE tasks ADD CONSTRAINT fk_tasks_assignee
   FOREIGN KEY (assignee_id) REFERENCES users(id);
-ALTER TABLE tasks ADD CONSTRAINT fk_tasks_creator 
+ALTER TABLE tasks ADD CONSTRAINT fk_tasks_creator
   FOREIGN KEY (created_by) REFERENCES users(id);
 
--- Team relationships  
-ALTER TABLE team_members ADD CONSTRAINT fk_team_members_team 
+-- Team relationships
+ALTER TABLE team_members ADD CONSTRAINT fk_team_members_team
   FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE;
-ALTER TABLE team_members ADD CONSTRAINT fk_team_members_user 
+ALTER TABLE team_members ADD CONSTRAINT fk_team_members_user
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
 
 -- Task relationships
-ALTER TABLE task_comments ADD CONSTRAINT fk_comments_task 
+ALTER TABLE task_comments ADD CONSTRAINT fk_comments_task
   FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE;
-ALTER TABLE task_history ADD CONSTRAINT fk_history_task 
+ALTER TABLE task_history ADD CONSTRAINT fk_history_task
   FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE;
 ```
 
@@ -488,28 +489,31 @@ ALTER TABLE task_history ADD CONSTRAINT fk_history_task
 **Frequently Used Queries**:
 
 1. **Task Listing with Filters**:
+
 ```sql
 -- Optimized with proper indexes
-SELECT t.*, u.first_name, u.last_name 
-FROM tasks t 
-LEFT JOIN users u ON t.assignee_id = u.id 
+SELECT t.*, u.first_name, u.last_name
+FROM tasks t
+LEFT JOIN users u ON t.assignee_id = u.id
 WHERE t.status = 'open' AND t.priority = 'high'
-ORDER BY t.created_at DESC 
+ORDER BY t.created_at DESC
 LIMIT 50;
 ```
 
 2. **User Dashboard Statistics**:
+
 ```sql
 -- Uses partial indexes for better performance
-SELECT 
+SELECT
   COUNT(*) FILTER (WHERE status = 'open') AS open_tasks,
   COUNT(*) FILTER (WHERE status = 'in_progress') AS in_progress_tasks,
   COUNT(*) FILTER (WHERE status = 'resolved') AS resolved_tasks
-FROM tasks 
+FROM tasks
 WHERE assignee_id = $1;
 ```
 
 3. **Search Functionality**:
+
 ```sql
 -- Full-text search with ranking
 SELECT t.*, ts_rank(search_vector, plainto_tsquery('english', $1)) AS rank
@@ -609,7 +613,7 @@ CREATE OR REPLACE FUNCTION audit_trigger()
 RETURNS TRIGGER AS $$
 BEGIN
   INSERT INTO audit_log (table_name, operation, user_id, old_values, new_values)
-  VALUES (TG_TABLE_NAME, TG_OP, current_setting('app.current_user_id'), 
+  VALUES (TG_TABLE_NAME, TG_OP, current_setting('app.current_user_id'),
           row_to_json(OLD), row_to_json(NEW));
   RETURN COALESCE(NEW, OLD);
 END;

@@ -1,27 +1,27 @@
 /**
  * TanStack Query Client Configuration
- * 
+ *
  * This module configures the global query client for efficient server state management.
- * 
+ *
  * Key Features:
  * - Centralized HTTP request handling with error management
  * - Automatic authentication handling with cookie sessions
  * - Configurable unauthorized behavior (throw vs return null)
  * - Optimized caching and refetch strategies
  * - Type-safe API request wrapper
- * 
+ *
  * Error Handling:
  * - Standardized error responses across all API calls
  * - Automatic unauthorized (401) detection and handling
  * - Proper error propagation to React components
  * - Network error resilience and retry logic
- * 
+ *
  * Performance Optimizations:
  * - Disabled automatic refetching to reduce server load
  * - Infinite stale time for stable data
  * - Smart cache invalidation strategies
  * - Minimal retry attempts for failed requests
- * 
+ *
  * Authentication Integration:
  * - Automatic session cookie inclusion
  * - Graceful handling of authentication failures
@@ -36,21 +36,52 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
  */
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
-    const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    // Try to parse as JSON first, fallback to text
+    let errorData: any;
+    const contentType = res.headers.get("content-type");
+    if (contentType && contentType.includes("application/json")) {
+      try {
+        errorData = await res.json();
+      } catch {
+        // If JSON parsing fails, use text
+        const text = await res.text();
+        throw new Error(`${res.status}: ${text || res.statusText}`);
+      }
+    } else {
+      const text = await res.text();
+      throw new Error(`${res.status}: ${text || res.statusText}`);
+    }
+
+    // Create error with response data attached
+    const error: any = new Error(
+      errorData?.message || `${res.status}: ${res.statusText}`
+    );
+    error.response = res;
+    error.status = res.status;
+    error.data = errorData;
+    throw error;
   }
 }
 
 export async function apiRequest(
   method: string,
   url: string,
-  data?: unknown | undefined,
+  data?: unknown | undefined
 ): Promise<Response> {
+  // Check if data is FormData (for file uploads)
+  const isFormData = data instanceof FormData;
+
   const res = await fetch(url, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
-    body: data ? JSON.stringify(data) : undefined,
+    headers: {
+      // Don't set Content-Type for FormData - browser will set it with boundary
+      ...(data && !isFormData ? { "Content-Type": "application/json" } : {}),
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+    },
+    body: data ? (isFormData ? data : JSON.stringify(data)) : undefined,
     credentials: "include",
+    cache: "no-store",
   });
 
   await throwIfResNotOk(res);
@@ -65,6 +96,11 @@ export const getQueryFn: <T>(options: {
   async ({ queryKey }) => {
     const res = await fetch(queryKey.join("/") as string, {
       credentials: "include",
+      headers: {
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      },
+      cache: "no-store",
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {

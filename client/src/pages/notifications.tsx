@@ -1,82 +1,42 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Bell, CheckCircle, AlertCircle, Info, UserPlus, MessageSquare, Calendar, Settings } from "lucide-react";
+import {
+  Bell,
+  CheckCircle,
+  AlertCircle,
+  Info,
+  UserPlus,
+  MessageSquare,
+  Calendar,
+  Settings,
+} from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useLocation } from "wouter";
+import MainWrapper from "@/components/main-wrapper";
 
-interface Notification {
-  id: string;
-  type: "task_assigned" | "task_updated" | "comment_added" | "team_invite" | "system" | "reminder";
+interface NotificationDTO {
+  id: number;
   title: string;
-  message: string;
-  read: boolean;
-  createdAt: string;
+  content: string;
+  type: string;
+  relatedTaskId?: number | null;
+  isRead?: boolean;
+  createdAt?: string;
   actionUrl?: string;
 }
 
-// Mock notifications data - in a real app, this would come from an API
-const mockNotifications: Notification[] = [
-  {
-    id: "1",
-    type: "task_assigned",
-    title: "New Task Assigned",
-    message: "You have been assigned to 'Fix login authentication issue'",
-    read: false,
-    createdAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(), // 30 minutes ago
-    actionUrl: "/tasks/1"
-  },
-  {
-    id: "2",
-    type: "comment_added",
-    title: "New Comment",
-    message: "John Doe commented on 'Update user dashboard'",
-    read: false,
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), // 2 hours ago
-    actionUrl: "/tasks/2"
-  },
-  {
-    id: "3",
-    type: "task_updated",
-    title: "Task Status Changed",
-    message: "Task 'Implement dark mode' has been marked as resolved",
-    read: true,
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), // 1 day ago
-    actionUrl: "/tasks/3"
-  },
-  {
-    id: "4",
-    type: "team_invite",
-    title: "Team Invitation",
-    message: "You have been invited to join the 'Backend Development' team",
-    read: true,
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 48).toISOString(), // 2 days ago
-    actionUrl: "/teams/2"
-  },
-  {
-    id: "5",
-    type: "system",
-    title: "System Maintenance",
-    message: "Scheduled maintenance will occur tonight from 11 PM to 1 AM EST",
-    read: true,
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 72).toISOString(), // 3 days ago
-  },
-  {
-    id: "6",
-    type: "reminder",
-    title: "Task Due Soon",
-    message: "Task 'Prepare quarterly report' is due in 2 days",
-    read: false,
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 96).toISOString(), // 4 days ago
-    actionUrl: "/tasks/4"
-  }
-];
-
-function getNotificationIcon(type: Notification["type"]) {
+function getNotificationIcon(type: NotificationDTO["type"]) {
   switch (type) {
     case "task_assigned":
     case "task_updated":
@@ -94,7 +54,7 @@ function getNotificationIcon(type: Notification["type"]) {
   }
 }
 
-function getNotificationColor(type: Notification["type"]) {
+function _getNotificationColor(type: NotificationDTO["type"]) {
   switch (type) {
     case "task_assigned":
     case "task_updated":
@@ -113,32 +73,61 @@ function getNotificationColor(type: Notification["type"]) {
 }
 
 export default function Notifications() {
-  const { user } = useAuth();
+  const { user: _user } = useAuth();
   const [, navigate] = useLocation();
-  const [notificationList, setNotificationList] = useState<Notification[]>(mockNotifications);
+  const [notificationList, setNotificationList] = useState<NotificationDTO[]>(
+    []
+  );
 
   // In a real app, this would fetch notifications from the API
-  const { data: notifications = notificationList, isLoading } = useQuery({
-    queryKey: ["/api/notifications"],
-    queryFn: () => Promise.resolve(notificationList),
-    onSuccess: (data: Notification[]) => setNotificationList(data),
+  const {
+    data: notifications = notificationList,
+    isLoading,
+    refetch,
+  } = useQuery<NotificationDTO[]>({
+    queryKey: ["/api/notifications", { read: false }],
+    queryFn: async () => {
+      const res = await fetch(`/api/notifications?limit=50&read=false`, {
+        credentials: "include",
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    refetchOnMount: "always",
   });
 
-  const unreadCount = notificationList.filter(n => !n.read).length;
-  const readNotifications = notificationList.filter(n => n.read);
-  const unreadNotifications = notificationList.filter(n => !n.read);
+  // Update notification list when data changes
+  useEffect(() => {
+    if (notifications) {
+      setNotificationList(notifications);
+    }
+  }, [notifications]);
 
-  const markAllAsRead = () => {
-    // In a real app, this would also call an API
-    setNotificationList(prev => prev.map(n => ({ ...n, read: true })));
-  };
+  const unreadCount = notificationList.filter((n) => !n.isRead).length;
+  const readNotifications = notificationList.filter((n) => n.isRead);
+  const unreadNotifications = notificationList.filter((n) => !n.isRead);
 
-  const markAsRead = (id: string) => {
-    // In a real app, this would also call an API
-    setNotificationList(prev => prev.map(n => 
-      n.id === id ? { ...n, read: true } : n
-    ));
-  };
+  const markAllMutation = useMutation({
+    mutationFn: async () => {
+      await fetch(`/api/notifications/read-all`, {
+        method: "PATCH",
+        credentials: "include",
+      });
+    },
+    onSuccess: () => refetch(),
+  });
+  const markAllAsRead = () => markAllMutation.mutate();
+
+  const markOneMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await fetch(`/api/notifications/${id}/read`, {
+        method: "PATCH",
+        credentials: "include",
+      });
+    },
+    onSuccess: () => refetch(),
+  });
+  const markAsRead = (id: number) => markOneMutation.mutate(id);
 
   if (isLoading) {
     return (
@@ -156,179 +145,187 @@ export default function Notifications() {
   }
 
   return (
-    <div className="container mx-auto p-6 max-w-4xl">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <Bell className="h-8 w-8" />
-            <div>
-              <h1 className="text-3xl font-bold">Notifications</h1>
-              <p className="text-muted-foreground">
-                Stay updated with your tasks and team activities
-              </p>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-3">
-            {unreadCount > 0 && (
-              <Badge variant="destructive">
-                {unreadCount} unread
-              </Badge>
-            )}
-            <Button variant="outline" onClick={markAllAsRead} disabled={unreadCount === 0}>
-              Mark All as Read
-            </Button>
-          </div>
+    <MainWrapper
+      action={
+        <div className="flex items-center gap-3">
+          {unreadCount > 0 && (
+            <Badge variant="destructive">{unreadCount} unread</Badge>
+          )}
+          <Button
+            variant="outline"
+            onClick={markAllAsRead}
+            disabled={unreadCount === 0}
+          >
+            Mark All as Read
+          </Button>
         </div>
-
-        <div className="space-y-6">
-          {unreadNotifications.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <AlertCircle className="h-5 w-5 text-red-500" />
-                  Unread Notifications
-                </CardTitle>
-                <CardDescription>
-                  {unreadCount} new notification{unreadCount !== 1 ? 's' : ''} requiring your attention
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {unreadNotifications.map((notification, index) => (
-                  <div key={notification.id}>
-                    <div className="flex items-start gap-4 p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">
-                      <div className="flex-shrink-0 mt-1">
-                        {getNotificationIcon(notification.type)}
+      }
+    >
+      {unreadNotifications.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-red-500" />
+              Unread Notifications
+            </CardTitle>
+            <CardDescription>
+              {unreadCount} new notification{unreadCount !== 1 ? "s" : ""}{" "}
+              requiring your attention
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {unreadNotifications.map((notification, index) => (
+              <div key={notification.id}>
+                <div className="flex items-start gap-4 p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <div className="flex-shrink-0 mt-1">
+                    {getNotificationIcon("task_updated")}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div
+                        className={
+                          notification.actionUrl
+                            ? "cursor-pointer hover:opacity-80 transition-opacity"
+                            : ""
+                        }
+                        onClick={() => {
+                          if (notification.actionUrl) {
+                            markAsRead(notification.id);
+                            const path = notification.actionUrl;
+                            // For mock notifications, navigate to appropriate pages
+                            if (path.includes("/tasks/")) {
+                              navigate("/my-tasks");
+                            } else if (path.includes("/teams/")) {
+                              navigate("/teams");
+                            } else {
+                              navigate("/");
+                            }
+                          }
+                        }}
+                      >
+                        <h4 className="font-semibold text-sm">
+                          {notification.title || "Notification"}
+                        </h4>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {notification.content}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          {notification.createdAt
+                            ? formatDistanceToNow(
+                                new Date(notification.createdAt),
+                                { addSuffix: true }
+                              )
+                            : "just now"}
+                        </p>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <div 
-                            className={notification.actionUrl ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary" className="text-xs">
+                          {notification.type.replace("_", " ")}
+                        </Badge>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => markAsRead(notification.id)}
+                        >
+                          Mark as Read
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {index < unreadNotifications.length - 1 && <Separator />}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {readNotifications.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-green-500" />
+              Previous Notifications
+            </CardTitle>
+            <CardDescription>Your notification history</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {readNotifications.map((notification, index) => (
+              <div key={notification.id}>
+                <div className="flex items-start gap-4 p-4 rounded-lg border">
+                  <div className="flex-shrink-0 mt-1 opacity-60">
+                    {getNotificationIcon("task_updated")}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h4 className="font-medium text-sm opacity-80">
+                          {notification.title || "Notification"}
+                        </h4>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {notification.content}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          {notification.createdAt
+                            ? formatDistanceToNow(
+                                new Date(notification.createdAt),
+                                { addSuffix: true }
+                              )
+                            : ""}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-xs opacity-60">
+                          {notification.type.replace("_", " ")}
+                        </Badge>
+                        {notification.actionUrl && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => {
-                              if (notification.actionUrl) {
-                                markAsRead(notification.id);
-                                const path = notification.actionUrl;
-                                // For mock notifications, navigate to appropriate pages
-                                if (path.includes('/tasks/')) {
+                              // Extract the path from the actionUrl
+                              const path = notification.actionUrl;
+                              if (path) {
+                                // For mock notifications, we'll navigate to appropriate pages
+                                if (path.includes("/tasks/")) {
+                                  // Navigate to my tasks page since individual task routes aren't implemented
                                   navigate("/my-tasks");
-                                } else if (path.includes('/teams/')) {
+                                } else if (path.includes("/teams/")) {
+                                  // Navigate to teams page
                                   navigate("/teams");
                                 } else {
+                                  // Default to dashboard
                                   navigate("/");
                                 }
                               }
                             }}
                           >
-                            <h4 className="font-semibold text-sm">{notification.title}</h4>
-                            <p className="text-sm text-muted-foreground mt-1">
-                              {notification.message}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-2">
-                              {formatDistanceToNow(new Date(notification.createdAt), { addSuffix: true })}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="secondary" className="text-xs">
-                              {notification.type.replace('_', ' ')}
-                            </Badge>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => markAsRead(notification.id)}
-                            >
-                              Mark as Read
-                            </Button>
-                          </div>
-                        </div>
+                            View
+                          </Button>
+                        )}
                       </div>
                     </div>
-                    {index < unreadNotifications.length - 1 && <Separator />}
                   </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
+                </div>
+                {index < readNotifications.length - 1 && <Separator />}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
-          {readNotifications.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CheckCircle className="h-5 w-5 text-green-500" />
-                  Previous Notifications
-                </CardTitle>
-                <CardDescription>
-                  Your notification history
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {readNotifications.map((notification, index) => (
-                  <div key={notification.id}>
-                    <div className="flex items-start gap-4 p-4 rounded-lg border">
-                      <div className="flex-shrink-0 mt-1 opacity-60">
-                        {getNotificationIcon(notification.type)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <h4 className="font-medium text-sm opacity-80">{notification.title}</h4>
-                            <p className="text-sm text-muted-foreground mt-1">
-                              {notification.message}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-2">
-                              {formatDistanceToNow(new Date(notification.createdAt), { addSuffix: true })}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs opacity-60">
-                              {notification.type.replace('_', ' ')}
-                            </Badge>
-                            {notification.actionUrl && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => {
-                                  // Extract the path from the actionUrl
-                                  const path = notification.actionUrl;
-                                  if (path) {
-                                    // For mock notifications, we'll navigate to appropriate pages
-                                    if (path.includes('/tasks/')) {
-                                      // Navigate to my tasks page since individual task routes aren't implemented
-                                      navigate("/my-tasks");
-                                    } else if (path.includes('/teams/')) {
-                                      // Navigate to teams page
-                                      navigate("/teams");
-                                    } else {
-                                      // Default to dashboard
-                                      navigate("/");
-                                    }
-                                  }
-                                }}
-                              >
-                                View
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    {index < readNotifications.length - 1 && <Separator />}
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
-
-          {notifications.length === 0 && (
-            <Card>
-              <CardContent className="text-center py-12">
-                <Bell className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No Notifications</h3>
-                <p className="text-muted-foreground">
-                  You're all caught up! We'll notify you when something important happens.
-                </p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
+      {(!notifications || notifications.length === 0) && (
+        <Card>
+          <CardContent className="text-center py-12">
+            <Bell className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-lg font-semibold mb-2">No Notifications</h3>
+            <p className="text-muted-foreground">
+              You're all caught up! We'll notify you when something important
+              happens.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+    </MainWrapper>
   );
 }

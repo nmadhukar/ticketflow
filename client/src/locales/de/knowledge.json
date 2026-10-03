@@ -1,0 +1,88 @@
+{
+  "title": "Wissensdatenbank-Verwaltung",
+  "subtitle": "Verwalte Artikel für häufige Probleme und Lösungen",
+  "actions": {
+    "aiLearning": "KI-Lernen",
+    "addArticle": "Artikel hinzufügen",
+    "clearFilters": "Filter löschen",
+    "publishNow": "Sofort veröffentlichen",
+    "cancel": "Abbrechen",
+    "create": "Erstellen",
+    "update": "Aktualisieren",
+    "delete": "Löschen"
+  },
+  "filters": {
+    "filterSearch": "Filtern & Suchen",
+    "search": "Suche",
+    "searchPlaceholder": "Artikel suchen...",
+    "category": "Kategorie",
+    "allCategories": "Alle Kategorien",
+    "status": "Status",
+    "allStatuses": "Alle Status",
+    "published": "Veröffentlicht",
+    "draft": "Entwurf",
+    "archived": "Archiviert",
+    "source": "Quelle",
+    "allSources": "Alle Quellen",
+    "manual": "Manuell",
+    "ai_generated": "KI-generiert"
+  },
+  "table": {
+    "title": "Wissensartikel ({{count}})",
+    "manage": "Verwalte manuell erstellte und KI-generierte Wissensartikel",
+    "columns": {
+      "title": "Titel",
+      "category": "Kategorie",
+      "source": "Quelle",
+      "status": "Status",
+      "views": "Aufrufe",
+      "usage": "Nutzung",
+      "effectiveness": "Wirksamkeit",
+      "created": "Erstellt",
+      "actions": "Aktionen"
+    },
+    "loading": "Artikel werden geladen...",
+    "emptyFiltered": "Keine Artikel entsprechen deiner Suche.",
+    "empty": "Keine Artikel vorhanden. Erstelle deinen ersten Artikel!"
+  },
+  "badges": {
+    "published": "Veröffentlicht",
+    "draft": "Entwurf",
+    "ai": "KI",
+    "manual": "Manuell"
+  },
+  "dialog": {
+    "createTitle": "Wissensartikel erstellen",
+    "editTitle": "Wissensartikel bearbeiten",
+    "createDesc": "Erstelle einen neuen Artikel für häufige Probleme und Lösungen.",
+    "editDesc": "Aktualisiere die Artikeldetails unten.",
+    "fields": {
+      "title": "Titel *",
+      "titlePlaceholder": "z. B. Wie man das Passwort zurücksetzt",
+      "summary": "Zusammenfassung",
+      "summaryPlaceholder": "Kurze Beschreibung der Lösung",
+      "category": "Kategorie",
+      "tags": "Tags",
+      "tagsPlaceholder": "Kommagetrennte Tags",
+      "content": "Inhalt *",
+      "contentPlaceholder": "Detaillierte Schritt-für-Schritt-Lösung...",
+      "categoryPlaceholder": "Kategorie wählen"
+    },
+    "submitCreate": "Artikel erstellen",
+    "submitUpdate": "Artikel aktualisieren"
+  },
+  "delete": {
+    "title": "Wissensartikel löschen",
+    "confirm": "Möchtest du \"{{title}}\" wirklich löschen? Dies kann nicht rückgängig gemacht werden."
+  },
+  "toasts": {
+    "success": "Erfolg",
+    "error": "Fehler",
+    "created": "Artikel erfolgreich erstellt",
+    "updated": "Artikel erfolgreich aktualisiert",
+    "deleted": "Artikel erfolgreich gelöscht",
+    "aiComplete": "KI-Lernen abgeschlossen"
+  }
+}
+
+

@@ -1,0 +1,59 @@
+{
+  "drawer": {
+    "title": "Statistiken",
+    "close": "Schließen",
+    "refresh": "Aktualisieren"
+  },
+  "agent": {
+    "title": "Meine Statistiken",
+    "personal": {
+      "title": "Persönliche Statistiken",
+      "assignedToMe": "Mir Zugewiesen",
+      "createdByMe": "Von Mir Erstellt",
+      "resolutionRate": "Lösungsrate",
+      "avgResolutionTime": "Durchschnittliche Lösungszeit"
+    },
+    "team": {
+      "title": "Team-Übersicht",
+      "selectTeam": "Team Auswählen",
+      "totalTickets": "Gesamte Tickets",
+      "openTickets": "Offene Tickets",
+      "inProgress": "In Bearbeitung",
+      "resolved": "Gelöst",
+      "highPriority": "Hohe Priorität",
+      "noTeam": "Sie sind keinem Team zugewiesen"
+    }
+  },
+  "manager": {
+    "title": "Abteilungsstatistiken",
+    "department": {
+      "title": "Abteilungsübersicht",
+      "selectDepartment": "Abteilung Auswählen",
+      "totalTickets": "Gesamte Tickets",
+      "openTickets": "Offene Tickets",
+      "inProgress": "In Bearbeitung",
+      "resolved": "Gelöst",
+      "highPriority": "Hohe Priorität",
+      "avgResolutionTime": "Durchschnittliche Lösungszeit"
+    },
+    "priority": {
+      "title": "Prioritätsverteilung"
+    },
+    "category": {
+      "title": "Kategorieaufschlüsselung"
+    },
+    "teams": {
+      "title": "Teamleistung",
+      "memberStats": "Teammitglied-Statistiken"
+    }
+  },
+  "common": {
+    "loading": "Statistiken werden geladen...",
+    "error": "Fehler beim Laden der Statistiken",
+    "noData": "Keine Daten verfügbar",
+    "hours": "Stunden",
+    "days": "Tage",
+    "percentage": "{{value}}%"
+  }
+}
+

@@ -1,0 +1,59 @@
+{
+  "drawer": {
+    "title": "Statistics",
+    "close": "Close",
+    "refresh": "Refresh"
+  },
+  "agent": {
+    "title": "My Statistics",
+    "personal": {
+      "title": "Personal Stats",
+      "assignedToMe": "Assigned to Me",
+      "createdByMe": "Created by Me",
+      "resolutionRate": "Resolution Rate",
+      "avgResolutionTime": "Avg Resolution Time"
+    },
+    "team": {
+      "title": "Team Overview",
+      "selectTeam": "Select Team",
+      "totalTickets": "Total Tickets",
+      "openTickets": "Open Tickets",
+      "inProgress": "In Progress",
+      "resolved": "Resolved",
+      "highPriority": "High Priority",
+      "noTeam": "You are not assigned to any team"
+    }
+  },
+  "manager": {
+    "title": "Department Statistics",
+    "department": {
+      "title": "Department Overview",
+      "selectDepartment": "Select Department",
+      "totalTickets": "Total Tickets",
+      "openTickets": "Open Tickets",
+      "inProgress": "In Progress",
+      "resolved": "Resolved",
+      "highPriority": "High Priority",
+      "avgResolutionTime": "Avg Resolution Time"
+    },
+    "priority": {
+      "title": "Priority Distribution"
+    },
+    "category": {
+      "title": "Category Breakdown"
+    },
+    "teams": {
+      "title": "Team Performance",
+      "memberStats": "Team Member Statistics"
+    }
+  },
+  "common": {
+    "loading": "Loading statistics...",
+    "error": "Failed to load statistics",
+    "noData": "No data available",
+    "hours": "hours",
+    "days": "days",
+    "percentage": "{{value}}%"
+  }
+}
+

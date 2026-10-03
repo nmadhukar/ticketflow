@@ -12,6 +12,7 @@ export function useAuth() {
   const logoutMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/auth/logout");
+      console.log(response)
       return response;
     },
     onSuccess: () => {

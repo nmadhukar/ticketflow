@@ -1,0 +1,50 @@
+{
+  "title": "Dashboard",
+  "subtitle": "Welcome back! Here's your ticket overview.",
+  "realtimeUpdates": "Real-time updates active",
+  "stats": {
+    "totalTickets": "Total Tickets",
+    "openTickets": "Open Tickets",
+    "inProgress": "In Progress",
+    "resolved": "Resolved",
+    "closed": "Closed",
+    "completed": "Completed",
+    "highPriority": "High Priority"
+  },
+  "admin": {
+    "totalUsers": "Total Users",
+    "activeUsers": "active",
+    "totalDepartments": "Total Departments",
+    "departmentsSubtitle": "Active departments",
+    "totalTeams": "Total Teams",
+    "acrossDepartments": "Across all departments",
+    "totalTickets": "Total Tickets",
+    "allTickets": "All tickets",
+    "openTickets": "Open Tickets",
+    "highPriority": "High Priority",
+    "highPriorityTickets": "High priority tickets",
+    "urgentPriority": "Urgent Priority",
+    "urgentTickets": "Urgent tickets",
+    "priorityTickets": "Priority Tickets",
+    "highUrgent": "High / Urgent",
+    "ticketStatus": "Ticket Status",
+    "openInProgressCompleted": "Open / In Progress / On Hold / Resolved or Closed",
+    "avgResolutionTime": "Avg Resolution Time",
+    "hours": "hours",
+    "pendingArticles": "Pending Articles",
+    "pendingArticlesSubtitle": "Awaiting approval"
+  },
+  "recentActivity": {
+    "title": "Recent Activity",
+    "noActivity": "No recent activity"
+  },
+  "myTasks": {
+    "title": "My Tasks",
+    "noTasks": "No tasks assigned to you"
+  },
+  "teamMembers": {
+    "title": "Team Members",
+    "noMembers": "No team members"
+  }
+}
+

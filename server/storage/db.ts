@@ -1,0 +1,50 @@
+import { Pool as NeonPool, neonConfig } from "@neondatabase/serverless";
+import { Pool as PgPool } from "pg";
+import { drizzle as drizzleNeon } from "drizzle-orm/neon-serverless";
+import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
+import ws from "ws";
+import * as schema from "@shared/schema";
+
+if (!process.env.DATABASE_URL) {
+  console.error("DATABASE_URL environment variable is not set!");
+  console.error(
+    "Available environment variables:",
+    Object.keys(process.env).filter(
+      (key) => key.includes("DATABASE") || key.includes("DB")
+    )
+  );
+  throw new Error(
+    "DATABASE_URL must be set. Did you forget to provision a database?"
+  );
+}
+
+const connectionString = process.env.DATABASE_URL;
+let hostname = "";
+try {
+  hostname = new URL(connectionString).hostname || "";
+} catch { /* unparseable URL: hostname stays empty */ }
+
+let pool: NeonPool | PgPool;
+export let db: ReturnType<typeof drizzleNeon> | ReturnType<typeof drizzlePg>;
+
+// Decide which driver to use:
+// - Always use native Postgres for localhost
+// - Use Neon only if explicitly requested or hostname ends with .neon.tech
+const isLocal = /^(localhost|127\.0\.0\.1)$/i.test(hostname);
+const isExplicitNeon = (process.env.DB_DRIVER || "").toLowerCase() === "neon";
+const isNeonHost = /\.neon\.tech$/i.test(hostname);
+
+if (isLocal || (!isExplicitNeon && !isNeonHost)) {
+  // Native PostgreSQL driver (recommended for Render and most deployments)
+  pool = new PgPool({ connectionString });
+  db = drizzlePg(pool as PgPool, { schema });
+  console.log("Database driver: pg (node-postgres)");
+} else {
+  // Neon serverless driver (only when using a Neon database)
+  neonConfig.webSocketConstructor = ws;
+  pool = new NeonPool({ connectionString });
+  db = drizzleNeon({ client: pool as NeonPool, schema });
+  console.log("Database driver: neon-serverless (WebSocket)");
+}
+
+export { pool };

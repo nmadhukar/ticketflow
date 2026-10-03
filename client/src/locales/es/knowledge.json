@@ -1,0 +1,88 @@
+{
+  "title": "Gestión de la base de conocimiento",
+  "subtitle": "Administra artículos para problemas comunes y sus soluciones",
+  "actions": {
+    "aiLearning": "Aprendizaje de IA",
+    "addArticle": "Agregar artículo",
+    "clearFilters": "Limpiar filtros",
+    "publishNow": "Publicar inmediatamente",
+    "cancel": "Cancelar",
+    "create": "Crear",
+    "update": "Actualizar",
+    "delete": "Eliminar"
+  },
+  "filters": {
+    "filterSearch": "Filtrar y buscar",
+    "search": "Buscar",
+    "searchPlaceholder": "Buscar artículos...",
+    "category": "Categoría",
+    "allCategories": "Todas las categorías",
+    "status": "Estado",
+    "allStatuses": "Todos los estados",
+    "published": "Publicado",
+    "draft": "Borrador",
+    "archived": "Archivado",
+    "source": "Origen",
+    "allSources": "Todas las fuentes",
+    "manual": "Manual",
+    "ai_generated": "Generado por IA"
+  },
+  "table": {
+    "title": "Artículos de conocimiento ({{count}})",
+    "manage": "Gestiona artículos creados manualmente y generados por IA",
+    "columns": {
+      "title": "Título",
+      "category": "Categoría",
+      "source": "Origen",
+      "status": "Estado",
+      "views": "Vistas",
+      "usage": "Uso",
+      "effectiveness": "Efectividad",
+      "created": "Creado",
+      "actions": "Acciones"
+    },
+    "loading": "Cargando artículos...",
+    "emptyFiltered": "Ningún artículo coincide con tu búsqueda.",
+    "empty": "No hay artículos. ¡Crea tu primer artículo!"
+  },
+  "badges": {
+    "published": "Publicado",
+    "draft": "Borrador",
+    "ai": "IA",
+    "manual": "Manual"
+  },
+  "dialog": {
+    "createTitle": "Crear artículo de conocimiento",
+    "editTitle": "Editar artículo de conocimiento",
+    "createDesc": "Crea un nuevo artículo para problemas comunes y sus soluciones.",
+    "editDesc": "Actualiza los detalles del artículo a continuación.",
+    "fields": {
+      "title": "Título *",
+      "titlePlaceholder": "p. ej., Cómo restablecer la contraseña",
+      "summary": "Resumen",
+      "summaryPlaceholder": "Descripción breve de la solución",
+      "category": "Categoría",
+      "tags": "Etiquetas",
+      "tagsPlaceholder": "Etiquetas separadas por coma",
+      "content": "Contenido *",
+      "contentPlaceholder": "Solución detallada paso a paso...",
+      "categoryPlaceholder": "Seleccionar categoría"
+    },
+    "submitCreate": "Crear artículo",
+    "submitUpdate": "Actualizar artículo"
+  },
+  "delete": {
+    "title": "Eliminar artículo de conocimiento",
+    "confirm": "¿Seguro que quieres eliminar \"{{title}}\"? Esta acción no se puede deshacer."
+  },
+  "toasts": {
+    "success": "Éxito",
+    "error": "Error",
+    "created": "Artículo creado correctamente",
+    "updated": "Artículo actualizado correctamente",
+    "deleted": "Artículo eliminado correctamente",
+    "aiComplete": "Aprendizaje de IA completado"
+  }
+}
+
+

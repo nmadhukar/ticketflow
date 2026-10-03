@@ -1,0 +1,78 @@
+{
+  "title": "Tickets",
+  "subtitle": "Gérez et suivez tous les tickets de vos projets",
+  "newTicket": "Nouveau ticket",
+  "createTicket": "Créer un ticket",
+  "editTicket": "Modifier le ticket",
+  "deleteTicket": "Supprimer le ticket",
+  "taskDeleted": "Ticket supprimé avec succès",
+  "failedToDelete": "Échec de la suppression du ticket",
+  "confirmDelete": "Voulez-vous vraiment supprimer ce ticket ?",
+  "filters": {
+    "all": "Tous",
+    "status": "Statut",
+    "category": "Catégorie",
+    "priority": "Priorité",
+    "search": "Rechercher des tickets...",
+    "searchPlaceholder": "Rechercher par titre, description ou numéro de ticket...",
+    "onlyMyTickets": "Uniquement mes tickets",
+    "clearFilters": "Effacer les filtres",
+    "page": "Page",
+    "prev": "Précédent",
+    "next": "Suivant",
+    "of": "sur",
+    "tickets": "tickets"
+  },
+  "status": {
+    "all": "Tous les statuts",
+    "open": "Ouvert",
+    "in_progress": "En cours",
+    "resolved": "Résolu",
+    "closed": "Fermé",
+    "on_hold": "En attente"
+  },
+  "category": {
+    "all": "Toutes les catégories",
+    "bug": "Bug",
+    "feature": "Fonctionnalité",
+    "support": "Support",
+    "enhancement": "Amélioration",
+    "incident": "Incident",
+    "request": "Demande"
+  },
+  "priority": {
+    "all": "Toutes les priorités",
+    "low": "Faible",
+    "medium": "Moyenne",
+    "high": "Haute",
+    "urgent": "Urgente"
+  },
+  "assignee": {
+    "none": "Non assigné",
+    "assignedTo": "Assigné à",
+    "assignTo": "Assigner à",
+    "assignToUser": "Assigner à un utilisateur",
+    "assignToTeam": "Assigner à une équipe"
+  },
+  "details": {
+    "title": "Titre",
+    "description": "Description",
+    "notes": "Notes",
+    "dueDate": "Date d'échéance",
+    "createdAt": "Créé",
+    "updatedAt": "Mis à jour",
+    "createdBy": "Créé par",
+    "ticketNumber": "Ticket #"
+  },
+  "view": {
+    "cards": "Cartes",
+    "table": "Tableau",
+    "showMine": "Afficher mes tickets"
+  },
+  "empty": {
+    "noTickets": "Aucun ticket trouvé",
+    "noMatchingTickets": "Aucun ticket ne correspond à vos filtres"
+  }
+}
+
+

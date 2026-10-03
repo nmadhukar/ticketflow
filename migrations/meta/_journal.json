@@ -8,6 +8,48 @@
       "when": 1752846269289,
       "tag": "0000_useful_argent",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1761682510291,
+      "tag": "0001_noisy_warstar_kb_ai",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1761936944564,
+      "tag": "0002_certain_grey_gargoyle",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1762179444859,
+      "tag": "0003_premium_purple_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1762181024340,
+      "tag": "0004_milky_screwball",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1762621138266,
+      "tag": "0005_worried_colonel_america",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1763052895724,
+      "tag": "0006_wandering_forge",
+      "breakpoints": true
     }
   ]
 }

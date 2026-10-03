@@ -1,0 +1,88 @@
+{
+  "title": "知识库管理",
+  "subtitle": "管理常见问题与解决方案的文章",
+  "actions": {
+    "aiLearning": "AI 学习",
+    "addArticle": "添加文章",
+    "clearFilters": "清除筛选",
+    "publishNow": "立即发布",
+    "cancel": "取消",
+    "create": "创建",
+    "update": "更新",
+    "delete": "删除"
+  },
+  "filters": {
+    "filterSearch": "筛选与搜索",
+    "search": "搜索",
+    "searchPlaceholder": "搜索文章...",
+    "category": "类别",
+    "allCategories": "所有类别",
+    "status": "状态",
+    "allStatuses": "所有状态",
+    "published": "已发布",
+    "draft": "草稿",
+    "archived": "已归档",
+    "source": "来源",
+    "allSources": "所有来源",
+    "manual": "手动",
+    "ai_generated": "AI 生成"
+  },
+  "table": {
+    "title": "知识文章（{{count}}）",
+    "manage": "管理手动创建和 AI 生成的知识文章",
+    "columns": {
+      "title": "标题",
+      "category": "类别",
+      "source": "来源",
+      "status": "状态",
+      "views": "浏览",
+      "usage": "使用",
+      "effectiveness": "有效性",
+      "created": "创建时间",
+      "actions": "操作"
+    },
+    "loading": "正在加载文章...",
+    "emptyFiltered": "没有符合条件的文章。",
+    "empty": "暂无文章。创建你的第一篇文章吧！"
+  },
+  "badges": {
+    "published": "已发布",
+    "draft": "草稿",
+    "ai": "AI",
+    "manual": "手动"
+  },
+  "dialog": {
+    "createTitle": "创建知识文章",
+    "editTitle": "编辑知识文章",
+    "createDesc": "为常见问题及其解决方案创建新文章。",
+    "editDesc": "在下方更新文章详细信息。",
+    "fields": {
+      "title": "标题 *",
+      "titlePlaceholder": "例如：如何重置密码",
+      "summary": "摘要",
+      "summaryPlaceholder": "解决方案的简要说明",
+      "category": "类别",
+      "tags": "标签",
+      "tagsPlaceholder": "逗号分隔的标签",
+      "content": "内容 *",
+      "contentPlaceholder": "详细的分步解决方案...",
+      "categoryPlaceholder": "选择类别"
+    },
+    "submitCreate": "创建文章",
+    "submitUpdate": "更新文章"
+  },
+  "delete": {
+    "title": "删除知识文章",
+    "confirm": "确定要删除“{{title}}”吗？此操作无法撤销。"
+  },
+  "toasts": {
+    "success": "成功",
+    "error": "错误",
+    "created": "文章创建成功",
+    "updated": "文章更新成功",
+    "deleted": "文章删除成功",
+    "aiComplete": "AI 学习完成"
+  }
+}
+
+

@@ -1,0 +1,34 @@
+{
+  "title": "Tableau de bord",
+  "subtitle": "Bon retour ! Voici le résumé de vos tickets.",
+  "realtimeUpdates": "Mises à jour en temps réel actives",
+  "stats": {
+    "totalTickets": "Tickets totaux",
+    "openTickets": "Tickets ouverts",
+    "inProgress": "En cours",
+    "resolved": "Résolus",
+    "closed": "Fermés",
+    "completed": "Complétés",
+    "highPriority": "Haute priorité"
+  },
+  "admin": {
+    "totalUsers": "Utilisateurs totaux",
+    "activeUsers": "actifs",
+    "totalTeams": "Équipes totales",
+    "acrossDepartments": "Tous départements confondus",
+    "openTickets": "Tickets ouverts",
+    "highPriority": "haute priorité",
+    "avgResolutionTime": "Temps moyen de résolution",
+    "hours": "heures"
+  },
+  "recentActivity": {
+    "title": "Activité récente",
+    "noActivity": "Aucune activité récente"
+  },
+  "teamMembers": {
+    "title": "Membres de l'équipe",
+    "noMembers": "Aucun membre de l'équipe"
+  }
+}
+
+

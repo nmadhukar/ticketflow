@@ -1,0 +1,24 @@
+{
+  "notificationType": "Received",
+  "mail": {
+    "timestamp": "2026-10-01T12:00:00.000Z",
+    "source": "hans.mueller@example.test",
+    "messageId": "fixture-ses-message-0002",
+    "destination": ["support@tickets.example.test"],
+    "commonHeaders": {
+      "from": ["\"Müller, Hans\" <hans.mueller@example.test>"],
+      "to": ["support@tickets.example.test"],
+      "subject": "Drucker defekt"
+    }
+  },
+  "receipt": {
+    "timestamp": "2026-10-01T12:00:00.000Z",
+    "recipients": ["support@tickets.example.test"],
+    "spamVerdict": { "status": "PASS" },
+    "virusVerdict": { "status": "PASS" },
+    "spfVerdict": { "status": "PASS" },
+    "dkimVerdict": { "status": "PASS" },
+    "dmarcVerdict": { "status": "PASS" }
+  },
+  "content": "From: =?iso-8859-1?Q?M=FCller=2C_Hans?= <hans.mueller@example.test>\r\nTo: support@tickets.example.test\r\nSubject: Drucker defekt\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\nDer Drucker im zweiten Stock ist defekt.\r\n"
+}

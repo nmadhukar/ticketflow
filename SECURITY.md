@@ -19,11 +19,13 @@ TicketFlow implements a comprehensive zero-trust security architecture where no 
 #### 1. Authentication Layer
 
 **Multi-Factor Authentication Options:**
+
 - Primary: Email/Password with bcrypt hashing (10 salt rounds)
 - Secondary: Microsoft 365 SSO with OAuth 2.0
 - Session-based authentication with secure cookies
 
 **Password Security:**
+
 ```typescript
 // Password hashing implementation
 const saltRounds = 10;
@@ -37,6 +39,7 @@ const hashedPassword = await bcrypt.hash(password, saltRounds);
 ```
 
 **Session Management:**
+
 - Sessions stored in PostgreSQL (not in memory)
 - 7-day expiration with sliding window
 - Secure, httpOnly, sameSite cookies
@@ -45,6 +48,7 @@ const hashedPassword = await bcrypt.hash(password, saltRounds);
 #### 2. Authorization Layer
 
 **Role-Based Access Control (RBAC):**
+
 ```typescript
 Roles:
 - Admin: Full system access
@@ -62,6 +66,7 @@ const requireAdmin = (req, res, next) => {
 ```
 
 **Resource-Level Permissions:**
+
 - Tickets: Users can only edit assigned/created tickets
 - Teams: Only team admins can manage members
 - Departments: Only managers can view department data
@@ -70,18 +75,21 @@ const requireAdmin = (req, res, next) => {
 #### 3. Data Protection
 
 **Encryption at Rest:**
+
 - Database: PostgreSQL with encryption enabled
 - File Storage: Encrypted blob storage
 - API Keys: Encrypted before database storage
 - Sensitive fields: Additional application-level encryption
 
 **Encryption in Transit:**
+
 - HTTPS enforced in production
 - TLS 1.2+ required
 - Certificate pinning for mobile apps
 - Secure WebSocket connections (WSS)
 
 **Data Minimization:**
+
 - Only collect necessary user data
 - Automatic data purging policies
 - No sensitive data in logs
@@ -90,23 +98,26 @@ const requireAdmin = (req, res, next) => {
 #### 4. Input Validation & Sanitization
 
 **Zod Schema Validation:**
+
 ```typescript
 // Example validation schema
 const createTicketSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(5000),
-  priority: z.enum(['low', 'medium', 'high', 'urgent']),
+  priority: z.enum(["low", "medium", "high", "urgent"]),
   // SQL injection prevention via parameterized queries
 });
 ```
 
 **XSS Prevention:**
+
 - React's automatic escaping
 - Content Security Policy headers
 - Sanitization of user-generated content
 - No inline scripts or styles
 
 **SQL Injection Prevention:**
+
 - Drizzle ORM with parameterized queries
 - No raw SQL execution
 - Input validation before database operations
@@ -115,6 +126,7 @@ const createTicketSchema = z.object({
 #### 5. API Security
 
 **Rate Limiting:**
+
 ```typescript
 // Rate limit configuration
 Authentication endpoints: 5 requests/minute/IP
@@ -123,24 +135,27 @@ File uploads: 10 requests/minute/user
 ```
 
 **API Key Management:**
+
 - Separate keys for different services (SES, Bedrock)
 - Keys never exposed to frontend
 - Rotation reminders and expiration
 - Audit logging for key usage
 
 **CORS Configuration:**
+
 ```typescript
 cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(','),
+  origin: process.env.ALLOWED_ORIGINS?.split(","),
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-})
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+});
 ```
 
 #### 6. Audit & Monitoring
 
 **Comprehensive Logging:**
+
 - All authentication attempts
 - Permission denied events
 - Data modifications with before/after
@@ -148,6 +163,7 @@ cors({
 - File access attempts
 
 **Security Events Tracked:**
+
 ```typescript
 - Failed login attempts
 - Password reset requests
@@ -157,6 +173,7 @@ cors({
 ```
 
 **Real-time Monitoring:**
+
 - Anomaly detection for unusual access patterns
 - Alert on multiple failed login attempts
 - Geographic access monitoring
@@ -165,18 +182,21 @@ cors({
 #### 7. Infrastructure Security
 
 **Environment Variables:**
+
 - No secrets in code repository
 - Environment-specific configurations
 - Secure secret management
 - Regular rotation policies
 
 **Dependency Management:**
+
 - Regular security updates
 - Vulnerability scanning
 - License compliance
 - Supply chain security
 
 **Container Security:**
+
 - Minimal base images
 - Non-root user execution
 - Read-only file systems where possible
@@ -187,12 +207,14 @@ cors({
 ### Development Security
 
 1. **Secure Coding Standards:**
+
    - Code reviews required for all changes
    - Security linting with ESLint security plugins
    - Dependency vulnerability scanning
    - SAST (Static Application Security Testing)
 
 2. **Secret Management:**
+
    - Never commit secrets
    - Use environment variables
    - Implement secret rotation
@@ -207,12 +229,14 @@ cors({
 ### Operational Security
 
 1. **Incident Response Plan:**
+
    - 24-hour response SLA
    - Defined escalation procedures
    - Post-incident reviews
    - Security patch timeline
 
 2. **Access Control:**
+
    - Principle of least privilege
    - Regular access reviews
    - Automated deprovisioning
@@ -243,6 +267,7 @@ cors({
 ## Security Checklist
 
 ### Authentication & Authorization
+
 - [x] Multi-factor authentication available
 - [x] Secure password storage (bcrypt)
 - [x] Session management in database
@@ -251,6 +276,7 @@ cors({
 - [x] API authentication required
 
 ### Data Protection
+
 - [x] HTTPS enforced
 - [x] Encryption at rest
 - [x] Secure file storage
@@ -259,6 +285,7 @@ cors({
 - [x] XSS prevention
 
 ### Infrastructure
+
 - [x] Environment variable security
 - [x] No hardcoded secrets
 - [x] Dependency scanning
@@ -267,6 +294,7 @@ cors({
 - [x] Rate limiting implemented
 
 ### Monitoring & Response
+
 - [x] Audit logging
 - [x] Security event tracking
 - [x] Anomaly detection
@@ -276,13 +304,15 @@ cors({
 
 ## Known Security Considerations
 
-1. **File Upload Security**: 
+1. **File Upload Security**:
+
    - Limited to 10MB
    - File type validation
    - Virus scanning recommended
    - Stored outside web root
 
 2. **AI Integration Security**:
+
    - API keys encrypted
    - Usage monitoring
    - Rate limiting
@@ -303,22 +333,26 @@ cors({
 ## Regular Security Tasks
 
 ### Daily
+
 - Monitor security alerts
 - Review failed login attempts
 - Check system health
 
 ### Weekly
+
 - Review access logs
 - Update security patches
 - Audit new user accounts
 
 ### Monthly
+
 - Dependency updates
 - Security training
 - Access reviews
 - Penetration testing
 
 ### Quarterly
+
 - Full security audit
 - Policy review
 - Compliance check

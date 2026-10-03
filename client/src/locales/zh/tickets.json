@@ -1,0 +1,78 @@
+{
+  "title": "工单",
+  "subtitle": "管理并跟踪你项目中的所有工单",
+  "newTicket": "新建工单",
+  "createTicket": "创建工单",
+  "editTicket": "编辑工单",
+  "deleteTicket": "删除工单",
+  "taskDeleted": "工单已成功删除",
+  "failedToDelete": "删除工单失败",
+  "confirmDelete": "确定要删除此工单吗？",
+  "filters": {
+    "all": "全部",
+    "status": "状态",
+    "category": "类别",
+    "priority": "优先级",
+    "search": "搜索工单...",
+    "searchPlaceholder": "按标题、描述或工单号搜索...",
+    "onlyMyTickets": "只看我的工单",
+    "clearFilters": "清除筛选",
+    "page": "第",
+    "prev": "上一页",
+    "next": "下一页",
+    "of": "页，共",
+    "tickets": "条"
+  },
+  "status": {
+    "all": "所有状态",
+    "open": "未解决",
+    "in_progress": "进行中",
+    "resolved": "已解决",
+    "closed": "已关闭",
+    "on_hold": "搁置"
+  },
+  "category": {
+    "all": "所有类别",
+    "bug": "缺陷",
+    "feature": "功能",
+    "support": "支持",
+    "enhancement": "改进",
+    "incident": "事件",
+    "request": "请求"
+  },
+  "priority": {
+    "all": "所有优先级",
+    "low": "低",
+    "medium": "中",
+    "high": "高",
+    "urgent": "紧急"
+  },
+  "assignee": {
+    "none": "未分配",
+    "assignedTo": "指派给",
+    "assignTo": "指派到",
+    "assignToUser": "指派给用户",
+    "assignToTeam": "指派给团队"
+  },
+  "details": {
+    "title": "标题",
+    "description": "描述",
+    "notes": "备注",
+    "dueDate": "截止日期",
+    "createdAt": "创建时间",
+    "updatedAt": "更新时间",
+    "createdBy": "创建者",
+    "ticketNumber": "工单号"
+  },
+  "view": {
+    "cards": "卡片",
+    "table": "表格",
+    "showMine": "显示我的工单"
+  },
+  "empty": {
+    "noTickets": "没有找到工单",
+    "noMatchingTickets": "没有符合筛选条件的工单"
+  }
+}
+
+

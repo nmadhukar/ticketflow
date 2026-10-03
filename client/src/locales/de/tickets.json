@@ -1,0 +1,78 @@
+{
+  "title": "Tickets",
+  "subtitle": "Verwalte und verfolge alle Tickets deiner Projekte",
+  "newTicket": "Neues Ticket",
+  "createTicket": "Ticket erstellen",
+  "editTicket": "Ticket bearbeiten",
+  "deleteTicket": "Ticket löschen",
+  "taskDeleted": "Ticket erfolgreich gelöscht",
+  "failedToDelete": "Ticket konnte nicht gelöscht werden",
+  "confirmDelete": "Möchtest du dieses Ticket wirklich löschen?",
+  "filters": {
+    "all": "Alle",
+    "status": "Status",
+    "category": "Kategorie",
+    "priority": "Priorität",
+    "search": "Tickets suchen...",
+    "searchPlaceholder": "Nach Titel, Beschreibung oder Ticketnummer suchen...",
+    "onlyMyTickets": "Nur meine Tickets",
+    "clearFilters": "Filter löschen",
+    "page": "Seite",
+    "prev": "Zurück",
+    "next": "Weiter",
+    "of": "von",
+    "tickets": "Tickets"
+  },
+  "status": {
+    "all": "Alle Status",
+    "open": "Offen",
+    "in_progress": "In Bearbeitung",
+    "resolved": "Gelöst",
+    "closed": "Geschlossen",
+    "on_hold": "Wartend"
+  },
+  "category": {
+    "all": "Alle Kategorien",
+    "bug": "Fehler",
+    "feature": "Funktion",
+    "support": "Support",
+    "enhancement": "Verbesserung",
+    "incident": "Vorfall",
+    "request": "Anfrage"
+  },
+  "priority": {
+    "all": "Alle Prioritäten",
+    "low": "Niedrig",
+    "medium": "Mittel",
+    "high": "Hoch",
+    "urgent": "Dringend"
+  },
+  "assignee": {
+    "none": "Nicht zugewiesen",
+    "assignedTo": "Zugewiesen an",
+    "assignTo": "Zuweisen an",
+    "assignToUser": "Benutzer zuweisen",
+    "assignToTeam": "Team zuweisen"
+  },
+  "details": {
+    "title": "Titel",
+    "description": "Beschreibung",
+    "notes": "Notizen",
+    "dueDate": "Fälligkeitsdatum",
+    "createdAt": "Erstellt",
+    "updatedAt": "Aktualisiert",
+    "createdBy": "Erstellt von",
+    "ticketNumber": "Ticket #"
+  },
+  "view": {
+    "cards": "Karten",
+    "table": "Tabelle",
+    "showMine": "Meine Tickets anzeigen"
+  },
+  "empty": {
+    "noTickets": "Keine Tickets gefunden",
+    "noMatchingTickets": "Keine Tickets entsprechen deinen Filtern"
+  }
+}
+
+
