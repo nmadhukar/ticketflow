@@ -58,6 +58,11 @@ services:
       # (never from the request's Host header), and the server refuses to boot without it (R34).
       APP_BASE_URL: ${APP_BASE_URL}
 
+      # Optional (R36): id of the team that receives emailed tickets and customer tickets with
+      # no user or team assignee. Blank: they stay admin-only until triaged. An id that names
+      # no team is logged at startup and ignored.
+      DEFAULT_TRIAGE_TEAM_ID: ${DEFAULT_TRIAGE_TEAM_ID:-}
+
       # Security & Auth
       SESSION_SECRET: ${SESSION_SECRET}
       JWT_SECRET: ${JWT_SECRET}

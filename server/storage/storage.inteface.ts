@@ -563,9 +563,11 @@ export interface IStorage {
       totalTickets: number;
       openTickets: number;
       inProgress: number;
+      onHold: number;
       resolved: number;
       closed: number;
       highPriority: number;
+      urgent: number;
     }>;
   }>;
   getManagerStats(userId: string): Promise<{
@@ -575,9 +577,11 @@ export interface IStorage {
       totalTickets: number;
       openTickets: number;
       inProgress: number;
+      onHold: number;
       resolved: number;
       closed: number;
       highPriority: number;
+      urgent: number;
       avgResolutionTime: number;
     }>;
     priorityDistribution: {

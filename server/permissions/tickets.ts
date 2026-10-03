@@ -31,6 +31,8 @@ interface CanUpdateArgs {
   user: any;
   ticket: any;
   payload: Record<string, unknown>;
+  /** The caller already ran assertTaskAccess for this user and ticket; do not query it again. */
+  accessChecked?: boolean;
 }
 
 interface Verdict<T = any> {
@@ -75,13 +77,17 @@ export async function canUpdateTicket({
   user,
   ticket,
   payload,
+  accessChecked = false,
 }: CanUpdateArgs): Promise<Verdict<UpdatePayload>> {
   const role = normalizeRole(user?.role);
   const userId: unknown = user?.id;
   if (!role || typeof userId !== "string") {
     return { allowed: false, reason: "Unknown role" };
   }
-  if (typeof ticket?.id !== "number" || !(await canAccessTask({ id: userId, role }, ticket.id))) {
+  if (
+    typeof ticket?.id !== "number" ||
+    (!accessChecked && !(await canAccessTask({ id: userId, role }, ticket.id)))
+  ) {
     return { allowed: false, reason: "This ticket is outside your scope" };
   }
 

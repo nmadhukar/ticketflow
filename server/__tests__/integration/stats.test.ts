@@ -15,8 +15,9 @@ import { db } from "../../storage/db";
  * user-assigned, team-queued and stale-column rows, so each role sees a different slice.
  */
 type Agent = ReturnType<typeof request.agent>;
-type Who = "A1" | "A2" | "A3" | "M1" | "M2" | "C1" | "C2" | "admin";
-const WHO: Who[] = ["A1", "A2", "A3", "M1", "M2", "C1", "C2", "admin"];
+// U is the legacy role `user`, which the server treats as an agent (a member of T1 here).
+type Who = "A1" | "A2" | "A3" | "U" | "M1" | "M2" | "C1" | "C2" | "admin";
+const WHO: Who[] = ["A1", "A2", "A3", "U", "M1", "M2", "C1", "C2", "admin"];
 const STATUSES = ["open", "in_progress", "on_hold", "resolved", "closed"] as const;
 const STAT_KEY: Record<(typeof STATUSES)[number], string> = {
   open: "open",
@@ -53,12 +54,14 @@ describe("dashboard stats", () => {
     users.M1 = await createUser({ role: "manager" });
     users.M2 = await createUser({ role: "manager" });
     for (const w of ["A1", "A2", "A3"] as const) users[w] = await createUser({ role: "agent" });
+    users.U = await createUser({ role: "user" });
     for (const w of ["C1", "C2"] as const) users[w] = await createUser({ role: "customer" });
 
     const T1 = (await createTeam(users.M1)).id;
     const T2 = (await createTeam(users.M2)).id;
     await storage.addTeamMember({ teamId: T1, userId: users.A1.id });
     await storage.addTeamMember({ teamId: T1, userId: users.A2.id });
+    await storage.addTeamMember({ teamId: T1, userId: users.U.id });
     await storage.addTeamMember({ teamId: T2, userId: users.A3.id });
 
     const toUser = (w: Who) => ({ assigneeType: "user" as const, assigneeId: users[w].id, assigneeTeamId: null });
@@ -141,6 +144,8 @@ describe("dashboard stats", () => {
     expect(totals.C1).toBe(7);
     // A1 does not see T2's queue even though a stale assignee_id points at A1.
     expect(totals.A1).toBe(8);
+    // The legacy role `user` is an agent: the same slice as A2, the other T1 member who created nothing.
+    expect(totals.U).toBe(totals.A2);
   });
 
   describe("GET /api/admin/stats", () => {
@@ -184,6 +189,110 @@ describe("dashboard stats", () => {
 
       const a3 = await agents.A3.get("/api/stats/agent");
       expect(a3.body.personal.assignedToMe).toBe(3);
+    });
+
+    it("team counters include onHold and add up to the team's total", async () => {
+      const a1 = await agents.A1.get("/api/stats/agent");
+      const t1 = a1.body.team.find((t: any) => t.totalTickets > 0);
+      expect(t1).toMatchObject({
+        totalTickets: 5,
+        openTickets: 1,
+        inProgress: 1,
+        onHold: 1,
+        resolved: 1,
+        closed: 1,
+        // Same definitions as /api/stats: highPriority is `high` only (1), and urgent counts
+        // non-closed urgent tickets separately (open, on_hold, resolved = 3; the closed one is out).
+        highPriority: 1,
+        urgent: 3,
+      });
+      expect(t1.openTickets + t1.inProgress + t1.onHold + t1.resolved + t1.closed).toBe(t1.totalTickets);
+      // A team with no tickets still reports zeros, not a missing row.
+      const a3 = await agents.A3.get("/api/stats/agent");
+      expect(a3.body.team[0]).toMatchObject({
+        totalTickets: 3,
+        onHold: 1,
+        openTickets: 1,
+        resolved: 1,
+        highPriority: 0,
+        urgent: 1,
+      });
+      // One definition everywhere: the team figure is the count of `high` tickets queued to the team
+      // (the same filter /api/stats applies to everything), not high + urgent.
+      const queuedHigh = (await listAll("admin")).filter(
+        (t) => t.assigneeType === "team" && t.assigneeTeamId === t1.teamId && t.priority === "high"
+      ).length;
+      expect(t1.highPriority).toBe(queuedHigh);
+    });
+
+    it("the legacy role user gets agent stats (it used to be refused)", async () => {
+      const res = await agents.U.get("/api/stats/agent");
+      expect(res.status).toBe(200);
+      expect(res.body.personal.assignedToMe).toBe(0);
+      expect(res.body.team[0]).toMatchObject({ totalTickets: 5, onHold: 1 });
+      for (const who of ["C1", "M1", "admin"] as const) {
+        expect((await agents[who].get("/api/stats/agent")).status).toBe(403);
+      }
+    });
+  });
+
+  describe("GET /api/stats/manager", () => {
+    it("M1's department counts come from SQL: onHold included, highPriority is priority high only", async () => {
+      const res = await agents.M1.get("/api/stats/manager");
+      expect(res.status).toBe(200);
+      expect(res.body.department).toHaveLength(1);
+      expect(res.body.department[0]).toMatchObject({
+        totalTickets: 5,
+        openTickets: 1,
+        inProgress: 1,
+        onHold: 1,
+        resolved: 1,
+        closed: 1,
+        highPriority: 1, // the one `high` ticket; the urgent ones are counted separately (as in /api/stats)
+        urgent: 3,
+      });
+      expect(res.body.priorityDistribution).toEqual({ urgent: 4, high: 1, medium: 0, low: 0 });
+      expect(res.body.categoryBreakdown).toEqual([{ category: "support", count: 5, percentage: 100 }]);
+      const [t1] = res.body.teamPerformance;
+      expect(t1).toMatchObject({ totalTickets: 5, resolutionRate: 2 / 5 });
+      expect(t1.members.map((m: any) => [m.assigned, m.resolved])).toEqual([
+        [0, 0], // M1: createTeam enrols the creator
+        [1, 0], // A1: one open ticket
+        [1, 0], // A2: one on_hold ticket
+        [0, 0], // U
+      ]);
+      expect(t1.members.map((m: any) => m.userId)).toEqual([users.M1.id, users.A1.id, users.A2.id, users.U.id]);
+    });
+
+    it("M2 sees only its own department, and the department route agrees on highPriority", async () => {
+      const res = await agents.M2.get("/api/stats/manager");
+      expect(res.body.department[0]).toMatchObject({
+        totalTickets: 3,
+        openTickets: 1,
+        onHold: 1,
+        resolved: 1,
+        closed: 0,
+        highPriority: 0,
+        urgent: 1,
+      });
+      const m1 = await agents.M1.get("/api/stats/manager");
+      const dept = await agents.M1.get(`/api/departments/${m1.body.department[0].departmentId}/stats`);
+      expect(dept.status).toBe(200);
+      expect(dept.body.highPriorityTickets).toBe(m1.body.department[0].highPriority);
+    });
+
+    it("a manager with no departments gets empty lists, and non-managers are refused", async () => {
+      const lonely = await createUser({ role: "manager" });
+      const a = await loginAs(ctx.app, lonely);
+      const res = await a.get("/api/stats/manager");
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        department: [],
+        priorityDistribution: { urgent: 0, high: 0, medium: 0, low: 0 },
+        categoryBreakdown: [],
+        teamPerformance: [],
+      });
+      expect((await agents.A1.get("/api/stats/manager")).status).toBe(403);
     });
   });
 });

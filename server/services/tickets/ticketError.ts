@@ -36,6 +36,8 @@ export function toTicketError(e: unknown): unknown {
   if (e instanceof TicketError) return e;
   if (e instanceof ZodError) return new TicketError("VALIDATION", "Invalid input", e.flatten());
   if (e instanceof HttpError) {
+    // A retryable conflict that is not a workflow refusal (e.g. a ticket-number clash) keeps its own contract.
+    if (e.status === 409 && e.code === "conflict") return e;
     if (e.status === 400) return new TicketError("VALIDATION", e.message, e.details);
     if (e.status === 403) return new TicketError("FORBIDDEN", e.message, e.details);
     if (e.status === 404) return new TicketError("NOT_FOUND", e.message, e.details);

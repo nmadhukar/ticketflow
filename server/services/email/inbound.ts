@@ -11,6 +11,7 @@ import { SYSTEM_USER_ID } from "../../utils/systemUser";
 import { createTicketSchema } from "../tickets/schemas";
 import { COMMENT_MAX_LENGTH, commentBodySchema } from "../tickets/commentSchema";
 import { createTicketRecord, runTicketCreatedHooks } from "../tickets/create";
+import { defaultTriageAssignment } from "../tickets/triage";
 import { notifyCommentAdded } from "../tickets/notifier";
 import { parseEmail, parseSingleMailbox } from "./mime";
 import { publicBaseUrl } from "../../utils/appBaseUrl";
@@ -173,7 +174,9 @@ export async function processSesNotification(input: unknown): Promise<InboundRes
     description: description === "" ? null : description,
     category: inboundCategory(),
   });
-  const ticket = await createTicketRecord({ ...fields }, sender.id);
+  // R36: with DEFAULT_TRIAGE_TEAM_ID set the ticket is queued to that team; unset, it stays admin-triage.
+  const triage = await defaultTriageAssignment();
+  const ticket = await createTicketRecord({ ...fields, ...(triage ?? {}) }, sender.id);
   // The same after-create effects as POST /api/tasks (AI auto-response per settings, realtime
   // broadcast, Teams webhooks), run by the route after it has answered SNS. APP_BASE_URL is the
   // site origin for the Teams link; unset, the card has no link (there is no request to read it from).

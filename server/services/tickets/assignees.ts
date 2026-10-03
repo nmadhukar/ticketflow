@@ -37,7 +37,12 @@ export async function assertAgentMayAssign(
   user: { id: string; role: unknown },
   fields: AssigneeFields
 ): Promise<void> {
-  if (normalizeRole(user.role) !== "agent") return;
+  const role = normalizeRole(user.role);
+  // Deny by default: an unknown role may not assign anything.
+  if (role === null) {
+    throw new HttpError(403, "forbidden", "Your role cannot assign a new ticket");
+  }
+  if (role !== "agent") return;
   if (typeof fields.assigneeId === "string" && fields.assigneeId !== user.id) {
     throw new HttpError(403, "forbidden", "Agents can assign a new ticket only to themselves or to their own team");
   }

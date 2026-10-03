@@ -24,7 +24,7 @@ function mcpWriteContext(user: User): WriteContext {
     actionBaseUrl: publicBaseUrl(),
     onStatusRefusal: ({ from, to, taskId }) =>
       logSecurityEvent(
-        { user: { userId: user.id, role: user.role }, ip: "mcp", get: () => undefined } as never,
+        { user: { id: user.id, role: user.role }, ip: "mcp", get: () => undefined } as never,
         "change_status",
         "ticket",
         false,
