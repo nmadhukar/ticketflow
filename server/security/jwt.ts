@@ -56,7 +56,7 @@ export const verifyToken = (token: string): JWTPayload => {
       audience: JWT_AUDIENCE,
     }) as JWTPayload;
     return decoded;
-  } catch (error) {
+  } catch {
     throw new Error("Invalid or expired token");
   }
 };
@@ -103,7 +103,7 @@ export const optionalJWT = (
     try {
       const decoded = verifyToken(token);
       req.user = decoded;
-    } catch (error) {
+    } catch {
       // Continue without authentication for optional routes
     }
   }
@@ -129,7 +129,7 @@ export const refreshAccessToken = (refreshToken: string) => {
     };
 
     return generateTokens(newPayload);
-  } catch (error) {
+  } catch {
     throw new Error("Invalid or expired refresh token");
   }
 };

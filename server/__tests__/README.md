@@ -20,7 +20,7 @@ server/__tests__/
 ├── mocks/                   # Mock implementations and test data
 │   └── aws-bedrock.mock.ts         # AWS Bedrock service mocks
 └── utils/                   # Testing utilities and helpers
-    ├── test-data-generator.ts      # Realistic test data generation
+    ├── snsTestSigner.ts            # Signs SNS messages for the inbound-email tests
     ├── test-reporter.ts            # Comprehensive test reporting
     └── test-runner.ts              # Automated test execution
 ```
@@ -148,23 +148,6 @@ node server/__tests__/utils/test-runner.js performance
 - Admin AI management interfaces
 
 ## 🔧 Test Utilities
-
-### Test Data Generator
-
-Generates realistic test data for consistent testing:
-
-```typescript
-import { TestDataGenerator } from './utils/test-data-generator';
-
-// Generate 100 realistic tickets
-const tickets = TestDataGenerator.generateTickets(100);
-
-// Generate AI response scenarios
-const scenarios = TestDataGenerator.generateAIResponseScenarios();
-
-// Generate load testing data
-const loadData = TestDataGenerator.generateLoadTestData(1000, 50);
-```
 
 ### AWS Bedrock Mocks
 

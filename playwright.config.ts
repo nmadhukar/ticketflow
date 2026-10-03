@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = 5055;
+// E2E_PORT lets parallel checkouts run side by side; 5055 is the default.
+const PORT = Number(process.env.E2E_PORT ?? 5055);
 const BASE_URL = `http://localhost:${PORT}`;
 
 // The e2e database is whatever TEST_DATABASE_URL names. Refuse anything that is
@@ -36,7 +37,17 @@ export default defineConfig({
   retries: 0,
   reporter: [["list"]],
   use: { baseURL: BASE_URL, trace: "retain-on-failure" },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        // Chromium refuses some ports outright (ERR_UNSAFE_PORT: 5060 and 5061 are SIP);
+        // allow the one this run uses so E2E_PORT can be any free port.
+        launchOptions: { args: [`--explicitly-allowed-ports=${PORT}`] },
+      },
+    },
+  ],
   webServer: {
     // The BUILT app, in production mode, so the strict CSP is what loads.
     command: "npm run build && npm start",

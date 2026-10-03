@@ -54,7 +54,7 @@ export const hashPassword = async (password: string): Promise<string> => {
   try {
     const salt = await bcrypt.genSalt(SALT_ROUNDS);
     return await bcrypt.hash(password, salt);
-  } catch (error) {
+  } catch {
     throw new Error("Failed to hash password");
   }
 };
@@ -66,7 +66,7 @@ export const verifyPassword = async (
 ): Promise<boolean> => {
   try {
     return await bcrypt.compare(password, hashedPassword);
-  } catch (error) {
+  } catch {
     throw new Error("Failed to verify password");
   }
 };
@@ -421,7 +421,7 @@ export const validateToken = async (
     }
 
     return decoded;
-  } catch (error) {
+  } catch {
     return null;
   }
 };

@@ -158,32 +158,39 @@ describe("DELETE /api/tasks/:id", () => {
     expect(logged.mock.calls.every((c) => c.every((a) => typeof a === "string"))).toBe(true);
   });
 
-  it("the ticket row is locked first: a child insert racing the delete fails cleanly and leaves no orphan", async () => {
+  it("the ticket row is locked first: a comment inserted in an open transaction is deleted with the ticket, not left to fail the delete", async () => {
     const admin = await createUser({ role: "admin" });
     const adminA = await loginAs(ctx.app, admin);
     const t = await createTicketAs(adminA);
     const id: number = t.body.id;
     jest.spyOn(s3Service, "deleteFiles").mockResolvedValue({ deleted: [], failed: [] });
 
-    // Another session holds the row lock; the delete must queue behind it.
+    // Another session inserts a comment and keeps its transaction open. The
+    // insert holds a key-share lock on the ticket row through the FK.
+    //
+    // With FOR UPDATE first, deleteTask queues behind that lock, then (after the
+    // COMMIT) sees the comment and deletes it with the rest. Without FOR UPDATE
+    // it would delete its children while the comment is still invisible, then
+    // block on the ticket row, and fail with an FK violation once the comment
+    // commits. So this only passes when the ticket row is locked first.
     const holder = await pool.connect();
-    await holder.query("BEGIN");
-    await holder.query("SELECT id FROM tasks WHERE id = $1 FOR UPDATE", [id]);
-    let deleteDone = false;
-    const deleting = storage.deleteTask(id).then(() => {
-      deleteDone = true;
-    });
-    await new Promise((r) => setTimeout(r, 300));
-    expect(deleteDone).toBe(false);
-    // A comment insert now also waits (FK key-share lock) behind the same row.
-    const inserting = db
-      .insert(taskComments)
-      .values({ taskId: id, userId: admin.id, content: "late" })
-      .then(() => "inserted", () => "rejected");
-    await holder.query("COMMIT");
-    holder.release();
-    await deleting;
-    expect(await inserting).toBe("rejected");
+    try {
+      await holder.query("BEGIN");
+      await holder.query(
+        "INSERT INTO task_comments (task_id, user_id, content) VALUES ($1, $2, $3)",
+        [id, admin.id, "in flight"]
+      );
+      let deleteDone = false;
+      const deleting = storage.deleteTask(id).then(() => {
+        deleteDone = true;
+      });
+      await new Promise((r) => setTimeout(r, 300));
+      expect(deleteDone).toBe(false);
+      await holder.query("COMMIT");
+      await expect(deleting).resolves.toBeUndefined();
+    } finally {
+      holder.release();
+    }
     expect(await db.select().from(tasks).where(eq(tasks.id, id))).toHaveLength(0);
     expect(await db.select().from(taskComments).where(eq(taskComments.taskId, id))).toHaveLength(0);
   });

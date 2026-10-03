@@ -112,7 +112,7 @@ const TaskAttachments = ({
           setMaxFileSizeMB(settings.maxFileUploadSize);
         }
         // Note: MAX_FILES_PER_REQUEST is server-side only, use default
-      } catch (error) {
+      } catch {
         // Use defaults if fetch fails
         console.warn("Could not fetch upload limits, using defaults");
       }

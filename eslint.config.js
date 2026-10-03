@@ -35,16 +35,16 @@ export default tseslint.config(
   },
   {
     rules: {
-      // Unused imports, locals and parameters are errors. An unused catch binding
-      // is behaviour-neutral, and a leading underscore marks an intentional
-      // unused parameter/local.
+      // Unused imports, locals, parameters and catch bindings are errors. Write
+      // `catch {` when the error is not used. A leading underscore marks an
+      // intentional unused parameter/local (it does not apply to catch bindings).
       "@typescript-eslint/no-unused-vars": [
         "error",
         {
           args: "after-used",
           argsIgnorePattern: "^_",
           varsIgnorePattern: "^_",
-          caughtErrors: "none",
+          caughtErrors: "all",
         },
       ],
       // Baseline: 786 occurrences at the time this config was added. Fixing them

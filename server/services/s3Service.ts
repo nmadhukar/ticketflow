@@ -143,7 +143,7 @@ class S3Service {
 
       // Region is optional (has default), but we check if it exists
       // No need to add to missing if it's not set, as it has a default
-    } catch (error) {
+    } catch {
       missing.push("bedrock_settings table (unable to access)");
     }
 

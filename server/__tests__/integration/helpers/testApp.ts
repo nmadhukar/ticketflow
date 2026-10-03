@@ -5,6 +5,7 @@ import { closeAuth } from "../../../services/auth";
 import { closeDb } from "./testDb";
 import { recordResponse } from "./noSecrets";
 import { installErrorHandling } from "../../../http/install";
+import { registerHealthRoutes } from "../../../http/health";
 
 /**
  * Builds the real application (the production `registerRoutes`) without
@@ -47,6 +48,9 @@ export async function createTestApp(): Promise<{
   } finally {
     global.setInterval = realSetInterval;
   }
+
+  // The health routes production registers after registerRoutes (server/index.ts).
+  registerHealthRoutes(app);
 
   // Same /api 404 + JSON error handler production installs in server/index.ts.
   installErrorHandling(app);

@@ -25,7 +25,7 @@ const tsJestOptions = (extra = {}) => [
   },
 ];
 const tsJest = (extra = {}) => ({
-  '^.+.tsx?$': tsJestOptions(extra),
+  '^.+\\.tsx?$': tsJestOptions(extra),
   // sanitize-html depends on htmlparser2 and friends, which ship ES modules
   // only; ts-jest (allowJs) turns them into CommonJS for the test runtime.
   '^.+[\\\\/]node_modules[\\\\/](htmlparser2|domhandler|domutils|dom-serializer|domelementtype|entities)[\\\\/].+\\.js$':
