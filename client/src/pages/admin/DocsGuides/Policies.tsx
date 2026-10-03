@@ -173,7 +173,7 @@ export default function Policies() {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-    } catch (error) {
+    } catch {
       toast({
         title: "Error",
         description: "Failed to download document",

@@ -3442,7 +3442,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             (emailProvider?.provider === EMAIL_PROVIDERS.AWS &&
               emailProvider?.metadata?.awsSecretAccessKey &&
               emailProvider?.metadata?.awsAccessKeyId);
-        } catch (error) {
+        } catch {
           // Email provider check failed, continue with env check
         }
 
@@ -3451,7 +3451,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const template = await storage.getEmailTemplate("user_invitation");
           emailTemplateExists = !!template;
-        } catch (error) {
+        } catch {
           // Template check failed
         }
 

@@ -30,7 +30,7 @@ export async function seedTeams() {
           .limit(1);
         if (anyAdmin?.id) createdById = anyAdmin.id;
       }
-    } catch (e) {
+    } catch {
       // continue without createdBy if lookup fails
     }
 

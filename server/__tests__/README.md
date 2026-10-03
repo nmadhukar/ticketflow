@@ -15,7 +15,7 @@ server/__tests__/
 ├── mocks/
 │   └── aws-bedrock.mock.ts   # Bedrock fake (see below)
 ├── fixtures/ses/         # Recorded SNS and SES payloads for inbound email
-├── utils/                # snsTestSigner.ts, test-data-generator.ts
+├── utils/                # snsTestSigner.ts
 └── setup.ts
 ```
 

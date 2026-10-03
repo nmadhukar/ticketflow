@@ -3,6 +3,7 @@ import "./bootGuard";
 import express from "express";
 import { registerRoutes } from "./routes/index";
 import { installErrorHandling } from "./http/install";
+import { registerHealthRoutes } from "./http/health";
 import { setupVite, serveStatic, log } from "./vite";
 import { requestLogger } from "./utils/requestLogger";
 import { isDevelopmentEnv } from "./env";
@@ -10,7 +11,6 @@ import { describeError } from "./http/errors";
 import {
   applySecurity,
   applyRouteSpecificSecurity,
-  securityHealthCheck,
 } from "./security";
 
 const app = express();
@@ -72,20 +72,7 @@ app.use(requestLogger(log));
 
   const server = await registerRoutes(app);
 
-  // Simple health check endpoint (no database required)
-  app.get("/health", (req, res) => {
-    res.json({
-      status: "ok",
-      timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV,
-      port: process.env.PORT,
-    });
-  });
-
-  // Security health check endpoint
-  app.get("/api/security/health", (req, res) => {
-    res.json(securityHealthCheck());
-  });
+  registerHealthRoutes(app);
 
   installErrorHandling(app);
 

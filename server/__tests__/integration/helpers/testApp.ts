@@ -2,9 +2,10 @@ import express, { type Express } from "express";
 import { installRequestPipeline } from "../../../security/pipeline";
 import { registerRoutes } from "../../../routes/index";
 import { closeAuth } from "../../../services/auth";
-import { closeDb } from "./testDb";
+import { closeDb, resetDb } from "./testDb";
 import { recordJsonResponses } from "./noSecrets";
 import { installErrorHandling } from "../../../http/install";
+import { registerHealthRoutes } from "../../../http/health";
 
 /**
  * Builds the real application (the production `registerRoutes`) without
@@ -41,6 +42,9 @@ export async function createTestApp(): Promise<{
     global.setInterval = realSetInterval;
   }
 
+  // The health routes production registers after registerRoutes (server/index.ts).
+  registerHealthRoutes(app);
+
   // Same /api 404 + JSON error handler production installs in server/index.ts.
   installErrorHandling(app);
 
@@ -49,6 +53,9 @@ export async function createTestApp(): Promise<{
     async close() {
       server.close();
       await closeAuth();
+      // Leave the shared test DB empty: tests write fake Bedrock/email/Teams
+      // settings, and e2e runs against the same database.
+      await resetDb();
       await closeDb();
     },
   };

@@ -31,6 +31,9 @@ import { storage } from "../storage";
 import { EMAIL_PROVIDERS } from "../../shared/constants";
 
 type AsyncMock = jest.Mock<(...args: unknown[]) => Promise<unknown>>;
+// The one place a mocked storage method is cast; `unknown` first because the
+// real signatures do not overlap with the loose mock type.
+const asMock = (fn: unknown): AsyncMock => fn as AsyncMock;
 
 describe("Company Settings - Email Endpoints", () => {
   let app: express.Express;
@@ -44,21 +47,19 @@ describe("Company Settings - Email Endpoints", () => {
 
   describe("GET /api/company-settings/email", () => {
     it("returns empty object when no active provider", async () => {
-      (storage.getActiveEmailProvider as unknown as AsyncMock).mockResolvedValue(
-        undefined
-      );
+      asMock(storage.getActiveEmailProvider).mockResolvedValue(undefined);
       const res = await request(app).get("/api/company-settings/email");
       expect(res.status).toBe(200);
       expect(res.body).toEqual({});
     });
 
     it("returns active provider summary when configured", async () => {
-      (storage.getActiveEmailProvider as unknown as AsyncMock).mockResolvedValue({
+      asMock(storage.getActiveEmailProvider).mockResolvedValue({
         provider: EMAIL_PROVIDERS.AWS,
         fromEmail: "no-reply@example.com",
         fromName: "TicketFlow",
         metadata: { awsAccessKeyId: "AKIA...", awsRegion: "us-east-1" },
-      } as any);
+      });
       const res = await request(app).get("/api/company-settings/email");
       expect(res.status).toBe(200);
       expect(res.body.provider).toBe(EMAIL_PROVIDERS.AWS);
@@ -69,12 +70,12 @@ describe("Company Settings - Email Endpoints", () => {
 
   describe("POST /api/company-settings/email", () => {
     it("validates payload and saves AWS provider", async () => {
-      (storage.upsertEmailProvider as unknown as AsyncMock).mockResolvedValue({
+      asMock(storage.upsertEmailProvider).mockResolvedValue({
         provider: EMAIL_PROVIDERS.AWS,
         fromEmail: "no-reply@example.com",
         fromName: "TicketFlow",
         isActive: true,
-      } as any);
+      });
 
       const res = await request(app).post("/api/company-settings/email").send({
         provider: EMAIL_PROVIDERS.AWS,
@@ -87,8 +88,11 @@ describe("Company Settings - Email Endpoints", () => {
 
       expect(res.status).toBe(200);
       expect(storage.upsertEmailProvider).toHaveBeenCalled();
-      const call = (storage.upsertEmailProvider as unknown as unknown as AsyncMock).mock
-        .calls[0][0] as any;
+      const call = asMock(storage.upsertEmailProvider).mock.calls[0][0] as {
+        provider: string;
+        fromEmail: string;
+        metadata: { awsAccessKeyId: string; awsRegion: string };
+      };
       expect(call.provider).toBe(EMAIL_PROVIDERS.AWS);
       expect(call.fromEmail).toBe("no-reply@example.com");
       expect(call.metadata.awsAccessKeyId).toBe("key");
@@ -105,7 +109,7 @@ describe("Company Settings - Email Endpoints", () => {
 
   describe("POST /api/company-settings/email/test", () => {
     it("succeeds for AWS adapter", async () => {
-      (storage.getActiveEmailProvider as unknown as AsyncMock).mockResolvedValue({
+      asMock(storage.getActiveEmailProvider).mockResolvedValue({
         provider: EMAIL_PROVIDERS.AWS,
         fromEmail: "no-reply@example.com",
         fromName: "TicketFlow",
@@ -114,7 +118,7 @@ describe("Company Settings - Email Endpoints", () => {
           awsSecretAccessKey: "secret",
           awsRegion: "us-east-1",
         },
-      } as any);
+      });
 
       const res = await request(app)
         .post("/api/company-settings/email/test")
@@ -124,9 +128,7 @@ describe("Company Settings - Email Endpoints", () => {
     });
 
     it("returns 400 when not configured", async () => {
-      (storage.getActiveEmailProvider as unknown as AsyncMock).mockResolvedValue(
-        undefined
-      );
+      asMock(storage.getActiveEmailProvider).mockResolvedValue(undefined);
       const res = await request(app)
         .post("/api/company-settings/email/test")
         .send({ testEmail: "user@example.com" });

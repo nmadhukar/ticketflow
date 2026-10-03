@@ -42,6 +42,10 @@ describe("route table", () => {
 
     // Guard against an empty walk passing vacuously.
     expect(registered.length).toBeGreaterThan(100);
+    // The health routes are registered by server/index.ts after registerRoutes;
+    // the walk must see them or a duplicate of either would go unnoticed.
+    expect(registered).toContain("GET /health");
+    expect(registered).toContain("GET /api/security/health");
     const seen = new Map<string, number>();
     for (const r of registered) seen.set(r, (seen.get(r) ?? 0) + 1);
     const duplicates = Array.from(seen)

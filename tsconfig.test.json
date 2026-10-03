@@ -7,9 +7,7 @@
     "shared/**/*.test.ts",
     "server/__tests__/**/*.ts",
     "client/src/**/__tests__/**/*",
-    "client/src/**/*.d.ts",
-    "jest.setup*",
-    "client/src/vite-env.d.ts"
+    "client/src/**/*.d.ts"
   ],
   "exclude": ["node_modules", "build", "dist"],
   "compilerOptions": {

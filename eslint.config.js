@@ -29,22 +29,28 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.node, ...globals.jest } },
   },
   {
+    // Preloaded by node (NODE_OPTIONS=--require) as plain CommonJS.
+    files: ["e2e/**/*.cjs"],
+    languageOptions: { globals: globals.node },
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+  {
     // Jest runs this file untransformed as CommonJS (package.json is "type": "module").
     files: ["jest.setup.js"],
     rules: { "@typescript-eslint/no-require-imports": "off" },
   },
   {
     rules: {
-      // Unused imports, locals and parameters are errors. An unused catch binding
-      // is behaviour-neutral, and a leading underscore marks an intentional
-      // unused parameter/local.
+      // Unused imports, locals, parameters and catch bindings are errors. Write
+      // `catch {` when the error is not used. A leading underscore marks an
+      // intentional unused parameter/local (it does not apply to catch bindings).
       "@typescript-eslint/no-unused-vars": [
         "error",
         {
           args: "after-used",
           argsIgnorePattern: "^_",
           varsIgnorePattern: "^_",
-          caughtErrors: "none",
+          caughtErrors: "all",
         },
       ],
       // Baseline: 786 occurrences at the time this config was added. Fixing them

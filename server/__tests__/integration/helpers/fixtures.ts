@@ -52,6 +52,10 @@ export async function loginAs(
 /**
  * Creates a team directly in the database. Unless `departmentId` is given, a
  * fresh active department managed by `managerOrAdmin` is created for it.
+ *
+ * This writes through the database and `storage`, NOT the API, so it bypasses
+ * every permission check. Use it to arrange state; never rely on it to prove
+ * what the API allows. Permission tests must create teams through the routes.
  */
 export async function createTeam(
   managerOrAdmin: User,
