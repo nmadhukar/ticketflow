@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ticketflow
+      POSTGRES_PASSWORD: ticketflow
+      POSTGRES_DB: ticketflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ticketflow"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      DATABASE_URL: postgresql://ticketflow:ticketflow@postgres:5432/ticketflow
+      SESSION_SECRET: ticketflow-dev-session-secret-not-for-prod
+      NODE_ENV: development
+      PORT: "5000"
+      REPLIT_DOMAINS: localhost:5000
+      REPL_ID: ticketflow-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./shared:/app/shared:ro
+      - ./client:/app/client:ro
+      - ./migrations:/app/migrations:ro
+      - ./drizzle.config.ts:/app/drizzle.config.ts:ro
+      - ./tsconfig.json:/app/tsconfig.json:ro
+      - ./vite.config.ts:/app/vite.config.ts:ro
+      - /app/node_modules
+
+volumes:
+  pgdata:
