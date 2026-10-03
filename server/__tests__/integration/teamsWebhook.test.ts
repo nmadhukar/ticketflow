@@ -1,4 +1,3 @@
-import { promises as dnsPromises } from "dns";
 import { eq } from "drizzle-orm";
 import { teamsIntegrationSettings, tasks, type User } from "@shared/schema";
 import { createTestApp } from "./helpers/testApp";
@@ -6,36 +5,39 @@ import { resetDb } from "./helpers/testDb";
 import { createTeam, createTicketAs, createUser, loginAs } from "./helpers/fixtures";
 import { db } from "../../storage/db";
 import { mcpFor } from "./helpers/mcpClient";
+import { fakeWebhookTransport } from "../utils/fakeWebhookTransport";
 
 const hook = (tenant: string) => `https://${tenant}.webhook.office.com/webhookb2/abc@def/IncomingWebhook/xyz/secret`;
 
 describe("Teams webhook settings and fan-out", () => {
   let ctx: Awaited<ReturnType<typeof createTestApp>>;
-  let fetchMock: jest.SpyInstance;
+  // R44: webhooks go out through https.request with a pinned lookup. The fake runs that lookup, so
+  // a webhook counts as sent only when its host resolved to a public address (see the helper).
+  let net: ReturnType<typeof fakeWebhookTransport>;
+  let dnsAnswer: string[];
+  // R84: the feature is off unless TEAMS_WEBHOOKS_ENABLED is exactly "true"; this file tests it on
+  // (and, in the last describe, off).
+  const savedFlag = process.env.TEAMS_WEBHOOKS_ENABLED;
   beforeAll(async () => {
     ctx = await createTestApp();
   });
   afterAll(async () => {
+    if (savedFlag === undefined) delete process.env.TEAMS_WEBHOOKS_ENABLED;
+    else process.env.TEAMS_WEBHOOKS_ENABLED = savedFlag;
     await ctx.close();
   });
   beforeEach(async () => {
+    process.env.TEAMS_WEBHOOKS_ENABLED = "true";
     await resetDb();
-    jest
-      .spyOn(dnsPromises, "lookup")
-      .mockResolvedValue([{ address: "52.96.0.1", family: 4 }] as never);
-    const real = globalThis.fetch;
-    fetchMock = jest.spyOn(globalThis, "fetch").mockImplementation(((input: unknown, init?: RequestInit) => {
-      if (String(input).includes("webhook.office.com")) return Promise.resolve(new Response("1", { status: 200 }));
-      return real(input as never, init);
-    }) as never);
+    dnsAnswer = ["52.96.0.1"];
+    net = fakeWebhookTransport({ addresses: () => dnsAnswer });
   });
   afterEach(() => jest.restoreAllMocks());
 
   const webhookHosts = () =>
-    fetchMock.mock.calls
-      .map((c) => String(c[0]))
-      .filter((u) => u.includes("webhook.office.com"))
-      .map((u) => new URL(u).hostname)
+    net
+      .delivered()
+      .map((c) => String(c.options.hostname))
       .sort();
 
   async function giveWebhook(user: User, tenant: string, types = ["ticket_created", "ticket_updated"]) {
@@ -133,7 +135,7 @@ describe("Teams webhook settings and fan-out", () => {
       const agent = await loginAs(ctx.app, admin);
       const res = await agent.post("/api/teams-integration/test");
       expect(res.status).toBe(400);
-      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("evil.example"))).toHaveLength(0);
+      expect(net.calls.filter((c) => c.options.hostname === "evil.example")).toHaveLength(0);
     });
 
     it("the test route sends to an allow-listed webhook", async () => {
@@ -147,10 +149,7 @@ describe("Teams webhook settings and fan-out", () => {
   });
 
   describe("tickets created and updated through MCP", () => {
-    const bodies = () =>
-      fetchMock.mock.calls
-        .filter((c) => String(c[0]).includes("webhook.office.com"))
-        .map((c) => String((c[1] as RequestInit | undefined)?.body ?? ""));
+    const bodies = () => net.delivered().map((c) => c.body);
 
     it("carry a link built from APP_BASE_URL, and none when it is unset", async () => {
       const admin = await createUser({ role: "admin" });
@@ -164,14 +163,14 @@ describe("Teams webhook settings and fan-out", () => {
         expect(bodies()).toHaveLength(1);
         expect(bodies()[0]).toContain("https://tickets.example.test/my-tasks");
 
-        fetchMock.mockClear();
+        net.calls.length = 0;
         const updated = await mcp.call("update_ticket", { id: created.data.id, priority: "high" });
         expect(updated.isError).toBe(false);
         expect(bodies()).toHaveLength(1);
         expect(bodies()[0]).toContain("https://tickets.example.test/my-tasks");
 
         delete process.env.APP_BASE_URL;
-        fetchMock.mockClear();
+        net.calls.length = 0;
         await mcp.call("update_ticket", { id: created.data.id, priority: "low" });
         expect(bodies()).toHaveLength(1);
         expect(bodies()[0]).not.toContain("potentialAction");
@@ -229,7 +228,7 @@ describe("Teams webhook settings and fan-out", () => {
       const customerAgent = await loginAs(ctx.app, w.customer);
       const created = await createTicketAs(customerAgent, {});
       expect(created.status).toBe(201);
-      fetchMock.mockClear();
+      net.calls.length = 0;
       const adminAgent = await loginAs(ctx.app, w.admin);
       const res = await adminAgent.patch(`/api/tasks/${created.body.id}`).send({ status: "in_progress" });
       expect(res.status).toBe(200);
@@ -245,48 +244,103 @@ describe("Teams webhook settings and fan-out", () => {
       const agent = await loginAs(ctx.app, w.customer);
       const res = await createTicketAs(agent, {});
       expect(res.status).toBe(201);
-      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("evil.example"))).toHaveLength(0);
+      expect(net.calls.filter((c) => c.options.hostname === "evil.example")).toHaveLength(0);
       expect(webhookHosts()).toEqual(["customer-owner.webhook.office.com"]);
     });
 
     it("fan-out posts at most WEBHOOK_CONCURRENCY webhooks at a time and still reaches all of them", async () => {
-      const real = globalThis.fetch;
-      let inFlight = 0;
-      let peak = 0;
-      fetchMock.mockImplementation(((input: unknown, init?: RequestInit) => {
-        if (!String(input).includes("webhook.office.com")) return real(input as never, init);
-        inFlight++;
-        peak = Math.max(peak, inFlight);
-        return new Promise((resolve) =>
-          setTimeout(() => {
-            inFlight--;
-            resolve(new Response("1", { status: 200 }));
-          }, 25)
-        );
-      }) as never);
+      jest.restoreAllMocks();
+      net = fakeWebhookTransport({ addresses: () => dnsAnswer, delayMs: 25 });
       const requester = await createUser({ role: "customer" });
       const requesterAgent = await loginAs(ctx.app, requester);
       const created = await createTicketAs(requesterAgent, {});
       expect(created.status).toBe(201);
       for (let i = 0; i < 12; i++) await giveWebhook(await createUser({ role: "admin" }), `bulk-${i}`);
-      fetchMock.mockClear();
-      peak = 0;
+      net.calls.length = 0;
+      net.resetPeak();
       const [task] = await db.select().from(tasks);
       const { notifyTicketWebhooks, WEBHOOK_CONCURRENCY } = await import("../../services/teamsNotifications");
       await notifyTicketWebhooks({ task, kind: "updated", actionUrl: null });
       expect(webhookHosts()).toHaveLength(12);
-      expect(peak).toBeGreaterThan(1);
-      expect(peak).toBeLessThanOrEqual(WEBHOOK_CONCURRENCY);
+      expect(net.peak()).toBeGreaterThan(1);
+      expect(net.peak()).toBeLessThanOrEqual(WEBHOOK_CONCURRENCY);
     });
 
     it("a private DNS answer blocks the call and the ticket still saves", async () => {
       const w = await world();
-      (dnsPromises.lookup as unknown as jest.Mock).mockResolvedValue([{ address: "169.254.169.254", family: 4 }]);
+      dnsAnswer = ["169.254.169.254"];
       const agent = await loginAs(ctx.app, w.customer);
       const res = await createTicketAs(agent, {});
       expect(res.status).toBe(201);
       expect(webhookHosts()).toEqual([]);
       expect(await db.select().from(tasks)).toHaveLength(1);
+    });
+  });
+
+  describe("R84: off unless TEAMS_WEBHOOKS_ENABLED is exactly 'true'", () => {
+    const OFF: Array<string | undefined> = [undefined, "", "false", "TRUE", "True", "1", "yes", " true"];
+    const setFlag = (v: string | undefined) => {
+      if (v === undefined) delete process.env.TEAMS_WEBHOOKS_ENABLED;
+      else process.env.TEAMS_WEBHOOKS_ENABLED = v;
+    };
+
+    it.each(OFF)("flag %j: a ticket event sends nothing, makes no fetch or https call, and the ticket saves", async (flag) => {
+      const admin = await createUser({ role: "admin" });
+      const customer = await createUser({ role: "customer" });
+      await giveWebhook(admin, "admin");
+      await giveWebhook(customer, "customer-owner");
+      setFlag(flag);
+      const fetchSpy = jest.spyOn(globalThis, "fetch");
+      const agent = await loginAs(ctx.app, customer);
+      const res = await createTicketAs(agent, {});
+      expect(res.status).toBe(201);
+      expect(net.calls).toHaveLength(0);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      const { notifyTicketWebhooks } = await import("../../services/teamsNotifications");
+      const [task] = await db.select().from(tasks);
+      await notifyTicketWebhooks({ task, kind: "updated", actionUrl: null });
+      expect(net.calls).toHaveLength(0);
+    });
+
+    it.each(OFF)("flag %j: the test route answers 503 teams_webhooks_disabled with no outbound call", async (flag) => {
+      const admin = await createUser({ role: "admin" });
+      await giveWebhook(admin, "contoso");
+      setFlag(flag);
+      const res = await (await loginAs(ctx.app, admin)).post("/api/teams-integration/test");
+      expect(res.status).toBe(503);
+      expect(res.body.error).toBe("teams_webhooks_disabled");
+      expect(typeof res.body.message).toBe("string");
+      expect(net.calls).toHaveLength(0);
+    });
+
+    it.each(OFF)("flag %j: saving webhook settings answers 409 teams_webhooks_disabled and stores nothing", async (flag) => {
+      const admin = await createUser({ role: "admin" });
+      setFlag(flag);
+      const res = await (await loginAs(ctx.app, admin))
+        .post("/api/teams-integration/settings")
+        .send({ enabled: true, webhookUrl: hook("contoso"), notificationTypes: ["ticket_created"] });
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe("teams_webhooks_disabled");
+      expect(await db.select().from(teamsIntegrationSettings)).toHaveLength(0);
+    });
+
+    it("the settings read says whether the feature is on, and removing settings still works when it is off", async () => {
+      const admin = await createUser({ role: "admin" });
+      await giveWebhook(admin, "contoso");
+      const agent = await loginAs(ctx.app, admin);
+      expect((await agent.get("/api/teams-integration/settings")).body.webhooksEnabled).toBe(true);
+      setFlag(undefined);
+      expect((await agent.get("/api/teams-integration/settings")).body.webhooksEnabled).toBe(false);
+      expect((await agent.delete("/api/teams-integration/settings")).status).toBe(200);
+    });
+
+    it("exactly 'true' turns it back on", async () => {
+      const admin = await createUser({ role: "admin" });
+      setFlag("true");
+      const res = await (await loginAs(ctx.app, admin))
+        .post("/api/teams-integration/settings")
+        .send({ enabled: true, webhookUrl: hook("contoso"), notificationTypes: ["ticket_created"] });
+      expect(res.status).toBe(200);
     });
   });
 });

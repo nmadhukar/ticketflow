@@ -288,6 +288,9 @@ describe("real-time updates over an authenticated WebSocket", () => {
       c.messages.length = 0;
 
       await db.update(users).set({ role: "agent" }).where(eq(users.id, admin.id));
+      // R51: eligibility is cached for at most 1 s, and this change bypasses disconnectUser (the
+      // call that invalidates the cache), so the next event may use the old row for up to 1 s.
+      await quiet(1100);
       await so.agent.patch(`/api/tasks/${ticketId}`).send({ priority: "high" }).expect(200);
       await quiet();
       expect(c.messages).toEqual([]);

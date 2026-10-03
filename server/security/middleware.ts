@@ -196,6 +196,12 @@ export const securityHeaders = (
   next();
 };
 
+/** Sessions (and bearer users) carry the row's `id`; `userId` is the JWT payload's name for it (R56). */
+function sessionUserId(req: AuthenticatedRequest): string | undefined {
+  const u = req.user as { id?: string; userId?: string } | undefined;
+  return u?.id ?? u?.userId;
+}
+
 // Request logging for security audit
 export const securityAuditLog = (
   req: AuthenticatedRequest,
@@ -222,7 +228,7 @@ export const securityAuditLog = (
       timestamp: new Date().toISOString(),
       method: req.method,
       path: req.path,
-      userId: req.user?.userId,
+      userId: sessionUserId(req),
       role: req.user?.role,
       ip: req.ip,
       userAgent: req.get("User-Agent"),
@@ -241,7 +247,7 @@ export const securityAuditLog = (
           path: req.path,
           statusCode: res.statusCode,
           duration,
-          userId: req.user?.userId,
+          userId: sessionUserId(req),
         })
       );
     }

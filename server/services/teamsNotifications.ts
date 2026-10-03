@@ -1,7 +1,7 @@
 import { and, eq, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { teamsIntegrationSettings, users, type Task } from "@shared/schema";
-import { validateWebhookUrl } from "./webhookGuard";
+import { teamsWebhooksEnabled, validateWebhookUrl } from "./webhookGuard";
 import { db } from "../storage/db";
 import { usersWhoCanAccessTask } from "../permissions/ticketAccess";
 import { teamsIntegration } from "./microsoftTeams";
@@ -72,6 +72,8 @@ export interface TicketWebhookEvent {
  * Never throws: a failed webhook is logged by host.
  */
 export async function notifyTicketWebhooks(event: TicketWebhookEvent): Promise<void> {
+  // R84: off unless TEAMS_WEBHOOKS_ENABLED=true. Nothing is read or sent.
+  if (!teamsWebhooksEnabled()) return;
   try {
     const rows = await db
       .select({

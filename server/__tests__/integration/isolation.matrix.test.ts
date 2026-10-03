@@ -15,6 +15,7 @@ import { resetDb } from "./helpers/testDb";
 import { createTeam, createUser, loginAs } from "./helpers/fixtures";
 import { storage } from "../../storage";
 import { db } from "../../storage/db";
+import { canAccessTask, usersWhoCanAccessTask } from "../../permissions/ticketAccess";
 
 /**
  * Ticket isolation matrix (one access rule everywhere).
@@ -323,6 +324,50 @@ describe("ticket isolation matrix", () => {
         new Set(res.body.map((e: { taskId: number }) => ticketOf(e.taskId) ?? `#${e.taskId}`))
       ).sort();
       expect(seen).toEqual(visibleTo(who));
+    });
+  });
+
+  describe("usersWhoCanAccessTask (the set-based query, R51) is the same rule as canAccessTask", () => {
+    it.each(TICKETS)("%s: every role agrees with canAccessTask and with the matrix", async (t) => {
+      const candidates = WHO.map((w) => ({ id: users[w].id, role: users[w].role }));
+      const allowed = await usersWhoCanAccessTask(candidates, ids[t]);
+      for (const w of WHO) {
+        const single = await canAccessTask(candidates[WHO.indexOf(w)], ids[t]);
+        expect({ t, w, set: allowed.has(users[w].id) }).toEqual({ t, w, set: single });
+        expect({ t, w, set: allowed.has(users[w].id) }).toEqual({ t, w, set: MATRIX[w][TICKETS.indexOf(t)] });
+      }
+    });
+
+    it("the legacy role 'user' is judged as an agent, by both queries", async () => {
+      for (const t of TICKETS) {
+        const legacy = { id: users.A1.id, role: "user" };
+        const viaSet = (await usersWhoCanAccessTask([legacy], ids[t])).has(users.A1.id);
+        expect({ t, viaSet }).toEqual({ t, viaSet: await canAccessTask(legacy, ids[t]) });
+        expect({ t, viaSet }).toEqual({ t, viaSet: MATRIX.A1[TICKETS.indexOf(t)] });
+      }
+    });
+
+    it("a single candidate, a duplicate, an unknown role, a blank id and no candidates", async () => {
+      expect(Array.from(await usersWhoCanAccessTask([{ id: users.A1.id, role: "agent" }], ids.t1))).toEqual([users.A1.id]);
+      const dup = await usersWhoCanAccessTask(
+        [
+          { id: users.C1.id, role: "customer" },
+          { id: users.C1.id, role: "customer" },
+        ],
+        ids.t1
+      );
+      expect(Array.from(dup)).toEqual([users.C1.id]);
+      expect((await usersWhoCanAccessTask([{ id: users.admin.id, role: "superuser" }], ids.t1)).size).toBe(0);
+      expect((await usersWhoCanAccessTask([{ id: "", role: "admin" }], ids.t1)).size).toBe(0);
+      expect((await usersWhoCanAccessTask([], ids.t1)).size).toBe(0);
+      // A ticket that does not exist is visible to nobody, not even an admin.
+      expect((await usersWhoCanAccessTask([{ id: users.admin.id, role: "admin" }], 999999999)).size).toBe(0);
+    });
+
+    it("ids that need quoting go through as data, not SQL", async () => {
+      const odd = `x"); DROP TABLE tasks; --,{}`;
+      expect((await usersWhoCanAccessTask([{ id: odd, role: "customer" }], ids.t1)).size).toBe(0);
+      expect((await usersWhoCanAccessTask([{ id: users.admin.id, role: "admin" }], ids.t1)).size).toBe(1);
     });
   });
 

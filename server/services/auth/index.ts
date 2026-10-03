@@ -261,10 +261,8 @@ export function setupAuth(app: Express) {
     cookie: { ...sessionCookieOptions, maxAge: sessionTtl },
   };
 
-  // Exactly one reverse proxy (nginx / the platform router) sits in front of the app, so
-  // req.ip is the address that proxy saw. A deployment with a second hop (a CDN in front
-  // of the proxy) would key every limiter on the CDN's address: raise this number there.
-  app.set("trust proxy", 1);
+  // `trust proxy` is set once, in server/index.ts, from TRUST_PROXY_HOPS (R49): the auth limiters
+  // below key on req.ip, the address the trusted proxy chain saw.
   // Auth rate limits (every environment), registered before the handlers.
   // Mounted with app.use (POST only), not as a second app.post route, so the route
   // table keeps exactly one registration per method + path (noDuplicateRoutes).

@@ -52,7 +52,12 @@ import { setupMicrosoftAuth } from "../services/auth/microsoftAuth";
 import { teamsIntegration } from "../services/microsoftTeams";
 import { canChangeTeamMembership } from "../permissions/teams";
 import { teamsSettingsInputSchema } from "../services/teamsNotifications";
-import { assertPublicHost, validateWebhookUrl } from "../services/webhookGuard";
+import {
+  assertPublicHost,
+  teamsWebhooksEnabled,
+  TEAMS_WEBHOOKS_DISABLED_MESSAGE,
+  validateWebhookUrl,
+} from "../services/webhookGuard";
 import { sessionTrackingMiddleware } from "../middleware/sessionTracking.middleware";
 import {
   type User,
@@ -3637,7 +3642,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const userId = getUserId(req);
         const settings = await storage.getTeamsIntegrationSettings(userId);
-        res.json(settings || { enabled: false });
+        // R84: tells the settings page whether TEAMS_WEBHOOKS_ENABLED is on, so it can say how to enable it.
+        res.json({ ...(settings || { enabled: false }), webhooksEnabled: teamsWebhooksEnabled() });
       } catch (error) {
         logRouteError("Error fetching Teams settings", error);
         fail(res, 500, "Failed to fetch Teams settings");
@@ -3651,6 +3657,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     teamsWebhookAdminOnly,
     async (req: any, res, next) => {
       try {
+        if (!teamsWebhooksEnabled()) return fail(res, 409, TEAMS_WEBHOOKS_DISABLED_MESSAGE, { code: "teams_webhooks_disabled" });
         const userId = getUserId(req);
         const input = teamsSettingsInputSchema.parse(req.body ?? {});
         const settings = await storage.upsertTeamsIntegrationSettings({
@@ -3713,6 +3720,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     teamsWebhookAdminOnly,
     async (req: any, res, next) => {
       try {
+        if (!teamsWebhooksEnabled()) return fail(res, 503, TEAMS_WEBHOOKS_DISABLED_MESSAGE, { code: "teams_webhooks_disabled" });
         const userId = getUserId(req);
         const settings = await storage.getTeamsIntegrationSettings(userId);
 

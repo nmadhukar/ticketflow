@@ -6,7 +6,7 @@ import { installErrorHandling } from "./http/install";
 import { registerHealthRoutes } from "./http/health";
 import { setupVite, serveStatic, log } from "./vite";
 import { requestLogger } from "./utils/requestLogger";
-import { isDevelopmentEnv } from "./env";
+import { isDevelopmentEnv, parseTrustProxyHops } from "./env";
 import { describeError } from "./http/errors";
 import {
   applySecurity,
@@ -15,8 +15,11 @@ import {
 
 const app = express();
 
-// Trust Nginx/reverse proxy so req.ip uses the real client IP via X-Forwarded-For
-app.set("trust proxy", 1);
+// Trust the reverse proxy chain so req.ip is the real client address (X-Forwarded-For), set here and
+// nowhere else (R49). TRUST_PROXY_HOPS is the number of proxies in front of the app: 1 (default) is
+// one nginx / platform router, 2 is Coolify/Traefik plus nginx. A deployment with more hops than this
+// number would key every limiter on a proxy's address; fewer would trust a client-supplied entry.
+app.set("trust proxy", parseTrustProxyHops());
 
 // Security headers, rate limit, body parsers (MAX_REQUEST_SIZE_MB, default
 // 50MB, for base64 uploads) and then the input sanitiser: the sanitiser must

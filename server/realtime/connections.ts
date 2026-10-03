@@ -22,6 +22,16 @@ export interface Connection {
 // userId -> that user's open sockets (one per tab).
 const connections = new Map<string, Set<Connection>>();
 
+/**
+ * Bumped whenever a user is disconnected on purpose (disconnectUser: deactivation, role or password
+ * change, approval with 1012) or every socket is dropped. realtime/ws.ts keys its short-lived
+ * eligibility cache on it, so such a change is never served from the cache (R51).
+ */
+let epoch = 0;
+export function connectionEpoch(): number {
+  return epoch;
+}
+
 export function allConnections(): Connection[] {
   return Array.from(connections.values()).flatMap((set) => Array.from(set));
 }
@@ -45,6 +55,7 @@ export function removeConnection(conn: Connection): void {
 }
 
 export function clearConnections(): void {
+  epoch++;
   for (const c of allConnections()) c.ws.terminate();
   connections.clear();
 }
@@ -60,6 +71,7 @@ export function userConnections(userId: string): Connection[] {
  * re-authenticated with the new state. Never throws.
  */
 export function disconnectUser(userId: string, code: number = 1008): void {
+  epoch++;
   for (const c of userConnections(userId)) {
     try {
       c.ws.close(code, code === 1008 ? "unauthorized" : "reconnect");

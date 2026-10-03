@@ -106,7 +106,11 @@ services:
       # Rate limiting
       RATE_LIMITING_ENABLED: ${RATE_LIMITING_ENABLED:-true}
       RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-900000}
-      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-100}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-600}
+      # Proxies in front of the app (R49): 1 behind nginx alone, 2 behind Coolify/Traefik plus nginx.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      # Teams incoming webhooks are OFF unless this is exactly "true" (R84).
+      TEAMS_WEBHOOKS_ENABLED: ${TEAMS_WEBHOOKS_ENABLED:-}
 
       # Input validation
       INPUT_VALIDATION_ENABLED: ${INPUT_VALIDATION_ENABLED:-true}
