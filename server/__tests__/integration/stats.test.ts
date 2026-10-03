@@ -201,12 +201,28 @@ describe("dashboard stats", () => {
         onHold: 1,
         resolved: 1,
         closed: 1,
-        highPriority: 5, // urgent x4 + high x1: agent team stats keep high or urgent
+        // Same definitions as /api/stats: highPriority is `high` only (1), and urgent counts
+        // non-closed urgent tickets separately (open, on_hold, resolved = 3; the closed one is out).
+        highPriority: 1,
+        urgent: 3,
       });
       expect(t1.openTickets + t1.inProgress + t1.onHold + t1.resolved + t1.closed).toBe(t1.totalTickets);
       // A team with no tickets still reports zeros, not a missing row.
       const a3 = await agents.A3.get("/api/stats/agent");
-      expect(a3.body.team[0]).toMatchObject({ totalTickets: 3, onHold: 1, openTickets: 1, resolved: 1 });
+      expect(a3.body.team[0]).toMatchObject({
+        totalTickets: 3,
+        onHold: 1,
+        openTickets: 1,
+        resolved: 1,
+        highPriority: 0,
+        urgent: 1,
+      });
+      // One definition everywhere: the team figure is the count of `high` tickets queued to the team
+      // (the same filter /api/stats applies to everything), not high + urgent.
+      const queuedHigh = (await listAll("admin")).filter(
+        (t) => t.assigneeType === "team" && t.assigneeTeamId === t1.teamId && t.priority === "high"
+      ).length;
+      expect(t1.highPriority).toBe(queuedHigh);
     });
 
     it("the legacy role user gets agent stats (it used to be refused)", async () => {
@@ -232,7 +248,8 @@ describe("dashboard stats", () => {
         onHold: 1,
         resolved: 1,
         closed: 1,
-        highPriority: 1, // the one `high` ticket; the four urgent ones are not counted (as in /api/stats)
+        highPriority: 1, // the one `high` ticket; the urgent ones are counted separately (as in /api/stats)
+        urgent: 3,
       });
       expect(res.body.priorityDistribution).toEqual({ urgent: 4, high: 1, medium: 0, low: 0 });
       expect(res.body.categoryBreakdown).toEqual([{ category: "support", count: 5, percentage: 100 }]);
@@ -256,6 +273,7 @@ describe("dashboard stats", () => {
         resolved: 1,
         closed: 0,
         highPriority: 0,
+        urgent: 1,
       });
       const m1 = await agents.M1.get("/api/stats/manager");
       const dept = await agents.M1.get(`/api/departments/${m1.body.department[0].departmentId}/stats`);

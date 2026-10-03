@@ -536,17 +536,27 @@ export class DatabaseStorage implements IStorage {
       return row;
     };
     let createdTask: Task;
+    const isNumberClash = (e: any) => {
+      const cause = e?.cause ?? e;
+      return cause?.code === "23505" && /ticket_number/.test(String(cause?.constraint ?? cause?.detail ?? ""));
+    };
     try {
       createdTask = await insertOnce();
     } catch (e: any) {
       // A ticket number taken outside the counter (unique violation on ticket_number
-      // only): re-sync the counter once and retry once. A second failure propagates.
-      const cause = e?.cause ?? e;
-      const isNumberClash =
-        cause?.code === "23505" && /ticket_number/.test(String(cause?.constraint ?? cause?.detail ?? ""));
-      if (!isNumberClash) throw e;
+      // only): re-sync the counter once and retry once.
+      if (!isNumberClash(e)) throw e;
       await this.resyncTicketCounter();
-      createdTask = await insertOnce();
+      try {
+        createdTask = await insertOnce();
+      } catch (second: any) {
+        // Still clashing (a concurrent writer): a retryable 409 `conflict` with a fixed
+        // message, never the raw pg error (constraint and key text) in a 500.
+        if (isNumberClash(second)) {
+          throw new HttpError(409, "conflict", "Could not assign a ticket number; please try again");
+        }
+        throw second;
+      }
     }
 
     // Add history entry
@@ -3117,6 +3127,7 @@ export class DatabaseStorage implements IStorage {
       resolved: number;
       closed: number;
       highPriority: number;
+      urgent: number;
     }>;
   }> {
     // Personal stats: tickets assigned to me
@@ -3158,7 +3169,8 @@ export class DatabaseStorage implements IStorage {
     const avgResolutionTime = Number(resolvedTickets[0]?.avgTime || 0);
 
     // Team stats: the user's teams (only teams the user is enrolled in via teamMembers),
-    // counted in one grouped query. highPriority here stays high or urgent.
+    // counted in one grouped query. highPriority is priority high only and urgent (non-closed)
+    // is counted separately: the definitions /api/stats uses.
     const userTeams = await this.getUserTeams(userId);
     const teamRows =
       userTeams.length > 0
@@ -3171,7 +3183,8 @@ export class DatabaseStorage implements IStorage {
               onHold: sql<number>`count(*) FILTER (WHERE ${tasks.status} = 'on_hold')`.mapWith(Number),
               resolved: sql<number>`count(*) FILTER (WHERE ${tasks.status} = 'resolved')`.mapWith(Number),
               closed: sql<number>`count(*) FILTER (WHERE ${tasks.status} = 'closed')`.mapWith(Number),
-              highPriority: sql<number>`count(*) FILTER (WHERE ${tasks.priority} IN ('high', 'urgent'))`.mapWith(Number),
+              highPriority: sql<number>`count(*) FILTER (WHERE ${tasks.priority} = 'high')`.mapWith(Number),
+              urgent: sql<number>`count(*) FILTER (WHERE ${tasks.priority} = 'urgent' AND ${tasks.status} <> 'closed')`.mapWith(Number),
             })
             .from(tasks)
             .where(
@@ -3198,6 +3211,7 @@ export class DatabaseStorage implements IStorage {
         resolved: r?.resolved ?? 0,
         closed: r?.closed ?? 0,
         highPriority: r?.highPriority ?? 0,
+        urgent: r?.urgent ?? 0,
       };
     });
 
@@ -3223,6 +3237,7 @@ export class DatabaseStorage implements IStorage {
       resolved: number;
       closed: number;
       highPriority: number;
+      urgent: number;
       avgResolutionTime: number;
     }>;
     priorityDistribution: {
@@ -3299,6 +3314,7 @@ export class DatabaseStorage implements IStorage {
               resolved: countWhere(sql`${tasks.status} = 'resolved'`),
               closed: countWhere(sql`${tasks.status} = 'closed'`),
               highPriority: countWhere(sql`${tasks.priority} = 'high'`),
+              urgent: countWhere(sql`${tasks.priority} = 'urgent' AND ${tasks.status} <> 'closed'`),
               avgTime: avgHours,
             })
             .from(tasks)
@@ -3320,6 +3336,7 @@ export class DatabaseStorage implements IStorage {
         resolved: r?.resolved ?? 0,
         closed: r?.closed ?? 0,
         highPriority: r?.highPriority ?? 0,
+        urgent: r?.urgent ?? 0,
         avgResolutionTime: Number(r?.avgTime ?? 0),
       };
     });

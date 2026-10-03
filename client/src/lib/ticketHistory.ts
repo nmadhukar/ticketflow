@@ -24,8 +24,10 @@ export function historyFieldLabel(field: string): string {
 /** The text shown next to the actor's name for one history entry. */
 export function describeHistoryItem(item: TicketHistoryItem): string {
   if (item.action === "updated" && item.field) {
-    const from = item.oldValue ?? "—";
-    const to = item.newValue ?? "—";
+    // null, undefined and "" all mean "no value"; "0" and "false" are real values and show.
+    const show = (v: string | null | undefined) => (v === null || v === undefined || v === "" ? "—" : v);
+    const from = show(item.oldValue);
+    const to = show(item.newValue);
     return `${historyFieldLabel(item.field)}: ${from} → ${to}`;
   }
   return item.action;

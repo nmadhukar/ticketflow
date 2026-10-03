@@ -129,7 +129,24 @@ describe("numeric id params", () => {
   it("does not apply the numeric check to string params", async () => {
     const res = await agent.delete("/api/user/sessions/not-a-number");
     expect(res.body.error).not.toBe("invalid_id");
-    const res2 = await agent.patch("/api/admin/users/abc");
-    expect(res2.body.error).not.toBe("invalid_id");
+    expect(res.status).toBeLessThan(500);
+    // A user id that names nobody is the user's own 404, not a numeric-format 400.
+    const res2 = await agent.patch("/api/admin/users/abc").send({ firstName: "x" });
+    expect(res2.status).toBe(404);
+    expect(res2.body.error).toBe("user_not_found");
+  });
+
+  const STRING_PARAMS = ["userId", "sessionId", "token", "name", "adminId", "type", "referenceId"];
+  const stringCases: Array<[string, string, string]> = [];
+  for (const [method, path] of ROUTES) {
+    // /api/ai-feedback/:type/:referenceId validates both itself (a ticket id and a closed type set).
+    if (path.startsWith("/api/ai-feedback/")) continue;
+    for (const name of STRING_PARAMS) if (path.includes(":" + name)) stringCases.push([method, path, name]);
+  }
+
+  it.each(stringCases)("%s %s with a non-numeric %s is never answered invalid_id", async (method, path, name) => {
+    const res = await (agent as any)[method](fill(path, "not-a-number", name)).send({});
+    expect(res.body.error).not.toBe("invalid_id");
+    expect(res.status).not.toBe(500);
   });
 });

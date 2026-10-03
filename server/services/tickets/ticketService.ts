@@ -70,6 +70,8 @@ function badRequest(message: string): HttpError {
  * The customer's routing choice (a user, a team, a department only, or nothing) turned into
  * the assignment columns. REST and MCP share it. A customer with no user or team assignee
  * (nothing chosen, or a department only) goes to DEFAULT_TRIAGE_TEAM_ID when that is set (R36).
+ * Department-only tickets are triaged too, by owner decision: no user or team assignee means
+ * only admins could see them, which is the M2 problem. The department hint is kept as given.
  * Mutates and returns `fields`.
  */
 async function applyCustomerRouting(fields: Record<string, unknown>): Promise<Record<string, unknown>> {

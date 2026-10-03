@@ -567,6 +567,7 @@ export interface IStorage {
       resolved: number;
       closed: number;
       highPriority: number;
+      urgent: number;
     }>;
   }>;
   getManagerStats(userId: string): Promise<{
@@ -580,6 +581,7 @@ export interface IStorage {
       resolved: number;
       closed: number;
       highPriority: number;
+      urgent: number;
       avgResolutionTime: number;
     }>;
     priorityDistribution: {

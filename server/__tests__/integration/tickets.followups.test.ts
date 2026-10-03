@@ -252,6 +252,75 @@ describe("updateTask with no row written", () => {
   });
 });
 
+describe("Round 2: createTask clashes, demo seeders, deny-by-default", () => {
+  it("a second ticket-number clash is 409 conflict with no pg text (not a raw 500)", async () => {
+    await resetDb();
+    const admin = await createUser({ role: "admin" });
+    const a = await loginAs(ctx.app, admin);
+    const first = (await createTicketAs(a, {})).body;
+    // The counter keeps handing out a number that already exists: both attempts clash.
+    const spy = jest
+      .spyOn(storage as unknown as { getNextTicketNumber: () => Promise<string> }, "getNextTicketNumber")
+      .mockResolvedValue(first.ticketNumber);
+    try {
+      const before = (await db.select().from(tasks)).length;
+      const res = await createTicketAs(a, {});
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe("conflict");
+      expect(JSON.stringify(res.body)).not.toMatch(/duplicate|constraint|ticket_number|tasks_/i);
+      expect((await db.select().from(tasks)).length).toBe(before);
+      // The storage layer says the same (and the service does not remap it to invalid_transition).
+      await expect(
+        storage.createTask({ title: "again", category: "support", createdBy: admin.id } as never)
+      ).rejects.toMatchObject({ status: 409, code: "conflict" });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("a single clash is repaired by re-syncing the counter (201, and the number is new)", async () => {
+    await resetDb();
+    const admin = await createUser({ role: "admin" });
+    const a = await loginAs(ctx.app, admin);
+    const first = (await createTicketAs(a, {})).body;
+    const real = (storage as unknown as { getNextTicketNumber: () => Promise<string> }).getNextTicketNumber.bind(storage);
+    const spy = jest
+      .spyOn(storage as unknown as { getNextTicketNumber: () => Promise<string> }, "getNextTicketNumber")
+      .mockResolvedValueOnce(first.ticketNumber)
+      .mockImplementation(real);
+    const res = await createTicketAs(a, {});
+    expect(res.status).toBe(201);
+    expect(res.body.ticketNumber).not.toBe(first.ticketNumber);
+    spy.mockRestore();
+  });
+
+  it("running the demo seeders twice, then creating a ticket, is 201", async () => {
+    await resetDb();
+    const { runSeeders } = await import("../../seed/runSeeders");
+    const env = { NODE_ENV: "development", SEED_DEMO_DATA: "true" } as NodeJS.ProcessEnv;
+    await runSeeders(env);
+    await runSeeders(env);
+    const seeded = (await db.select().from(tasks)).length;
+    expect(seeded).toBeGreaterThan(0);
+    const customer = await createUser({ role: "customer" });
+    const c = await loginAs(ctx.app, customer);
+    const res = await createTicketAs(c, {});
+    expect(res.status).toBe(201);
+    expect((await db.select().from(tasks)).length).toBe(seeded + 1);
+  });
+
+  it("assertAgentMayAssign denies an unknown or missing role (deny by default), and still allows admin and manager", async () => {
+    const { assertAgentMayAssign } = await import("../../services/tickets/assignees");
+    for (const role of [null, undefined, "superuser", ""]) {
+      await expect(assertAgentMayAssign({ id: "u", role }, {})).rejects.toMatchObject({ status: 403, code: "forbidden" });
+    }
+    await expect(assertAgentMayAssign({ id: "u", role: "admin" }, { assigneeId: "someone" })).resolves.toBeUndefined();
+    await expect(assertAgentMayAssign({ id: "u", role: "manager" }, { assigneeId: "someone" })).resolves.toBeUndefined();
+    await expect(assertAgentMayAssign({ id: "u", role: "customer" }, {})).resolves.toBeUndefined();
+    await expect(assertAgentMayAssign({ id: "u", role: "agent" }, { assigneeId: "someone" })).rejects.toMatchObject({ status: 403 });
+  });
+});
+
 describe("M9: one joined query per page", () => {
   let admin: User;
   let agent: User;

@@ -108,7 +108,12 @@ export function errorMiddleware(err: unknown, _req: Request, res: Response, _nex
     if (e?.type === "entity.too.large") {
       return res.status(413).json({ error: "payload_too_large", message: "Request body is too large" });
     }
-    return res.status(status).json({ error: "bad_request", message: "Bad request" });
+    // Another middleware's own 401/403/404 keeps its status AND its contract code; any
+    // other 4xx (405, 415, ...) is a generic bad_request.
+    const known: Record<number, string> = { 401: "Unauthorized", 403: "Forbidden", 404: "Not found" };
+    return res
+      .status(status)
+      .json({ error: defaultErrorCode(status), message: known[status] ?? "Bad request" });
   }
   // Type and code only (M7): the object or its message can carry request bodies,
   // emails, tokens or SQL parameters.
