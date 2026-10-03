@@ -1,6 +1,6 @@
 import { db } from "../storage/db";
 import { users, userInvitations } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { DEMO_ADMIN_PASSWORD, DEMO_PASSWORD } from "./demoAccounts";
 import { scrypt, randomBytes, randomUUID } from "crypto";
 import { promisify } from "util";
@@ -83,17 +83,37 @@ export async function seedSystemUser() {
     .limit(1);
 
   if (existingSystemUser.length === 0) {
-    await db.insert(users).values({
-      id: SYSTEM_USER_ID,
-      email: SYSTEM_USER_EMAIL,
-      firstName: "System",
-      lastName: "User",
-      role: "admin",
-      isActive: true,
-      isApproved: true,
-      // No password - system user cannot login
-    });
-    console.log("System user created.");
+    // Same guard as the AI system user: a DIFFERENT account holding the email
+    // is not ours to touch, and a unique violation here would restart the
+    // container in a loop (M8). One loud line (ids only), no system user row.
+    const [clash] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(ne(users.id, SYSTEM_USER_ID), sql`lower(${users.email}) = ${SYSTEM_USER_EMAIL}`))
+      .limit(1);
+    if (clash) {
+      console.error(
+        `System user NOT created: user ${clash.id} already holds its email. Machine-made rows cannot be attributed to it until that is resolved.`
+      );
+      return;
+    }
+    try {
+      await db.insert(users).values({
+        id: SYSTEM_USER_ID,
+        email: SYSTEM_USER_EMAIL,
+        firstName: "System",
+        lastName: "User",
+        role: "admin",
+        isActive: true,
+        isApproved: true,
+        // No password - system user cannot login
+      });
+      console.log("System user created.");
+    } catch (error) {
+      // 23505 from a race with the check above: same outcome as a clash.
+      if ((error as { code?: string })?.code !== "23505") throw error;
+      console.error("System user NOT created: unique violation (another process created it, or its email is taken).");
+    }
   }
 }
 

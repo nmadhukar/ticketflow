@@ -7,6 +7,7 @@ import {
   recordBearerFailure,
 } from "../../security/rateLimiting";
 import { JWT_AUDIENCE, JWT_ISSUER } from "../../security/jwt";
+import { isApiPath } from "../../utils/apiPath";
 
 /**
  * Bearer authentication for REST: `Authorization: Bearer tfk_...` (an API key)
@@ -39,7 +40,7 @@ const BEARER_HEADER = /^Bearer(?:\s+(.*))?$/i;
 /** The presented bearer token ("" when the header is `Bearer` alone), or null when there is none. */
 export function extractBearer(req: Pick<Request, "headers" | "path">): string | null {
   // Bearer is an API concept: pages and static files never see a JSON 401 for it.
-  if (!(req.path ?? "").toLowerCase().startsWith("/api")) return null;
+  if (!isApiPath(req.path)) return null;
   const header = req.headers.authorization;
   if (typeof header !== "string") return null;
   const match = BEARER_HEADER.exec(header.trim());

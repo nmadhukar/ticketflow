@@ -385,11 +385,11 @@ export function registerCompanySettingsRoutes(app: Express): void {
         // unchanged. Changing the identifier with a blank secret is refused
         // rather than silently pairing the old secret with a new identity.
         const blank = (v: unknown) => typeof v !== "string" || v.trim() === "";
-        const secretRequired = (field: string) =>
-          res.status(400).json({
-            error: "validation_failed",
-            message: `${field} is required when the account identifier changes`,
-            details: { required: [field] },
+        // fieldErrors, the same shape every other form field error has.
+        const secretRequired = (field: string, why: string) =>
+          fail(res, 400, `${field} is required ${why}`, {
+            code: "validation_failed",
+            details: { formErrors: [], fieldErrors: { [field]: [`Required ${why}`] } },
           });
         if (
           data.provider === EMAIL_PROVIDERS.AWS &&
@@ -397,7 +397,19 @@ export function registerCompanySettingsRoutes(app: Express): void {
           prev.awsSecretAccessKey &&
           prev.awsAccessKeyId !== data.awsAccessKeyId
         ) {
-          return secretRequired("awsSecretAccessKey");
+          return secretRequired("awsSecretAccessKey", "when the account identifier changes");
+        }
+        // Nothing stored and nothing submitted: the SES sender would pair this access key id
+        // with the SERVER's own AWS secret (environment fallback). That is only coherent when
+        // the key id is the environment's own; any other id (a new host or account) must
+        // bring its secret.
+        if (
+          data.provider === EMAIL_PROVIDERS.AWS &&
+          blank(data.awsSecretAccessKey) &&
+          !prev.awsSecretAccessKey &&
+          data.awsAccessKeyId !== process.env.AWS_ACCESS_KEY_ID
+        ) {
+          return secretRequired("awsSecretAccessKey", "for an access key id that is not the server's own");
         }
         if (
           data.provider === EMAIL_PROVIDERS.SMTP &&
@@ -405,8 +417,10 @@ export function registerCompanySettingsRoutes(app: Express): void {
           prev.password &&
           (prev.host !== data.host || prev.username !== data.username)
         ) {
-          return secretRequired("password");
+          return secretRequired("password", "when the host or username changes");
         }
+        // SMTP has no environment fallback (its adapter is not implemented), so a blank
+        // password with nothing stored simply saves none; nothing is borrowed from the server.
 
         const saved = await storage.upsertEmailProvider(
           {

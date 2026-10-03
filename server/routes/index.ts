@@ -266,6 +266,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/users", isAuthenticated, async (req: any, res) => {
     try {
       // Staff only. normalizeRole reads the legacy role "user" as agent.
+      // One lookup of the requester, used for both the staff check and the picker below.
       const requesterRole = normalizeRole(
         (await storage.getUser(getUserId(req)))?.role
       );
@@ -280,9 +281,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (forTeamMemberSelection) {
         // Filter for team member selection: agents, managers, and admins (if requester is admin)
-        const requesterId = getUserId(req);
-        const requester = await storage.getUser(requesterId);
-        const isRequesterAdmin = requester?.role === "admin";
+        const isRequesterAdmin = requesterRole === "admin";
 
         let query = db.select(publicUserColumns).from(users);
 

@@ -8,14 +8,37 @@ import type { NextFunction, Request, Response } from "express";
 
 const TOKEN_PATH = /^(\/api\/invitations\/)[^/]+/i;
 const NO_BODY_PATH = /^\/api\/(auth|invitations)(\/|$)/i;
-const SECRET_KEY = /pass(word)?|token|secret|key|hash|authorization|credential/i;
+// A key is a secret when one of its WORDS is one of these (camelCase, snake_case and
+// kebab-case split into words): plainKey, keyHash, awsSecretAccessKey, refresh_token,
+// x-api-key. A substring match also hid harmless fields (totalTokens, keywords).
+const SECRET_WORDS = new Set([
+  "pass",
+  "password",
+  "passwd",
+  "token",
+  "secret",
+  "key",
+  "hash",
+  "authorization",
+  "credential",
+  "credentials",
+  "apikey",
+]);
+
+function keyWords(key: string): string[] {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
 
 export function redactLogPath(path: string): string {
   return path.replace(TOKEN_PATH, "$1[redacted]");
 }
 
 export function maskSecrets(_key: string, value: unknown): unknown {
-  return SECRET_KEY.test(_key) ? "[redacted]" : value;
+  return keyWords(_key).some((w) => SECRET_WORDS.has(w)) ? "[redacted]" : value;
 }
 
 export function requestLogger(log: (line: string) => void) {

@@ -435,15 +435,19 @@ describe("last administrator", () => {
     }
   });
 
-  it("an admin whose isActive is NULL is not an active admin (target and the others alike)", async () => {
+  it("an inactive admin is not an active admin (target and the others alike); is_active cannot be NULL", async () => {
     const { a, b } = await twoAdmins();
-    await db.update(usersTable).set({ isActive: null }).where(eq(usersTable.id, b.id));
+    // Migration 0020 made users.is_active NOT NULL, so the NULL case of the original test no longer exists.
+    await expect(
+      db.update(usersTable).set({ isActive: null as unknown as boolean }).where(eq(usersTable.id, b.id))
+    ).rejects.toThrow();
+    await db.update(usersTable).set({ isActive: false }).where(eq(usersTable.id, b.id));
     // b is not active, so a is the last active administrator.
     await expect(storage.updateUserKeepingAnAdmin(a.id, { role: "agent" }, "someone-else")).rejects.toMatchObject({
       status: 409,
       code: "last_admin",
     });
-    // Demoting the NULL admin loses no active admin.
+    // Demoting the inactive admin loses no active admin.
     await expect(storage.updateUserKeepingAnAdmin(b.id, { role: "agent" }, a.id)).resolves.toMatchObject({ role: "agent" });
   });
 

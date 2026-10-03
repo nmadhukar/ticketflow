@@ -38,6 +38,11 @@ describe("R34: outbound links come from APP_BASE_URL", () => {
   });
 });
 
+const GOOD_SECRETS = {
+  SESSION_SECRET: "k3Jx9mQ2vR8sT5wY1zB7nC4dF6gH0aLp",
+  JWT_SECRET: "Zp8Qw3Er7Ty1Ui5Op9As2Df6Gh0Jk4Lx",
+};
+
 describe("startup configuration check", () => {
   it("production without APP_BASE_URL refuses to boot: one line, exit 1", () => {
     const lines: string[] = [];
@@ -51,7 +56,7 @@ describe("startup configuration check", () => {
   it("production with a valid APP_BASE_URL, and development or test without one, start", () => {
     const exit = jest.fn();
     for (const env of [
-      { NODE_ENV: "production", APP_BASE_URL: "https://tickets.example.com" },
+      { NODE_ENV: "production", APP_BASE_URL: "https://tickets.example.com", ...GOOD_SECRETS },
       { NODE_ENV: "development" },
       { NODE_ENV: "test" },
       {},
@@ -60,6 +65,26 @@ describe("startup configuration check", () => {
       expect(assertStartupConfig({ env, log: () => undefined, exit })).toBe(true);
     }
     expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("production without SESSION_SECRET or JWT_SECRET, or with a placeholder one, refuses to boot before any seeder runs", () => {
+    const base = { NODE_ENV: "production", APP_BASE_URL: "https://tickets.example.com" };
+    expect(startupConfigProblems({ ...base, ...GOOD_SECRETS })).toEqual([]);
+    expect(startupConfigProblems({ ...base, JWT_SECRET: GOOD_SECRETS.JWT_SECRET })).toEqual([
+      expect.stringMatching(/^SESSION_SECRET must be set/),
+    ]);
+    for (const placeholder of [
+      "your-32-character-random-session-secret-here",
+      "your-super-secret-session-key-change-this-in-production",
+      "dev-only-session-secret-not-for-production",
+      "changeme",
+    ]) {
+      expect(startupConfigProblems({ ...base, ...GOOD_SECRETS, SESSION_SECRET: placeholder })).toEqual([
+        expect.stringMatching(/^SESSION_SECRET is still a placeholder/),
+      ]);
+    }
+    // Development is untouched: the development fallback applies.
+    expect(startupConfigProblems({ NODE_ENV: "development", SESSION_SECRET: "your-secret" })).toEqual([]);
   });
 
   it("a malformed APP_BASE_URL refuses to boot in any environment", () => {

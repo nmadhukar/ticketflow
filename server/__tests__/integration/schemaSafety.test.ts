@@ -117,6 +117,7 @@ describe("schema safety on deploy (R32)", () => {
           "0014_api_keys_hashed.sql",
           "0018_sns_message_dedupe.sql",
           "0019_sns_message_dedupe_status.sql",
+          "0020_users_is_active_not_null.sql",
         ]) {
           expect(run.out).toContain(`applied ${f}`);
         }
@@ -130,6 +131,38 @@ describe("schema safety on deploy (R32)", () => {
       const counter = await scratch.query(`SELECT last_number FROM ticket_number_counters WHERE prefix = 'TKT' AND year = 2025`);
       expect(counter.rows[0].last_number).toBe(41);
       expect(await findMissingSchemaObjects(scratch)).toEqual([]);
+    },
+    180000
+  );
+
+  it(
+    "0020: a legacy NULL is_active becomes false (never true), the column turns NOT NULL, and a second run changes nothing",
+    async () => {
+      // A database from before the constraint: the column is nullable and holds a NULL.
+      await scratch.query(`ALTER TABLE users ALTER COLUMN is_active DROP NOT NULL`);
+      await scratch.query(
+        `INSERT INTO users (id, email, role, is_active, is_approved) VALUES ('null-active', 'null-active@example.test', 'agent', NULL, true)`
+      );
+      for (const attempt of [1, 2]) {
+        const run = applyMigrations();
+        expect({ attempt, status: run.status }).toEqual({ attempt, status: 0 });
+        expect(run.out).toContain("applied 0020_users_is_active_not_null.sql");
+        const rows = await scratch.query(`SELECT id, is_active FROM users WHERE id IN ('null-active', 'legacy-1') ORDER BY id`);
+        // The NULL row keeps today's behaviour (inactive); the active row stays active.
+        expect(rows.rows).toEqual([
+          { id: "legacy-1", is_active: true },
+          { id: "null-active", is_active: false },
+        ]);
+        const col = await scratch.query(
+          `SELECT is_nullable, column_default FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'is_active'`
+        );
+        expect(col.rows[0].is_nullable).toBe("NO");
+        expect(col.rows[0].column_default).toBe("true");
+      }
+      await expect(
+        scratch.query(`INSERT INTO users (id, email, role, is_active) VALUES ('null-again', 'again@example.test', 'agent', NULL)`)
+      ).rejects.toMatchObject({ code: "23502" });
+      await scratch.query(`DELETE FROM users WHERE id = 'null-active'`);
     },
     180000
   );

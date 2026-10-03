@@ -30,6 +30,14 @@ export async function sendEmail(params: EmailParams): Promise<boolean> {
   const secretAccessKey = params.awsSecretAccessKey || process.env.AWS_SECRET_ACCESS_KEY;
   const region = params.awsRegion || process.env.AWS_REGION || "us-east-1";
 
+  // Same rule as the settings save guard, enforced at send time: a stored key id that is
+  // not the server's own never borrows the server's secret (a mismatched pair, or another
+  // account's identity signing with this server's secret).
+  if (params.awsAccessKeyId && !params.awsSecretAccessKey && params.awsAccessKeyId !== process.env.AWS_ACCESS_KEY_ID) {
+    console.error("AWS SES not used: the stored access key id has no secret and is not the server's own key");
+    return false;
+  }
+
   if (!accessKeyId || !secretAccessKey) {
     console.error('AWS credentials not configured');
     return false;

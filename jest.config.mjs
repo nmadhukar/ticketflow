@@ -1,5 +1,7 @@
 /** @type {import('jest').Config} */
 
+// `npm test` passes --runInBand globally because the integration suites share one database.
+
 // ts-jest runs the suites as CommonJS, so override the module settings that
 // tsconfig.json (bundler/ESNext, for Vite and tsx) sets. isolatedModules makes
 // ts-jest transpile only: type errors are the job of `npm run check`.

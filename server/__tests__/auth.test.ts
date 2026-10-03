@@ -67,6 +67,51 @@ describe('Auth Routes', () => {
 
       expect(response.status).toBe(400);
       expect(response.body.message).toBe('Email already registered');
+      // Stays 400 (never 409): the answer is the same for every kind of account.
+      expect(response.body.error).toBe('email_registered');
+    });
+
+    it('ignores role, isApproved, isActive and id in the body: a self-registration is an unapproved customer', async () => {
+      (storage.getUserByEmail as jest.Mock).mockResolvedValue(null);
+      (storage.createUser as jest.Mock).mockImplementation(async (u: Record<string, unknown>) => u);
+
+      const response = await request(app)
+        .post('/api/auth/register')
+        .send({ ...validUser, role: 'admin', isApproved: true, isActive: false, id: 'chosen-id' });
+
+      expect(response.status).toBe(201);
+      expect(response.body.user).toEqual(
+        expect.objectContaining({ role: 'customer', isApproved: false })
+      );
+      const created = (storage.createUser as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
+      expect(created).toEqual(
+        expect.objectContaining({ role: 'customer', isApproved: false, isActive: true })
+      );
+      expect(created.id).not.toBe('chosen-id');
+    });
+
+    it('answers a validation failure with the error contract', async () => {
+      const response = await request(app)
+        .post('/api/auth/register')
+        .send({ ...validUser, email: 'not-an-email', password: 'short' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('validation_failed');
+      expect(response.body.details.fieldErrors.email).toBeDefined();
+      expect(response.body.details.fieldErrors.password).toBeDefined();
+      expect(storage.createUser).not.toHaveBeenCalled();
+    });
+
+    it('answers a bad invitation with the invalid_invitation code', async () => {
+      (storage.getUserByEmail as jest.Mock).mockResolvedValue(null);
+      (storage.getUserInvitationByToken as jest.Mock).mockResolvedValue(undefined);
+
+      const response = await request(app)
+        .post('/api/auth/register')
+        .send({ ...validUser, inviteToken: 'nope' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toBe('invalid_invitation');
     });
 
     it('should auto-approve invited users', async () => {
@@ -112,6 +157,7 @@ describe('Auth Routes', () => {
       // Identical to a password account's answer: SSO-ness is not revealed.
       expect(response.status).toBe(400);
       expect(response.body.message).toBe('Email already registered');
+      expect(response.body.error).toBe('email_registered');
       expect(storage.upsertUser).not.toHaveBeenCalled();
     });
   });
@@ -134,6 +180,7 @@ describe('Auth Routes', () => {
 
       expect(response.status).toBe(401);
       expect(response.body.message).toBe('Invalid email or password');
+      expect(response.body.error).toBe('invalid_credentials');
     });
 
     it('should reject login for a deactivated account', async () => {
@@ -151,6 +198,7 @@ describe('Auth Routes', () => {
 
       expect(response.status).toBe(401);
       expect(response.body.message).toBe('Account is deactivated');
+      expect(response.body.error).toBe('invalid_credentials');
     });
 
     it('should reject login with invalid email', async () => {

@@ -341,7 +341,7 @@ export class DatabaseStorage implements IStorage {
     user: InsertUser,
     invitationId: number
   ): Promise<User | null> {
-    return await (db as any).transaction(async (tx: typeof db) => {
+    return await db.transaction(async (tx) => {
       const claimed = await tx
         .update(userInvitations)
         .set({ status: "accepted", acceptedAt: new Date() })
@@ -368,7 +368,7 @@ export class DatabaseStorage implements IStorage {
     userId: string,
     role: string
   ): Promise<boolean> {
-    const accepted: boolean = await (db as any).transaction(async (tx: typeof db) => {
+    const accepted: boolean = await db.transaction(async (tx) => {
       const claimed = await tx
         .update(userInvitations)
         .set({ status: "accepted", acceptedAt: new Date() })

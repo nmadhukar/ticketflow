@@ -59,6 +59,14 @@ describe("leftover demo accounts on an existing deployment", () => {
     expect(await db.select().from(users)).toHaveLength(4);
   });
 
+  it("checks every case-variant row of a demo email, not just one", async () => {
+    await insertDemo("admin@ticketflow.local", "A-changed-password-1!", "admin");
+    await insertDemo("Admin@Ticketflow.local", DEMO_ADMIN_PASSWORD, "admin");
+    await deactivateDemoAccounts({});
+    expect(await active("admin@ticketflow.local")).toBe(true);
+    expect(await active("Admin@Ticketflow.local")).toBe(false);
+  });
+
   it("is idempotent and logs emails, never passwords", async () => {
     await insertDemo("admin@ticketflow.local", DEMO_ADMIN_PASSWORD, "admin");
     const warn = console.warn as unknown as jest.Mock;

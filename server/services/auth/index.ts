@@ -14,7 +14,7 @@
 
 import passport from "passport";
 import { normalizeRole } from "../../permissions/roles";
-import { Strategy as LocalStrategy } from "passport-local";
+import { Strategy as LocalStrategy, type IVerifyOptions } from "passport-local";
 import type { Express, RequestHandler } from "express";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
@@ -32,7 +32,13 @@ import { isAiSystemUserId } from "../../utils/aiSystemUserId";
 import { ServerResponse, type IncomingMessage } from "http";
 import { disconnectUser } from "../../realtime/connections";
 import { fail, logRouteError } from "../../http/errors";
-import { authRateLimit, authRequestRateLimit } from "../../security/rateLimiting";
+import {
+  authRateLimit,
+  changePasswordRateLimit,
+  forgotPasswordRateLimit,
+  resetPasswordRateLimit,
+} from "../../security/rateLimiting";
+import { isApiPath } from "../../utils/apiPath";
 import {
   bearerAuth,
   bearerRateLimitGate,
@@ -49,6 +55,9 @@ declare global {
 }
 
 const scryptAsync = promisify(scrypt);
+
+/** What the local strategy tells the login handler when it refuses: a message, and a code for a lock. */
+type LoginInfo = IVerifyOptions & { code?: "account_locked" };
 
 /**
  * Hash a password using scrypt with random salt
@@ -122,6 +131,9 @@ const changePasswordSchema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters"),
 });
 
+/** express-session's default cookie name, stated so the revocation path can clear it by name. */
+const SESSION_COOKIE_NAME = "connect.sid";
+
 let activeSessionStore: InstanceType<ReturnType<typeof connectPg>> | undefined;
 let activeSessionMiddleware: RequestHandler | undefined;
 
@@ -136,9 +148,33 @@ export async function closeAuth(): Promise<void> {
   await store?.close();
 }
 
+/** The two stamps a session carries for the password-change revocation rule. */
+export interface SessionStamp {
+  /** When the sign-in started (ms). */
+  authAt?: unknown;
+  /** The verified row's passwordChangedAt at sign-in (ms; 0 when it had none). */
+  pwdAt?: unknown;
+}
+
+/** The passwordChangedAt of a user row as a millisecond stamp (0 for none), the value `pwdAt` stores. */
+export function passwordStamp(user: { passwordChangedAt?: Date | string | null } | undefined): number {
+  const changedAt = user?.passwordChangedAt;
+  return changedAt ? new Date(changedAt).getTime() : 0;
+}
+
 /**
  * A session that authenticated before the password last changed is dead. Shared by
  * the HTTP check in setupAuth and the WebSocket upgrade so they cannot disagree.
+ *
+ * Primary rule: the session stores the passwordChangedAt of the row whose password
+ * it verified (`pwdAt`); it is dead once the row has a later change. That closes the
+ * race where a reset takes its timestamp before the login starts but commits after
+ * the login read the old row (a clock comparison alone would honour that session).
+ * Sessions created before `pwdAt` existed, and hand-built ones, fall back to comparing
+ * `authAt` with the change time. Accepted: the changer's own request that was already
+ * in flight can save the session with its old stamps, which fails closed (that
+ * request's browser signs in again); and `authAt` is a server clock, so with several
+ * instances a skew can revoke a fresh session early (never later).
  */
 export function isSessionRevoked(
   user: { passwordChangedAt?: Date | string | null } | undefined,
@@ -146,8 +182,9 @@ export function isSessionRevoked(
 ): boolean {
   const changedAt = user?.passwordChangedAt;
   if (!changedAt) return false;
-  const authAt = (session as { authAt?: unknown } | undefined)?.authAt;
-  return !(typeof authAt === "number" && authAt >= new Date(changedAt).getTime());
+  const stamp = (session ?? {}) as SessionStamp;
+  if (typeof stamp.pwdAt === "number") return stamp.pwdAt < passwordStamp(user);
+  return !(typeof stamp.authAt === "number" && stamp.authAt >= new Date(changedAt).getTime());
 }
 
 /**
@@ -159,7 +196,7 @@ export function isSessionRevoked(
  */
 export async function authenticateUpgrade(
   req: IncomingMessage
-): Promise<{ user: Express.User; authAt: unknown } | null> {
+): Promise<{ user: Express.User; authAt: unknown; pwdAt: unknown } | null> {
   const sessionMiddleware = activeSessionMiddleware;
   if (!sessionMiddleware) return null;
   const res = new ServerResponse(req);
@@ -179,7 +216,8 @@ export async function authenticateUpgrade(
   if (!user || isAiSystemUserId(user.id)) return null;
   if (isSessionRevoked(user, (req as any).session)) return null;
   if (user.mustChangePassword) return null;
-  return { user, authAt: (req as any).session?.authAt };
+  const stamp = ((req as any).session ?? {}) as SessionStamp;
+  return { user, authAt: stamp.authAt, pwdAt: stamp.pwdAt };
 }
 
 /**
@@ -206,19 +244,25 @@ export function setupAuth(app: Express) {
 
   activeSessionStore = sessionStore;
 
+  // Also the options a cookie is cleared with: they must match the ones it was set with.
+  const sessionCookieOptions = {
+    httpOnly: true,
+    secure: cookieSecure,
+    sameSite: "lax" as const,
+    path: "/",
+  };
   const sessionSettings: session.SessionOptions = {
+    name: SESSION_COOKIE_NAME,
     secret: sessionSecret,
     store: sessionStore,
     resave: false,
     saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      secure: cookieSecure,
-      maxAge: sessionTtl,
-      sameSite: "lax",
-    },
+    cookie: { ...sessionCookieOptions, maxAge: sessionTtl },
   };
 
+  // Exactly one reverse proxy (nginx / the platform router) sits in front of the app, so
+  // req.ip is the address that proxy saw. A deployment with a second hop (a CDN in front
+  // of the proxy) would key every limiter on the CDN's address: raise this number there.
   app.set("trust proxy", 1);
   // Auth rate limits (every environment), registered before the handlers.
   // Mounted with app.use (POST only), not as a second app.post route, so the route
@@ -228,14 +272,17 @@ export function setupAuth(app: Express) {
       req.method === "POST" ? limiter(req, res, next) : next()
     );
   limitPost("/api/auth/login", authRateLimit);
-  limitPost("/api/auth/forgot-password", authRequestRateLimit);
-  limitPost("/api/auth/reset-password", authRequestRateLimit);
-  limitPost("/api/auth/change-password", authRequestRateLimit);
+  // One limiter per endpoint: separate budgets (see security/rateLimiting.ts).
+  limitPost("/api/auth/forgot-password", forgotPasswordRateLimit);
+  limitPost("/api/auth/reset-password", resetPasswordRateLimit);
+  limitPost("/api/auth/change-password", changePasswordRateLimit);
 
   activeSessionMiddleware = session(sessionSettings);
   app.use(activeSessionMiddleware);
   app.use(passport.initialize());
   app.use(passport.session());
+  // Tells setupMicrosoftAuth the one session + passport stack is already in place.
+  app.set("sessionStackMounted", true);
 
   // Bearer API keys / JWTs. Runs after passport.session() so a bearer replaces a
   // cookie's user (and an invalid bearer is 401 despite a valid cookie), and
@@ -256,7 +303,7 @@ export function setupAuth(app: Express) {
     // must still get the app; every other API route is checked.
     const p = req.path.toLowerCase();
     if (
-      !p.startsWith("/api") ||
+      !isApiPath(p) ||
       (req.method === "POST" && (p === "/api/auth/login" || p === "/api/auth/logout")) ||
       (req.method === "GET" && p === "/api/logout")
     ) {
@@ -264,6 +311,8 @@ export function setupAuth(app: Express) {
     }
     if (!isSessionRevoked(req.user, req.session)) return next();
     req.session.destroy(() => {
+      // The dead cookie must not keep riding along: expire it in the browser too.
+      res.clearCookie(SESSION_COOKIE_NAME, sessionCookieOptions);
       res.status(401).json({
         error: "session_revoked",
         message: "Your session ended because the password changed. Sign in again.",
@@ -276,7 +325,7 @@ export function setupAuth(app: Express) {
   app.use((req, res, next) => {
     // Express routes case-insensitively, so compare the lower-cased path.
     const path = req.path.toLowerCase();
-    if (!req.user?.mustChangePassword || !path.startsWith("/api")) return next();
+    if (!req.user?.mustChangePassword || !isApiPath(path)) return next();
     const allowed =
       (req.method === "GET" && (path === "/api/auth/user" || path === "/api/logout")) ||
       (req.method === "POST" &&
@@ -309,11 +358,11 @@ export function setupAuth(app: Express) {
           // arrive in parallel.
           const attempt = await storage.claimLoginAttempt(user.id, new Date());
           if (attempt === null) {
-            return done(null, false, {
-              message:
-                "Too many failed login attempts. Try again in a few minutes.",
+            const locked: LoginInfo = {
+              message: "Too many failed login attempts. Try again in a few minutes.",
               code: "account_locked",
-            } as any);
+            };
+            return done(null, false, locked);
           }
 
           const isValid = await comparePasswords(password, user.password);
@@ -475,7 +524,7 @@ export function setupAuth(app: Express) {
       // makes this session older than passwordChangedAt, so it is refused.
       const authStartedAt = Date.now();
 
-      passport.authenticate("local", (err: any, user: any, info: any) => {
+      passport.authenticate("local", (err: any, user: any, info: LoginInfo | undefined) => {
         if (err) {
           logRouteError("Authentication error", err);
           return fail(res, 500, "Authentication error");
@@ -504,8 +553,12 @@ export function setupAuth(app: Express) {
           if (err) {
             return fail(res, 500, "Failed to establish session");
           }
-          // Stamped after login (which starts a fresh session) for the revocation check.
-          (req.session as any).authAt = authStartedAt;
+          // Stamped after login (which starts a fresh session) for the revocation check:
+          // the time the sign-in started, and the change stamp of the row whose password
+          // was verified (isSessionRevoked explains why both).
+          const stamp = req.session as unknown as SessionStamp;
+          stamp.authAt = authStartedAt;
+          stamp.pwdAt = passwordStamp(user);
 
           res.json({
             id: user.id,
@@ -752,12 +805,23 @@ export function setupAuth(app: Express) {
           message: "This account signs in with single sign-on and has no local password.",
         });
       }
+      // A wrong current password is a password guess like a wrong login, so it spends the
+      // same lockout budget: the attempt is claimed before the comparison (a locked
+      // account is refused without one), and a correct one forgives earlier misses.
+      const attempt = await storage.claimLoginAttempt(current.id, new Date());
+      if (attempt === null) {
+        return res.status(423).json({
+          error: "account_locked",
+          message: "Too many failed attempts. Try again in a few minutes.",
+        });
+      }
       if (!(await comparePasswords(body.currentPassword, current.password))) {
         return res.status(400).json({
           error: "invalid_current_password",
           message: "Current password is incorrect",
         });
       }
+      await storage.resetFailedLogins(current.id);
       if (body.currentPassword === body.password) {
         return res.status(400).json({
           error: "password_unchanged",
@@ -769,7 +833,9 @@ export function setupAuth(app: Express) {
       // instant. Other devices sign in again.
       const changedAt = new Date();
       await storage.updateUserPassword(current.id, newHash, changedAt);
-      (req.session as any).authAt = changedAt.getTime();
+      const stamp = req.session as unknown as SessionStamp;
+      stamp.authAt = changedAt.getTime();
+      stamp.pwdAt = changedAt.getTime();
       await storage.revokeUserSessions(current.id, req.sessionID);
       // Sockets of other devices must go (their sessions are revoked); this device's
       // socket reconnects, so its new authAt must be stored before it does.
