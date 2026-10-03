@@ -6,12 +6,13 @@ import { eq, sql } from "drizzle-orm";
 import { AI_SYSTEM_USER_ID } from "../../utils/aiSystemUserId";
 import request from "supertest";
 import WebSocket from "ws";
-import { users } from "@shared/schema";
+import { users, userInvitations } from "@shared/schema";
 import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
 import { createUser, createTicketAs, DEFAULT_PASSWORD } from "./helpers/fixtures";
 import { db } from "../../storage/db";
-import { attachRealtime, closeRealtime, connectionCount, notifyTicket } from "../../realtime/ws";
+import { attachRealtime, closeRealtime, connectionCount, notifyTicket, originAllowed } from "../../realtime/ws";
+import { storage } from "../../storage";
 import type { Express } from "express";
 import type { User } from "@shared/schema";
 
@@ -330,6 +331,38 @@ describe("real-time updates over an authenticated WebSocket", () => {
       back.ws.close();
     });
 
+    it("approving a user reconnects their open socket (1012)", async () => {
+      const u = await createUser({ role: "agent" });
+      const { cookie } = await login(u);
+      const c = await open(cookie);
+      await storage.approveUser(u.id);
+      expect((await c.closed).code).toBe(1012);
+    });
+
+    it("accepting an invitation (role and approval change) reconnects the open socket (1012)", async () => {
+      const u = await createUser({ role: "agent" });
+      const admin = await createUser({ role: "admin" });
+      const { cookie } = await login(u);
+      const c = await open(cookie);
+      const [inv] = await db
+        .insert(userInvitations)
+        .values({
+          email: u.email as string,
+          role: "manager",
+          invitedBy: admin.id,
+          invitationToken: randomUUID(),
+          expiresAt: new Date(Date.now() + 3600_000),
+        })
+        .returning();
+      expect(await storage.acceptInvitationForUser(inv.id, u.id, "manager")).toBe(true);
+      expect((await c.closed).code).toBe(1012);
+      // A claim that finds nothing pending drops nobody.
+      const again = await open((await login(u)).cookie);
+      expect(await storage.acceptInvitationForUser(inv.id, u.id, "manager")).toBe(false);
+      await quiet();
+      expect(again.ws.readyState).toBe(WebSocket.OPEN);
+    });
+
     it("an admin password reset closes the user's sockets with 1008", async () => {
       const u = await createUser({ role: "agent" });
       const admin = await createUser({ role: "admin" });
@@ -367,6 +400,48 @@ describe("real-time updates over an authenticated WebSocket", () => {
       const origin = url.replace("ws://", "http://").replace("/ws", "");
       await open(cookie, { origin });
       expect(connectionCount()).toBe(1);
+    });
+
+    it("does not trust X-Forwarded-Host unless the app trusts its proxy", async () => {
+      const u = await createUser({ role: "agent" });
+      const { cookie } = await login(u);
+      // The server under test was attached without trustProxy: a client-chosen
+      // forwarded host cannot make a foreign Origin "same origin".
+      const c = await open(cookie, { origin: "https://public.example", "x-forwarded-host": "public.example" });
+      expect((await c.closed).code).toBe(1008);
+      expect(connectionCount()).toBe(0);
+    });
+
+    it("originAllowed reads X-Forwarded-Host (its last entry) only with trustProxy", () => {
+      const req = (headers: Record<string, string>) => ({ headers }) as unknown as http.IncomingMessage;
+      const forged = req({ origin: "https://public.example", host: "internal:5000", "x-forwarded-host": "public.example" });
+      const behindProxy = req({
+        origin: "https://public.example",
+        host: "internal:5000",
+        "x-forwarded-host": "evil.example, public.example", // the client's entry, then the proxy's
+      });
+      const spoofed = req({
+        origin: "https://evil.example",
+        host: "internal:5000",
+        "x-forwarded-host": "evil.example, public.example",
+      });
+      detach(); // one /ws listener at a time
+      const stop = attachRealtime(server, { trustProxy: true });
+      try {
+        expect(originAllowed(forged)).toBe(true);
+        expect(originAllowed(behindProxy)).toBe(true);
+        expect(originAllowed(spoofed)).toBe(false); // only the proxy's last entry counts
+      } finally {
+        stop();
+      }
+      const stop2 = attachRealtime(server); // back to the default
+      try {
+        expect(originAllowed(forged)).toBe(false);
+        expect(originAllowed(req({ origin: "http://internal:5000", host: "internal:5000" }))).toBe(true);
+      } finally {
+        stop2();
+        detach = attachRealtime(server);
+      }
     });
 
     it("accepts an origin listed in CORS_ORIGIN and ignores a wildcard", async () => {

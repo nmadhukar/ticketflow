@@ -416,8 +416,8 @@ ledger entry ("Task N" is the plan task). Nothing here blocks the release.
   fields (M5).
 - The general /api limit stays 100 requests per 15 minutes per IP; `RATE_LIMIT_MAX_REQUESTS`
   now takes effect, so raise it if staff share one NAT address.
-- Teams cards for tickets created or updated through MCP carry no link (the service could use
-  the APP_BASE_URL helper).
+- RESOLVED (FU4): Teams cards for tickets created or updated through MCP now carry the
+  APP_BASE_URL link (no link when APP_BASE_URL is unset or unusable).
 - README and DEVELOPER_DOCUMENTATION showed the old compose command. Fixed (FU5): both now give
   the current one, the required environment and the Node 24 image; the Dockerfile `CMD` carries a
   comment that it skips the schema steps.
@@ -483,18 +483,19 @@ ledger entry ("Task N" is the plan task). Nothing here blocks the release.
 - Task 20: REST `change_status` audit logs userId "anonymous" (reads `req.user.userId`; pre-existing); MCP audit `ip='mcp'`; customer routing rewrite still in the REST create handler; `listTickets` per-row `getTask`; double access query on REST by-id; no Teams link on MCP updates.
 
 ### AI
-- Task 12: on the create path, a comment written and then a failed `setApplied` leaves the row unapplied (a later apply duplicates; the log says "comment failed").
-- Task 12: `ticketsResolvedByAI` compares the draft `createdAt`, not the applied time, and `COALESCE(resolvedAt, closedAt)` is stale after a reopen; `knowledgeBaseLearning` logs the ticket category; raw `console.error(error)` in non-AI knowledge routes (about `:4352` and `:5612`); `ESCALATION_ACTIVE` is client-only.
-- Task 12 (out-of-scope review note): the tests README still describes the old mock.
+- Task 12: RESOLVED (FU4). On the create path, a comment written and then a failed `setApplied` is retried once and logged as "the comment was posted but marking the draft applied failed" (no longer "comment failed"). If the row stays unapplied, the apply route finds the AI comment with the same response text, marks the draft applied and posts nothing (`alreadyApplied: true`). Test: `ai.routes.test.ts` "comment written but setApplied failing".
+- Task 12: RESOLVED (FU4). `ticketsResolvedByAI` now uses the applied time (the AI comment's `created_at`, falling back to the draft's `createdAt` when no comment is found) and the LATEST resolution (`GREATEST(resolvedAt, closedAt)`). `knowledgeBaseLearning` no longer logs the ticket category; the remaining raw error logs (ticket knowledge learning, attachments, S3 delete) log the error type only (`logRouteError`). The non-AI knowledge routes already used `logRouteError`.
+- Task 12: still open, by design: `ESCALATION_ACTIVE` is client-only.
+- Task 12 (out-of-scope review note): RESOLVED (FU4). The tests README describes the real layout, the SDK-boundary Bedrock mock and the run commands.
 
 ### Realtime, Teams webhooks and inbound email
-- Task 14: `acceptInvitationForUser` and `approveUser` do not call `disconnectUser` (the lazy re-check covers it); a per-event users read and a UNION per 200 sockets; `originAllowed` trusts `x-forwarded-host`; `secureAuth.ts` is a dead module.
-- Task 15: the DNS-rebinding window (the allow-list is the control; pinning through an undici dispatcher would need a dependency); fan-out runs one `canAccessTask` per webhook row per event with no concurrency cap (disable legacy non-admin webhook rows after deploy); `createTeam` still inserts the creator as team admin (latent if a new caller appears); team routes still return `{message}` without `error` (to Task 17).
-- Task 16: display names containing `@` or a backslash are refused (safe direction); a fenced-out late holder only logs; the done mark is not in the same transaction as the create (`createTask` has no transaction); the 64 KB header cap may refuse long Received or ARC chains (check real sizes after deploy).
+- Task 14: RESOLVED (FU4). `acceptInvitationForUser` (after the commit) and `approveUser` now call `disconnectUser(userId, 1012)`. `originAllowed` no longer trusts `x-forwarded-host` unless the app's Express `trust proxy` is on (`server/index.ts` sets it to 1 for the deployed reverse proxy, so behind the proxy it is trusted, and then only the LAST entry, the one the proxy wrote, is read); `attachRealtime(server, { trustProxy })` carries the setting. Still open: a per-event users read and a UNION per 200 sockets; `secureAuth.ts` is a dead module.
+- Task 15: NOT FIXED, by decision: the DNS-rebinding window. The host allow-list (`*.webhook.office.com`) is the control; pinning the checked address needs an undici dispatcher, i.e. a new dependency, which this plan does not add (documented in `webhookGuard.ts`). RESOLVED (FU4): fan-out resolves access for all candidate owners in one query (per 200) and posts at most 5 webhooks at a time (`WEBHOOK_CONCURRENCY`, an in-house limiter). Still open: `createTeam` inserts the creator as team admin (latent if a new caller appears); team routes still return `{message}` without `error` (to Task 17).
+- Task 16: display names containing `@` or a backslash are refused (safe direction); a fenced-out late holder only logs. NOT FIXED, by decision: the done mark stays a separate statement from the create. Sharing a transaction means threading `tx` through the ticket-number counter and the one-retry-on-number-clash in `createTask` (a unique violation aborts a transaction, so the retry needs savepoints); the claim fence stays and the window is two statements wide (documented in `routes/email.ts`). The 64 KB header cap stays as a documented limit (check real Received or ARC sizes after deploy; documented in `mime.ts`).
 
 ### Security hardening and deployment
 - FU5: the built server (`node dist/index.js`, so `npm start`) now refuses to boot with one log line when `NODE_ENV` is unset (`npm run dev` through tsx still defaults to development; `npm start` needs `NODE_ENV=production`); the request sanitiser now walks iteratively with no depth limit (still linear).
 - Task 13: still open: `NODE_ENV` unset in other entry points means development mode; a subtree deeper than 20 (fixed by FU5, above); `sanitizeForSQL` and `sanitizeText` are dead; existing 404s lack an error code (to Task 17).
 
 ### MCP
-- Tasks 21 and 22: the MCP list limit is capped at 100 versus REST 500; the invented-status test accepts `VALIDATION` or `INVALID_STATE`; the isolation suite's last test is order-dependent; a non-numeric id gives the SDK's plain-text error; `get_ticket` FORBIDDEN discloses existence (REST parity).
+- Tasks 21 and 22: the MCP list limit stays at 100 versus REST 500, on purpose (FU4): the caller is a model, 500 full tickets in one tool result fills its context, each row costs a `getTask`, and `hasMore`/`offset` make paging cheap (reason in `ticketService.ts`). RESOLVED (FU4): the invented-status test asserts exactly `VALIDATION`; the isolation suite's secret-scan test makes its own calls and no longer depends on test order; a non-numeric id (`"abc"`, `"12"`, `1.5`) gives a coded `VALIDATION` with `fieldErrors.id` (the tool schema accepts number or string so the value reaches the service). Still open: `get_ticket` FORBIDDEN discloses existence (REST parity).

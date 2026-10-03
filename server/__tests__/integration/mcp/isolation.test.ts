@@ -245,7 +245,35 @@ describe("every tool: success, validation, unauthenticated, forbidden, not-found
   });
 });
 
-it("no tool output anywhere in this file carries a secret key", () => {
-  expect(outputs.length).toBeGreaterThan(20);
-  expect(outputs.flatMap((o) => findSecrets(o))).toEqual([]);
+describe("a non-numeric id", () => {
+  it.each(ID_TOOLS)("%s answers a coded VALIDATION, not the SDK's plain-text error", async (tool, args) => {
+    for (const bad of ["abc", "12", "", 1.5]) {
+      const res = await run(mcp.admin, tool, args(bad as never));
+      expect([tool, bad, res.isError, res.data?.code]).toEqual([tool, bad, true, "VALIDATION"]);
+      expect(res.data.details.fieldErrors.id).toBeDefined();
+    }
+  });
+});
+
+// Independent of every other test in this file (and of test order or `-t`): it makes its own
+// calls, one per tool, and scans those together with whatever earlier tests happened to collect.
+it("no tool output carries a secret key", async () => {
+  const own: unknown[] = [];
+  const mine = async (caller: McpCaller, name: string, args: object) => {
+    const res = await caller.call(name, args);
+    own.push(res.data);
+    return res;
+  };
+  const created = await mine(mcp.A, "create_ticket", { title: "secret scan", category: "support" });
+  const newId = created.data.id as number;
+  await mine(mcp.A, "get_ticket", { id: newId, includeComments: true });
+  await mine(mcp.A, "list_tickets", {});
+  await mine(mcp.admin, "update_ticket", { id: newId, notes: "n" });
+  await mine(mcp.A, "add_comment", { id: newId, content: "hi" });
+  await mine(mcp.admin, "close_ticket", { id: newId });
+  await mine(mcp.admin, "reopen_ticket", { id: newId });
+  await mine(mcp.admin, "delete_ticket", { id: newId, confirm: true });
+  await mine(mcp.B, "get_ticket", { id: ticketId }); // a refusal is scanned too
+  expect(own).toHaveLength(9);
+  expect([...outputs, ...own].flatMap((o) => findSecrets(o))).toEqual([]);
 });

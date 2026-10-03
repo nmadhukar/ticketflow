@@ -367,7 +367,7 @@ export class DatabaseStorage implements IStorage {
     userId: string,
     role: string
   ): Promise<boolean> {
-    return await (db as any).transaction(async (tx: typeof db) => {
+    const accepted: boolean = await (db as any).transaction(async (tx: typeof db) => {
       const claimed = await tx
         .update(userInvitations)
         .set({ status: "accepted", acceptedAt: new Date() })
@@ -386,6 +386,10 @@ export class DatabaseStorage implements IStorage {
         .where(eq(users.id, userId));
       return true;
     });
+    // The role and approval changed under any open socket: reconnect it with the new ones
+    // (after the commit, so a rolled-back claim drops nothing).
+    if (accepted) disconnectUser(userId, 1012);
+    return accepted;
   }
 
   async clearPasswordResetToken(userId: string): Promise<void> {
@@ -1609,6 +1613,9 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(users.id, userId))
       .returning(publicUserColumns);
+
+    // Approval changes what the user may see: reconnect any open socket with it.
+    if (updatedUser) disconnectUser(userId, 1012);
 
     return updatedUser;
   }

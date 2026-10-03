@@ -70,6 +70,27 @@ export async function canAccessTask(user: AccessUser, taskId: number): Promise<b
   return rows.length > 0;
 }
 
+/** Visibility branches per query in usersWhoCanAccessTask. */
+const ACCESS_CHUNK = 200;
+
+/**
+ * Which of `candidates` can see ticket `taskId`: the same rule as canAccessTask, but one
+ * query (a UNION ALL of `SELECT <id> FROM tasks WHERE id = <ticket> AND <rule>` branches)
+ * per ACCESS_CHUNK users instead of one per user. Returns the allowed user ids.
+ */
+export async function usersWhoCanAccessTask(candidates: AccessUser[], taskId: number): Promise<Set<string>> {
+  const allowed = new Set<string>();
+  for (let i = 0; i < candidates.length; i += ACCESS_CHUNK) {
+    const branches = candidates.slice(i, i + ACCESS_CHUNK).map(
+      (u) => sql`(SELECT ${u.id}::text AS uid FROM ${tasks} WHERE ${tasks.id} = ${taskId} AND ${ticketVisibilityWhere(u)})`
+    );
+    if (branches.length === 0) continue;
+    const result = await db.execute(sql.join(branches, sql` UNION ALL `));
+    for (const row of result.rows as Array<{ uid: string }>) allowed.add(row.uid);
+  }
+  return allowed;
+}
+
 /** 404 if the ticket does not exist, 403 if it exists but is outside the user's scope. */
 export async function assertTaskAccess(user: AccessUser, taskId: number): Promise<void> {
   if (await canAccessTask(user, taskId)) return;

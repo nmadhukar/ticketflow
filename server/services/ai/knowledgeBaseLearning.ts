@@ -389,11 +389,11 @@ export const processKnowledgeLearning = async (options?: {
     let totalPublished = 0;
 
     // Process each category separately
-    for (const [category, tickets] of Object.entries(ticketsByCategory)) {
+    for (const tickets of Object.values(ticketsByCategory)) {
       if (tickets.length < 3) continue; // Need minimum tickets for pattern analysis
 
       console.log(
-        `Analyzing ${tickets.length} resolved tickets in category: ${category}`
+        `Analyzing ${tickets.length} resolved tickets in one category group`
       );
 
       // Enrich tickets with comments and resolution data
