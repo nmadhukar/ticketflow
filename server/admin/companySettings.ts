@@ -15,6 +15,14 @@ import { fail, logRouteError } from "../http/errors";
 /** The company ticket prefix: 1 to 6 ASCII letters or digits. */
 export const TICKET_PREFIX_PATTERN = /^[A-Za-z0-9]{1,6}$/;
 
+/** Providers with no sending adapter (R58): they cannot be selected. */
+const UNSUPPORTED_EMAIL_PROVIDERS: ReadonlySet<string> = new Set([
+  EMAIL_PROVIDERS.SMTP,
+  EMAIL_PROVIDERS.MAILGUN,
+  EMAIL_PROVIDERS.SENDGRID,
+  EMAIL_PROVIDERS.CUSTOM,
+]);
+
 /** The submitted secret if non-blank, else the stored one if any, as a metadata fragment. */
 function secretOrKept(
   field: string,
@@ -50,7 +58,7 @@ export function registerCompanySettingsRoutes(app: Express): void {
             );
             s.logoUrl = presignedUrl;
           } catch (error) {
-            console.warn("Failed to generate presigned URL for logo:", error);
+            logRouteError("Failed to generate presigned URL for logo", error);
             // Keep original URL/key if presigned URL generation fails
           }
         }
@@ -310,7 +318,7 @@ export function registerCompanySettingsRoutes(app: Express): void {
             const oldKey = s3Service.extractKeyFromUrl(currentSettings.logoUrl);
             if (oldKey !== s3Key) await s3Service.deleteFile(oldKey);
           } catch (error) {
-            console.warn("Failed to delete old logo from S3:", error);
+            logRouteError("Failed to delete old logo from S3", error);
             // The new logo is already live; a leftover object is harmless
           }
         }
@@ -363,6 +371,18 @@ export function registerCompanySettingsRoutes(app: Express): void {
     isAdmin,
     async (req: any, res) => {
       try {
+        // R58: SMTP, Mailgun, SendGrid and Custom have no sending adapter (each needs a
+        // client library, a new dependency), so they cannot be selected and nothing is
+        // stored. A row of that kind saved before this still reads back (GET) and sending
+        // through it still logs "not implemented".
+        if (UNSUPPORTED_EMAIL_PROVIDERS.has(String(req.body?.provider))) {
+          const message = "That email provider is not available. Use AWS SES or Mailtrap.";
+          return fail(res, 400, message, {
+            code: "provider_not_supported",
+            details: { formErrors: [], fieldErrors: { provider: [message] } },
+          });
+        }
+
         const parsed = SaveEmailSettingsSchema.safeParse(req.body);
         if (!parsed.success) {
           return fail(res, 400, "Invalid payload", {
@@ -411,16 +431,7 @@ export function registerCompanySettingsRoutes(app: Express): void {
         ) {
           return secretRequired("awsSecretAccessKey", "for an access key id that is not the server's own");
         }
-        if (
-          data.provider === EMAIL_PROVIDERS.SMTP &&
-          blank(data.password) &&
-          prev.password &&
-          (prev.host !== data.host || prev.username !== data.username)
-        ) {
-          return secretRequired("password", "when the host or username changes");
-        }
-        // SMTP has no environment fallback (its adapter is not implemented), so a blank
-        // password with nothing stored simply saves none; nothing is borrowed from the server.
+        // (SMTP, Mailgun, SendGrid and Custom never reach this point: see the R58 refusal above.)
 
         const saved = await storage.upsertEmailProvider(
           {

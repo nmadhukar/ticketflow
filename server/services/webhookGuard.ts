@@ -1,5 +1,6 @@
-import { promises as dnsPromises } from "dns";
-import { isIP } from "net";
+import dns from "dns";
+import https from "https";
+import { isIP, type LookupFunction } from "net";
 import { HttpError } from "../http/errors";
 
 /**
@@ -12,14 +13,24 @@ import { HttpError } from "../http/errors";
  *    within WEBHOOK_TIMEOUT_MS.
  * Only the host is ever logged, never the URL (the path carries the secret).
  *
- * KNOWN LIMIT (DNS rebinding, documented, not fixed): the addresses are checked by one
- * lookup and fetch then resolves the name again, so a host that answers differently the
- * second time could slip past the address check. The control that holds is the host
- * allow-list (only *.webhook.office.com, which this project does not control, can be
- * named). Closing the window means pinning the checked address into the connection
- * (an undici dispatcher with a custom `connect.lookup`), which needs the `undici`
- * dependency; Node's bundled fetch does not export it. No dependency was added.
+ * DNS rebinding (R44): the check and the connection use ONE resolution. The request goes
+ * through https.request with a custom `lookup` that resolves the name, refuses when ANY
+ * address is private, and answers the connection with a validated address, so the socket
+ * can only be opened to an address that passed the check; there is no second lookup to
+ * rebind. `servername` is the original host, so TLS still verifies the certificate against
+ * the name, not the address. No dependency is needed.
  */
+
+/**
+ * R84: Teams webhooks are OFF unless TEAMS_WEBHOOKS_ENABLED is exactly "true". Off, no ticket event
+ * sends anything, the test route answers 503 and saving settings answers 409, all with the code
+ * `teams_webhooks_disabled`. The code stays in place so an admin can turn it on.
+ */
+export function teamsWebhooksEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.TEAMS_WEBHOOKS_ENABLED === "true";
+}
+export const TEAMS_WEBHOOKS_DISABLED_MESSAGE =
+  "Teams webhooks are turned off on this server. Set TEAMS_WEBHOOKS_ENABLED=true and restart to enable them.";
 
 export const WEBHOOK_TIMEOUT_MS = 8000;
 const ALLOWED_HOST_SUFFIX = ".webhook.office.com";
@@ -110,11 +121,17 @@ export function isPrivateAddress(address: string): boolean {
   return false;
 }
 
-/** Resolves the host and refuses unless it resolves, and every address is public. */
+/**
+ * Resolves the host and refuses unless it resolves, and every address is public. A courtesy
+ * pre-check for the admin "send a test" route (a 400 instead of a quiet false); the send itself
+ * is pinned by createPinnedLookup, so this check is not what protects the connection.
+ */
 export async function assertPublicHost(hostname: string): Promise<void> {
   let results: { address: string }[];
   try {
-    results = await dnsPromises.lookup(hostname, { all: true });
+    results = await new Promise<{ address: string }[]>((resolve, reject) =>
+      dns.lookup(hostname, { all: true }, (err, addresses) => (err ? reject(err) : resolve(addresses)))
+    );
   } catch {
     refuse("Webhook host could not be resolved");
   }
@@ -123,6 +140,97 @@ export async function assertPublicHost(hostname: string): Promise<void> {
   }
 }
 
+type LookupResult = { address: string; family: number };
+type Resolve = (hostname: string, options: { all: true }, cb: (err: NodeJS.ErrnoException | null, addresses: LookupResult[]) => void) => void;
+
+/**
+ * A `lookup` for net.connect / https.request that resolves ONCE, refuses when ANY address is
+ * private, and answers with the validated address(es). It honours `options.all` (the array
+ * form Node's autoSelectFamily uses) and the single-address form.
+ */
+export function createPinnedLookup(resolve: Resolve = dns.lookup as unknown as Resolve) {
+  return (
+    hostname: string,
+    options: { all?: boolean; family?: number | string } | undefined,
+    callback: (err: NodeJS.ErrnoException | null, address?: string | LookupResult[], family?: number) => void
+  ): void => {
+    resolve(hostname, { all: true }, (err, addresses) => {
+      if (err) return callback(err);
+      if (!Array.isArray(addresses) || addresses.length === 0) {
+        return callback(Object.assign(new Error("Webhook host could not be resolved"), { code: "ENOTFOUND" }) as NodeJS.ErrnoException);
+      }
+      if (addresses.some((a) => isPrivateAddress(a.address))) {
+        return callback(
+          Object.assign(new Error("Webhook host resolves to a non-public address"), { code: "EWEBHOOKPRIVATE" }) as NodeJS.ErrnoException
+        );
+      }
+      const wanted = Number(options?.family) || 0;
+      const usable = wanted === 4 || wanted === 6 ? addresses.filter((a) => a.family === wanted) : addresses;
+      if (usable.length === 0) {
+        return callback(Object.assign(new Error("Webhook host has no address of the requested family"), { code: "ENOTFOUND" }) as NodeJS.ErrnoException);
+      }
+      if (options?.all) return callback(null, usable.map((a) => ({ address: a.address, family: a.family })));
+      callback(null, usable[0].address, usable[0].family);
+    });
+  };
+}
+
+/** Response bytes read before the connection is dropped (only the status matters). */
+const MAX_RESPONSE_BYTES = 64 * 1024;
+
+/**
+ * The one HTTPS POST: connects to the address the pinned `lookup` validated, with TLS
+ * SNI and certificate verification on the original host name, no redirects followed,
+ * a timeout, and a bounded response read. Resolves with the status code.
+ * `extra` (a local CA, port and lookup) is reachable only through `webhookGuardTesting`; the
+ * production entry points (sendPinnedJson, postWebhookJson) cannot override the pinned lookup.
+ */
+function sendWith(
+  url: URL,
+  body: string,
+  extra: { lookup?: ReturnType<typeof createPinnedLookup>; ca?: string | Buffer; port?: number } = {}
+): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const req = https.request(
+      {
+        method: "POST",
+        hostname: url.hostname,
+        port: extra.port ?? 443,
+        path: `${url.pathname}${url.search}`,
+        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
+        servername: url.hostname,
+        // On an error the callback carries no address; net's type does not model that.
+        lookup: (extra.lookup ?? createPinnedLookup()) as unknown as LookupFunction,
+        ...(extra.ca ? { ca: extra.ca } : {}),
+        agent: false,
+        signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+      },
+      (res) => {
+        // No redirect is followed: a 3xx is just a status here.
+        const status = res.statusCode ?? 0;
+        let read = 0;
+        res.on("data", (chunk: Buffer) => {
+          read += chunk.length;
+          if (read > MAX_RESPONSE_BYTES) res.destroy();
+        });
+        res.on("error", () => {});
+        res.on("end", () => resolve(status));
+        res.on("close", () => resolve(status));
+      }
+    );
+    req.on("error", reject);
+    req.end(body);
+  });
+}
+
+/** The pinned POST, with no way to override the lookup or TLS trust. */
+export function sendPinnedJson(url: URL, body: string): Promise<number> {
+  return sendWith(url, body);
+}
+
+/** Test-only: the same POST with a local CA, port and lookup. Not used by production code. */
+export const webhookGuardTesting = { sendWith };
+
 /**
  * POSTs JSON to a Teams webhook. Returns true on a 2xx; false on any refusal,
  * redirect, timeout or error (the reason is logged with the host only).
@@ -130,24 +238,27 @@ export async function assertPublicHost(hostname: string): Promise<void> {
 export async function postWebhookJson(rawUrl: string, payload: unknown): Promise<boolean> {
   let host = "unknown";
   try {
+    // R84, defense in depth: the callers check the flag too.
+    if (!teamsWebhooksEnabled()) throw new HttpError(503, "teams_webhooks_disabled", TEAMS_WEBHOOKS_DISABLED_MESSAGE);
     const url = validateWebhookUrl(rawUrl);
     host = url.hostname;
-    await assertPublicHost(host);
-    const response = await fetch(url.toString(), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      redirect: "manual",
-      signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
-    });
-    if (response.status >= 300 && response.status < 400) {
-      console.warn(`Teams webhook to ${host} answered a redirect (${response.status}); not followed`);
+    const status = await sendPinnedJson(url, JSON.stringify(payload));
+    if (status >= 300 && status < 400) {
+      console.warn(`Teams webhook to ${host} answered a redirect (${status}); not followed`);
       return false;
     }
-    if (!response.ok) console.warn(`Teams webhook to ${host} answered ${response.status}`);
-    return response.ok;
+    const ok = status >= 200 && status < 300;
+    if (!ok) console.warn(`Teams webhook to ${host} answered ${status}`);
+    return ok;
   } catch (error) {
-    const reason = error instanceof HttpError ? error.message : error instanceof Error ? error.name : "error";
+    const reason =
+      error instanceof HttpError
+        ? error.message
+        : (error as NodeJS.ErrnoException)?.code === "EWEBHOOKPRIVATE"
+          ? "Webhook host resolves to a non-public address"
+          : error instanceof Error
+            ? error.name
+            : "error";
     console.warn(`Teams webhook to ${host} not sent: ${reason}`);
     return false;
   }

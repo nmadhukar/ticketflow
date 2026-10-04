@@ -1,7 +1,7 @@
 import { and, eq, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { teamsIntegrationSettings, users, type Task } from "@shared/schema";
-import { validateWebhookUrl } from "./webhookGuard";
+import { teamsWebhooksEnabled, validateWebhookUrl } from "./webhookGuard";
 import { db } from "../storage/db";
 import { usersWhoCanAccessTask } from "../permissions/ticketAccess";
 import { teamsIntegration } from "./microsoftTeams";
@@ -67,11 +67,13 @@ export interface TicketWebhookEvent {
  * Sends a ticket's Teams webhook notifications. A webhook receives a ticket
  * only when its owner (a) enabled it for this kind of event and (b) can access
  * the ticket under the one visibility rule (the canAccessTask rule). One query finds the
- * enabled webhooks; one more (per 200 owners) checks access for the owners whose
+ * enabled webhooks; one more (a single set-based query, R51) checks access for the owners whose
  * notification types match; the posts then go out WEBHOOK_CONCURRENCY at a time.
  * Never throws: a failed webhook is logged by host.
  */
 export async function notifyTicketWebhooks(event: TicketWebhookEvent): Promise<void> {
+  // R84: off unless TEAMS_WEBHOOKS_ENABLED=true. Nothing is read or sent.
+  if (!teamsWebhooksEnabled()) return;
   try {
     const rows = await db
       .select({
@@ -99,7 +101,7 @@ export async function notifyTicketWebhooks(event: TicketWebhookEvent): Promise<v
       (r) => !!r.webhookUrl && (event.kind === "created" ? wantsCreated(r.notificationTypes) : wantsUpdated(r.notificationTypes))
     );
 
-    // Access for every candidate owner in one query (per 200), not one query per webhook row.
+    // Access for every candidate owner in one set-based query (R51), not one query per webhook row.
     const allowed = await usersWhoCanAccessTask(
       candidates.map((r) => ({ id: r.ownerId, role: r.role })),
       event.task.id

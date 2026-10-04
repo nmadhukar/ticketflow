@@ -193,6 +193,17 @@ describe("API keys: admin-issued and hashed", () => {
     expect(by).toEqual({ old: true, fresh: false, never: false });
   });
 
+  it("a key whose permissions column is NULL is listed with [] and resolves with [] (R50: no database default)", async () => {
+    const admin = await createUser({ role: "admin" });
+    const owner = await createUser({ role: "customer" });
+    const plaintext = await seedKey(owner.id, { name: "nullperm" });
+    await db.update(apiKeys).set({ permissions: null }).where(eq(apiKeys.name, "nullperm"));
+    const res = await (await loginAs(ctx.app, admin)).get("/api/api-keys");
+    expect(res.status).toBe(200);
+    expect(res.body.find((k: { name: string }) => k.name === "nullperm").permissions).toEqual([]);
+    expect((await findActiveKey(plaintext))?.permissions).toEqual([]);
+  });
+
   it("lists keys without plaintext or hash, and revokes one", async () => {
     const admin = await createUser({ role: "admin" });
     const c1 = await createUser({ role: "customer" });

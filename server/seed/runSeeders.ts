@@ -9,7 +9,7 @@ import { describeError } from "../http/errors";
  *  2. the data fix-ups: legacy role "user" -> agent, assignee columns, legacy
  *     API keys;
  *  3. the passwordless system user and the AI system user;
- *  4. the default email templates (best effort);
+ *  4. the default email templates, then the invitation template fix-up (best effort, both);
  *  5. the bootstrap admin (only if no admin exists and ADMIN_EMAIL/ADMIN_PASSWORD are set).
  * A failure in any step but 4 stops startup (StartupStepError, one line).
  *
@@ -65,6 +65,8 @@ export interface SeederSet {
   deactivateDemoAccounts(env: NodeJS.ProcessEnv): Promise<unknown>;
   bootstrapAdmin(env: NodeJS.ProcessEnv): Promise<void>;
   emailTemplates(): Promise<void>;
+  /** Startup data fix-up: a stored `user_invitation` still equal to the OLD default (with the Department line) becomes the new default. Runs right after emailTemplates. */
+  updateOldInvitationTemplate?(): Promise<unknown>;
   demoUsers(): Promise<void>;
   departments(): Promise<void>;
   teams(): Promise<void>;
@@ -83,6 +85,7 @@ async function defaultSeeders(): Promise<SeederSet> {
   const { migrateAssigneeTypes } = await import("./assigneeTypeFixup");
   const { deactivateLegacyApiKeys } = await import("./legacyApiKeyFixup");
   const { ensureAiSystemUser } = await import("../utils/aiSystemUser");
+  const { updateOldInvitationTemplate } = await import("./invitationTemplateFixup");
   return {
     aiSystemUser: ensureAiSystemUser,
     migrateLegacyRoles,
@@ -92,6 +95,7 @@ async function defaultSeeders(): Promise<SeederSet> {
     deactivateDemoAccounts,
     bootstrapAdmin: seedBootstrapAdmin,
     emailTemplates: seed.seedEmailTemplates,
+    updateOldInvitationTemplate,
     demoUsers: seed.seedUsers,
     departments: seed.seedDepartments,
     teams: seed.seedTeams,
@@ -119,6 +123,7 @@ export async function runSeeders(
   await required("AI system user", s.aiSystemUser);
   // Default templates are data, not security: a failure is logged and startup goes on.
   await bestEffort("default email templates", s.emailTemplates);
+  if (s.updateOldInvitationTemplate) await bestEffort("invitation template update", s.updateOldInvitationTemplate);
   await required("bootstrap admin", () => s.bootstrapAdmin(env));
 
   if (env.SEED_DEMO_DATA !== "true") return;

@@ -134,6 +134,22 @@ Content-Type: application/json`}
 
               <Card>
                 <CardHeader>
+                  <CardTitle>Get Task</CardTitle>
+                  <div className="flex gap-2">
+                    <Badge variant="secondary">GET</Badge>
+                    <code className="text-sm">/api/tasks/:id</code>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-sm">
+                    Returns one ticket you may see, with its number, status, priority and assignee.
+                    An unknown id is 404; a ticket outside your access is 403.
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
                   <CardTitle>Update Task</CardTitle>
                   <div className="flex gap-2">
                     <Badge variant="secondary">PATCH</Badge>
@@ -150,6 +166,43 @@ Content-Type: application/json`}
 }`}
                     </pre>
                   </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Add Comment</CardTitle>
+                  <div className="flex gap-2">
+                    <Badge variant="secondary">POST</Badge>
+                    <code className="text-sm">/api/tasks/:id/comments</code>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <h3 className="text-sm font-medium mb-2">Request Body</h3>
+                    <pre className="bg-muted p-3 rounded-md overflow-x-auto text-sm">
+{`{
+  "content": "I restarted the service."
+}`}
+                    </pre>
+                  </div>
+                  <p className="text-sm">1 to 10000 characters. Returns 201 with the comment.</p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Delete Task</CardTitle>
+                  <div className="flex gap-2">
+                    <Badge variant="secondary">DELETE</Badge>
+                    <code className="text-sm">/api/tasks/:id</code>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-sm">
+                    Admin only (managers too when the deployment sets ALLOW_MANAGER_DELETE). Removes the
+                    ticket with its comments, attachments and history. Returns 204.
+                  </p>
                 </CardContent>
               </Card>
             </div>

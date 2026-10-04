@@ -251,8 +251,11 @@ describe("dashboard stats", () => {
         highPriority: 1, // the one `high` ticket; the urgent ones are counted separately (as in /api/stats)
         urgent: 3,
       });
-      expect(res.body.priorityDistribution).toEqual({ urgent: 4, high: 1, medium: 0, low: 0 });
-      expect(res.body.categoryBreakdown).toEqual([{ category: "support", count: 5, percentage: 100 }]);
+      // R45: the distribution and the total use the /api/stats scope (created, assigned, queued,
+      // teammates), 8 tickets for M1: the 5 queued, A1's and A2's, and the one M1 created in D2.
+      expect(res.body.priorityDistribution).toEqual({ urgent: 4, high: 2, medium: 1, low: 1 });
+      expect(res.body.categoryBreakdown).toEqual([{ category: "support", count: 8, percentage: 100 }]);
+      expect(res.body.totalTickets).toBe(8);
       const [t1] = res.body.teamPerformance;
       expect(t1).toMatchObject({ totalTickets: 5, resolutionRate: 2 / 5 });
       expect(t1.members.map((m: any) => [m.assigned, m.resolved])).toEqual([
@@ -287,12 +290,69 @@ describe("dashboard stats", () => {
       const res = await a.get("/api/stats/manager");
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
+        totalTickets: 0,
+        personal: { assignedToMe: 0, createdByMe: 0 },
         department: [],
         priorityDistribution: { urgent: 0, high: 0, medium: 0, low: 0 },
         categoryBreakdown: [],
         teamPerformance: [],
       });
       expect((await agents.A1.get("/api/stats/manager")).status).toBe(403);
+    });
+  });
+
+  describe("GET /api/stats/manager, the manager's own scope (R45)", () => {
+    it("totals, priorities and categories equal GET /api/stats; department blocks stay team-queue based", async () => {
+      const mgr = await createUser({ role: "manager" });
+      const other = await createUser({ role: "manager" });
+      const member = await createUser({ role: "agent" });
+      const stranger = await createUser({ role: "agent" });
+      const team = await createTeam(mgr);
+      const otherTeam = await createTeam(other);
+      await storage.addTeamMember({ teamId: team.id, userId: member.id });
+      const mk = async (title: string, priority: string, category: string, extra: Partial<InsertTask>) =>
+        storage.createTask({
+          title,
+          description: "r45",
+          category,
+          priority,
+          status: "open",
+          createdBy: stranger.id,
+          assigneeType: "team",
+          assigneeId: null,
+          assigneeTeamId: otherTeam.id,
+          ...extra,
+        });
+      // (a) created by the manager, queued to another department
+      await mk("a", "urgent", "support", { createdBy: mgr.id });
+      // (b) assigned to the manager
+      await mk("b", "high", "bug", { assigneeType: "user", assigneeId: mgr.id, assigneeTeamId: null });
+      // (c) queued to the manager's department team
+      await mk("c", "medium", "support", { assigneeTeamId: team.id });
+      // (d) assigned to a member of that team
+      await mk("d", "low", "bug", { assigneeType: "user", assigneeId: member.id, assigneeTeamId: null });
+      // (e) unrelated
+      await mk("e", "urgent", "other", {});
+
+      const a = await loginAs(ctx.app, mgr);
+      const stats = (await a.get("/api/stats")).body;
+      const res = await a.get("/api/stats/manager");
+      expect(res.status).toBe(200);
+      expect(stats.total).toBe(4);
+      expect(res.body.totalTickets).toBe(stats.total);
+      const pSum = Object.values(res.body.priorityDistribution as Record<string, number>).reduce((x, y) => x + y, 0);
+      expect(pSum).toBe(stats.total);
+      expect(res.body.priorityDistribution).toEqual({ urgent: 1, high: 1, medium: 1, low: 1 });
+      const cSum = (res.body.categoryBreakdown as any[]).reduce((x, y) => x + y.count, 0);
+      expect(cSum).toBe(stats.total);
+      expect(Object.fromEntries(res.body.categoryBreakdown.map((c: any) => [c.category, c.count]))).toEqual({
+        support: 2,
+        bug: 2,
+      });
+      expect(res.body.personal).toEqual({ assignedToMe: 1, createdByMe: 1 });
+      // The department block counts only what is queued to the department's teams: (c).
+      expect(res.body.department[0].totalTickets).toBe(1);
+      expect(res.body.teamPerformance[0].totalTickets).toBe(1);
     });
   });
 });

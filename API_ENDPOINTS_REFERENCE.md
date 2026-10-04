@@ -26,20 +26,22 @@ Every API failure is JSON, never HTML, and never carries a stack trace:
 
 | Status | Typical `error` codes | Meaning |
 |---|---|---|
-| 400 | `validation_failed`, `invalid_id`, `invalid_json`, `email_registered`, `invalid_expiry`, `invalid_role`, `invalid_webhook_url`, `invalid_current_password`, `password_unchanged`, `invalid_reset_token`, `ai_disabled` | Bad input. A value outside a closed set (status, priority, category) is always 400, never an empty list. |
+| 400 | `validation_failed`, `invalid_id`, `invalid_json`, `email_registered`, `invalid_expiry`, `invalid_role`, `invalid_webhook_url`, `invalid_current_password`, `password_unchanged`, `invalid_reset_token`, `ai_disabled`, `provider_not_supported` | Bad input. A value outside a closed set (status, priority, category) is always 400, never an empty list. `provider_not_supported`: an email provider that is not implemented (SMTP, Mailgun, SendGrid, Custom) cannot be saved (`details.fieldErrors.provider`). |
 | 401 | `unauthorized`, `invalid_credentials`, `invalid_token`, `session_revoked` | No or invalid credentials. Bearer failures also send `WWW-Authenticate`. |
 | 403 | `forbidden`, `session_required`, `password_change_required`, `invalid_role` | Authenticated but not allowed. |
 | 404 | `not_found`, `user_not_found`, `invitation_not_found`, `api_key_not_found` | Missing record, or an unknown `/api/...` path (JSON, not HTML). |
 | 405 | `method_not_allowed` | Only `POST /api/mcp` is served on the MCP path. |
-| 409 | `invalid_transition`, `last_admin`, `self_demotion`, `no_local_password`, `email_in_use`, `conflict` | State conflict. |
+| 409 | `invalid_transition`, `last_admin`, `self_demotion`, `no_local_password`, `email_in_use`, `conflict`, `teams_webhooks_disabled` | State conflict. `teams_webhooks_disabled`: saving Teams webhook settings while `TEAMS_WEBHOOKS_ENABLED` is not `true` (R84). |
 | 413 | `payload_too_large` | Request body over the limit. |
 | 423 | `account_locked` | Five wrong passwords lock the account for 15 minutes. |
 | 429 | `too_many_requests`, `quota_exceeded` | Rate limit (every limiter, `/api/mcp` included), or the AI cost limit (see section 8). |
-| 503 | `ai_not_configured`, `ai_unavailable`, `inbound_email_not_configured`, `S3_CONFIGURATION_REQUIRED` | A dependency is not configured or not available. |
+| 503 | `ai_not_configured`, `ai_unavailable`, `inbound_email_not_configured`, `S3_CONFIGURATION_REQUIRED`, `teams_webhooks_disabled`, `in_progress` | A dependency is not configured or not available. `teams_webhooks_disabled`: the Teams webhook test route while `TEAMS_WEBHOOKS_ENABLED` is not `true` (R84). `in_progress` (with `Retry-After: 20`): an inbound email attempt that lost its claim to a newer holder. |
 
 Two non-obvious rules:
 - A route id that is not a positive integer answers `400 invalid_id` before anything else
-  (including before 401), for `:id`, `:taskId`, `:teamId` and `:assignmentId`.
+  (including before 401), for `:id`, `:taskId`, `:teamId` and `:assignmentId`. A number above
+  2147483647 (the int4 range of every id column) is not a valid id either: it is `400 invalid_id`,
+  not a database error.
 - A ticket id that does not exist is `404 not_found`; one that exists but is outside the
   caller's scope is `403 forbidden`.
 
@@ -317,10 +319,10 @@ All five routes are **admin only** (403 for everyone else, 401 anonymous):
 | Route | Notes |
 |---|---|
 | `GET /api/teams-integration/settings` | The caller's webhook settings. |
-| `POST /api/teams-integration/settings` | Body fields `enabled`, `teamId`, `teamName`, `channelId`, `channelName`, `webhookUrl`, notification types. The webhook URL must be `https`, default port, no credentials, host name (not an address) under **`*.webhook.office.com`**. Anything else is `400 invalid_webhook_url`. An empty string clears it. |
+| `POST /api/teams-integration/settings` | Teams webhooks are off unless `TEAMS_WEBHOOKS_ENABLED=true`: while off this is `409 teams_webhooks_disabled` (R84). Body fields `enabled`, `teamId`, `teamName`, `channelId`, `channelName`, `webhookUrl`, notification types. The webhook URL must be `https`, default port, no credentials, host name (not an address) under **`*.webhook.office.com`**. Anything else is `400 invalid_webhook_url`. An empty string clears it. |
 | `DELETE /api/teams-integration/settings` | Disable. |
 | `GET /api/teams-integration/teams` | Needs a Microsoft sign-in token (401 `microsoft_auth_required`). |
-| `POST /api/teams-integration/test` | Sends a test card. A stored URL that is not allow-listed, or that resolves to a private address, is refused with 400 before any request. |
+| `POST /api/teams-integration/test` | While `TEAMS_WEBHOOKS_ENABLED` is not `true` this is `503 teams_webhooks_disabled`. Sends a test card. A stored URL that is not allow-listed, or that resolves to a private address, is refused with 400 before any request. |
 
 Delivery never follows redirects, times out after 8 seconds, refuses private or reserved
 addresses, and logs only the host. A ticket event notifies only webhooks whose owner can
@@ -456,7 +458,8 @@ Secrets are **never returned**. The response says only whether one is stored.
 - `GET /api/sso/status` (signed in): `{configured: boolean}`. `POST /api/sso/test` (admin):
   checks the tenant's OpenID metadata.
 - `GET /api/company-settings/email` returns provider, from address and flags such as
-  `hasAwsSecret`, `mailtrapHasToken`, `hasSmtpPassword`. `POST /api/company-settings/email`,
+  `hasAwsSecret`, `mailtrapHasToken`, `hasSmtpPassword`. `POST /api/company-settings/email`
+  (400 `provider_not_supported` for smtp, mailgun, sendgrid and custom: not implemented),
   `PATCH .../email/sender`, `PATCH .../email/settings`, `POST .../email/test` (writes are
   session only). A blank secret keeps the stored one **only for the same provider**; a
   secret never follows an admin across a provider switch.
@@ -470,9 +473,9 @@ Secrets are **never returned**. The response says only whether one is stored.
 | Area | Routes |
 |---|---|
 | Users | `GET /api/users` (staff only, 403 for customers; no secret fields; system accounts hidden). `GET|PATCH /api/user/preferences`. |
-| Admin users | `GET /api/admin/users`, `PATCH /api/admin/users/:userId` (role/profile; 409 `last_admin` when it would leave no active admin, 409 `self_demotion` for your own account, 409 `email_in_use`, 400 `invalid_role`), `POST .../toggle-status`, `POST .../approve`, `POST .../reset-password` (session only; returns `{tempPassword}` once with `Cache-Control: no-store`, sets `mustChangePassword`, ends the user's sessions; 409 `no_local_password` for SSO or system accounts). |
+| Admin users | `GET /api/admin/users`, `PATCH /api/admin/users/:userId` (role/profile; 409 `last_admin` when it would leave no active admin, 409 `self_demotion` for your own account, 409 `email_in_use`, 400 `invalid_role`), `POST .../toggle-status`, `POST .../approve` (404 `user_not_found` for an unknown id), `POST .../reset-password` (session only; returns `{tempPassword}` once with `Cache-Control: no-store`, sets `mustChangePassword`, ends the user's sessions; 409 `no_local_password` for SSO or system accounts). |
 | Invitations | Admin: `GET|POST /api/admin/invitations` (`role` whitelist, `expiresAt` must be in the future and within 30 days, default 7 days; 400 `invalid_expiry` / `invalid_role`), `DELETE /api/admin/invitations/:id`, `POST .../:id/resend`. Public: `GET /api/invitations/:token`, `POST /api/invitations/:token/accept` (an anonymous caller gets `{registrationRequired:true, email, registerPath}` and no account; a signed-in user whose email matches is promoted). Claiming an invitation is atomic. Tokens are 32 random bytes and are redacted from request logs. The admin responses never include the token (R33): it travels only in the emailed link, built on `APP_BASE_URL` (R34). |
-| Statistics | `GET /api/stats`, `GET /api/stats/agent`, `GET /api/stats/manager`, `GET /api/stats/global` (admin only), `GET /api/admin/stats` (admin only), `GET /api/activity?limit=` (only events of tickets the caller can see). Counts follow the same visibility rule as the lists. |
+| Statistics | `GET /api/stats`, `GET /api/stats/agent`, `GET /api/stats/manager`, `GET /api/stats/global` (admin only), `GET /api/admin/stats` (admin only), `GET /api/activity?limit=` (only events of tickets the caller can see). Counts follow the same visibility rule as the lists. `GET /api/stats/manager` returns `totalTickets`, `priorityDistribution` and `categoryBreakdown` over the manager's `/api/stats` scope (tickets they created, are assigned, or that are queued or assigned within their departments), plus `personal: {assignedToMe, createdByMe}`; its `department` and `teamPerformance` blocks count only tickets queued to the department's teams. |
 | Notifications | `GET /api/notifications`, `PATCH /api/notifications/:id/read`, `PATCH /api/notifications/read-all`. |
 | Email templates | `GET /api/email-templates`, `PUT /api/email-templates/:name`. |
 | Health | `GET /health`, `GET /api/security/health` (outside `/api` JSON contract; no auth). |
@@ -560,18 +563,25 @@ Tool results are JSON text. On success `isError` is absent. On failure the resul
 
 Wrong values reach the service and come back as `VALIDATION`, not a protocol error.
 
+A ticket `id` is a positive integer, as a number or as a string of plain digits (`"12"` is 12): no sign,
+space, leading zero or decimal point, at most 2147483647. Anything else (`"abc"`, `"1.5"`, `""`, `" 12"`,
+`0`, `-1`) is `VALIDATION` with `details.fieldErrors.id`. `limit` and `offset` take a number or a numeric
+string the same way; a value out of range or not numeric is `VALIDATION` with `details.fieldErrors.limit`
+or `.offset`.
+
 | Tool | Arguments | Returns |
 |---|---|---|
 | `create_ticket` | `title`, `category` (required); `description`, `priority`, `severity`, `notes`, `assigneeId`, `assigneeType`, `assigneeTeamId`, `dueDate`, `tags`, `estimatedHours`, `actualHours` (staff only) | The ticket (status `open`, created as the key owner). A `status` argument is rejected. |
 | `get_ticket` | `id`; `includeComments?` | The ticket, optionally with comments. |
-| `list_tickets` | `status`, `priority`, `category`, `assigneeId`, `search`, `limit` (1-100, default 25), `offset` (default 0) | `{tickets, total, returned, limit, offset, hasMore}`. `total` counts all matching visible tickets; page with `offset + returned` while `hasMore`. An invalid filter is `VALIDATION`, never an empty list. |
+| `list_tickets` | `status`, `priority`, `category`, `assigneeId`, `search`, `limit` (1-100, default 25; number or numeric string), `offset` (0 or more, default 0; number or numeric string) | `{tickets, total, returned, limit, offset, hasMore}`. `total` counts all matching visible tickets; page with `offset + returned` while `hasMore`. An invalid filter is `VALIDATION`, never an empty list. |
 | `update_ticket` | `id` plus any updatable field and `status` | `{ticket, appliedFields, ignoredFields}`. |
 | `close_ticket` | `id` | The ticket. Staff only; an already closed ticket is `INVALID_STATE`. |
 | `reopen_ticket` | `id` | The ticket back to `open`. Staff, or the customer who created it; an open ticket is `INVALID_STATE`. |
 | `delete_ticket` | `id`, `confirm` (must be the boolean `true`) | `{deleted:true, id, ticketNumber}`. Admin only (manager only with `ALLOW_MANAGER_DELETE=true`). Without a literal `true` it is `VALIDATION` and nothing is deleted. |
 | `add_comment` | `id`, `content` (1-10000 characters) | The comment. |
 
-A refused status change over MCP is written to the security audit log like the REST one.
+A refused status change over MCP is written to the security audit log like the REST one, with the
+caller's IP and `channel: "mcp"`.
 The MCP page size cap (100) is lower than the REST cap (500).
 
 Example call (placeholders only):

@@ -5,10 +5,12 @@ import path from "path";
 import { unsetNodeEnvBootProblem } from "./env";
 import { assertStartupConfig } from "./startup/config";
 
+// R54: the app root comes from this module's own location (esbuild bundles it into
+// dist/index.js, so import.meta.dirname is `.../dist`), never from process.cwd().
 const problem = unsetNodeEnvBootProblem(
   process.env.NODE_ENV,
   process.argv[1] ? path.resolve(process.argv[1]) : undefined,
-  path.resolve(process.cwd(), "dist"),
+  import.meta.dirname,
 );
 if (problem) {
   console.error(problem);

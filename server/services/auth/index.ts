@@ -134,18 +134,19 @@ const changePasswordSchema = z.object({
 /** express-session's default cookie name, stated so the revocation path can clear it by name. */
 const SESSION_COOKIE_NAME = "connect.sid";
 
-let activeSessionStore: InstanceType<ReturnType<typeof connectPg>> | undefined;
+// R55: every store setupAuth creates, so a second call no longer leaks the first one's pool.
+const activeSessionStores = new Set<InstanceType<ReturnType<typeof connectPg>>>();
 let activeSessionMiddleware: RequestHandler | undefined;
 
 /**
- * Closes the session store's own connection pool (created by setupAuth).
- * Used by the test harness so Jest can exit without --forceExit.
+ * Closes the connection pool of EVERY session store setupAuth created, then
+ * forgets them. Used by the test harness so Jest can exit without --forceExit.
  */
 export async function closeAuth(): Promise<void> {
-  const store = activeSessionStore;
-  activeSessionStore = undefined;
+  const stores = Array.from(activeSessionStores);
+  activeSessionStores.clear();
   activeSessionMiddleware = undefined;
-  await store?.close();
+  await Promise.all(stores.map((store) => store.close()));
 }
 
 /** The two stamps a session carries for the password-change revocation rule. */
@@ -209,7 +210,7 @@ export async function authenticateUpgrade(
     await run(passport.initialize());
     await run(passport.session());
   } catch (error) {
-    console.error("WebSocket auth error:", error instanceof Error ? error.message : "unknown");
+    logRouteError("WebSocket auth error", error);
     return null;
   }
   const user = (req as any).user as Express.User | undefined;
@@ -242,7 +243,7 @@ export function setupAuth(app: Express) {
   const cookieSecure =
     (process.env.COOKIE_SECURE || "").toLowerCase() === "true";
 
-  activeSessionStore = sessionStore;
+  activeSessionStores.add(sessionStore);
 
   // Also the options a cookie is cleared with: they must match the ones it was set with.
   const sessionCookieOptions = {
@@ -260,10 +261,8 @@ export function setupAuth(app: Express) {
     cookie: { ...sessionCookieOptions, maxAge: sessionTtl },
   };
 
-  // Exactly one reverse proxy (nginx / the platform router) sits in front of the app, so
-  // req.ip is the address that proxy saw. A deployment with a second hop (a CDN in front
-  // of the proxy) would key every limiter on the CDN's address: raise this number there.
-  app.set("trust proxy", 1);
+  // `trust proxy` is set once, in server/index.ts, from TRUST_PROXY_HOPS (R49): the auth limiters
+  // below key on req.ip, the address the trusted proxy chain saw.
   // Auth rate limits (every environment), registered before the handlers.
   // Mounted with app.use (POST only), not as a second app.post route, so the route
   // table keeps exactly one registration per method + path (noDuplicateRoutes).
@@ -405,7 +404,7 @@ export function setupAuth(app: Express) {
       if (!role) return done(null, false);
       done(null, { ...user, role });
     } catch (error) {
-      console.error("Deserialize user error:", error);
+      logRouteError("Deserialize user error", error);
       done(null, false);
     }
   });
@@ -592,7 +591,7 @@ export function setupAuth(app: Express) {
   app.get("/api/logout", (req, res) => {
     req.logout((err) => {
       if (err) {
-        console.error("Logout error:", err);
+        logRouteError("Logout error", err);
       }
       res.redirect("/");
     });

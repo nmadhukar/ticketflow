@@ -1,5 +1,6 @@
 import { insertTaskSchema, type Task } from "@shared/schema";
 import { storage } from "../../storage";
+import type { DbTx } from "../../storage/db";
 import { notifyTicketWebhooks } from "../teamsNotifications";
 import { runCreateTimeAutoResponse } from "../ai/createTimeAutoResponse";
 
@@ -11,10 +12,12 @@ import { runCreateTimeAutoResponse } from "../ai/createTimeAutoResponse";
  */
 export async function createTicketRecord(
   fields: Record<string, unknown>,
-  createdBy: string
+  createdBy: string,
+  tx?: DbTx
 ): Promise<Task> {
   const taskData = insertTaskSchema.parse({ ...fields, createdBy });
-  return storage.createTask(taskData);
+  // R46: with a `tx` (inbound email) the number, the row and the history entry all join it.
+  return tx ? storage.createTask(taskData, tx) : storage.createTask(taskData);
 }
 
 /** Sends a "ticket:created" realtime message to one user. Registered by registerRoutes, which owns the sockets. */

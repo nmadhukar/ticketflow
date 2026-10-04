@@ -21,11 +21,22 @@ export interface RequiredTable {
   columns: string[];
 }
 
+// To extend: a new column on a listed table goes on its own line in that table's `columns`; a new
+// table gets its own entry appended at the END of this array (with the migration number in a
+// comment). server/__tests__/integration/schemaSafety.test.ts derives the migration files it
+// applies from the migrations/ directory, so a new migration is covered there automatically.
 export const REQUIRED_TABLES: RequiredTable[] = [
   {
     table: "users",
-    // 0010 login lockout, 0011 forced password change, session revocation.
-    columns: ["failed_login_attempts", "locked_until", "must_change_password", "password_changed_at"],
+    // 0010 login lockout, 0011 forced password change, session revocation, 0022 lockout decay.
+    // One column per line, newest last: two branches adding a column then merge without a conflict.
+    columns: [
+      "failed_login_attempts",
+      "locked_until",
+      "must_change_password",
+      "password_changed_at",
+      "last_failed_login_at",
+    ],
   },
   // connect-pg-simple runs with createTableIfMissing: false.
   { table: "sessions", columns: ["sid", "sess", "expire"] },
@@ -35,6 +46,8 @@ export const REQUIRED_TABLES: RequiredTable[] = [
   { table: "sns_message_dedupe", columns: ["message_id", "status", "received_at"] },
   // 0014 hashed API keys (the hash column predates the program; the index below does not).
   { table: "api_keys", columns: ["key_hash", "is_active"] },
+  // 0021 AI analytics: the time a draft was applied.
+  { table: "ticket_auto_responses", columns: ["applied_at"] },
 ];
 
 /** 0014: unique partial index over hashed keys. */

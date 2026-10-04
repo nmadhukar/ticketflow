@@ -36,8 +36,8 @@ services:
     # Schema before start (ruling R32): the hand-written idempotent migrations (0007+) first,
     # so drizzle-kit push has nothing of theirs left to create (push silently applies nothing
     # when it would have to ask a question); the server then refuses to boot if anything
-    # required is still missing.
-    command: sh -c "npm run db:migrate-sql && npm run db:push && node dist/index.js"
+    # required is still missing. `exec` makes node PID 1, so it receives SIGTERM from `docker stop`.
+    command: sh -c "npm run db:migrate-sql && npm run db:push && exec node dist/index.js"
     environment:
       # Core runtime
       NODE_ENV: ${NODE_ENV:-production}
@@ -75,11 +75,15 @@ services:
       SNS_INBOUND_TOPIC_ARN: ${SNS_INBOUND_TOPIC_ARN:-}
       # Category of emailed tickets; unset or unknown = support.
       INBOUND_EMAIL_CATEGORY: ${INBOUND_EMAIL_CATEGORY:-}
+      INBOUND_EMAIL_MAX_HEADER_BYTES: ${INBOUND_EMAIL_MAX_HEADER_BYTES:-}
+      PG_POOL_MAX: ${PG_POOL_MAX:-}
 
       # Microsoft 365 SSO from the environment (the admin panel's SSO settings take precedence).
       MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
       MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
       MICROSOFT_TENANT_ID: ${MICROSOFT_TENANT_ID:-}
+      # Role of a NEW SSO account: customer (default) or agent. It stays pending approval.
+      SSO_DEFAULT_ROLE: ${SSO_DEFAULT_ROLE:-}
 
       # AWS credentials from the environment (fallbacks; the admin panel's Bedrock/SES settings take precedence).
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
@@ -102,7 +106,11 @@ services:
       # Rate limiting
       RATE_LIMITING_ENABLED: ${RATE_LIMITING_ENABLED:-true}
       RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-900000}
-      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-100}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-600}
+      # Proxies in front of the app (R49): 1 behind nginx alone, 2 behind Coolify/Traefik plus nginx.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      # Teams incoming webhooks are OFF unless this is exactly "true" (R84).
+      TEAMS_WEBHOOKS_ENABLED: ${TEAMS_WEBHOOKS_ENABLED:-}
 
       # Input validation
       INPUT_VALIDATION_ENABLED: ${INPUT_VALIDATION_ENABLED:-true}

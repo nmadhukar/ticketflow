@@ -247,18 +247,29 @@ const EmailTab = () => {
                       Mailtrap
                     </SelectItem>
                     <SelectItem value={EMAIL_PROVIDERS.AWS}>AWS SES</SelectItem>
-                    <SelectItem value={EMAIL_PROVIDERS.SMTP}>SMTP</SelectItem>
-                    <SelectItem value={EMAIL_PROVIDERS.MAILGUN}>
-                      Mailgun
+                    {/* No sending adapter exists for these four (the server answers 400
+                        provider_not_supported), so they cannot be chosen. */}
+                    <SelectItem value={EMAIL_PROVIDERS.SMTP} disabled>
+                      SMTP (not available)
                     </SelectItem>
-                    <SelectItem value={EMAIL_PROVIDERS.SENDGRID}>
-                      SendGrid
+                    <SelectItem value={EMAIL_PROVIDERS.MAILGUN} disabled>
+                      Mailgun (not available)
                     </SelectItem>
-                    <SelectItem value={EMAIL_PROVIDERS.CUSTOM}>
-                      Custom
+                    <SelectItem value={EMAIL_PROVIDERS.SENDGRID} disabled>
+                      SendGrid (not available)
+                    </SelectItem>
+                    <SelectItem value={EMAIL_PROVIDERS.CUSTOM} disabled>
+                      Custom (not available)
                     </SelectItem>
                   </SelectContent>
                 </Select>
+                {/* A row saved before these were withdrawn still loads as the selected provider. */}
+                {provider !== EMAIL_PROVIDERS.MAILTRAP &&
+                  provider !== EMAIL_PROVIDERS.AWS && (
+                    <p className="text-sm text-muted-foreground">
+                      This provider is no longer available, choose Mailtrap or AWS SES.
+                    </p>
+                  )}
               </div>
               <div className="flex flex-col items-center justify-center">
                 <h3 className="text-lg font-semibold">Service Status</h3>

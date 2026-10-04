@@ -32,7 +32,7 @@ export const requireMcpKey: RequestHandler = (req, res, next) => {
 
 const mcpPost: RequestHandler = async (req, res, next) => {
   // Stateless: a new server and transport per request, no session id.
-  const server = createMcpServer(req.user as User);
+  const server = createMcpServer(req.user as User, req.ip);
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,

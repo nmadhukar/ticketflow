@@ -87,7 +87,8 @@ in_tree() {
     -v "${deps}:/work/node_modules" -v "${PREFIX}_npm:/root/.npm" \
     -v "${PREFIX}_reports:/gate-reports" -w /work \
     -e GATE_NONCE="${GATE_NONCE:-local}" -e CI=true \
-    -e DATABASE_URL -e TEST_DATABASE_URL -e SESSION_SECRET -e JWT_SECRET \
+    -e DATABASE_URL -e TEST_DATABASE_URL \
+    -e SESSION_SECRET="$GATE_SESSION_SECRET" -e JWT_SECRET="$GATE_JWT_SECRET" \
     "$image" sh -c 'tar -C /src --exclude=./node_modules --exclude=./.git --exclude=./dist --exclude=./.env --exclude='./.env.*' -cf - . | tar -C /work -xf - && exec "$@"' sh "$@"
 }
 run_node() { in_tree "$NODE_IMAGE" "${PREFIX}_deps" "$@"; }
@@ -149,6 +150,20 @@ if app_curl http://localhost:5000/api/security/health >/dev/null 2>&1; then ok '
 if app_curl http://localhost:5000/ >/dev/null 2>&1; then ok 'UI entry point responds'; else bad 'UI entry point unavailable'; fi
 printf 'Stack images: %s; %s\n' "$NODE_IMAGE" "$BROWSER_IMAGE"
 compose ps || true
+
+# R67: the NODE_ENV boot guard is proven on the built bundle itself. The gate image's
+# `node dist/index.js` with NODE_ENV empty and cwd `/` (not the app root) must refuse with
+# exit 1 and the one "Refusing to start" line; the guard finds the app from its own path (R54).
+# /app is WORKDIR in docker/gate/Dockerfile.gate. The shell's `|| rc=$?` keeps a refusal from
+# tripping anything: it is the expected outcome.
+GUARD_RC=0
+GUARD_OUT="$(compose run --rm --no-deps -T -e NODE_ENV= -w / app node /app/dist/index.js 2>&1)" || GUARD_RC=$?
+if [ "$GUARD_RC" -eq 1 ] && printf '%s' "$GUARD_OUT" | grep -q 'Refusing to start: NODE_ENV is not set'; then
+  ok 'Built bundle refuses to start with NODE_ENV unset (exit 1, from cwd /)'
+else
+  bad "Built bundle did not refuse NODE_ENV unset (exit $GUARD_RC)"
+  printf '%s\n' "$GUARD_OUT" | head -n 5
+fi
 
 printf '%s\n' '--- STEP 2: genuine ticket workflow ---'
 # Use Node's built-in fetch, so no curl/python/jq are needed on the host.

@@ -20,7 +20,20 @@ import { storage } from "server/storage";
 import { assertTaskAccess, type AccessUser } from "server/permissions/ticketAccess";
 import { HttpError, fail, logRouteError } from "server/http/errors";
 import type { TaskAssignmentBinding } from "server/storage/storage.inteface";
+import { projectUserForViewer } from "server/utils/publicUser";
 import { z } from "zod";
+
+/** R41: the assignment rows carry two users; project both for the viewer. */
+function projectAssignments<
+  T extends { assignedUser: Record<string, any> | null; assignedByUser: Record<string, any> }
+>(viewer: unknown, rows: T[]) {
+  const v = viewer as { id?: string; role?: unknown };
+  return rows.map((a) => ({
+    ...a,
+    assignedUser: a.assignedUser ? projectUserForViewer(v, a.assignedUser) : null,
+    assignedByUser: projectUserForViewer(v, a.assignedByUser),
+  }));
+}
 
 /**
  * Before an assignment is changed through /api/teams/:id/tasks/:taskId/assignments/:assignmentId:
@@ -197,7 +210,16 @@ export function registerTeamsRoutes(app: Express): void {
         );
       }
 
-      const team = await storage.createTeam(teamData);
+      // R61: the team and the creator's member row (role "admin") land together or not at all.
+      const team = await db.transaction(async (tx) => {
+        const [created] = await tx.insert(teams).values(teamData).returning();
+        await tx.insert(teamMembers).values({
+          teamId: created.id,
+          userId,
+          role: "admin",
+        });
+        return created;
+      });
       res.status(201).json(team);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -355,6 +377,7 @@ export function registerTeamsRoutes(app: Express): void {
           const isAdmin = await storage.isTeamAdmin(member.userId, teamId);
           return {
             ...memberWithoutRole,
+            user: projectUserForViewer(user, memberWithoutRole.user),
             isAdmin,
           };
         })
@@ -385,7 +408,15 @@ export function registerTeamsRoutes(app: Express): void {
       }
 
       const admins = await storage.getTeamAdmins(teamId);
-      res.json(admins);
+      const viewer = req.user;
+      res.json(
+        admins.map((a) => ({
+          ...a,
+          user: projectUserForViewer(viewer, a.user),
+          // grantedByUser is `{}` when the granting account is gone.
+          grantedByUser: projectUserForViewer(viewer, a.grantedByUser),
+        }))
+      );
     } catch (error) {
       logRouteError("Error fetching team admins", error);
       fail(res, 500, "Failed to fetch team admins");
@@ -622,20 +653,20 @@ export function registerTeamsRoutes(app: Express): void {
         // System admins can always access
         if (user.role === "admin") {
           const assignments = await storage.getTaskAssignments(taskId, teamId);
-          return res.json(assignments);
+          return res.json(projectAssignments(req.user, assignments));
         }
 
         // Team creator can access
         if (team.createdBy === userId) {
           const assignments = await storage.getTaskAssignments(taskId, teamId);
-          return res.json(assignments);
+          return res.json(projectAssignments(req.user, assignments));
         }
 
         // Team admins can access
         const isAdmin = await isTeamAdmin(storage, userId, teamId);
         if (isAdmin) {
           const assignments = await storage.getTaskAssignments(taskId, teamId);
-          return res.json(assignments);
+          return res.json(projectAssignments(req.user, assignments));
         }
 
         // Managers can access if team is in their department
@@ -655,7 +686,7 @@ export function registerTeamsRoutes(app: Express): void {
               taskId,
               teamId
             );
-            return res.json(assignments);
+            return res.json(projectAssignments(req.user, assignments));
           }
         }
 
@@ -664,7 +695,7 @@ export function registerTeamsRoutes(app: Express): void {
         const isMember = userTeams.some((t) => t.id === teamId);
         if (isMember) {
           const assignments = await storage.getTaskAssignments(taskId, teamId);
-          return res.json(assignments);
+          return res.json(projectAssignments(req.user, assignments));
         }
 
         return fail(res, 403, "You don't have permission to view task assignments");
@@ -847,7 +878,7 @@ export function registerTeamsRoutes(app: Express): void {
           return fail(res, 404, "Team member not found");
         }
 
-        res.json(member);
+        res.json({ ...member, user: projectUserForViewer(req.user, member.user) });
       } catch (error) {
         logRouteError("Error updating team member", error);
         fail(res, 500, "Failed to update team member");

@@ -30,7 +30,14 @@ export async function callTool(
   });
   if (res.status !== 200) return { status: res.status, isError: true, data: res.body, raw: res.text };
   const text = res.body.result.content[0].text as string;
-  return { status: 200, isError: !!res.body.result.isError, data: JSON.parse(text), raw: text };
+  // A schema rejection by the SDK (a missing required argument) is plain text, not our coded JSON.
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { message: text };
+  }
+  return { status: 200, isError: !!res.body.result.isError, data, raw: text };
 }
 
 /** An API key for the user plus a bound caller. */

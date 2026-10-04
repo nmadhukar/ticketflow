@@ -1,4 +1,5 @@
 import { spawnSync } from "child_process";
+import { readdirSync } from "fs";
 import path from "path";
 import pg from "pg";
 import { pool } from "../../storage/db";
@@ -37,6 +38,17 @@ async function admin(sql: string) {
   } finally {
     await c.end();
   }
+}
+
+// Mirrors scripts/apply-sql-migrations.mjs (FIRST_VERSION and NOT_RUN). If that script gains a
+// NOT_RUN entry, add its file name here too.
+const NOT_RUN = ["0008_migrate_ai_settings_to_db.sql"];
+function runnableMigrations(): string[] {
+  const files = readdirSync(path.join(ROOT, "migrations"))
+    .filter((f) => /^\d{4}_[A-Za-z0-9_]+\.sql$/.test(f) && Number(f.slice(0, 4)) >= 7 && !NOT_RUN.includes(f))
+    .sort();
+  expect(files.length).toBeGreaterThanOrEqual(10);
+  return files;
 }
 
 function applyMigrations(): { status: number | null; out: string } {
@@ -107,21 +119,11 @@ describe("schema safety on deploy (R32)", () => {
       for (const attempt of [1, 2]) {
         const run = applyMigrations();
         expect({ attempt, status: run.status }).toEqual({ attempt, status: 0 });
-        for (const f of [
-          "0007_remove_department_from_users.sql",
-          "0009_simplify_cost_limits.sql",
-          "0010_login_lockout.sql",
-          "0011_role_agent.sql",
-          "0012_ticket_number_counter.sql",
-          "0013_ai_system_user.sql",
-          "0014_api_keys_hashed.sql",
-          "0018_sns_message_dedupe.sql",
-          "0019_sns_message_dedupe_status.sql",
-          "0020_users_is_active_not_null.sql",
-        ]) {
+        // Derived from migrations/, so a new 0021+ file is applied twice here without editing this list.
+        for (const f of runnableMigrations()) {
           expect(run.out).toContain(`applied ${f}`);
         }
-        expect(run.out).toContain("not run 0008_migrate_ai_settings_to_db.sql");
+        for (const f of NOT_RUN) expect(run.out).toContain(`not run ${f}`);
       }
 
       const role = await scratch.query(`SELECT role FROM users WHERE id = 'legacy-1'`);
@@ -133,6 +135,34 @@ describe("schema safety on deploy (R32)", () => {
       expect(await findMissingSchemaObjects(scratch)).toEqual([]);
     },
     180000
+  );
+
+  it(
+    "R50: drizzle-kit push is idempotent after the SQL migrations: every push reports no changes and issues no SQL",
+    () => {
+      // Independent of test order: build the state a deploy leaves (push, then the SQL files) here.
+      // On the database an earlier test already built, both steps change nothing; on a scratch
+      // database that is still empty (this test run alone with -t) they create it. Without this
+      // the first push below would create every table and fail the "no statements" assertion.
+      pushSchema();
+      expect(applyMigrations().status).toBe(0);
+      for (const attempt of [1, 2]) {
+        const r = spawnSync("npx", ["drizzle-kit", "push", "--verbose", "--force"], {
+          cwd: ROOT,
+          shell: true,
+          env: { ...process.env, DATABASE_URL: scratchUrl },
+          encoding: "utf8",
+          timeout: 120000,
+        });
+        const out = `${r.stdout}${r.stderr}`;
+        expect({ attempt, status: r.status }).toEqual({ attempt, status: 0 });
+        // A push that has work to do prints the statements it runs; one that has none says so.
+        const statements = out.split(/\r?\n/).filter((l) => /^(ALTER|CREATE|DROP)\b/.test(l.trim()));
+        expect({ attempt, statements }).toEqual({ attempt, statements: [] });
+        expect(out).toContain("No changes detected");
+      }
+    },
+    240000
   );
 
   it(

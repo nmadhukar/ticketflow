@@ -208,26 +208,35 @@ describe("settings secrets are masked and never returned", () => {
       expect(active.metadata.mailtrapToken).toBe(T);
     });
 
-    it("SMTP: the password is never returned and a blank one keeps the stored password", async () => {
+    it("SMTP (R58: no longer selectable): a row stored earlier still reads back with its password masked, and saving SMTP is refused", async () => {
       const P = secret();
-      const smtp = { ...base, provider: "smtp", host: "smtp.example.test", port: 587, username: "u", encryption: "tls" };
-      await admin.post("/api/company-settings/email").send({ ...smtp, password: P });
+      // A row saved before SMTP was withdrawn: written directly, since the route now refuses it.
+      await storage.upsertEmailProvider(
+        {
+          provider: "smtp",
+          fromEmail: "no-reply@example.test",
+          fromName: "TicketFlow",
+          metadata: { host: "smtp.example.test", port: 587, username: "u", password: P, encryption: "tls" },
+          isActive: true,
+        } as any,
+        (await createUser({ role: "admin" })).id
+      );
       const read = await admin.get("/api/company-settings/email");
+      expect(read.status).toBe(200);
+      expect(read.body.provider).toBe("smtp");
       expect(JSON.stringify(read.body)).not.toContain(P);
       expect(read.body.hasSmtpPassword).toBe(true);
-      const same = await admin.post("/api/company-settings/email").send({ ...smtp, port: 2525 });
-      expect(same.status).toBe(200);
-      const active: any = await storage.getActiveEmailProvider();
-      expect(active.metadata.port).toBe(2525);
-      expect(active.metadata.password).toBe(P);
 
-      // A changed host or username with a blank password is refused.
-      for (const change of [{ host: "smtp2.example.test" }, { username: "other" }]) {
-        const res = await admin.post("/api/company-settings/email").send({ ...smtp, ...change });
+      const smtp = { ...base, provider: "smtp", host: "smtp.example.test", port: 2525, username: "u", encryption: "tls" };
+      for (const body of [{ ...smtp, password: secret() }, smtp]) {
+        const res = await admin.post("/api/company-settings/email").send(body);
         expect(res.status).toBe(400);
-        expect(res.body.error).toBe("validation_failed");
+        expect(res.body.error).toBe("provider_not_supported");
       }
-      expect(((await storage.getActiveEmailProvider()) as any).metadata.host).toBe("smtp.example.test");
+      // Nothing was stored by the refused saves.
+      const active: any = await storage.getActiveEmailProvider();
+      expect(active.metadata.port).toBe(587);
+      expect(active.metadata.password).toBe(P);
     });
 
     it("a secret from another provider is not carried across a provider switch", async () => {

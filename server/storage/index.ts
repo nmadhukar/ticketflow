@@ -1,5 +1,5 @@
 import { randomBytes } from "crypto";
-import { HttpError } from "../http/errors";
+import { HttpError, describeError } from "../http/errors";
 import { disconnectUser } from "../realtime/connections";
 import {
   users,
@@ -91,7 +91,7 @@ import {
   TeamTaskAssignment,
   InsertTeamTaskAssignment,
 } from "@shared/schema";
-import { db } from "./db";
+import { db, type DbTx } from "./db";
 import {
   eq,
   desc,
@@ -174,10 +174,18 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async upsertUser(userData: UpsertUser): Promise<User> {
+  /**
+   * `onInsert` holds values for a NEW row only (an SSO sign-up's role): they
+   * are not in the conflict update, so a later call never touches the role or
+   * approval of an account that already exists.
+   */
+  async upsertUser(
+    userData: UpsertUser,
+    onInsert?: Partial<Pick<UpsertUser, "role" | "isApproved">>
+  ): Promise<User> {
     const [user] = await db
       .insert(users)
-      .values(userData)
+      .values({ ...userData, ...onInsert })
       .onConflictDoUpdate({
         target: users.id,
         set: {
@@ -208,11 +216,15 @@ export class DatabaseStorage implements IStorage {
   async claimLoginAttempt(userId: string, now: Date = new Date()): Promise<number | null> {
     const nowTs = sql`${now.toISOString()}::timestamp`;
     const lockUntil = new Date(now.getTime() + LOCKOUT_MINUTES * 60 * 1000);
-    const next = sql`(CASE WHEN ${users.lockedUntil} IS NOT NULL AND ${users.lockedUntil} <= ${nowTs} THEN 1 ELSE ${users.failedLoginAttempts} + 1 END)`;
+    // R53: the count restarts at 1 after an expired lock, or when the last failure is a
+    // whole lockout window old. A NULL stamp (a row from before 0022) counts as before.
+    const windowStart = sql`${new Date(now.getTime() - LOCKOUT_MINUTES * 60 * 1000).toISOString()}::timestamp`;
+    const next = sql`(CASE WHEN (${users.lockedUntil} IS NOT NULL AND ${users.lockedUntil} <= ${nowTs}) OR (${users.lastFailedLoginAt} IS NOT NULL AND ${users.lastFailedLoginAt} <= ${windowStart}) THEN 1 ELSE ${users.failedLoginAttempts} + 1 END)`;
     const rows = await db
       .update(users)
       .set({
         failedLoginAttempts: next,
+        lastFailedLoginAt: nowTs,
         lockedUntil: sql`CASE WHEN ${next} >= ${MAX_FAILED_LOGINS} THEN ${lockUntil.toISOString()}::timestamp ELSE NULL END`,
       })
       .where(
@@ -229,7 +241,7 @@ export class DatabaseStorage implements IStorage {
   async resetFailedLogins(userId: string): Promise<void> {
     await db
       .update(users)
-      .set({ failedLoginAttempts: 0, lockedUntil: null })
+      .set({ failedLoginAttempts: 0, lockedUntil: null, lastFailedLoginAt: null })
       .where(eq(users.id, userId));
   }
 
@@ -305,6 +317,7 @@ export class DatabaseStorage implements IStorage {
         passwordChangedAt: new Date(),
         failedLoginAttempts: 0,
         lockedUntil: null,
+        lastFailedLoginAt: null,
         passwordResetToken: null,
         passwordResetExpires: null,
         updatedAt: new Date(),
@@ -474,8 +487,12 @@ export class DatabaseStorage implements IStorage {
   // lock serialises concurrent creates. Only when no row exists is it seeded from
   // the NUMERIC max of existing tickets (so it is right even where migration 0012
   // never ran), then the UPDATE is repeated. All inside one transaction.
-  async getNextTicketNumber(): Promise<string> {
-    const settings = await this.getCompanySettings();
+  //
+  // R46: with a `tx` the bump (and the seed) run on the caller's transaction, so the counter row
+  // lock is held until that transaction ends and a rollback gives the number back. Without one it
+  // opens its own transaction exactly as before.
+  async getNextTicketNumber(tx?: DbTx): Promise<string> {
+    const settings = await this.getCompanySettings(tx);
     const prefix = settings?.ticketPrefix || "TKT";
     const year = new Date().getFullYear();
     const head = `${prefix}-${year}-`;
@@ -490,7 +507,7 @@ export class DatabaseStorage implements IStorage {
       return rows.length ? Number(rows[0].last_number) : null;
     };
 
-    const next = await db.transaction(async (tx) => {
+    const run = async (tx: any): Promise<number> => {
       const first = await bump(tx);
       if (first !== null) return first;
       await tx.execute(sql`
@@ -503,19 +520,20 @@ export class DatabaseStorage implements IStorage {
       const second = await bump(tx);
       if (second === null) throw new Error("ticket number counter could not be seeded");
       return second;
-    });
+    };
+    const next = tx ? await run(tx) : await db.transaction((own) => run(own));
 
     return `${head}${next.toString().padStart(4, "0")}`;
   }
 
   // Raise the counter to at least the numeric max of existing tickets for this
   // prefix and year (recovery after a ticket was written outside the counter).
-  private async resyncTicketCounter(): Promise<void> {
-    const settings = await this.getCompanySettings();
+  private async resyncTicketCounter(tx?: DbTx): Promise<void> {
+    const settings = await this.getCompanySettings(tx);
     const prefix = settings?.ticketPrefix || "TKT";
     const year = new Date().getFullYear();
     const head = `${prefix}-${year}-`;
-    await db.execute(sql`
+    await (tx ?? db).execute(sql`
       INSERT INTO ticket_number_counters (prefix, year, last_number)
       SELECT ${prefix}, ${year}, COALESCE(MAX(CAST(substr(ticket_number, ${head.length + 1}) AS integer)), 0)
       FROM tasks
@@ -526,19 +544,25 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Task operations
-  async createTask(task: InsertTask): Promise<Task> {
-    // Generate ticket number
-    const insertOnce = async () => {
-      const ticketNumber = await this.getNextTicketNumber();
+  //
+  // R46: with a `tx` the counter bump, the insert and the history row all run on the caller's
+  // transaction. A unique violation aborts a Postgres transaction, so each attempt then runs
+  // inside tx.transaction(...), which is a SAVEPOINT: a clash rolls back to it (the bump with
+  // it), the counter is re-synced on the same tx, and the one retry runs in a second savepoint.
+  // Without a `tx` (REST, MCP) nothing changes: each statement is its own, as before.
+  async createTask(task: InsertTask, tx?: DbTx): Promise<Task> {
+    const attempt = async (conn: DbTx) => {
+      const ticketNumber = await this.getNextTicketNumber(tx ? conn : undefined);
       // Convert string date to Date object if needed
       const taskData = {
         ...task,
         ticketNumber,
         dueDate: task.dueDate ? new Date(task.dueDate) : null,
       };
-      const [row] = await db.insert(tasks).values(taskData).returning();
-      return row;
+      const [row] = await conn.insert(tasks).values(taskData).returning();
+      return row as Task;
     };
+    const insertOnce = async () => (tx ? tx.transaction((sp: DbTx) => attempt(sp)) : attempt(db));
     let createdTask: Task;
     const isNumberClash = (e: any) => {
       const cause = e?.cause ?? e;
@@ -550,7 +574,7 @@ export class DatabaseStorage implements IStorage {
       // A ticket number taken outside the counter (unique violation on ticket_number
       // only): re-sync the counter once and retry once.
       if (!isNumberClash(e)) throw e;
-      await this.resyncTicketCounter();
+      await this.resyncTicketCounter(tx);
       try {
         createdTask = await insertOnce();
       } catch (second: any) {
@@ -564,7 +588,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     // Add history entry
-    await db.insert(taskHistory).values({
+    await (tx ?? db).insert(taskHistory).values({
       taskId: createdTask.id,
       userId: task.createdBy,
       action: "created",
@@ -619,14 +643,16 @@ export class DatabaseStorage implements IStorage {
         teamName: sql<
           string | null
         >`CASE WHEN ${tasks.assigneeType} = 'team' THEN ${teams.name} ELSE NULL END`,
-        lastUpdatedBy: sql<string>`(
-          SELECT ${displayNameSql("u.first_name", "u.last_name", "u.role")}
+        // The list's rule (R59): no name for a missing user, '' when there is no history, ties by id.
+        lastUpdatedBy: sql<string>`COALESCE((
+          SELECT CASE WHEN u.id IS NULL THEN NULL
+            ELSE ${displayNameSql("u.first_name", "u.last_name", "u.role")} END
           FROM ${taskHistory} th
           LEFT JOIN ${users} u ON u.id = th.user_id
           WHERE th.task_id = ${tasks.id}
-          ORDER BY th.created_at DESC
+          ORDER BY th.created_at DESC, th.id DESC
           LIMIT 1
-        )`,
+        ), '')`,
       })
       .from(tasks)
       .leftJoin(sql`${users} as creator`, sql`creator.id = ${tasks.createdBy}`)
@@ -771,127 +797,6 @@ export class DatabaseStorage implements IStorage {
     return rows;
   }
 
-  async getTasks(
-    filters: {
-      status?: string;
-      category?: string;
-      assigneeId?: string;
-      createdBy?: string;
-      search?: string;
-      limit?: number;
-      offset?: number;
-    } = {}
-  ): Promise<any[]> {
-    const conditions = [];
-
-    if (filters.status) {
-      conditions.push(eq(tasks.status, filters.status));
-    }
-
-    if (filters.category) {
-      conditions.push(eq(tasks.category, filters.category));
-    }
-
-    if (filters.assigneeId) {
-      conditions.push(eq(tasks.assigneeId, filters.assigneeId));
-    }
-    // Note: team-scoped visibility is handled by a dedicated join-based method
-    if (filters.createdBy) {
-      conditions.push(eq(tasks.createdBy, filters.createdBy));
-    }
-
-    if (filters.search) {
-      conditions.push(
-        or(
-          ilike(tasks.title, containsPattern(filters.search)),
-          ilike(tasks.description, containsPattern(filters.search))
-        )
-      );
-    }
-
-    // First get the tasks
-    let taskQuery: any = db.select().from(tasks);
-
-    if (conditions.length > 0) {
-      taskQuery = (taskQuery as any).where(and(...conditions));
-    }
-
-    // id breaks createdAt ties so paging by offset reaches every row exactly once.
-    taskQuery = (taskQuery as any).orderBy(desc(tasks.createdAt), desc(tasks.id));
-
-    if (filters.limit) {
-      taskQuery = (taskQuery as any).limit(filters.limit);
-    }
-
-    if (filters.offset) {
-      taskQuery = (taskQuery as any).offset(filters.offset);
-    }
-
-    const taskResults = await taskQuery;
-
-    // Now enhance with creator and assignee names
-    const enhancedTasks = [];
-    for (const task of taskResults) {
-      let creatorName = "Unknown";
-      let assigneeName = "";
-
-      // Get creator name
-      if (task.createdBy) {
-        const [creator] = await db
-          .select()
-          .from(users)
-          .where(eq(users.id, task.createdBy));
-        if (creator) {
-          creatorName = displayNameOf(creator);
-        }
-      }
-
-      // Get assignee name (team via assigneeTeamId, user via assigneeId)
-      if (task.assigneeType === "team" && (task as any).assigneeTeamId) {
-        const [team] = await db
-          .select()
-          .from(teams)
-          .where(eq(teams.id, (task as any).assigneeTeamId));
-        if (team) {
-          assigneeName = team.name;
-        }
-      } else if (task.assigneeId) {
-        const [assignee] = await db
-          .select()
-          .from(users)
-          .where(eq(users.id, task.assigneeId));
-        if (assignee) {
-          assigneeName = displayNameOf(assignee);
-        }
-      }
-
-      // Get last updated by info
-      let lastUpdatedBy = null;
-      const [lastUpdate] = await db
-        .select({
-          userName: sql<string>`${displayNameSql(sql`${users.firstName}`, sql`${users.lastName}`, sql`${users.role}`)}`,
-        })
-        .from(taskHistory)
-        .leftJoin(users, eq(taskHistory.userId, users.id))
-        .where(eq(taskHistory.taskId, task.id))
-        .orderBy(desc(taskHistory.createdAt))
-        .limit(1);
-
-      if (lastUpdate) {
-        lastUpdatedBy = lastUpdate.userName;
-      }
-
-      enhancedTasks.push({
-        ...task,
-        creatorName,
-        assigneeName,
-        lastUpdatedBy,
-      });
-    }
-
-    return enhancedTasks;
-  }
-
   async updateTask(
     id: number,
     updates: Partial<InsertTask>,
@@ -1033,11 +938,8 @@ export class DatabaseStorage implements IStorage {
         );
       }
     } catch (error) {
-      console.error(
-        `Failed to delete S3 objects after ticket ${id} was deleted: ${
-          error instanceof Error ? error.message : "unknown error"
-        }`
-      );
+      // The type only (R63): the text of an SDK error can carry request data.
+      console.error(`Failed to delete S3 objects after ticket ${id} was deleted: ${describeError(error)}`);
     }
   }
 
@@ -1064,17 +966,9 @@ export class DatabaseStorage implements IStorage {
 
   // Team operations
   async createTeam(team: InsertTeam): Promise<Team> {
+    // R61: inserts the team only. Membership is the caller's decision: POST /api/teams adds the
+    // creator's member row in the same transaction as the team.
     const [createdTeam] = await db.insert(teams).values(team).returning();
-
-    // Add creator as admin
-    if (team.createdBy) {
-      await db.insert(teamMembers).values({
-        teamId: createdTeam.id,
-        userId: team.createdBy,
-        role: "admin",
-      });
-    }
-
     return createdTeam;
   }
 
@@ -1397,14 +1291,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Comment operations
-  async addTaskComment(comment: InsertTaskComment): Promise<TaskComment> {
-    const [createdComment] = await db
+  // R46: an optional `tx` puts the comment and its history row on the caller's transaction.
+  async addTaskComment(comment: InsertTaskComment, tx?: DbTx): Promise<TaskComment> {
+    const conn = tx ?? db;
+    const [createdComment] = await conn
       .insert(taskComments)
       .values(comment)
       .returning();
 
     // Add history entry
-    await db.insert(taskHistory).values({
+    await conn.insert(taskHistory).values({
       taskId: comment.taskId,
       userId: comment.userId,
       action: "commented",
@@ -1638,27 +1534,7 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async toggleUserStatus(userId: string): Promise<PublicUser> {
-    const [currentUser] = await db
-      .select({ isActive: users.isActive })
-      .from(users)
-      .where(eq(users.id, userId));
-
-    const [updatedUser] = await db
-      .update(users)
-      .set({
-        isActive: !currentUser.isActive,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, userId))
-      .returning(publicUserColumns);
-
-    if (updatedUser && !updatedUser.isActive) disconnectUser(userId);
-
-    return updatedUser;
-  }
-
-  async approveUser(userId: string): Promise<PublicUser> {
+  async approveUser(userId: string): Promise<PublicUser | undefined> {
     const [updatedUser] = await db
       .update(users)
       .set({
@@ -1881,7 +1757,7 @@ export class DatabaseStorage implements IStorage {
         }
       } catch (error) {
         // Skip sessions with invalid data
-        console.error("Error parsing session data:", error);
+        console.error("Error parsing session data:", describeError(error));
       }
     }
 
@@ -1918,7 +1794,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Company settings operations
-  async getCompanySettings(): Promise<CompanySettings | undefined> {
+  // `conn`: inside a transaction the cold-cache read must use the transaction's own connection;
+  // a pool query there waits for a free connection, and with every connection held by a
+  // transaction doing the same, nothing ever frees one (deadlock).
+  async getCompanySettings(conn?: DbTx): Promise<CompanySettings | undefined> {
     // Check cache first
     const now = Date.now();
     if (
@@ -1929,7 +1808,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     // Cache miss or expired - fetch from database
-    const [settings] = await db.select().from(companySettings).limit(1);
+    const [settings] = await (conn ?? db).select().from(companySettings).limit(1);
 
     // Update cache
     this.companySettingsCache = {
@@ -3241,6 +3120,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getManagerStats(userId: string): Promise<{
+    totalTickets: number;
+    personal: { assignedToMe: number; createdByMe: number };
     department: Array<{
       departmentId: number;
       departmentName: string;
@@ -3305,7 +3186,11 @@ export class DatabaseStorage implements IStorage {
         : [];
     const teamIds = deptTeams.map((t) => t.id);
 
-    // A department's tickets are the ones queued to one of its teams.
+    // R45: `totalTickets`, `priorityDistribution`, `categoryBreakdown` and `personal` use the scope
+    // GET /api/stats gives this manager (ticketVisibilityWhere: created, assigned, queued, teammates).
+    // The `department` and `teamPerformance` blocks below are deliberately TEAM-QUEUE based: a
+    // department's tickets are the ones queued to one of its teams.
+    const managerScope = ticketVisibilityWhere({ id: userId, role: "manager" });
     const inDeptTeams: SQL =
       teamIds.length > 0
         ? (and(inArray(tasks.assigneeTeamId, teamIds), eq(tasks.assigneeType, "team")) as SQL)
@@ -3355,11 +3240,11 @@ export class DatabaseStorage implements IStorage {
       };
     });
 
-    // Priority distribution across all department tickets
+    // Priority distribution across every ticket the manager can see (the /api/stats scope)
     const priorityResult = await db
       .select({ priority: tasks.priority, count: count() })
       .from(tasks)
-      .where(inDeptTeams)
+      .where(managerScope)
       .groupBy(tasks.priority);
 
     const priorityDistribution = {
@@ -3378,11 +3263,20 @@ export class DatabaseStorage implements IStorage {
       else if (priority === "low") priorityDistribution.low = n;
     }
 
-    // Category breakdown
+    const [totals] = await db
+      .select({
+        total: count(),
+        assignedToMe: countWhere(sql`${assignedToUserSql} AND ${tasks.assigneeId} = ${userId}`),
+        createdByMe: countWhere(sql`${tasks.createdBy} = ${userId}`),
+      })
+      .from(tasks)
+      .where(managerScope);
+
+    // Category breakdown (same scope)
     const categoryResult = await db
       .select({ category: tasks.category, count: count() })
       .from(tasks)
-      .where(inDeptTeams)
+      .where(managerScope)
       .groupBy(tasks.category);
 
     const totalCategoryTickets = categoryResult.reduce(
@@ -3469,6 +3363,11 @@ export class DatabaseStorage implements IStorage {
     });
 
     return {
+      totalTickets: Number(totals?.total ?? 0),
+      personal: {
+        assignedToMe: totals?.assignedToMe ?? 0,
+        createdByMe: totals?.createdByMe ?? 0,
+      },
       department: departmentStats,
       priorityDistribution,
       categoryBreakdown,

@@ -147,9 +147,23 @@ const MsTeamIntegration = () => {
       ? teamsNotificationTypes
       : settings?.notificationTypes || [];
 
+  // R84: the server keeps Teams webhooks off unless TEAMS_WEBHOOKS_ENABLED=true. Only an explicit
+  // false from the server means "off"; while the settings load, nothing is claimed.
+  const webhooksOff = settings?.webhooksEnabled === false;
+
   return (
     <div className="space-y-6">
-      {isEnabled ? (
+      {webhooksOff ? (
+        <Alert variant="destructive" data-testid="teams-webhooks-off">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Teams webhooks are turned off on this server</AlertTitle>
+          <AlertDescription>
+            Nothing is sent to Teams and settings cannot be saved. To enable them, set
+            the server environment variable <code>TEAMS_WEBHOOKS_ENABLED=true</code> and
+            restart the application.
+          </AlertDescription>
+        </Alert>
+      ) : isEnabled ? (
         <Alert>
           <CheckCircle2 className="h-4 w-4" />
           <AlertTitle>Teams Integration Active</AlertTitle>
@@ -249,7 +263,7 @@ const MsTeamIntegration = () => {
                 <div className="flex gap-3">
                   <Button
                     onClick={handleTeamsWebhookSubmit}
-                    disabled={updateTeamsIntegrationMutation.isPending}
+                    disabled={updateTeamsIntegrationMutation.isPending || webhooksOff}
                   >
                     {updateTeamsIntegrationMutation.isPending && (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -262,7 +276,7 @@ const MsTeamIntegration = () => {
                       <Button
                         variant="outline"
                         onClick={() => testTeamsNotificationMutation.mutate()}
-                        disabled={testTeamsNotificationMutation.isPending}
+                        disabled={testTeamsNotificationMutation.isPending || webhooksOff}
                       >
                         {testTeamsNotificationMutation.isPending ? (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />

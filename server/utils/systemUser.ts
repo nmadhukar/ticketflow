@@ -10,6 +10,7 @@
  */
 
 import { db } from "../storage/db";
+import { logRouteError } from "../http/errors";
 import { users } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
@@ -52,7 +53,7 @@ export async function getSystemUserId(): Promise<string> {
       // Unique constraint violation - user was created by another process
       return SYSTEM_USER_ID;
     }
-    console.error("Error creating system user:", error);
+    logRouteError("Error creating system user", error);
     throw new Error("System user not found and could not be created");
   }
 }

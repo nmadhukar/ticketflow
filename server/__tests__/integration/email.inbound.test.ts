@@ -768,8 +768,16 @@ describe("POST /api/email/inbound", () => {
       const teams = jest.spyOn(teamsIntegration, "sendWebhookNotification").mockResolvedValue(true as never);
       return { autoResponse, broadcast, teams };
     }
+    // R84: Teams webhooks are off unless TEAMS_WEBHOOKS_ENABLED=true; these tests exercise the feature.
+    let savedTeamsFlag: string | undefined;
+    beforeEach(() => {
+      savedTeamsFlag = process.env.TEAMS_WEBHOOKS_ENABLED;
+      process.env.TEAMS_WEBHOOKS_ENABLED = "true";
+    });
     afterEach(() => {
       jest.restoreAllMocks();
+      if (savedTeamsFlag === undefined) delete process.env.TEAMS_WEBHOOKS_ENABLED;
+      else process.env.TEAMS_WEBHOOKS_ENABLED = savedTeamsFlag;
     });
 
     it("an emailed ticket runs the auto-response, the broadcast and the Teams webhook", async () => {

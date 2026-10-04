@@ -52,7 +52,12 @@ import { setupMicrosoftAuth } from "../services/auth/microsoftAuth";
 import { teamsIntegration } from "../services/microsoftTeams";
 import { canChangeTeamMembership } from "../permissions/teams";
 import { teamsSettingsInputSchema } from "../services/teamsNotifications";
-import { assertPublicHost, validateWebhookUrl } from "../services/webhookGuard";
+import {
+  assertPublicHost,
+  teamsWebhooksEnabled,
+  TEAMS_WEBHOOKS_DISABLED_MESSAGE,
+  validateWebhookUrl,
+} from "../services/webhookGuard";
 import { sessionTrackingMiddleware } from "../middleware/sessionTracking.middleware";
 import {
   type User,
@@ -113,7 +118,7 @@ import {
   ticketVisibilityWhere,
 } from "../permissions/ticketAccess";
 import { HttpError, asyncHandler, fail, logRouteError } from "../http/errors";
-import { autoResponseCommentBody, autoResponseCommentExists } from "../services/ai/autoResponseComment";
+import { autoResponseCommentBody, findAutoResponseComment } from "../services/ai/autoResponseComment";
 import { projectUserForViewer } from "../utils/publicUser";
 import { toPublicInvitation } from "../utils/publicInvitation";
 import { publicBaseUrl } from "../utils/appBaseUrl";
@@ -276,6 +281,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ) {
         return fail(res, 403, "Forbidden");
       }
+      // R41: an agent sees no other user's phone (their own row keeps it).
+      const viewer = { id: getUserId(req), role: requesterRole };
       const forTeamMemberSelection =
         req.query.forTeamMemberSelection === "true";
 
@@ -308,12 +315,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const filteredUsers = await query;
-        return res.json(filteredUsers);
+        return res.json(filteredUsers.map((u) => projectUserForViewer(viewer, u)));
       }
 
       // Default: return all users (backward compatible)
       const allUsers = await storage.getAllUsers();
-      res.json(allUsers);
+      res.json(allUsers.map((u) => projectUserForViewer(viewer, u)));
     } catch (error) {
       logRouteError("Error fetching users", error);
       fail(res, 500, "Failed to fetch users");
@@ -798,7 +805,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(
         history.map((h) => ({
           ...h,
-          user: h.user ? projectUserForViewer(req.user?.role, h.user) : undefined,
+          user: h.user ? projectUserForViewer(req.user, h.user) : undefined,
         }))
       );
     } catch (error) {
@@ -814,7 +821,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(
         comments.map((c) => ({
           ...c,
-          user: c.user ? projectUserForViewer(req.user?.role, c.user) : undefined,
+          user: c.user ? projectUserForViewer(req.user, c.user) : undefined,
         }))
       );
     } catch (error) {
@@ -956,7 +963,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post(
     "/api/admin/users/:userId/approve",
     isAuthenticated,
-    async (req: any, res) => {
+    async (req: any, res, next) => {
       try {
         const user = await storage.getUser(getUserId(req));
         if (user?.role !== "admin") {
@@ -965,8 +972,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const { userId } = req.params;
         const updatedUser = await storage.approveUser(userId);
+        // R68: an unknown id used to answer 200 with an empty body.
+        if (!updatedUser) {
+          throw new HttpError(404, "user_not_found", "User not found");
+        }
         res.json(updatedUser);
       } catch (error) {
+        if (error instanceof HttpError) return next(error);
         logRouteError("Error approving user", error);
         fail(res, 500, "Failed to approve user");
       }
@@ -2774,6 +2786,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (invitation.status === "accepted") {
           return fail(res, 400, "Cannot resend accepted invitation");
         }
+        // A cancelled invitation's link is dead (GET 404, accept and register 400): mailing
+        // it again would send a link that cannot work.
+        if (invitation.status === "cancelled") {
+          return fail(res, 400, "Cannot resend a cancelled invitation");
+        }
 
         // Send invitation email using the template
         const emailTemplate = await storage.getEmailTemplate("user_invitation");
@@ -2788,9 +2805,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             invitation.email
           )}&token=${invitation.invitationToken}`;
 
-          const department = invitation.departmentId
-            ? await storage.getDepartmentById(invitation.departmentId)
-            : null;
           const inviter = await storage.getUser(invitation.invitedBy);
 
           // Get fromEmail and fromName: prioritize email provider, fallback to company settings, then defaults
@@ -2828,7 +2842,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 role:
                   invitation.role.charAt(0).toUpperCase() +
                   invitation.role.slice(1),
-                department: department?.name || "Not assigned",
+                department: "", // R43: a stored template's {{department}} renders empty
                 registrationUrl: inviteUrl,
                 year: new Date().getFullYear().toString(),
               },
@@ -2860,7 +2874,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 role:
                   invitation.role.charAt(0).toUpperCase() +
                   invitation.role.slice(1),
-                department: department?.name || "Not assigned",
+                department: "", // R43: a stored template's {{department}} renders empty
                 registrationUrl: inviteUrl,
                 year: new Date().getFullYear().toString(),
               },
@@ -2868,6 +2882,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
               fromName,
               ...awsCredentials,
             });
+          } else {
+            // R58: a stored SMTP, Mailgun, SendGrid or Custom row has no adapter.
+            console.warn(
+              `Invitation email not sent: email provider ${emailProvider.provider} is not implemented`
+            );
           }
         }
 
@@ -3315,8 +3334,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         role: inviteRole,
         firstName: req.body.firstName,
         lastName: req.body.lastName,
-        department: req.body.department,
-        departmentId: req.body.departmentId,
+        // R43: no department. `department` and `departmentId` in the body are
+        // ignored (stripped, not a 400, so old clients still work).
         ...(expiresAt ? { expiresAt } : {}),
         invitedBy: userId,
       } as any);
@@ -3333,10 +3352,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const inviteUrl = `${inviteBase}/auth?mode=register&email=${encodeURIComponent(
           invitation.email
         )}&token=${invitation.invitationToken}`;
-
-        const department = invitation.departmentId
-          ? await storage.getDepartmentById(invitation.departmentId)
-          : null;
 
         // Get fromEmail and fromName: prioritize email provider, fallback to company settings, then defaults
         const fromName =
@@ -3372,7 +3387,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               role:
                 invitation.role.charAt(0).toUpperCase() +
                 invitation.role.slice(1),
-              department: department?.name || "Not assigned",
+              department: "", // R43: a stored template's {{department}} renders empty
               registrationUrl: inviteUrl,
               year: new Date().getFullYear().toString(),
             },
@@ -3404,7 +3419,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               role:
                 invitation.role.charAt(0).toUpperCase() +
                 invitation.role.slice(1),
-              department: department?.name || "Not assigned",
+              department: "", // R43: a stored template's {{department}} renders empty
               registrationUrl: inviteUrl,
               year: new Date().getFullYear().toString(),
             },
@@ -3412,6 +3427,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             fromName,
             ...awsCredentials,
           });
+        } else {
+          // R58: a stored SMTP, Mailgun, SendGrid or Custom row has no adapter.
+          console.warn(
+            `Invitation email not sent: email provider ${emailProvider.provider} is not implemented`
+          );
         }
       }
 
@@ -3506,7 +3526,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         email: invitation.email,
         role: invitation.role,
-        departmentId: invitation.departmentId,
       });
     } catch (error) {
       logRouteError("Error validating invitation", error);
@@ -3623,7 +3642,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const userId = getUserId(req);
         const settings = await storage.getTeamsIntegrationSettings(userId);
-        res.json(settings || { enabled: false });
+        // R84: tells the settings page whether TEAMS_WEBHOOKS_ENABLED is on, so it can say how to enable it.
+        res.json({ ...(settings || { enabled: false }), webhooksEnabled: teamsWebhooksEnabled() });
       } catch (error) {
         logRouteError("Error fetching Teams settings", error);
         fail(res, 500, "Failed to fetch Teams settings");
@@ -3637,6 +3657,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     teamsWebhookAdminOnly,
     async (req: any, res, next) => {
       try {
+        if (!teamsWebhooksEnabled()) return fail(res, 409, TEAMS_WEBHOOKS_DISABLED_MESSAGE, { code: "teams_webhooks_disabled" });
         const userId = getUserId(req);
         const input = teamsSettingsInputSchema.parse(req.body ?? {});
         const settings = await storage.upsertTeamsIntegrationSettings({
@@ -3699,6 +3720,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     teamsWebhookAdminOnly,
     async (req: any, res, next) => {
       try {
+        if (!teamsWebhooksEnabled()) return fail(res, 503, TEAMS_WEBHOOKS_DISABLED_MESSAGE, { code: "teams_webhooks_disabled" });
         const userId = getUserId(req);
         const settings = await storage.getTeamsIntegrationSettings(userId);
 
@@ -3839,7 +3861,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Claim the draft first: of two concurrent applies only one gets the row back and posts.
       const claimed = await db
         .update(ticketAutoResponses)
-        .set({ wasApplied: true })
+        .set({ wasApplied: true, appliedAt: new Date() }) // R48 (a JS time, like resolvedAt)
         .where(and(eq(ticketAutoResponses.id, draft.id), eq(ticketAutoResponses.wasApplied, false)))
         .returning({ id: ticketAutoResponses.id });
       if (claimed.length === 0) return res.json({ applied: true, alreadyApplied: true });
@@ -3847,7 +3869,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         // The create path may have posted this comment and then failed to mark the draft
         // applied; posting again would duplicate it. The claim above already marked it applied.
-        if (await autoResponseCommentExists(taskId, aiUserId, draft.aiResponse)) {
+        const existingAt = await findAutoResponseComment(taskId, aiUserId, draft.aiResponse);
+        if (existingAt) {
+          // R48: it was applied when that comment was posted, not now.
+          await db
+            .update(ticketAutoResponses)
+            .set({ appliedAt: existingAt })
+            .where(eq(ticketAutoResponses.id, draft.id));
           return res.json({ applied: true, alreadyApplied: true });
         }
         await storage.addTaskComment({
@@ -3863,7 +3891,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           await db
             .update(ticketAutoResponses)
-            .set({ wasApplied: false })
+            .set({ wasApplied: false, appliedAt: null })
             .where(eq(ticketAutoResponses.id, draft.id));
         } catch (rollbackError) {
           console.error(
@@ -4134,6 +4162,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const articleId = parseInt(req.params.id);
+        if (!(await storage.getKnowledgeArticle(articleId))) {
+          return fail(res, 404, "Knowledge article not found");
+        }
         await storage.deleteKnowledgeArticle(articleId);
         res.json({ message: "Knowledge article deleted successfully" });
       } catch (error) {
@@ -4886,6 +4917,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // a reopen and a second resolve, resolvedAt alone is stale). "Posted" is the AI comment's
       // time (the applied time; the draft's createdAt is when it was generated), falling back to
       // the draft's createdAt for a row whose comment cannot be found.
+      // R48: applied_at is that time when it was recorded. Only a row applied before 0021 has NULL
+      // and keeps the comment-based rule, which can borrow another draft's earlier comment.
       const [ticketsResolvedByAIResult] = await db
         .select({ count: sql<number>`count(DISTINCT ${ticketAutoResponses.ticketId})::int` })
         .from(ticketAutoResponses)
@@ -4895,6 +4928,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             eq(ticketAutoResponses.wasApplied, true),
             inArray(tasks.status, ["resolved", "closed"]),
             sql`GREATEST(${tasks.resolvedAt}, ${tasks.closedAt}) >= COALESCE(
+              ${ticketAutoResponses.appliedAt},
               (SELECT MIN(c.created_at) FROM task_comments c
                 WHERE c.task_id = ${ticketAutoResponses.ticketId}
                   AND c.user_id = ${ticketAutoResponses.respondedBy}

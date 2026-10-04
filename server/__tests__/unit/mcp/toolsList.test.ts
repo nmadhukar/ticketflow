@@ -50,6 +50,33 @@ describe("MCP tools/list", () => {
     }
   });
 
+  it("I2: every by-id tool advertises `id` as required, with a type, so a client or model cannot leave it out", async () => {
+    const { client } = await connect();
+    const { tools } = await client.listTools();
+    for (const name of ["get_ticket", "update_ticket", "close_ticket", "reopen_ticket", "delete_ticket", "add_comment"]) {
+      const schema = tools.find((t) => t.name === name)!.inputSchema as {
+        required?: string[];
+        properties: Record<string, { type?: unknown; anyOf?: Array<{ type?: string }> }>;
+      };
+      expect([name, schema.required ?? []]).toEqual([name, expect.arrayContaining(["id"])]);
+      const id = schema.properties.id;
+      const types = id.type !== undefined ? [id.type].flat() : (id.anyOf ?? []).map((a) => a.type);
+      // Typed: a number and a string are both advertised (the handler also takes any other value, to answer a coded VALIDATION).
+      expect([name, types]).toEqual([name, expect.arrayContaining(["number", "string"])]);
+    }
+    // limit and offset stay optional but typed.
+    const list = tools.find((t) => t.name === "list_tickets")!.inputSchema as {
+      required?: string[];
+      properties: Record<string, { type?: unknown; anyOf?: Array<{ type?: string }> }>;
+    };
+    expect(list.required ?? []).not.toContain("limit");
+    for (const f of ["limit", "offset"]) {
+      const p = list.properties[f];
+      const types = p.type !== undefined ? [p.type].flat() : (p.anyOf ?? []).map((a) => a.type);
+      expect([f, types]).toEqual([f, expect.arrayContaining(["number", "string"])]);
+    }
+  });
+
   it("M3: create_ticket and update_ticket say notes are visible to the customer, never 'internal' only", async () => {
     const { client } = await connect();
     const { tools } = await client.listTools();

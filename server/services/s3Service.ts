@@ -9,6 +9,8 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { storage } from "../storage";
+// R63: a log line names the error's type (describeError), never the SDK error object or its text.
+import { describeError } from "../http/errors";
 
 /**
  * S3 Service for file upload, download, and deletion
@@ -73,7 +75,7 @@ class S3Service {
     } catch (error) {
       console.error(
         "Could not fetch bedrock_settings for S3 credentials:",
-        error
+        describeError(error)
       );
       throw new Error(
         "AWS credentials not found in bedrock_settings table. Please configure access key, secret, and region in AI Settings."
@@ -182,7 +184,7 @@ class S3Service {
       await this.client.send(command);
       return key;
     } catch (error) {
-      console.error("S3 upload error:", error);
+      console.error("S3 upload error:", describeError(error));
       throw new Error(
         `Failed to upload file to S3: ${
           error instanceof Error ? error.message : "Unknown error"
@@ -233,7 +235,7 @@ class S3Service {
 
       await this.client.send(command);
     } catch (error) {
-      console.error("S3 delete error:", error);
+      console.error(`S3 delete error for ${key}:`, describeError(error));
       // Don't throw - allow deletion to continue even if S3 delete fails
     }
   }
@@ -264,7 +266,7 @@ class S3Service {
       const url = await getSignedUrl(this.client, command, { expiresIn });
       return url;
     } catch (error) {
-      console.error("S3 presigned URL error:", error);
+      console.error(`S3 presigned URL error for ${key}:`, describeError(error));
       throw new Error(
         `Failed to generate presigned URL: ${
           error instanceof Error ? error.message : "Unknown error"
@@ -330,7 +332,7 @@ class S3Service {
       ) {
         return false;
       }
-      console.warn(`Error checking file existence for ${key}:`, error);
+      console.warn(`Error checking file existence for ${key}:`, describeError(error));
       return false;
     }
   }
@@ -427,7 +429,7 @@ class S3Service {
         nextContinuationToken: response.NextContinuationToken,
       };
     } catch (error) {
-      console.error("S3 list objects error:", error);
+      console.error("S3 list objects error:", describeError(error));
       throw new Error(
         `Failed to list S3 objects: ${
           error instanceof Error ? error.message : "Unknown error"
@@ -469,7 +471,7 @@ class S3Service {
 
       return { totalSize, fileCount };
     } catch (error) {
-      console.error("Error calculating storage stats:", error);
+      console.error("Error calculating storage stats:", describeError(error));
       throw error;
     }
   }
@@ -511,10 +513,8 @@ class S3Service {
         } else {
           failed.push({
             key,
-            error:
-              result.reason instanceof Error
-                ? result.reason.message
-                : "Unknown error",
+            // The error's type (R63), never its text: callers log this field.
+            error: describeError(result.reason),
           });
         }
       });

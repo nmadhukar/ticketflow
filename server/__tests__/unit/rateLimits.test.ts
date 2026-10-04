@@ -25,7 +25,7 @@ import { fail } from "../../http/errors";
 
 describe("M4: the general /api limit", () => {
   it("honours RATE_LIMIT_MAX_REQUESTS and RATE_LIMIT_WINDOW_MS, with the old defaults when unset or junk", () => {
-    expect(generalRateLimitConfig({})).toEqual({ windowMs: 900000, max: 100 });
+    expect(generalRateLimitConfig({})).toEqual({ windowMs: 900000, max: 600 });
     expect(generalRateLimitConfig({ RATE_LIMIT_MAX_REQUESTS: "250", RATE_LIMIT_WINDOW_MS: "60000" })).toEqual({
       windowMs: 60000,
       max: 250,
@@ -33,9 +33,15 @@ describe("M4: the general /api limit", () => {
     for (const junk of ["", "0", "-5", "1.5", "lots"]) {
       expect(generalRateLimitConfig({ RATE_LIMIT_MAX_REQUESTS: junk, RATE_LIMIT_WINDOW_MS: junk })).toEqual({
         windowMs: 900000,
-        max: 100,
+        max: 600,
       });
     }
+  });
+
+  it("unset is 600 per 15 minutes (R52)", () => {
+    expect(generalRateLimitConfig({}).max).toBe(600);
+    expect(generalRateLimitConfig({ RATE_LIMIT_MAX_REQUESTS: undefined }).max).toBe(600);
+    expect(generalRateLimitConfig({}).windowMs).toBe(15 * 60 * 1000);
   });
 
   it("is on only in production, and RATE_LIMITING_ENABLED=false turns it off there", () => {

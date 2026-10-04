@@ -138,3 +138,49 @@ test.describe.serial("ticket lifecycle: create, comment, reply, close, reopen", 
     expect(customer.csp.violations).toEqual([]);
   });
 });
+
+test.describe("a ticket whose title is markup (Y7)", () => {
+  const MARKUP = "<img src=x onerror=alert(1)><script>x</script>";
+
+  test("renders as literal text on the list and the detail panel; nothing runs and no CSP violation is reported", async ({
+    browser,
+  }) => {
+    const customer = await signedInContext(browser, "customerA");
+    const dialogs: string[] = [];
+    customer.page.on("dialog", async (dialog) => {
+      dialogs.push(dialog.message());
+      await dialog.dismiss();
+    });
+    try {
+      const { page } = customer;
+      const created = await page.request.post("/api/tasks", {
+        data: { title: MARKUP, description: "Markup in the title", category: "support", priority: "medium" },
+      });
+      expect(created.status()).toBe(201);
+      const body = await created.json();
+      expect(body.title).toBe(MARKUP); // stored verbatim (R27): safety is output escaping plus the CSP
+
+      // List page: the row shows the characters, and no element was built from them.
+      await page.goto("/tickets");
+      const row = page.getByRole("row").filter({ hasText: body.ticketNumber });
+      await expect(row).toBeVisible();
+      await expect(row).toContainText(MARKUP);
+      await expect(page.locator('img[src="x"]')).toHaveCount(0);
+      await expect(page.locator("main script, table script")).toHaveCount(0);
+
+      // Detail panel: the same, in the heading the user reads.
+      await openTicket(page, body.ticketNumber);
+      await expect(page.getByText(MARKUP, { exact: true }).first()).toBeVisible();
+      await expect(page.locator('img[src="x"]')).toHaveCount(0);
+      await expect(page.locator("main script, [role=dialog] script, table script")).toHaveCount(0);
+
+      // Give a would-be onerror handler time to fire, then check nothing did.
+      await page.waitForTimeout(500);
+      expect(dialogs).toEqual([]);
+      expect(await cspEvents(page)).toEqual([]);
+      expect(customer.csp.violations).toEqual([]);
+    } finally {
+      await customer.context.close();
+    }
+  });
+});

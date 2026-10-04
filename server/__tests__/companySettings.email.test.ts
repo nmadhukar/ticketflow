@@ -105,6 +105,63 @@ describe("Company Settings - Email Endpoints", () => {
         .send({ provider: EMAIL_PROVIDERS.AWS });
       expect(res.status).toBe(400);
     });
+
+    // R58: these four have no adapter, so they cannot be selected. Nothing is stored.
+    const UNSUPPORTED_BODIES: Array<[string, Record<string, unknown>]> = [
+      [EMAIL_PROVIDERS.SMTP, { host: "smtp.example.com", port: 587, username: "u", password: "p", encryption: "tls" }],
+      [EMAIL_PROVIDERS.MAILGUN, { domain: "mg.example.com", apiKey: "k", region: "us" }],
+      [EMAIL_PROVIDERS.SENDGRID, { apiKey: "k" }],
+      [EMAIL_PROVIDERS.CUSTOM, { config: { a: 1 } }],
+    ];
+    it.each(UNSUPPORTED_BODIES)("%s is refused 400 provider_not_supported and stores nothing", async (provider, rest) => {
+      const res = await request(app)
+        .post("/api/company-settings/email")
+        .send({ provider, fromEmail: "no-reply@example.com", fromName: "TicketFlow", ...rest });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("provider_not_supported");
+      expect(typeof res.body.message).toBe("string");
+      expect(res.body.details.fieldErrors.provider).toHaveLength(1);
+      expect(storage.upsertEmailProvider).not.toHaveBeenCalled();
+    });
+    it.each(UNSUPPORTED_BODIES)("%s is refused even when the rest of the payload is incomplete", async (provider) => {
+      const res = await request(app).post("/api/company-settings/email").send({ provider });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("provider_not_supported");
+      expect(storage.upsertEmailProvider).not.toHaveBeenCalled();
+    });
+
+    it("Mailtrap still saves", async () => {
+      asMock(storage.getActiveEmailProvider).mockResolvedValue(undefined);
+      asMock(storage.upsertEmailProvider).mockResolvedValue({
+        provider: EMAIL_PROVIDERS.MAILTRAP,
+        fromEmail: "no-reply@example.com",
+        fromName: "TicketFlow",
+        isActive: true,
+      });
+      const res = await request(app).post("/api/company-settings/email").send({
+        provider: EMAIL_PROVIDERS.MAILTRAP,
+        fromEmail: "no-reply@example.com",
+        fromName: "TicketFlow",
+        token: "mt-token",
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.provider).toBe(EMAIL_PROVIDERS.MAILTRAP);
+      expect(storage.upsertEmailProvider).toHaveBeenCalledTimes(1);
+    });
+
+    it("an existing stored SMTP row still reads back", async () => {
+      asMock(storage.getActiveEmailProvider).mockResolvedValue({
+        provider: EMAIL_PROVIDERS.SMTP,
+        fromEmail: "no-reply@example.com",
+        fromName: "TicketFlow",
+        metadata: { host: "smtp.example.com", password: "stored" },
+      });
+      const res = await request(app).get("/api/company-settings/email");
+      expect(res.status).toBe(200);
+      expect(res.body.provider).toBe(EMAIL_PROVIDERS.SMTP);
+      expect(res.body.hasSmtpPassword).toBe(true);
+      expect(JSON.stringify(res.body)).not.toContain("stored");
+    });
   });
 
   describe("POST /api/company-settings/email/test", () => {

@@ -17,7 +17,8 @@ const ALLOWED = (() => {
   try {
     const u = new URL(process.env.DATABASE_URL || "");
     if (!u.hostname) return null;
-    return { host: u.hostname.replace(/^[|]$/g, "").toLowerCase(), port: Number(u.port || 5432) };
+    // R54: an IPv6 hostname arrives bracketed ("[fd00::1]"); net.connect passes it without.
+    return { host: u.hostname.replace(/^\[|\]$/g, "").toLowerCase(), port: Number(u.port || 5432) };
   } catch {
     return null;
   }
@@ -25,7 +26,7 @@ const ALLOWED = (() => {
 const isAllowedPeer = (t) =>
   ALLOWED !== null &&
   typeof t.host === "string" &&
-  t.host.replace(/^[|]$/g, "").toLowerCase() === ALLOWED.host &&
+  t.host.replace(/^\[|\]$/g, "").toLowerCase() === ALLOWED.host &&
   Number(t.port) === ALLOWED.port;
 const isLoopback = (host) =>
   host === undefined ||
