@@ -208,7 +208,7 @@ export function registerAppTools(server: McpServer, user: User): void {
   server.registerTool(
     "get_knowledge_article",
     {
-      description: "Get one published knowledge article by id. A draft, archived or unknown article is NOT_FOUND.",
+      description: "Get one knowledge article by id, when the same article is readable through the knowledge REST routes (published). An unpublished or unknown article is NOT_FOUND.",
       inputSchema: z.object({ id: idArg("Article") }),
     },
     (args) => runTool(() => guard(async () => getReadableKnowledgeArticle(assertToolId(args.id))))

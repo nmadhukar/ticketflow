@@ -1,5 +1,5 @@
 import request from "supertest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { apiKeys, knowledgeArticles, notifications, teamMembers, type Team, type User } from "@shared/schema";
 import { db } from "../../../storage/db";
 import { storage } from "../../../storage";
@@ -453,6 +453,14 @@ describe("list_notifications", () => {
       .where(eq(notifications.id, noteOnRead));
     const res = await call("agentOn", "list_notifications", { unreadOnly: false, since: "2021-01-01T00:00:00Z" });
     expect(ids(res.data.notifications)).toEqual([noteOnUnread]);
+  });
+
+  it("polling with the newest createdAt as since returns nothing new (microsecond rows, millisecond cursor)", async () => {
+    await db.execute(sql`UPDATE notifications SET created_at = '2026-01-01T00:00:00.123456Z' WHERE id = ${noteOnUnread}`);
+    const first = await call("agentOn", "list_notifications");
+    const cursor = first.data.notifications[0].createdAt;
+    const again = await call("agentOn", "list_notifications", { since: cursor });
+    expect(ids(again.data.notifications)).toEqual([]);
   });
 
   it.each([{ since: "yesterday" }, { since: "2026-13-45" }, { limit: 0 }, { limit: "lots" }])("bad %p is VALIDATION", async (args) => {

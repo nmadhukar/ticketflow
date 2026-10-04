@@ -2987,7 +2987,13 @@ export class DatabaseStorage implements IStorage {
         and(
           eq(notifications.userId, userId),
           opts.unreadOnly ? eq(notifications.isRead, false) : undefined,
-          opts.since ? gt(notifications.createdAt, opts.since) : undefined
+          // created_at holds microseconds but a client's cursor comes back in milliseconds:
+          // compare at millisecond precision, or the newest row repeats on every poll. The column
+          // is UTC wall-clock `timestamp`; pass the ISO string as drizzle's own mapping does (a raw
+          // Date param would be sent in the server's local zone).
+          opts.since
+            ? sql`date_trunc('milliseconds', ${notifications.createdAt}) > ${opts.since.toISOString()}::timestamp`
+            : undefined
         )
       )
       .orderBy(desc(notifications.createdAt), desc(notifications.id))
