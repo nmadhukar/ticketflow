@@ -15,7 +15,7 @@ test("customer B cannot open customer A's ticket and does not see it listed", as
 
   // Sanity: A does see it.
   await a.page.goto("/tickets");
-  await expect(a.page.getByText(ticketNumber)).toBeVisible();
+  await expect(a.page.getByText(ticketNumber).filter({ visible: true })).toBeVisible();
   await a.context.close();
 
   const b = await signedInContext(browser, "customerB");
@@ -26,11 +26,11 @@ test("customer B cannot open customer A's ticket and does not see it listed", as
     await expect(b.page.getByText(ticketNumber)).toHaveCount(0);
     await expect(b.page.getByText(title)).toHaveCount(0);
 
-    // Opening its URL: the SPA has no per-ticket page, so the app's not-found state renders.
+    // Direct links now open the detail panel, but the server must still refuse another customer's ticket.
     await b.page.goto(`/tickets/${ticket.id}`);
-    // Match the NotFound page's own heading exactly, not any text containing "404".
-    await expect(b.page.getByRole("heading", { level: 1, name: /^page not found$/i })).toBeVisible();
+    await expect(b.page.getByRole("region", { name: "Selected ticket" }).getByRole("alert")).toBeVisible();
     await expect(b.page.getByText(ticketNumber)).toHaveCount(0);
+    await expect(b.page.getByText(title)).toHaveCount(0);
 
     // And the API refuses it, on the by-id path and the comments the panel reads.
     for (const path of [`/api/tasks/${ticket.id}`, `/api/tasks/${ticket.id}/comments`]) {

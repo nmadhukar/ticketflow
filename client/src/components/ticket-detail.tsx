@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,19 +37,18 @@ interface TicketDetailProps {
 
 export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [comment, setComment] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const { user } = useAuth() as any;
-  const currentUserId = user?.id as string | undefined;
   const role = user?.role as string | undefined;
 
   // Fetch ticket details
-  const { data: ticket, isLoading: ticketLoading } = useQuery<any>({
+  const { data: ticket, isLoading: ticketLoading, error: ticketError, refetch: refetchTicket } = useQuery<any>({
     queryKey: [`/api/tasks/${ticketId}`],
   });
 
   // Fetch ticket comments
-  const { data: comments, isLoading: commentsLoading } = useQuery<any[]>({
+  const { data: comments, isLoading: commentsLoading, error: commentsError, refetch: refetchComments } = useQuery<any[]>({
     queryKey: [`/api/tasks/${ticketId}/comments`],
   });
 
@@ -68,7 +67,7 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
     data: attachments,
     isLoading: attachmentsLoading,
     error: attachmentsError,
-    refetch: _refetchAttachments,
+    refetch: refetchAttachments,
   } = useQuery<any[]>({
     queryKey: [`/api/tasks/${ticketId}/attachments`],
     retry: false,
@@ -84,11 +83,11 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
       });
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_, submittedComment) => {
       queryClient.invalidateQueries({
         queryKey: [`/api/tasks/${ticketId}/comments`],
       });
-      setComment("");
+      setComment((draft) => draft === submittedComment ? "" : draft);
       toast({
         title: "Comment added",
         description: "Your comment has been added successfully.",
@@ -221,23 +220,12 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
     const formData = new FormData();
     formData.append("file", file);
 
-    await addAttachmentMutation.mutateAsync(formData);
+    addAttachmentMutation.mutate(formData);
     e.target.value = "";
   };
 
-  const canUploadAttachment = (() => {
-    if (role === "admin" || role === "manager") return true;
-    if (role === "agent") {
-      // allow when assigned to agent
-      return (
-        (queryClient.getQueryData([`/api/tasks/${ticketId}`]) as any)
-          ?.assigneeType === "user" &&
-        (queryClient.getQueryData([`/api/tasks/${ticketId}`]) as any)
-          ?.assigneeId === currentUserId
-      );
-    }
-    return false;
-  })();
+  // GET and attachment POST use the same server-side ticket-access rule.
+  const canUploadAttachment = !!ticket && !ticketError && !!user;
 
   const canDeleteAttachment = role === "admin" || role === "manager";
 
@@ -294,13 +282,10 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
     }
   };
 
-  const handleSubmitComment = async (e: React.FormEvent) => {
+  const handleSubmitComment = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!comment.trim()) return;
-
-    setIsSubmitting(true);
-    await addComment.mutateAsync(comment);
-    setIsSubmitting(false);
+    if (!comment.trim() || addComment.isPending) return;
+    addComment.mutate(comment);
   };
 
   const getStatusColor = (status: string) => {
@@ -325,11 +310,11 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
       case "urgent":
         return "bg-destructive text-destructive-foreground";
       case "high":
-        return "bg-orange-500 text-white";
+        return "bg-orange-100 text-orange-900 dark:bg-orange-950 dark:text-orange-200";
       case "medium":
-        return "bg-yellow-500 text-white";
+        return "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200";
       case "low":
-        return "bg-green-500 text-white";
+        return "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200";
       default:
         return "bg-muted text-muted-foreground";
     }
@@ -345,8 +330,19 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
 
   if (ticketLoading) {
     return (
-      <div className="flex items-center justify-center p-8">
-        Loading ticket details...
+      <div className="flex flex-wrap items-center justify-center gap-3 p-8">
+        <p role="status">Loading ticket details...</p>
+        {onClose && <Button variant="ghost" onClick={onClose}>Close ticket details</Button>}
+      </div>
+    );
+  }
+
+  if (ticketError && !ticket) {
+    return (
+      <div role="alert" className="space-y-3 p-6 text-center">
+        <p>Could not load this ticket. Please try again.</p>
+        <Button variant="outline" onClick={() => refetchTicket()}>Retry ticket</Button>
+        {onClose && <Button variant="ghost" onClick={onClose}>Close ticket details</Button>}
       </div>
     );
   }
@@ -362,11 +358,12 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
   return (
     <div className="flex flex-col gap-4">
       {/* Ticket Header */}
-      <Card className="bg-gray-50">
+      {ticketError && <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-destructive">Could not refresh ticket details.<Button variant="outline" onClick={() => refetchTicket()}>Retry ticket</Button></div>}
+      <Card className="bg-card">
         <CardHeader>
-          <div className="flex items-start justify-between">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-2 break-words">
+              <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-2xl font-bold">{ticket.ticketNumber}</h2>
                 <Badge className={getStatusColor(ticket.status)}>
                   {ticket.status.replace("_", " ")}
@@ -379,14 +376,14 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
               <p className="text-muted-foreground">{ticket.description}</p>
             </div>
             {onClose && (
-              <Button variant="ghost" size="sm" onClick={onClose}>
+              <Button variant="ghost" size="sm" className="h-10 w-10 shrink-0 p-0" aria-label="Close ticket details" onClick={onClose}>
                 <XCircle className="h-4 w-4" />
               </Button>
             )}
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-3 xl:grid-cols-5">
             <div>
               <p className="text-muted-foreground">Created by</p>
               <p className="font-medium">{ticket.createdByName || "Unknown"}</p>
@@ -406,6 +403,10 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
             <div>
               <p className="text-muted-foreground">Category</p>
               <Badge variant="outline">{ticket.category}</Badge>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Due date</p>
+              <p className="font-medium">{ticket.dueDate ? format(new Date(ticket.dueDate), "MMM d, yyyy") : "No due date"}</p>
             </div>
           </div>
           {ticket.tags && ticket.tags.length > 0 && (
@@ -429,9 +430,9 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         {/* Attachments */}
-        <Card className="bg-gray-50">
+        <Card className="min-w-0 bg-card">
           <CardHeader>
             <CardTitle>
               <div className="flex items-center gap-1">
@@ -442,7 +443,8 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
             {canUploadAttachment && (
               <div>
                 <input
-                  id="ticket-file-upload"
+                  id={`ticket-file-upload-${ticketId}`}
+                  aria-label="Ticket attachment"
                   type="file"
                   className="hidden"
                   onChange={handleFileUpload}
@@ -451,7 +453,7 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
                 <Button
                   size="sm"
                   onClick={() =>
-                    document.getElementById("ticket-file-upload")?.click()
+                    document.getElementById(`ticket-file-upload-${ticketId}`)?.click()
                   }
                   disabled={addAttachmentMutation.isPending}
                 >
@@ -473,8 +475,9 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
                 Loading attachments...
               </div>
             ) : attachmentsError ? (
-              <div className="text-sm text-destructive">
+              <div role="alert" className="space-y-2 text-sm text-destructive">
                 Failed to load attachments. Please try again.
+                <Button variant="outline" className="block" onClick={() => refetchAttachments()}>Retry attachments</Button>
               </div>
             ) : attachments &&
               Array.isArray(attachments) &&
@@ -483,9 +486,9 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
                 {attachments.map((attachment: any) => (
                   <div
                     key={attachment.id}
-                    className="flex items-center justify-between border rounded p-3"
+                    className="flex flex-wrap items-center justify-between gap-3 border rounded-lg p-3"
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex min-w-0 items-center gap-3 break-all">
                       <FileText className="h-4 w-4 text-muted-foreground" />
                       <div>
                         <div className="text-sm font-medium">
@@ -534,7 +537,7 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
           </CardContent>
         </Card>
         {/* Conversation */}
-        <Card className="bg-gray-50 col-span-2">
+        <Card className="min-w-0 bg-card xl:col-span-2">
           <CardHeader>
             <CardTitle>
               <div className="flex items-center gap-1">
@@ -545,6 +548,7 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
+              {commentsError && <div role="alert" className="space-y-2 text-sm text-destructive"><p>Could not load comments.</p><Button variant="outline" onClick={() => refetchComments()}>Retry comments</Button></div>}
               {commentsLoading ? (
                 <div className="text-center py-4 text-muted-foreground">
                   Loading comments...
@@ -553,15 +557,16 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
                 comments.map((comment: any) => (
                   <CommentItem key={comment.id} comment={comment} />
                 ))
-              ) : (
+              ) : !commentsError ? (
                 <div className="text-center py-4 text-muted-foreground">
                   No comments yet
                 </div>
-              )}
+              ) : null}
             </div>
             <Separator className="my-4" />
             <form onSubmit={handleSubmitComment} className="space-y-4">
               <Textarea
+                aria-label="Add a comment"
                 placeholder="Add a comment..."
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
@@ -570,7 +575,7 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
               <div className="flex justify-end">
                 <Button
                   type="submit"
-                  disabled={isSubmitting || !comment.trim()}
+                  disabled={addComment.isPending || !comment.trim()}
                 >
                   <Send className="h-4 w-4 mr-2" />
                   Send Comment
@@ -583,7 +588,7 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
 
       {/* AI Response Section */}
       {aiResponse && !aiResponse.wasApplied && role && role !== "customer" && (
-        <Card className="border-primary/20 bg-gray-50">
+        <Card className="border-primary/20 bg-card">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -688,7 +693,7 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
 
       {/* Activity History */}
       {Array.isArray(history) && history.length > 0 && (
-        <Card className="bg-gray-50">
+        <Card className="bg-card">
           <CardHeader>
             <div className="flex items-center gap-2">
               <Clock className="h-5 w-5" />

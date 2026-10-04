@@ -47,7 +47,7 @@ test.describe.serial("ticket lifecycle: create, comment, reply, close, reopen", 
       .first()
       .click();
     const dialog = page.getByRole("dialog");
-    await dialog.getByLabel("Task Title").fill(title);
+    await dialog.getByLabel("Ticket title").fill(title);
     await dialog.getByLabel("Description").fill("Created by the Playwright lifecycle flow.");
     // Category is required; the form defaults the assignment to a Team, which needs a
     // department and team, so the customer leaves the ticket unassigned (staff route it).
@@ -65,8 +65,9 @@ test.describe.serial("ticket lifecycle: create, comment, reply, close, reopen", 
 
     const row = page.getByRole("row").filter({ hasText: title });
     await expect(row).toBeVisible();
-    await expect(row.getByText(/^TKT-/)).toBeVisible();
-    ticketNumber = (await row.getByText(/^TKT-/).innerText()).trim();
+    const visibleNumber = row.getByText(/^TKT-/).filter({ visible: true });
+    await expect(visibleNumber).toBeVisible();
+    ticketNumber = (await visibleNumber.innerText()).trim();
     expect(ticketNumber).toMatch(/^TKT-/);
   });
 

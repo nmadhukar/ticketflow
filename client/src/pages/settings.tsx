@@ -23,7 +23,7 @@ export default function Settings() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const { data: sessions = [], isLoading: sessionsLoading } = useQuery<
+  const { data: sessions = [], isLoading: sessionsLoading, isError: sessionsError, refetch: refetchSessions } = useQuery<
     UserSession[]
   >({
     queryKey: ["/api/user/sessions"],
@@ -61,6 +61,7 @@ export default function Settings() {
 
   return (
     <MainWrapper>
+      <header className="mb-6 space-y-1"><h1 className="text-2xl font-semibold tracking-tight">Settings</h1><p className="text-sm text-muted-foreground">Your profile, preferences, and signed-in devices.</p></header>
       <Tabs defaultValue="profile" className="space-y-6">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="profile" className="flex items-center gap-2">
@@ -87,11 +88,11 @@ export default function Settings() {
                   <UserIcon className="h-8 w-8 text-muted-foreground" />
                 </div>
               )}
-              <div>
+              <div className="min-w-0">
                 <h3 className="text-lg font-semibold">
                   {typedUser?.firstName} {typedUser?.lastName}
                 </h3>
-                <p className="text-muted-foreground">{typedUser?.email}</p>
+                <p className="break-all text-sm text-muted-foreground">{typedUser?.email}</p>
                 <Badge variant="secondary" className="mt-1">
                   {typedUser?.role}
                 </Badge>
@@ -100,7 +101,7 @@ export default function Settings() {
 
             <Separator />
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 sm:grid-cols-2 [&_p]:break-words">
               <div>
                 <p className="text-sm font-medium">{t("settings.firstName")}</p>
                 <p className="text-sm text-muted-foreground">
@@ -139,7 +140,7 @@ export default function Settings() {
 
             <Separator />
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <p className="text-sm font-medium">
                   {t("settings.authenticatedVia")}
@@ -170,6 +171,8 @@ export default function Settings() {
                   <Skeleton className="h-16 w-full" />
                   <Skeleton className="h-16 w-full" />
                 </div>
+              ) : sessionsError ? (
+                <div role="alert" className="space-y-2 rounded-lg border p-4"><p className="text-sm">Couldn't load your signed-in devices.</p><Button variant="outline" size="sm" onClick={() => refetchSessions()}>Try again</Button></div>
               ) : sessions.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   {t("settings.noActiveSessions")}
@@ -214,6 +217,7 @@ export default function Settings() {
                           size="sm"
                           onClick={() => handleRevokeSession(session.sessionId)}
                           disabled={revokeSessionMutation.isPending}
+                          aria-label="Revoke session"
                           className="text-destructive hover:text-destructive"
                         >
                           <Trash2 className="h-4 w-4" />

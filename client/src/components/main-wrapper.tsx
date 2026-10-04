@@ -8,9 +8,9 @@ const MainWrapper = ({
   action,
 }: PropsWithChildren<{ action?: ReactNode }>) => {
   return (
-    <section className="flex-1 flex flex-col">
-      <Header action={action} />{" "}
-      <div className="flex-1 p-6 overflow-y-auto bg-background">{children}</div>
+    <section className="flex min-h-full min-w-0 flex-1 flex-col">
+      <Header action={action} />
+      <div className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-6 pb-24 sm:px-6 lg:px-8 lg:py-8">{children}</div>
     </section>
   );
 };

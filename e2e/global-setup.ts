@@ -10,6 +10,7 @@ export const E2E_USERS = {
   customerA: { email: "e2e-customer-a@example.test", role: "customer", env: "E2E_CUSTOMER_A_PASSWORD" },
   customerB: { email: "e2e-customer-b@example.test", role: "customer", env: "E2E_CUSTOMER_B_PASSWORD" },
   agent: { email: "e2e-agent@example.test", role: "agent", env: "E2E_AGENT_PASSWORD" },
+  manager: { email: "e2e-manager@example.test", role: "manager", env: "E2E_MANAGER_PASSWORD" },
   admin: { email: "e2e-admin@example.test", role: "admin", env: "E2E_ADMIN_PASSWORD" },
 } as const;
 

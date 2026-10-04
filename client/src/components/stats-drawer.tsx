@@ -6,6 +6,7 @@ import {
   SheetHeader,
   SheetTitle,
   SheetDescription,
+  SheetTrigger,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { BarChart3 } from "lucide-react";
@@ -17,7 +18,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 
 export function StatsDrawer() {
   const [open, setOpen] = useState(false);
@@ -31,27 +31,23 @@ export function StatsDrawer() {
 
   return (
     <TooltipProvider>
+      <Sheet open={open} onOpenChange={setOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
+          <SheetTrigger asChild>
           <Button
-            onClick={() => setOpen(true)}
-            className={cn(
-              "fixed top-1/2 left-0 -translate-y-1/2 z-50",
-              "rounded-r-lg rounded-l-none",
-              "px-4 py-3",
-              "shadow-lg hover:shadow-xl",
-              "transition-all hover:scale-105"
-            )}
-            variant="default"
+            className="gap-2 px-2 lg:px-3"
+            variant="ghost"
+            aria-label="Statistics"
           >
-            <BarChart3 className="h-5 w-5" />
+            <BarChart3 aria-hidden="true" className="h-5 w-5" /><span className="hidden xl:inline">Statistics</span>
           </Button>
+          </SheetTrigger>
         </TooltipTrigger>
         <TooltipContent side="right">
           <p>View Statistics</p>
         </TooltipContent>
       </Tooltip>
-      <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent
           side="left"
           className="!w-full sm:!w-3/4 md:!w-1/2 !max-w-none p-0"

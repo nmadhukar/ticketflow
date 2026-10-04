@@ -174,21 +174,21 @@ export function AiChatBot() {
   return isOpen ? (
     <Card
       className={cn(
-        "fixed bottom-6 right-6 w-96 shadow-2xl z-50 transition-all duration-200",
-        isMinimized ? "h-14" : "h-[600px]"
+        "fixed bottom-4 right-4 z-40 w-[calc(100vw-2rem)] rounded-xl shadow-xl sm:bottom-6 sm:right-6 sm:w-[420px]",
+        isMinimized ? "h-16" : "h-[min(600px,calc(100dvh-2rem))]"
       )}
     >
-      <CardHeader className="flex flex-row items-center justify-between p-4 border-b">
+      <CardHeader className="flex h-16 flex-row items-center justify-between space-y-0 border-b p-3">
         <div className="flex items-center gap-2">
           <Bot className="h-5 w-5 text-primary" />
-          <CardTitle className="text-lg">Help Assistant</CardTitle>
+          <CardTitle className="text-sm font-semibold">Help Assistant</CardTitle>
         </div>
         <div className="flex items-center gap-1">
           <Button
             onClick={startNewSession}
             variant="ghost"
             size="sm"
-            className="h-8 px-2 mr-1"
+            className="px-2"
             aria-label="Start new chat"
           >
             New chat
@@ -197,7 +197,7 @@ export function AiChatBot() {
             onClick={toggleMinimize}
             variant="ghost"
             size="icon"
-            className="h-8 w-8"
+            aria-label={isMinimized ? "Expand help assistant" : "Minimize help assistant"}
           >
             {isMinimized ? (
               <Maximize2 className="h-4 w-4" />
@@ -209,7 +209,7 @@ export function AiChatBot() {
             onClick={() => setIsOpen(false)}
             variant="ghost"
             size="icon"
-            className="h-8 w-8"
+            aria-label="Close help assistant"
           >
             <X className="h-4 w-4" />
           </Button>
@@ -217,7 +217,7 @@ export function AiChatBot() {
       </CardHeader>
 
       {!isMinimized && (
-        <CardContent className="p-0 flex flex-col h-[calc(100%-60px)]">
+        <CardContent className="flex h-[calc(100%-4rem)] flex-col p-0">
           {/* Messages Area */}
           <ScrollArea ref={scrollAreaRef} className="flex-1 p-4">
             {error && (
@@ -350,10 +350,10 @@ export function AiChatBot() {
   ) : (
     <Button
       onClick={toggleChat}
-      className="fixed bottom-6 right-6 rounded-full h-14 w-14 shadow-lg z-50"
-      size="icon"
+      className="fixed bottom-4 right-4 z-40 h-12 gap-2 rounded-full px-4 shadow-lg sm:bottom-6 sm:right-6"
+      aria-label="Open help assistant"
     >
-      <MessageCircle className="h-6 w-6" />
+      <MessageCircle aria-hidden="true" className="h-5 w-5" /><span className="hidden sm:inline">Ask AI</span>
     </Button>
   );
 }

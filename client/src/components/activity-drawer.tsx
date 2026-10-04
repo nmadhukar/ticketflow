@@ -8,6 +8,7 @@ import {
   SheetHeader,
   SheetTitle,
   SheetDescription,
+  SheetTrigger,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,8 +24,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/spinner";
+import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "wouter";
 import { format, isToday, isYesterday, parseISO } from "date-fns";
@@ -36,23 +37,18 @@ export function ActivityDrawer() {
   const { t } = useTranslation(["common", "dashboard"]);
   const [, setLocation] = useLocation();
 
-  // Only show for admin role
-  if (role !== "admin") {
-    return null;
-  }
-
   const { data: activity, isLoading: activityLoading } = useQuery<any[]>({
     queryKey: ["/api/activity"],
     queryFn: async () => {
       const res = await apiRequest("GET", "/api/activity?limit=50");
       return res.json();
     },
-    enabled: open, // Only fetch when drawer is open
+    enabled: role === "admin" && open,
     retry: false,
   });
 
   const handleActivityClick = (taskId: number) => {
-    setLocation(`/tickets/${taskId}`);
+    setLocation(`/tickets?ticket=${taskId}`);
     setOpen(false);
   };
 
@@ -115,29 +111,27 @@ export function ActivityDrawer() {
     return result;
   }, [groupedActivities]);
 
+  if (role !== "admin") return null;
+
   return (
     <TooltipProvider>
+      <Sheet open={open} onOpenChange={setOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
+          <SheetTrigger asChild>
           <Button
-            onClick={() => setOpen(true)}
-            className={cn(
-              "fixed top-1/2 right-0 -translate-y-1/2 z-50",
-              "rounded-l-lg rounded-r-none",
-              "px-4 py-3",
-              "shadow-lg hover:shadow-xl",
-              "transition-all hover:scale-105"
-            )}
-            variant="default"
+            className="gap-2 px-2 lg:px-3"
+            variant="ghost"
+            aria-label="Activity"
           >
-            <Activity className="h-5 w-5" />
+            <Activity aria-hidden="true" className="h-5 w-5" /><span className="hidden xl:inline">Activity</span>
           </Button>
+          </SheetTrigger>
         </TooltipTrigger>
         <TooltipContent side="left">
           <p>Recent Activities</p>
         </TooltipContent>
       </Tooltip>
-      <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent
           side="right"
           className="!w-full sm:!w-3/4 md:!w-1/2 !max-w-none p-0"

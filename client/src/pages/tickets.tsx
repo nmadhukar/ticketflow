@@ -51,10 +51,17 @@ import {
   XCircle,
   Zap,
 } from "lucide-react";
-import { useEffect, useState, Fragment } from "react";
+import { useEffect, useState, useRef, Fragment } from "react";
 import { useTranslation } from "react-i18next";
 import { useDebounce } from "@/hooks/useDebounce";
 import TicketDetail from "../components/ticket-detail";
+import { useSearch } from "wouter";
+
+const linkedTicketId = (search: string) => {
+  const value = new URLSearchParams(search).get("ticket") || "";
+  const id = Number(value);
+  return /^\d+$/.test(value) && Number.isSafeInteger(id) && id > 0 ? id : null;
+};
 
 const getStatusIcon = (status: string) => {
   switch (status) {
@@ -93,30 +100,11 @@ const getPriorityColor = (priority: string) => {
     case "urgent":
       return "bg-destructive text-destructive-foreground";
     case "high":
-      return "bg-orange-500 text-white";
+      return "bg-orange-100 text-orange-900 dark:bg-orange-950 dark:text-orange-200";
     case "medium":
-      return "bg-yellow-500 text-white";
+      return "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200";
     case "low":
-      return "bg-green-500 text-white";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-};
-
-const getCategoryColor = (category: string) => {
-  switch (category) {
-    case "bug":
-      return "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400";
-    case "feature":
-      return "bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400";
-    case "support":
-      return "bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-400";
-    case "enhancement":
-      return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400";
-    case "incident":
-      return "bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-400";
-    case "request":
-      return "bg-teal-100 text-teal-800 dark:bg-teal-900/20 dark:text-teal-400";
+      return "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200";
     default:
       return "bg-muted text-muted-foreground";
   }
@@ -124,35 +112,43 @@ const getCategoryColor = (category: string) => {
 
 const getPriorityIcon = (priority: string) => {
   switch (priority) {
+    case "urgent":
     case "high":
-      return <AlertTriangle className="h-3 w-3 text-red-200" />;
+      return <AlertTriangle className="h-3 w-3" />;
     case "medium":
-      return <CircleDot className="h-3 w-3 text-yellow-200" />;
+      return <CircleDot className="h-3 w-3" />;
     case "low":
-      return <CheckCircle className="h-3 w-3 text-green-200" />;
+      return <CheckCircle className="h-3 w-3" />;
     default:
-      return <CircleDot className="h-3 w-3 text-slate-200" />;
+      return <CircleDot className="h-3 w-3" />;
   }
 };
 
 const getCategoryIcon = (category: string) => {
   switch (category) {
     case "bug":
-      return <AlertTriangle className="h-3 w-3 text-red-500" />;
+      return <AlertTriangle className="h-3 w-3" />;
     case "feature":
-      return <Zap className="h-3 w-3 text-blue-500" />;
+      return <Zap className="h-3 w-3" />;
     case "support":
-      return <User className="h-3 w-3 text-purple-500" />;
+      return <User className="h-3 w-3" />;
     case "enhancement":
-      return <Target className="h-3 w-3 text-green-500" />;
+      return <Target className="h-3 w-3" />;
     case "incident":
-      return <AlertTriangle className="h-3 w-3 text-orange-500" />;
+      return <AlertTriangle className="h-3 w-3" />;
     case "request":
-      return <FileText className="h-3 w-3 text-blue-500" />;
+      return <FileText className="h-3 w-3" />;
     default:
-      return <Tag className="h-3 w-3 text-slate-400" />;
+      return <Tag className="h-3 w-3 text-muted-foreground" />;
   }
 };
+
+const PriorityBadge = ({ priority }: { priority: string }) => (
+  <Badge variant="outline" className={cn("flex w-fit items-center gap-1 text-xs capitalize", getPriorityColor(priority))}>
+    {getPriorityIcon(priority)}
+    <span>{priority}</span>
+  </Badge>
+);
 
 export default function Tasks() {
   const { toast } = useToast();
@@ -160,9 +156,11 @@ export default function Tasks() {
   const queryClient = useQueryClient();
   const { t } = useTranslation(["common", "tickets"]);
   const currentUserId = (user as any)?.id as string | undefined;
+  const search = useSearch();
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<any>(null);
-  const [expandedTicketId, setExpandedTicketId] = useState<number | null>(null);
+  const [expandedTicketId, setExpandedTicketId] = useState<number | null>(() => linkedTicketId(search));
+  const detailRef = useRef<HTMLElement>(null);
   const [draggedTask, setDraggedTask] = useState<any | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const debouncedSearch = useDebounce(searchInput, 500);
@@ -176,38 +174,56 @@ export default function Tasks() {
   const pageSize = 20;
   const [showMine, setShowMine] = useState(false);
 
-  // Update filters when debounced search changes
   useEffect(() => {
-    setFilters((prev) => ({ ...prev, search: debouncedSearch }));
-  }, [debouncedSearch]);
+    setExpandedTicketId(linkedTicketId(search));
+  }, [search]);
 
   useEffect(() => {
-    // Reset to first page when filters change
-    setPage(0);
-    // Collapse any expanded detail when filters change
+    if (expandedTicketId !== null) detailRef.current?.scrollIntoView?.({ block: "start" });
+  }, [expandedTicketId]);
+
+  const openTicketDetail = (id: number) => {
+    if (expandedTicketId === id) {
+      detailRef.current?.scrollIntoView?.({ block: "start" });
+      detailRef.current?.focus({ preventScroll: true });
+    }
+    setExpandedTicketId(id);
+    const url = new URL(window.location.href);
+    url.searchParams.set("ticket", String(id));
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+  };
+
+  const closeTicketDetail = () => {
     setExpandedTicketId(null);
-  }, [filters.search, filters.status, filters.category]);
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("ticket")) {
+      url.searchParams.delete("ticket");
+      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  };
+
+  const changeFilter = (field: "status" | "category" | "priority", value: string) => {
+    setPage(0);
+    setFilters((prev) => ({ ...prev, [field]: value }));
+  };
+
+  // Update filters when debounced search changes
+  useEffect(() => {
+    setPage(0);
+    setFilters((prev) => ({ ...prev, search: debouncedSearch }));
+  }, [debouncedSearch]);
 
   const params = new URLSearchParams();
   if (filters.status && filters.status !== "all")
     params.set("status", filters.status);
   if (filters.category && filters.category !== "all")
     params.set("category", filters.category);
+  if (filters.priority !== "all") params.set("priority", filters.priority);
   if (filters.search) params.set("search", filters.search);
   params.set("limit", String(pageSize));
   params.set("offset", String(page * pageSize));
   const baseUrl = showMine ? "/api/tasks/my" : "/api/tasks";
-  const tasksUrl = showMine ? baseUrl : `${baseUrl}?${params.toString()}`;
-
-  useEffect(() => {
-    setPage(0);
-    setExpandedTicketId(null);
-  }, [showMine]);
-
-  useEffect(() => {
-    // Ensure active query refetches immediately when toggling views
-    queryClient.invalidateQueries({ queryKey: [tasksUrl] });
-  }, [showMine, tasksUrl, queryClient]);
+  const tasksUrl = `${baseUrl}?${params.toString()}`;
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -228,11 +244,13 @@ export default function Tasks() {
     data: tasks,
     isLoading: tasksLoading,
     isFetching: isFetchingTasks,
+    error: tasksError,
+    refetch: refetchTasks,
   } = useQuery<any[]>({
     queryKey: [tasksUrl],
     retry: false,
     enabled: isAuthenticated,
-    initialData: [],
+    staleTime: 0,
     refetchOnMount: "always",
   });
 
@@ -242,12 +260,21 @@ export default function Tasks() {
     mutationFn: async (taskId: number) => {
       await apiRequest("DELETE", `/api/tasks/${taskId}`);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/tasks/my"] });
+    onSuccess: (_, deletedId) => {
+      if (expandedTicketId === deletedId) closeTicketDetail();
+      const deletedPath = `/api/tasks/${deletedId}`;
+      queryClient.removeQueries({
+        predicate: ({ queryKey }) =>
+          queryKey[0] === deletedPath ||
+          (typeof queryKey[0] === "string" && queryKey[0].startsWith(`${deletedPath}/`)) ||
+          (queryKey[0] === "/api/tasks" && String(queryKey[1]) === String(deletedId)),
+      });
+      queryClient.invalidateQueries({
+        predicate: ({ queryKey }) => typeof queryKey[0] === "string" && /^\/api\/tasks(?:\/my(?:-groups)?)?(?:\?|$)/.test(queryKey[0]),
+      });
       toast({
         title: t("messages.success"),
-        description: t("tickets.taskDeleted"),
+        description: t("tickets:taskDeleted"),
       });
     },
     onError: (error) => {
@@ -264,7 +291,7 @@ export default function Tasks() {
       }
       toast({
         title: t("messages.error"),
-        description: t("tickets.failedToDelete"),
+        description: t("tickets:failedToDelete"),
         variant: "destructive",
       });
     },
@@ -276,9 +303,10 @@ export default function Tasks() {
       return res.json();
     },
     onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/tasks/my"] });
-      queryClient.invalidateQueries({ queryKey: [tasksUrl] });
+      queryClient.invalidateQueries({
+        predicate: ({ queryKey }) => typeof queryKey[0] === "string" && /^\/api\/tasks(?:\/my(?:-groups)?)?(?:\?|$)/.test(queryKey[0]),
+      });
+      queryClient.invalidateQueries({ queryKey: [`/api/tasks/${variables.id}`] });
 
       // Find the task in the current list to get old assigneeTeamId
       const currentTask = tasks?.find((t: any) => t.id === variables.id);
@@ -320,6 +348,8 @@ export default function Tasks() {
   const role = (user as any)?.role as string | undefined;
   const canCreate = ["customer", "manager", "admin"].includes(role || "");
   const canDelete = role === "admin";
+  // The list is already scoped by ticket visibility; metadata narrows editable fields.
+  const canEdit = ["customer", "agent", "user", "manager", "admin"].includes(role || "");
 
   // Teams for assignment
   // - Admins: all teams
@@ -386,46 +416,17 @@ export default function Tasks() {
   };
 
   const handleEditTask = (task: any) => {
-    setExpandedTicketId(null);
     setEditingTask(task);
     setIsTaskModalOpen(true);
   };
 
   const handleDeleteTask = (taskId: number) => {
-    if (confirm(t("tickets.confirmDelete"))) {
+    if (confirm(t("tickets:confirmDelete"))) {
       deleteTaskMutation.mutate(taskId);
     }
   };
 
-  const filteredTasks = tasks?.filter((task: any) => {
-    if (
-      filters.search &&
-      !task.title.toLowerCase().includes(filters.search.toLowerCase()) &&
-      !task.description?.toLowerCase().includes(filters.search.toLowerCase()) &&
-      !task.ticketNumber?.toLowerCase().includes(filters.search.toLowerCase())
-    ) {
-      return false;
-    }
-    if (
-      filters.status &&
-      filters.status !== "all" &&
-      task.status !== filters.status
-    )
-      return false;
-    if (
-      filters.category &&
-      filters.category !== "all" &&
-      task.category !== filters.category
-    )
-      return false;
-    if (
-      filters.priority &&
-      filters.priority !== "all" &&
-      task.priority !== filters.priority
-    )
-      return false;
-    return true;
-  });
+  const filteredTasks = tasks || [];
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-US", {
@@ -453,7 +454,7 @@ export default function Tasks() {
     return new Date(dueDate) < new Date();
   };
 
-  const isLoading = tasksLoading || isFetchingTasks;
+  const isLoading = tasksLoading;
 
   if (!isAuthenticated) {
     return (
@@ -466,8 +467,6 @@ export default function Tasks() {
   return (
     <MainWrapper
       action={
-        !isLoading &&
-        !!tasks?.length &&
         canCreate && (
           <Button
             onClick={() => {
@@ -481,14 +480,19 @@ export default function Tasks() {
         )
       }
     >
+      <div className="mb-6 space-y-1">
+        <h1 className="text-balance text-2xl font-semibold tracking-tight text-foreground">{t("tickets:title")}</h1>
+        <p className="max-w-2xl text-pretty text-sm text-muted-foreground">{t("tickets:subtitle")}</p>
+      </div>
       {/* Enhanced Filters Bar */}
       <Card className="mb-6 shadow-business">
         <CardContent className="p-4">
           <div className="flex flex-col lg:flex-row gap-4">
             {/* Search */}
-            <div className="relative flex-1">
+            <div className="relative min-w-0 flex-1 lg:min-w-48">
               <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
               <Input
+                aria-label={t("tickets:filters.search")}
                 placeholder={t("tickets:filters.searchPlaceholder")}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
@@ -497,14 +501,14 @@ export default function Tasks() {
             </div>
 
             {/* Filter Controls */}
-            <div className="flex gap-3 items-center">
+            <div className="flex flex-wrap gap-3 items-center lg:shrink-0">
               <Select
                 value={filters.status}
                 onValueChange={(value) =>
-                  setFilters((prev) => ({ ...prev, status: value }))
+                  changeFilter("status", value)
                 }
               >
-                <SelectTrigger className="w-[140px] h-10">
+                <SelectTrigger aria-label={t("tickets:filters.status")} className="h-10 min-w-[130px] flex-1 sm:w-[140px] sm:flex-none">
                   <SelectValue placeholder={t("tickets:filters.status")} />
                 </SelectTrigger>
                 <SelectContent>
@@ -530,10 +534,10 @@ export default function Tasks() {
               <Select
                 value={filters.category}
                 onValueChange={(value) =>
-                  setFilters((prev) => ({ ...prev, category: value }))
+                  changeFilter("category", value)
                 }
               >
-                <SelectTrigger className="w-[140px] h-10">
+                <SelectTrigger aria-label={t("tickets:filters.category")} className="h-10 min-w-[130px] flex-1 sm:w-[140px] sm:flex-none">
                   <SelectValue placeholder={t("tickets:filters.category")} />
                 </SelectTrigger>
                 <SelectContent>
@@ -564,10 +568,10 @@ export default function Tasks() {
               <Select
                 value={filters.priority}
                 onValueChange={(value) =>
-                  setFilters((prev) => ({ ...prev, priority: value }))
+                  changeFilter("priority", value)
                 }
               >
-                <SelectTrigger className="w-[140px] h-10">
+                <SelectTrigger aria-label={t("tickets:filters.priority")} className="h-10 min-w-[130px] flex-1 sm:w-[140px] sm:flex-none">
                   <SelectValue placeholder={t("tickets:filters.priority")} />
                 </SelectTrigger>
                 <SelectContent>
@@ -577,6 +581,7 @@ export default function Tasks() {
                   <SelectItem value="high">
                     {t("common:priority.high")}
                   </SelectItem>
+                  <SelectItem value="urgent">{t("tickets:priority.urgent")}</SelectItem>
                   <SelectItem value="medium">
                     {t("common:priority.medium")}
                   </SelectItem>
@@ -592,9 +597,9 @@ export default function Tasks() {
                   id="only-my-tickets"
                   checked={showMine}
                   onCheckedChange={(v) => {
+                    setPage(0);
                     setShowMine(!!v);
                   }}
-                  disabled={isLoading}
                 />
                 <label
                   htmlFor="only-my-tickets"
@@ -607,33 +612,35 @@ export default function Tasks() {
           </div>
 
           {/* Active Filters & Stats */}
-          <div className="flex items-center justify-between mt-4 pt-4 border-t">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">
-                {filteredTasks?.length || 0} {t("tickets:filters.of")}{" "}
-                {tasks?.length || 0} {t("tickets:filters.tickets")}
+          <div className="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t">
+            <div className="flex w-full flex-wrap items-center gap-2">
+              <span className="text-sm tabular-nums text-muted-foreground" aria-live="polite">
+                {isLoading ? "Loading tickets…" : `${filteredTasks.length} ${t("tickets:filters.tickets")} on this page`}
+                {isFetchingTasks && !isLoading && " · Updating…"}
               </span>
-              {(filters.search ||
+              {(searchInput || filters.search ||
                 filters.status !== "all" ||
                 filters.category !== "all" ||
                 filters.priority !== "all") && (
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() =>
+                  onClick={() => {
+                    setSearchInput("");
+                    setPage(0);
                     setFilters({
                       search: "",
                       status: "all",
                       category: "all",
                       priority: "all",
-                    })
-                  }
-                  className="h-7 px-2"
+                    });
+                  }}
+                  className="h-10 px-3"
                 >
                   {t("tickets:filters.clearFilters")}
                 </Button>
               )}
-              {!showMine && (
+              {(
                 <>
                   <div className="ml-4 text-sm text-muted-foreground">
                     {t("tickets:filters.page")} {page + 1}
@@ -642,7 +649,7 @@ export default function Tasks() {
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={page === 0 || isLoading}
+                      disabled={page === 0 || isFetchingTasks}
                       onClick={() => setPage((p) => Math.max(0, p - 1))}
                     >
                       {t("tickets:filters.prev")}
@@ -650,7 +657,7 @@ export default function Tasks() {
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={isLoading || (tasks?.length || 0) < pageSize}
+                      disabled={isFetchingTasks || (tasks?.length || 0) < pageSize}
                       onClick={() => setPage((p) => p + 1)}
                     >
                       {t("tickets:filters.next")}
@@ -663,6 +670,19 @@ export default function Tasks() {
         </CardContent>
       </Card>
 
+      {expandedTicketId !== null && (
+        <section ref={detailRef} tabIndex={-1} className="mb-6 scroll-mt-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-lg" aria-label="Selected ticket">
+          <TicketDetail key={expandedTicketId} ticketId={expandedTicketId} onClose={closeTicketDetail} />
+        </section>
+      )}
+
+      {tasksError && (
+        <div role="alert" className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-destructive/30 bg-card p-4">
+          <p className="text-sm text-destructive">Could not load tickets. Please try again.</p>
+          <Button variant="outline" onClick={() => refetchTasks()}>Retry tickets</Button>
+        </div>
+      )}
+
       {/* Tasks Table */}
       <Card className="shadow-business">
         <CardContent className="p-0">
@@ -670,44 +690,44 @@ export default function Tasks() {
             <div className="text-center py-12">
               <div className="max-w-md mx-auto">
                 <Spinner size="lg" className="mx-auto mb-3" />
-                <p className="text-slate-500">Loading tickets...</p>
+                <p className="text-muted-foreground">Loading tickets...</p>
               </div>
             </div>
           ) : filteredTasks?.length > 0 ? (
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full table-fixed md:table-auto">
                 <thead className="bg-muted/50 border-b">
                   <tr>
-                    <th className="text-left p-4 font-medium">
+                    <th className="hidden text-left p-3 lg:table-cell lg:p-4 font-medium">
                       {t("tickets:table.columns.ticket")}
                     </th>
-                    <th className="text-left p-4 font-medium">
+                    <th className="text-left p-3 lg:p-4 font-medium">
                       {t("tickets:table.columns.title")}
                     </th>
-                    <th className="text-left p-4 font-medium">
+                    <th className="hidden text-left p-3 md:table-cell lg:p-4 font-medium">
                       {t("tickets:table.columns.priority")}
                     </th>
-                    <th className="text-left p-4 font-medium">
+                    <th className="w-[100px] text-left p-3 md:w-auto lg:p-4 font-medium">
                       {t("tickets:table.columns.status")}
                     </th>
-                    <th className="text-left p-4 font-medium">
+                    <th className="hidden text-left p-4 2xl:table-cell font-medium">
                       {t("tickets:table.columns.category")}
                     </th>
-                    <th className="min-w-max text-left p-4 font-medium ">
+                    <th className="hidden text-left p-3 md:table-cell lg:p-4 font-medium">
                       {t("tickets:table.columns.assignedTo")}
                     </th>
                     {role === "admin" && (
-                      <th className="min-w-max text-left p-4 font-medium whitespace-nowrap">
+                      <th className="hidden text-left p-4 2xl:table-cell font-medium whitespace-nowrap">
                         AI Info
                       </th>
                     )}
-                    <th className="text-left p-4 font-medium">
+                    <th className="hidden text-left p-4 2xl:table-cell font-medium">
                       {t("tickets:table.columns.dueDate")}
                     </th>
-                    <th className="text-left p-4 font-medium">
+                    <th className="hidden text-left p-4 2xl:table-cell font-medium">
                       {t("tickets:table.columns.created")}
                     </th>
-                    <th className="text-center p-4 font-medium">
+                    <th className="w-[104px] text-center p-3 md:w-auto lg:p-4 font-medium">
                       {t("tickets:table.columns.actions")}
                     </th>
                   </tr>
@@ -721,7 +741,7 @@ export default function Tasks() {
                         onDragStart={(e) => handleDragStart(e, task)}
                       >
                         <td
-                          className="p-4"
+                          className="hidden p-3 lg:table-cell lg:p-4"
                           onDragOver={handleDragOver}
                           onDrop={(e) =>
                             handleDrop(
@@ -731,68 +751,62 @@ export default function Tasks() {
                             )
                           }
                         >
-                          <Badge
-                            variant="outline"
-                            className="font-mono text-xs"
+                          <span
+                            className="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground"
                           >
                             <span className="min-w-max">
                               {task.ticketNumber}
                             </span>
-                          </Badge>
+                          </span>
                         </td>
-                        <td className="p-4">
-                          <div>
-                            <p
-                              className="font-medium line-clamp-1 cursor-pointer hover:text-primary hover:underline"
-                              onClick={() => handleEditTask(task)}
+                        <td className="min-w-0 p-3 lg:p-4">
+                          <div className="min-w-0">
+                            <p className="truncate whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground lg:hidden" title={task.ticketNumber}>{task.ticketNumber}</p>
+                            <button
+                              type="button"
+                              className="min-h-10 max-w-sm break-words text-left text-sm font-semibold leading-snug text-foreground hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+                              aria-expanded={expandedTicketId === task.id}
+                              onClick={() => openTicketDetail(task.id)}
                             >
                               {task.title}
-                            </p>
+                            </button>
                             {task.description && (
-                              <p className="text-sm text-muted-foreground line-clamp-2 mt-1 w-56">
+                              <p className="hidden text-sm text-muted-foreground mt-1 max-w-sm md:line-clamp-2">
                                 {task.description}
                               </p>
                             )}
+                            <div className="mt-1 md:hidden"><PriorityBadge priority={task.priority} /></div>
                           </div>
                         </td>
-                        <td className="p-4 w-fit">
-                          <Badge
-                            className={cn(
-                              "min-w-max flex items-center gap-1 w-fit text-xs lowercase shadow-sm",
-                              getPriorityColor(task.priority)
-                            )}
-                          >
-                            <span> {getPriorityIcon(task.priority)}</span>
-                            <span> {task.priority?.toUpperCase()}</span>
-                          </Badge>
+                        <td className="hidden p-3 md:table-cell lg:p-4">
+                          <PriorityBadge priority={task.priority} />
                         </td>
-                        <td className="p-4">
+                        <td className="p-3 lg:p-4">
                           <Badge
+                            variant="outline"
                             className={cn(
-                              "min-w-max flex items-center gap-1 w-fit text-xs lowercase shadow-sm",
+                              "flex items-center gap-1 w-fit text-xs capitalize",
                               getStatusColor(task.status)
                             )}
                           >
-                            <span> {getStatusIcon(task.status)}</span>
-                            <span>
-                              {task.status?.replace("_", " ").toUpperCase()}
+                            <span className="hidden shrink-0 sm:inline-flex">{getStatusIcon(task.status)}</span>
+                            <span className="whitespace-normal">
+                              {task.status?.replace(/_/g, " ")}
                             </span>
                           </Badge>
                         </td>
-                        <td className="p-4">
-                          <Badge
-                            className={`${getCategoryColor(
-                              task.category
-                            )} border flex items-center gap-1 text-xs w-fit lowercase shadow-sm`}
+                        <td className="hidden p-4 2xl:table-cell">
+                          <span
+                            className="flex items-center gap-1.5 text-sm capitalize text-muted-foreground"
                           >
                             <span> {getCategoryIcon(task.category)}</span>
-                            <span> {task.category?.toUpperCase()}</span>
-                          </Badge>
+                            <span> {task.category}</span>
+                          </span>
                         </td>
-                        <td className="p-4">
+                        <td className="hidden p-3 md:table-cell lg:p-4">
                           {task.assigneeType === "team" &&
                           task.assigneeTeamId ? (
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground w-32 break-all">
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground max-w-32 break-words">
                               <Users className="min-w-4 min-h-4 h-4 w-4" />
                               <span>
                                 {task.teamName ||
@@ -801,7 +815,7 @@ export default function Tasks() {
                               </span>
                             </div>
                           ) : task.assigneeId ? (
-                            <div className="flex items-center gap-2 text-sm text-muted-foreground w-32 break-all">
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground max-w-32 break-words">
                               <User className="min-w-4 min-h-4 h-4 w-4" />
                               <span>
                                 {task.assigneeName || task.assigneeId}
@@ -814,7 +828,7 @@ export default function Tasks() {
                           )}
                         </td>
                         {role === "admin" && (
-                          <td className="p-4 whitespace-nowrap">
+                          <td className="hidden p-4 whitespace-nowrap 2xl:table-cell">
                             {task.hasAutoResponse ? (
                               <div className="flex items-center gap-2">
                                 <Brain className="h-4 w-4 text-primary" />
@@ -840,7 +854,7 @@ export default function Tasks() {
                             )}
                           </td>
                         )}
-                        <td className="p-4 whitespace-nowrap">
+                        <td className="hidden p-4 whitespace-nowrap 2xl:table-cell">
                           {task.dueDate ? (
                             <div
                               className={`min-w-max text-sm ${
@@ -857,7 +871,7 @@ export default function Tasks() {
                             </span>
                           )}
                         </td>
-                        <td className=" p-4">
+                        <td className="hidden p-4 2xl:table-cell">
                           <div className="text-sm text-muted-foreground">
                             <p className="min-w-max">
                               {task.createdByName ||
@@ -869,19 +883,15 @@ export default function Tasks() {
                             </span>
                           </div>
                         </td>
-                        <td className="p-4">
-                          <div className="flex items-center justify-center gap-2">
+                        <td className="p-3 lg:p-4">
+                          <div className="flex items-center justify-center gap-0 sm:gap-2">
                             <Button
                               variant="ghost"
                               size="sm"
                               aria-label="View ticket"
                               aria-expanded={expandedTicketId === task.id}
-                              onClick={() => {
-                                setExpandedTicketId((prev) =>
-                                  prev === task.id ? null : task.id
-                                );
-                              }}
-                              className="h-8 w-8 p-0"
+                              onClick={() => openTicketDetail(task.id)}
+                              className="h-10 w-10 p-0"
                             >
                               <Eye className="h-4 w-4" />
                             </Button>
@@ -891,12 +901,7 @@ export default function Tasks() {
                                 (role === "admin" || role === "manager") &&
                                 (teams || []).length > 0;
                               const hasUpdateStatus = canUpdateStatus(task);
-                              const hasEditTicket = !(
-                                role === "agent" &&
-                                !showMine &&
-                                (task.assigneeType !== "user" ||
-                                  task.assigneeId !== currentUserId)
-                              );
+                              const hasEditTicket = canEdit;
                               const hasDelete = canDelete;
 
                               const hasAnyActions =
@@ -916,7 +921,7 @@ export default function Tasks() {
                                       variant="ghost"
                                       size="sm"
                                       aria-label="Ticket actions"
-                                      className="h-8 w-8 p-0"
+                                      className="h-10 w-10 p-0"
                                     >
                                       <MoreVertical className="h-4 w-4" />
                                     </Button>
@@ -1007,13 +1012,7 @@ export default function Tasks() {
                                         </DropdownMenuSubContent>
                                       </DropdownMenuSub>
                                     )}
-                                    {/* Hide Edit Ticket for agents when viewing all tickets and ticket is not directly assigned to them */}
-                                    {!(
-                                      role === "agent" &&
-                                      !showMine &&
-                                      (task.assigneeType !== "user" ||
-                                        task.assigneeId !== currentUserId)
-                                    ) && (
+                                    {canEdit && (
                                       <DropdownMenuItem
                                         onClick={() => {
                                           handleEditTask(task);
@@ -1041,36 +1040,21 @@ export default function Tasks() {
                           </div>
                         </td>
                       </tr>
-                      {expandedTicketId === task.id && (
-                        <tr className="bg-gray-300">
-                          <td
-                            className="p-4"
-                            colSpan={
-                              role === "admin" || role === "manager" ? 10 : 9
-                            }
-                          >
-                            <TicketDetail
-                              ticketId={task.id}
-                              onClose={() => setExpandedTicketId(null)}
-                            />
-                          </td>
-                        </tr>
-                      )}
                     </Fragment>
                   ))}
                 </tbody>
               </table>
             </div>
-          ) : (
+          ) : !tasksError ? (
             <div className="text-center py-12">
               <div className="max-w-md mx-auto">
-                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <FileText className="h-8 w-8 text-slate-400" />
+                <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+                  <FileText className="h-8 w-8 text-muted-foreground" />
                 </div>
-                <h3 className="text-lg font-medium text-slate-900 mb-2">
+                <h3 className="text-lg font-medium text-foreground mb-2">
                   {showMine ? "No tickets assigned" : "No tickets found"}
                 </h3>
-                <p className="text-slate-500 mb-6">
+                <p className="text-muted-foreground mb-6">
                   {filters.search ||
                   filters.status !== "all" ||
                   filters.category !== "all" ||
@@ -1090,7 +1074,7 @@ export default function Tasks() {
                         setEditingTask(null);
                         setIsTaskModalOpen(true);
                       }}
-                      className="bg-blue-600 hover:bg-blue-700"
+                      className="bg-primary hover:bg-primary/90"
                     >
                       <Plus className="h-4 w-4 mr-2" />
                       Create First Ticket
@@ -1098,7 +1082,7 @@ export default function Tasks() {
                   )}
               </div>
             </div>
-          )}
+          ) : null}
         </CardContent>
       </Card>
 

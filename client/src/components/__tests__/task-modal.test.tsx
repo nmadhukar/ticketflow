@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import TaskModal from "../task-modal";
 
@@ -41,7 +41,7 @@ const META = {
   assignableUsers: [],
   categories: ["bug", "support"],
   priorities: ["low", "medium", "high"],
-  permissions: {},
+  permissions: { allowedFields: ["title", "description", "category", "priority", "notes", "dueDate"], allowedAssigneeTypes: ["user", "team"] },
 };
 
 function json(body: unknown) {
@@ -56,7 +56,7 @@ function renderModal(props: Partial<React.ComponentProps<typeof TaskModal>> = {}
       <TaskModal isOpen onClose={onClose} {...props} />
     </QueryClientProvider>
   );
-  return { onClose };
+  return { onClose, client };
 }
 
 describe("TaskModal", () => {
@@ -84,6 +84,51 @@ describe("TaskModal", () => {
     expect(screen.queryByText("tickets:modal.createTitle")).not.toBeInTheDocument();
   });
 
+  it("blocks submission until metadata loads and offers retry after failure", async () => {
+    mockApiRequest.mockRejectedValueOnce(new Error("Offline"));
+    renderModal();
+    expect(screen.getByText("tickets:modal.buttons.create")).toBeDisabled();
+    const retry = await screen.findByRole("button", { name: "Retry ticket form" });
+    expect(screen.getByText("tickets:modal.buttons.create")).toBeDisabled();
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.getByText("tickets:modal.buttons.create")).toBeEnabled());
+  });
+
+  it("waits for edit permissions and details, then preserves edits across metadata refresh", async () => {
+    const task = { id: 7, title: "Original title", description: "", category: "bug", priority: "medium", status: "open" };
+    let resolveMeta!: (value: unknown) => void;
+    mockApiRequest.mockImplementation((method: string, url: string) => {
+      if (url === "/api/tickets/7/meta") return new Promise((resolve) => { resolveMeta = resolve; });
+      if (url === "/api/tasks/7") return Promise.resolve(json(task));
+      throw new Error(`unexpected ${method} ${url}`);
+    });
+    const { client } = renderModal({ task });
+    expect(screen.getByLabelText("tickets:modal.fields.taskTitle")).toHaveAttribute("readonly");
+    await act(async () => resolveMeta(json(META)));
+    const title = screen.getByLabelText("tickets:modal.fields.taskTitle");
+    await waitFor(() => expect(title).not.toHaveAttribute("readonly"));
+    fireEvent.change(title, { target: { value: "My unsaved change" } });
+    await act(async () => { client.setQueryData(["ticket-meta", { id: 7 }], { ...META, teams: [{ id: 1, name: "Support" }] }); });
+    await act(async () => { client.setQueryData(["/api/tasks/7"], { ...task, title: "Background update" }); });
+    expect(title).toHaveValue("My unsaved change");
+  });
+
+  it("honors edit metadata even for an admin and only sends permitted fields", async () => {
+    const task = { id: 7, title: "Original title", description: "", category: "bug", priority: "medium", status: "open", notes: "Original note" };
+    mockApiRequest.mockImplementation(async (method: string, url: string) => {
+      if (url === "/api/tickets/7/meta") return json({ ...META, permissions: { allowedFields: ["notes"], allowedAssigneeTypes: [] } });
+      if (url === "/api/tasks/7") return json(task);
+      throw new Error(`unexpected ${method} ${url}`);
+    });
+    renderModal({ task });
+    const save = screen.getByText("tickets:modal.buttons.update");
+    await waitFor(() => expect(save).toBeEnabled());
+    expect(screen.getByLabelText("tickets:modal.fields.taskTitle")).toHaveAttribute("readonly");
+    fireEvent.change(screen.getByRole("textbox", { name: "tickets:modal.sections.notes" }), { target: { value: "" } });
+    fireEvent.click(save);
+    await waitFor(() => expect(mockApiRequest).toHaveBeenCalledWith("PATCH", "/api/tasks/7", { notes: "" }));
+  });
+
   it("calls onClose when Cancel is clicked", () => {
     const { onClose } = renderModal();
     fireEvent.click(screen.getByText("tickets:modal.buttons.cancel"));
@@ -92,6 +137,7 @@ describe("TaskModal", () => {
 
   it("blocks submit and reports a missing title", async () => {
     renderModal();
+    await waitFor(() => expect(screen.getByText("tickets:modal.buttons.create")).toBeEnabled());
 
     fireEvent.click(screen.getByText("tickets:modal.buttons.create"));
 
@@ -103,6 +149,7 @@ describe("TaskModal", () => {
 
   it("blocks submit and reports a missing category once a title is entered", async () => {
     renderModal();
+    await waitFor(() => expect(screen.getByText("tickets:modal.buttons.create")).toBeEnabled());
 
     fireEvent.change(screen.getByLabelText("tickets:modal.fields.taskTitle"), {
       target: { value: "Printer is on fire" },
@@ -117,6 +164,7 @@ describe("TaskModal", () => {
 
   it("posts the entered values to /api/tasks on a valid submit", async () => {
     renderModal();
+    await waitFor(() => expect(screen.getByText("tickets:modal.buttons.create")).toBeEnabled());
 
     fireEvent.change(screen.getByLabelText("tickets:modal.fields.taskTitle"), {
       target: { value: "  Printer is on fire " },

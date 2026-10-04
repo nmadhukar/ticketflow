@@ -1643,12 +1643,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/notifications", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
-      const limit = req.query.limit ? parseInt(req.query.limit) : 5;
-      const unreadOnly = (req.query.read as string) === "false";
-      if (!unreadOnly) {
-        // For now, only support unread in this minimal implementation
+      const rawLimit = req.query.limit;
+      if (rawLimit !== undefined && (typeof rawLimit !== "string" || !/^\d+$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 100)) {
+        return fail(res, 400, "limit must be an integer between 1 and 100");
       }
-      const notifications = await storage.getUnreadNotifications(userId, limit);
+      const limit = rawLimit === undefined ? 5 : Number(rawLimit);
+      // History is explicit so existing unread polling clients and MCP parity remain unchanged.
+      const notifications = req.query.read === "all"
+        ? await storage.listNotifications(userId, { unreadOnly: false, limit })
+        : await storage.getUnreadNotifications(userId, limit);
       res.json(notifications);
     } catch (error) {
       logRouteError("Error fetching notifications", error);

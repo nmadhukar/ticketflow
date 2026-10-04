@@ -12,8 +12,22 @@ interface WebSocketMessage {
 }
 
 /** The lists and counters a ticket change can alter. */
-function invalidateTicketQueries() {
-  queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+function invalidateTicketQueries(ticketId?: number) {
+  queryClient.invalidateQueries({
+    predicate: ({ queryKey }) => {
+      const [path, id] = queryKey;
+      if (typeof path !== "string" || !/^\/api\/tasks(?:[/?]|$)/.test(path)) return false;
+      // Reconnection must also recover detail events missed while offline.
+      if (ticketId === undefined) return true;
+      // Older consumers use ["/api/tasks", id, "comments"] rather than one URL.
+      if (path === "/api/tasks" && (typeof id === "number" || (typeof id === "string" && /^\d+$/.test(id)))) {
+        return String(id) === String(ticketId);
+      }
+      if (/^\/api\/tasks(?:\/my(?:-groups)?)?(?:\?|$)/.test(path)) return true;
+      const ticketPath = `/api/tasks/${ticketId}`;
+      return path === ticketPath || path.startsWith(`${ticketPath}/`) || path.startsWith(`${ticketPath}?`);
+    },
+  });
   queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
   queryClient.invalidateQueries({ queryKey: ["/api/stats/agent"] });
   queryClient.invalidateQueries({ queryKey: ["/api/stats/manager"] });
@@ -200,13 +214,7 @@ export function useWebSocket() {
       case "ticket_updated": {
         // The server only sends this to users who can see the ticket. Refetch that
         // ticket (and its comments, history) and every list that may contain it.
-        const ticketId = (message as any).ticketId;
-        if (ticketId !== undefined && ticketId !== null) {
-          queryClient.invalidateQueries({ queryKey: [`/api/tasks/${ticketId}`] });
-          queryClient.invalidateQueries({ queryKey: [`/api/tasks/${ticketId}/comments`] });
-          queryClient.invalidateQueries({ queryKey: [`/api/tasks/${ticketId}/history`] });
-        }
-        invalidateTicketQueries();
+        invalidateTicketQueries(message.ticketId);
         // The event carries no team or department, so refresh every team's task list
         // and the department stats (prefix match on the query keys).
         queryClient.invalidateQueries({ queryKey: ["/api/teams"] });

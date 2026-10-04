@@ -27,6 +27,7 @@ for (const name of [
   "E2E_CUSTOMER_A_PASSWORD",
   "E2E_CUSTOMER_B_PASSWORD",
   "E2E_AGENT_PASSWORD",
+  "E2E_MANAGER_PASSWORD",
   "E2E_ADMIN_PASSWORD",
 ]) {
   process.env[name] ??= secret();
