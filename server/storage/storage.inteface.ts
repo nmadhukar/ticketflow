@@ -486,7 +486,13 @@ export interface IStorage {
     userId: string,
     limit?: number
   ): Promise<Notification[]>;
-  markNotificationRead(id: number): Promise<void>;
+  /** The user's own notifications, newest first; `since` keeps those created after it. */
+  listNotifications(
+    userId: string,
+    opts: { unreadOnly: boolean; since?: Date; limit: number }
+  ): Promise<Notification[]>;
+  /** Marks the user's OWN unread notifications read (`ids`, or all when omitted); returns how many changed. */
+  markNotificationsRead(userId: string, ids?: number[]): Promise<number>;
   markAllNotificationsRead(userId: string): Promise<void>;
   createNotification(notification: InsertNotification): Promise<Notification>;
 

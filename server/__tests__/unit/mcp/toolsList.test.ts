@@ -11,7 +11,12 @@ jest.mock("../../../services/tickets/ticketService", () => ({
   reopenTicket: jest.fn(),
   deleteTicket: jest.fn(),
   addComment: jest.fn(),
+  getTicketHistory: jest.fn(),
+  LIST_MAX_LIMIT: 100,
 }));
+// The app tools (MCP2) read through storage and workspaceReads, which reach the database too.
+jest.mock("../../../storage", () => ({ storage: {} }));
+jest.mock("../../../services/workspaceReads", () => ({}));
 
 import { createMcpServer } from "../../../mcp/server";
 import { TicketError } from "../../../services/tickets/ticketError";
@@ -28,7 +33,7 @@ async function connect() {
 }
 
 describe("MCP tools/list", () => {
-  it("lists exactly the eight ticket tools, each with a description and an object input schema", async () => {
+  it("lists exactly the eight ticket tools and the twelve app tools (MCP2), each with a description and an object input schema", async () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
@@ -41,6 +46,18 @@ describe("MCP tools/list", () => {
         "list_tickets",
         "reopen_ticket",
         "update_ticket",
+        "whoami",
+        "list_users",
+        "list_teams",
+        "get_team",
+        "list_departments",
+        "search_knowledge",
+        "get_knowledge_article",
+        "get_stats",
+        "list_notifications",
+        "mark_notifications_read",
+        "list_activity",
+        "get_ticket_history",
       ].sort()
     );
     for (const t of tools) {
@@ -53,7 +70,17 @@ describe("MCP tools/list", () => {
   it("I2: every by-id tool advertises `id` as required, with a type, so a client or model cannot leave it out", async () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
-    for (const name of ["get_ticket", "update_ticket", "close_ticket", "reopen_ticket", "delete_ticket", "add_comment"]) {
+    for (const name of [
+      "get_ticket",
+      "update_ticket",
+      "close_ticket",
+      "reopen_ticket",
+      "delete_ticket",
+      "add_comment",
+      "get_team",
+      "get_knowledge_article",
+      "get_ticket_history",
+    ]) {
       const schema = tools.find((t) => t.name === name)!.inputSchema as {
         required?: string[];
         properties: Record<string, { type?: unknown; anyOf?: Array<{ type?: string }> }>;

@@ -44,7 +44,7 @@ beforeEach(async () => {
 });
 
 describe("POST /api/mcp authentication", () => {
-  it("lists the eight tools for a valid key and sets no cookie and no session row", async () => {
+  it("lists every tool for a valid key and sets no cookie and no session row", async () => {
     const owner = await createUser({ role: "agent" });
     const { plaintext } = await issueApiKey({ userId: owner.id, name: "k" });
     const before = (await db.select().from(sessions)).length;
@@ -56,10 +56,22 @@ describe("POST /api/mcp authentication", () => {
       "close_ticket",
       "create_ticket",
       "delete_ticket",
+      "get_knowledge_article",
+      "get_stats",
+      "get_team",
       "get_ticket",
+      "get_ticket_history",
+      "list_activity",
+      "list_departments",
+      "list_notifications",
+      "list_teams",
       "list_tickets",
+      "list_users",
+      "mark_notifications_read",
       "reopen_ticket",
+      "search_knowledge",
       "update_ticket",
+      "whoami",
     ]);
     expect((await db.select().from(sessions)).length).toBe(before);
   });

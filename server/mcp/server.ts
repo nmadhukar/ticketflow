@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { User } from "@shared/schema";
 import { registerTicketTools } from "./tools";
+import { registerAppTools } from "./appTools";
 
 /**
  * A fresh MCP server for ONE request, acting as `user` (the owner of the API
@@ -9,5 +10,6 @@ import { registerTicketTools } from "./tools";
 export function createMcpServer(user: User, ip?: string): McpServer {
   const server = new McpServer({ name: "ticketflow", version: "1.0.0" });
   registerTicketTools(server, user, ip);
+  registerAppTools(server, user);
   return server;
 }

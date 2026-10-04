@@ -476,6 +476,45 @@ All endpoints return consistent error format:
 - `429`: Too Many Requests (rate limited)
 - `500`: Internal Server Error
 
+### MCP Server
+
+`POST /api/mcp` is a stateless Model Context Protocol server for agents holding an API key with
+the `mcp:tickets` permission. The full contract (errors, argument rules, every tool's arguments
+and result) is section 15 of `API_ENDPOINTS_REFERENCE.md`. Code: `server/mcp/` (`tools.ts` for
+tickets, `appTools.ts` for the rest, `args.ts` for id and paging parsing).
+
+Tools: `create_ticket`, `get_ticket`, `list_tickets`, `update_ticket` (also assigns), `close_ticket`,
+`reopen_ticket`, `delete_ticket`, `add_comment`, `get_ticket_history`, `whoami`, `list_users`,
+`list_teams`, `get_team`, `list_departments`, `search_knowledge`, `get_knowledge_article`,
+`get_stats`, `list_activity`, `list_notifications`, `mark_notifications_read`.
+
+Rulings:
+
+- **R85, one scope.** Every tool rides on `mcp:tickets`; there is no other MCP permission and no
+  key-scope UI for it. A key reads what its owner sees in the UI (teams, users, KB, stats,
+  notifications), nothing more.
+- **R86, same rules as REST.** A tool calls the rule its REST route calls, for the key owner's
+  role. A rule that was inline in a route handler lives in `server/services/workspaceReads.ts`
+  and both adapters call it. Never restate a permission rule in a tool.
+- **R87, no admin writes on MCP**: users (create, delete, role, approve), settings, SSO, email
+  providers, API keys, Teams settings, invitations.
+- **R88, notifications are pulled**: `list_notifications` (`unreadOnly`, `since`, `limit`) and
+  `mark_notifications_read` (own notifications only).
+
+Example client configuration (Streamable HTTP; the key comes from the environment):
+
+```json
+{
+  "mcpServers": {
+    "ticketflow": {
+      "type": "http",
+      "url": "https://{{host}}/api/mcp",
+      "headers": { "Authorization": "Bearer ${TICKETFLOW_API_KEY}" }
+    }
+  }
+}
+```
+
 ## Configuration & Environment
 
 ### Environment Variables

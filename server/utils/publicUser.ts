@@ -37,6 +37,25 @@ export function toPublicUser<T extends Partial<User>>(u: T): PublicUser {
   return out as PublicUser;
 }
 
+/**
+ * The signed-in user's view of their own account: GET /api/auth/user and the MCP whoami tool.
+ * An explicit list, so no secret column (password hash, reset token, lockout state) can leave.
+ */
+export function selfView(user: User) {
+  return {
+    id: user.id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    role: user.role,
+    mustChangePassword: user.mustChangePassword === true,
+    profileImageUrl: user.profileImageUrl,
+    phone: user.phone,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+}
+
 /** Who is looking: their id (to recognise their own row) and role. */
 export interface Viewer {
   id?: string | null;

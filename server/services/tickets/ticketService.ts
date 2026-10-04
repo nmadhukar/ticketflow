@@ -203,6 +203,23 @@ export async function getTicket(
   });
 }
 
+/**
+ * A ticket's history, oldest first: GET /api/tasks/:id/history. The access rule is get_ticket's
+ * (assertTaskAccess: unknown NOT_FOUND, not visible FORBIDDEN), and each actor is projected for
+ * this viewer (R41).
+ */
+export async function getTicketHistory(user: User, id: number) {
+  assertId(id);
+  return guard(async () => {
+    await assertTaskAccess(user, id);
+    const history = await storage.getTaskHistory(id);
+    return history.map((h) => ({
+      ...h,
+      user: h.user ? projectUserForViewer(user, h.user) : undefined,
+    }));
+  });
+}
+
 const listQuerySchema = z
   .object({
     status: z.enum(TICKET_STATUSES).optional(),

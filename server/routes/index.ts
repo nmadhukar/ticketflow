@@ -87,7 +87,6 @@ import {
   desc,
   and,
   or,
-  ilike,
   count,
   avg,
   sum,
@@ -95,7 +94,7 @@ import {
   inArray,
   getTableColumns,
 } from "drizzle-orm";
-import { teams, departments, users } from "@shared/schema";
+import { teams, users } from "@shared/schema";
 import { excludeSystemAccounts, ensureAiSystemUser } from "../utils/aiSystemUser";
 import { describeAIError, isQuotaBlocked, sendQuotaExceeded } from "../services/ai/aiErrors";
 import { requireStaff, isStaffRole } from "../permissions/staff";
@@ -117,7 +116,7 @@ import {
   requireTaskAccess,
   ticketVisibilityWhere,
 } from "../permissions/ticketAccess";
-import { HttpError, asyncHandler, fail, logRouteError } from "../http/errors";
+import { HttpError, asyncHandler, fail, logRouteError, sendHttpError } from "../http/errors";
 import { autoResponseCommentBody, findAutoResponseComment } from "../services/ai/autoResponseComment";
 import { projectUserForViewer } from "../utils/publicUser";
 import { toPublicInvitation } from "../utils/publicInvitation";
@@ -129,9 +128,16 @@ import {
   createTicket,
   deleteTicket,
   getTicket,
+  getTicketHistory,
   prepareTicketCreate,
   updateTicket,
 } from "../services/tickets/ticketService";
+import {
+  assertMayListUsers,
+  listDepartmentsFor,
+  listUsersFor,
+  searchKnowledgeArticles,
+} from "../services/workspaceReads";
 import { TicketError, ticketErrorToHttp } from "../services/tickets/ticketError";
 import { notifyCommentAdded } from "../services/tickets/notifier";
 import { createMcpRouter } from "../mcp/router";
@@ -142,7 +148,6 @@ import {
 import { registerEmailRoutes } from "./email";
 import { parseIdParam } from "../http/params";
 import { sanitizeRichHtml } from "../security/sanitizeHtml";
-import { containsPattern } from "../utils/like";
 import { registerTeamsRoutes } from "./teams";
 import { registerIdParams } from "../http/install";
 import {
@@ -270,17 +275,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Users route
   app.get("/api/users", isAuthenticated, async (req: any, res) => {
     try {
-      // Staff only. normalizeRole reads the legacy role "user" as agent.
+      // Staff only (workspaceReads.assertMayListUsers, the rule the MCP list_users tool uses).
       // One lookup of the requester, used for both the staff check and the picker below.
-      const requesterRole = normalizeRole(
-        (await storage.getUser(getUserId(req)))?.role
-      );
-      if (
-        !requesterRole ||
-        !["admin", "manager", "agent"].includes(requesterRole)
-      ) {
-        return fail(res, 403, "Forbidden");
-      }
+      const requester = await storage.getUser(getUserId(req));
+      assertMayListUsers(requester?.role);
+      const requesterRole = normalizeRole(requester?.role);
       // R41: an agent sees no other user's phone (their own row keeps it).
       const viewer = { id: getUserId(req), role: requesterRole };
       const forTeamMemberSelection =
@@ -319,9 +318,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Default: return all users (backward compatible)
-      const allUsers = await storage.getAllUsers();
-      res.json(allUsers.map((u) => projectUserForViewer(viewer, u)));
+      res.json(await listUsersFor({ id: getUserId(req), role: requester!.role }));
     } catch (error) {
+      if (error instanceof HttpError) return sendHttpError(res, error);
       logRouteError("Error fetching users", error);
       fail(res, 500, "Failed to fetch users");
     }
@@ -801,15 +800,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Ticket history (same access rule as GET /api/tasks/:id), oldest first.
   app.get("/api/tasks/:id/history", isAuthenticated, requireTaskAccess(), async (req: any, res, next) => {
     try {
-      const history = await storage.getTaskHistory(parseInt(req.params.id));
-      res.json(
-        history.map((h) => ({
-          ...h,
-          user: h.user ? projectUserForViewer(req.user, h.user) : undefined,
-        }))
-      );
+      // ticketService.getTicketHistory: the rule and projection the MCP get_ticket_history tool uses.
+      res.json(await getTicketHistory(req.user, parseInt(req.params.id)));
     } catch (error) {
-      next(error);
+      next(ticketErrorToHttp(error));
     }
   });
 
@@ -1668,7 +1662,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     async (req: any, res) => {
       try {
         const id = parseInt(req.params.id);
-        await storage.markNotificationRead(id);
+        // Only the caller's own notification: someone else's id matches nothing (the MCP
+        // mark_notifications_read tool uses the same storage call).
+        await storage.markNotificationsRead(getUserId(req), [id]);
         res.json({ success: true });
       } catch (error) {
         logRouteError("Error marking notification read", error);
@@ -2946,34 +2942,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return fail(res, 401, "Unauthorized");
       }
 
-      if (user.role === "admin") {
-        // Admins can see all departments (active and inactive)
-        const rows = await storage.getAllDepartmentsIncludingInactive();
-        return res.json(rows);
-      }
-
-      if (user.role === "manager") {
-        const rows = await db
-          .select()
-          .from(departments)
-          .where(
-            and(
-              eq(departments.isActive, true),
-              eq(departments.managerId as any, userId) as any
-            )
-          )
-          .orderBy(departments.name);
-        return res.json(rows);
-      }
-
-      // Ruling R40: every signed-in user can list departments; agents and
-      // customers get only id and name of the active ones.
-      const rows = await db
-        .select({ id: departments.id, name: departments.name })
-        .from(departments)
-        .where(eq(departments.isActive, true))
-        .orderBy(departments.name);
-      return res.json(rows);
+      // Admin: all (inactive too); manager: the active ones it manages; everyone else (R40):
+      // id and name of the active ones. workspaceReads.listDepartmentsFor, shared with MCP.
+      return res.json(await listDepartmentsFor(user));
     } catch (error) {
       logRouteError("Error fetching departments", error);
       fail(res, 500, "Failed to fetch departments");
@@ -4008,42 +3979,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Knowledge Base Routes
 
   // Search knowledge base
-  const knowledgeListSearchQuery = z.object({
-    query: z.string().max(200).optional(),
-    category: z.string().max(100).optional(),
-    limit: z.coerce.number().int().min(1).max(100).default(10),
-  });
-
   app.get("/api/knowledge/search", isAuthenticated, async (req, res, next) => {
     try {
-      const parsed = knowledgeListSearchQuery.safeParse(req.query);
-      if (!parsed.success) {
-        throw parsed.error;
-      }
-      const { query, category, limit } = parsed.data;
-
-      const articles = await db
-        .select()
-        .from(knowledgeArticles)
-        .where(
-          and(
-            eq(knowledgeArticles.isPublished, true),
-            query
-              ? or(
-                  ilike(knowledgeArticles.title, containsPattern(query)),
-                  ilike(knowledgeArticles.content, containsPattern(query))
-                )
-              : undefined,
-            category ? eq(knowledgeArticles.category, category) : undefined
-          )
-        )
-        .orderBy(
-          desc(knowledgeArticles.effectivenessScore),
-          desc(knowledgeArticles.usageCount)
-        )
-        .limit(limit);
-
-      res.json(articles);
+      // workspaceReads.searchKnowledgeArticles, shared with the MCP search_knowledge tool.
+      res.json(await searchKnowledgeArticles(req.query));
     } catch (error) {
       // A ZodError becomes 400 validation_failed in the JSON error handler.
       if (error instanceof z.ZodError) return next(error);

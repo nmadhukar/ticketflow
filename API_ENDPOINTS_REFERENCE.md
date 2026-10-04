@@ -476,7 +476,7 @@ Secrets are **never returned**. The response says only whether one is stored.
 | Admin users | `GET /api/admin/users`, `PATCH /api/admin/users/:userId` (role/profile; 409 `last_admin` when it would leave no active admin, 409 `self_demotion` for your own account, 409 `email_in_use`, 400 `invalid_role`), `POST .../toggle-status`, `POST .../approve` (404 `user_not_found` for an unknown id), `POST .../reset-password` (session only; returns `{tempPassword}` once with `Cache-Control: no-store`, sets `mustChangePassword`, ends the user's sessions; 409 `no_local_password` for SSO or system accounts). |
 | Invitations | Admin: `GET|POST /api/admin/invitations` (`role` whitelist, `expiresAt` must be in the future and within 30 days, default 7 days; 400 `invalid_expiry` / `invalid_role`), `DELETE /api/admin/invitations/:id`, `POST .../:id/resend`. Public: `GET /api/invitations/:token`, `POST /api/invitations/:token/accept` (an anonymous caller gets `{registrationRequired:true, email, registerPath}` and no account; a signed-in user whose email matches is promoted). Claiming an invitation is atomic. Tokens are 32 random bytes and are redacted from request logs. The admin responses never include the token (R33): it travels only in the emailed link, built on `APP_BASE_URL` (R34). |
 | Statistics | `GET /api/stats`, `GET /api/stats/agent`, `GET /api/stats/manager`, `GET /api/stats/global` (admin only), `GET /api/admin/stats` (admin only), `GET /api/activity?limit=` (only events of tickets the caller can see). Counts follow the same visibility rule as the lists. `GET /api/stats/manager` returns `totalTickets`, `priorityDistribution` and `categoryBreakdown` over the manager's `/api/stats` scope (tickets they created, are assigned, or that are queued or assigned within their departments), plus `personal: {assignedToMe, createdByMe}`; its `department` and `teamPerformance` blocks count only tickets queued to the department's teams. |
-| Notifications | `GET /api/notifications`, `PATCH /api/notifications/:id/read`, `PATCH /api/notifications/read-all`. |
+| Notifications | `GET /api/notifications` (the caller's own, unread only), `PATCH /api/notifications/:id/read` (the caller's own only: another user's id changes nothing and still answers `{success:true}`), `PATCH /api/notifications/read-all`. |
 | Email templates | `GET /api/email-templates`, `PUT /api/email-templates/:name`. |
 | Health | `GET /health`, `GET /api/security/health` (outside `/api` JSON contract; no auth). |
 | Interactive docs | The `/api-docs` page of the web app. |
@@ -550,6 +550,21 @@ request, no session id, JSON responses).
 - Every tool acts as the key's owner and applies the same service rules as REST
   (visibility, field table, workflow, delete rule).
 
+Rulings for the app tools (MCP2):
+
+- **R85, one scope.** Every tool, ticket or not, rides on `mcp:tickets`. There is no other MCP
+  permission. A key therefore also reads teams, users, the knowledge base, stats, activity and
+  notifications: exactly what its owner sees in the UI, nothing more.
+- **R86, same rules as REST.** Each tool calls the rule its REST route calls (the shared
+  functions in `server/services/workspaceReads.ts`, `ticketService` and `storage`), as the key's
+  owner, and returns the same projection (`projectUserForViewer`, no secret fields). A customer
+  gets what REST gives a customer.
+- **R87, no admin writes.** User create, delete, role change and approve, settings, SSO, email
+  providers, API keys, Teams settings and invitations are not on MCP. A leaked key must not be an
+  admin takeover.
+- **R88, notifications are pulled.** MCP has no push: an agent polls `list_notifications` (with
+  `since`) and clears with `mark_notifications_read`. Ticket events are also in `list_activity`.
+
 Tool results are JSON text. On success `isError` is absent. On failure the result has
 `isError: true` and the text is `{"code","message","details?"}` with `code` one of:
 
@@ -579,6 +594,21 @@ or `.offset`.
 | `reopen_ticket` | `id` | The ticket back to `open`. Staff, or the customer who created it; an open ticket is `INVALID_STATE`. |
 | `delete_ticket` | `id`, `confirm` (must be the boolean `true`) | `{deleted:true, id, ticketNumber}`. Admin only (manager only with `ALLOW_MANAGER_DELETE=true`). Without a literal `true` it is `VALIDATION` and nothing is deleted. |
 | `add_comment` | `id`, `content` (1-10000 characters) | The comment. |
+| `whoami` | none | The key owner as `GET /api/auth/user` shows them, plus `name` and `teams` (`[{id, name}]`, the teams they belong to; empty for a customer). |
+| `list_users` | `search?` (first name, last name or email), `limit` (1-100, default 25), `offset` | `{users, total, returned, limit, offset, hasMore}`, the users `GET /api/users` returns to the owner. Staff only: a customer is `FORBIDDEN`. |
+| `list_teams` | `mine?` | `{teams}`: `GET /api/teams` for an admin or manager; `GET /api/teams/my` for anyone else (REST refuses agents the full list), or for any role with `mine: true`. A customer is `FORBIDDEN`. |
+| `get_team` | `id`; `includeMembers?` | The team, as `GET /api/teams/:id` (customer `FORBIDDEN`). With `includeMembers: true` it adds `members` as `GET /api/teams/:id/members` returns them, under that route's rule (an agent not on the team, or a manager outside its department, is `FORBIDDEN`). |
+| `list_departments` | none | `{departments}`, as `GET /api/departments` for the owner's role. |
+| `search_knowledge` | `query?`, `category?`, `limit` (1-100, default 10) | `{articles}`, as `GET /api/knowledge/search` (published only). |
+| `get_knowledge_article` | `id` | One article that a non-admin REST route already lists (`is_published` or status `published`); anything else is `NOT_FOUND`. |
+| `get_stats` | none | The counts `GET /api/stats` returns to the owner (same scope). |
+| `list_activity` | `limit` (1-100, default 10) | `{activity}`, as `GET /api/activity` (events of tickets the owner can see). |
+| `get_ticket_history` | `id` | `{ticketId, history}`, as `GET /api/tasks/:id/history`. Same access as `get_ticket`: unknown `NOT_FOUND`, not visible `FORBIDDEN`. |
+| `list_notifications` | `unreadOnly?` (default true), `since?` (ISO 8601 date-time, only newer), `limit` (1-100, default 25) | `{notifications, returned, limit, hasMore}`: the owner's own, newest first. |
+| `mark_notifications_read` | `ids` (array of ids) or `all: true`, not both | `{marked}`: how many of the owner's own unread notifications were marked. Another user's id is not counted and not changed. |
+
+Assigning a ticket needs no tool of its own: `update_ticket` with `assigneeId`/`assigneeType`/
+`assigneeTeamId` is `PATCH /api/tasks/:id` (same field table and rules).
 
 A refused status change over MCP is written to the security audit log like the REST one, with the
 caller's IP and `channel: "mcp"`.
@@ -593,6 +623,24 @@ curl -X POST {{baseUrl}}/api/mcp \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_tickets","arguments":{"status":"open","limit":10}}}'
 ```
+
+Example client configuration (an MCP client that speaks Streamable HTTP, such as Claude Code's
+`.mcp.json`). Keep the key in an environment variable, never in the file:
+
+```json
+{
+  "mcpServers": {
+    "ticketflow": {
+      "type": "http",
+      "url": "https://{{host}}/api/mcp",
+      "headers": { "Authorization": "Bearer ${TICKETFLOW_API_KEY}" }
+    }
+  }
+}
+```
+
+A polling agent (R88) calls `list_notifications` with `since` set to the newest `createdAt` it
+has seen, and `list_activity` for ticket events.
 
 ## 16. Rate limits
 

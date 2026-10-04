@@ -2976,11 +2976,38 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
-  async markNotificationRead(id: number): Promise<void> {
-    await db
+  async listNotifications(
+    userId: string,
+    opts: { unreadOnly: boolean; since?: Date; limit: number }
+  ): Promise<Notification[]> {
+    return await db
+      .select()
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          opts.unreadOnly ? eq(notifications.isRead, false) : undefined,
+          opts.since ? gt(notifications.createdAt, opts.since) : undefined
+        )
+      )
+      .orderBy(desc(notifications.createdAt), desc(notifications.id))
+      .limit(opts.limit);
+  }
+
+  async markNotificationsRead(userId: string, ids?: number[]): Promise<number> {
+    // Scoped to the owner: an id that belongs to someone else matches nothing.
+    const changed = await db
       .update(notifications)
       .set({ isRead: true })
-      .where(eq(notifications.id, id));
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          eq(notifications.isRead, false),
+          ids ? inArray(notifications.id, ids) : undefined
+        )
+      )
+      .returning({ id: notifications.id });
+    return changed.length;
   }
 
   async markAllNotificationsRead(userId: string): Promise<void> {

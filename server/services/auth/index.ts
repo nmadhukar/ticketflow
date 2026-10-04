@@ -29,6 +29,7 @@ import { EMAIL_PROVIDERS } from "@shared/constants";
 import { requireSecret } from "../../security/secrets";
 import { publicBaseUrl } from "../../utils/appBaseUrl";
 import { isAiSystemUserId } from "../../utils/aiSystemUserId";
+import { selfView } from "../../utils/publicUser";
 import { ServerResponse, type IncomingMessage } from "http";
 import { disconnectUser } from "../../realtime/connections";
 import { fail, logRouteError } from "../../http/errors";
@@ -603,19 +604,8 @@ export function setupAuth(app: Express) {
       return fail(res, 401, "Not authenticated");
     }
 
-    const user = req.user;
-    res.json({
-      id: user.id,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      role: user.role,
-      mustChangePassword: user.mustChangePassword === true,
-      profileImageUrl: user.profileImageUrl,
-      phone: user.phone,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
-    });
+    // selfView: the projection the MCP whoami tool returns too.
+    res.json(selfView(req.user));
   });
 
   // Forgot password endpoint
