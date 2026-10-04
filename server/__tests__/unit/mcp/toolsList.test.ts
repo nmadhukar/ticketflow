@@ -18,6 +18,7 @@ jest.mock("../../../services/tickets/ticketService", () => ({
 jest.mock("../../../storage", () => ({ storage: {} }));
 jest.mock("../../../services/workspaceReads", () => ({}));
 
+import { TICKET_CATEGORIES } from "@shared/constants";
 import { createMcpServer } from "../../../mcp/server";
 import { TicketError } from "../../../services/tickets/ticketError";
 import * as service from "../../../services/tickets/ticketService";
@@ -65,6 +66,21 @@ describe("MCP tools/list", () => {
       expect((t.description ?? "").length).toBeGreaterThan(10);
       expect(t.inputSchema.type).toBe("object");
     }
+  });
+
+  it("create_ticket advertises title and category as required, and names every allowed category", async () => {
+    // Found by a DeepSeek Harness agent on 2026-10-04: with both listed as optional the model sent a
+    // title alone and every create failed with VALIDATION "category: Required".
+    const { client } = await connect();
+    const { tools } = await client.listTools();
+    const schema = tools.find((t) => t.name === "create_ticket")!.inputSchema as {
+      required?: string[];
+      properties: Record<string, { type?: unknown; description?: string }>;
+    };
+    expect(schema.required ?? []).toEqual(expect.arrayContaining(["title", "category"]));
+    expect(schema.properties.title.type).toBe("string");
+    expect(schema.properties.category.type).toBe("string");
+    for (const c of TICKET_CATEGORIES) expect(schema.properties.category.description).toContain(c);
   });
 
   it("I2: every by-id tool advertises `id` as required, with a type, so a client or model cannot leave it out", async () => {

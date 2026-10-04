@@ -515,6 +515,25 @@ Example client configuration (Streamable HTTP; the key comes from the environmen
 }
 ```
 
+DeepSeek Harness (`@deepseek-ai/dsh-mcp-client`), as one entry in a profile's `cordis.patch.yml`; the
+tools then appear as `mcp__ticketflow__<tool>`. From a container on Docker Desktop, a TicketFlow stack on
+the same PC is reached through `host.docker.internal`:
+
+```yaml
+- insert:
+    - id: mcp-ticketflow
+      name: "@deepseek-ai/dsh-mcp-client"
+      config:
+        serverName: ticketflow
+        transport: streamable-http
+        url: http://host.docker.internal:8088/api/mcp
+        headers:
+          Authorization: !!js "`Bearer ${process.env.TICKETFLOW_MCP_KEY}`"
+```
+
+Checked end to end on 2026-10-04: a DeepSeek Harness agent called all 20 tools with an admin, two agent
+and a customer key, and every result matched the REST answer for the same user.
+
 ## Configuration & Environment
 
 ### Environment Variables
