@@ -2,10 +2,9 @@ import {
   departments,
   insertTeamSchema,
   teams,
-  teamAdmins,
   teamMembers,
 } from "@shared/schema";
-import { and, desc, eq, not, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Express, Request } from "express";
 import { isAuthenticated } from "server/services/auth";
 import { db } from "server/storage/db";
@@ -18,7 +17,14 @@ import {
 } from "server/permissions/teams";
 import { storage } from "server/storage";
 import { assertTaskAccess, type AccessUser } from "server/permissions/ticketAccess";
-import { HttpError, fail, logRouteError } from "server/http/errors";
+import { HttpError, fail, logRouteError, sendHttpError } from "server/http/errors";
+import {
+  assertMayViewTeamMembers,
+  getTeamFor,
+  listMyTeamsFor,
+  listTeamsFor,
+  presentTeamMembers,
+} from "server/services/workspaceReads";
 import type { TaskAssignmentBinding } from "server/storage/storage.inteface";
 import { projectUserForViewer } from "server/utils/publicUser";
 import { z } from "zod";
@@ -63,86 +69,13 @@ export function registerTeamsRoutes(app: Express): void {
   // Team routes
   app.get("/api/teams", isAuthenticated, async (req: any, res) => {
     try {
+      // workspaceReads.listTeamsFor, the rule the MCP list_teams tool uses: customers 403, admin
+      // every team, manager its managed teams, agents 403 (they use /api/teams/my).
       const userId = getUserId(req);
-      const user: any = await storage.getUser(userId);
-
-      // Customers cannot access teams
-      if (user?.role === "customer") {
-        return fail(res, 403, "Customers cannot access teams");
-      }
-
-      if (["admin", "customer"].includes(user?.role)) {
-        const allTeams = await storage.getTeams();
-        return res.json(allTeams);
-      }
-
-      if (user?.role === "manager") {
-        // Get team IDs where manager is admin
-        const adminTeamIds = await db
-          .select({ teamId: teamAdmins.teamId })
-          .from(teamAdmins)
-          .where(eq(teamAdmins.userId, userId));
-
-        // Get team IDs where manager is member
-        const memberTeamIds = await db
-          .select({ teamId: teamMembers.teamId })
-          .from(teamMembers)
-          .where(eq(teamMembers.userId, userId));
-
-        // Combine team IDs (remove duplicates)
-        const allTeamIds = Array.from(
-          new Set([
-            ...adminTeamIds.map((t) => t.teamId),
-            ...memberTeamIds.map((t) => t.teamId),
-          ])
-        );
-
-        if (allTeamIds.length === 0) {
-          return res.json([]);
-        }
-
-        // Get full team data, excluding teams created by the manager
-        // Optionally scope to teams in departments managed by the manager
-        const managedTeams = await db
-          .select({
-            id: teams.id,
-            name: teams.name,
-            description: teams.description,
-            departmentId: teams.departmentId,
-            createdAt: teams.createdAt,
-            createdBy: teams.createdBy,
-          })
-          .from(teams)
-          .where(
-            and(inArray(teams.id, allTeamIds), not(eq(teams.createdBy, userId)))
-          )
-          .orderBy(desc(teams.createdAt));
-
-        // Filter to only teams in departments managed by this manager
-        // Since departmentId is now required, all teams will have a department
-        const filteredTeams = [];
-        for (const team of managedTeams) {
-          const [department] = await db
-            .select()
-            .from(departments)
-            .where(
-              and(
-                eq(departments.id, team.departmentId),
-                eq(departments.managerId as any, userId)
-              )
-            )
-            .limit(1);
-          if (department) {
-            filteredTeams.push(team);
-          }
-        }
-
-        return res.json(filteredTeams);
-      }
-
-      // Agents/Users: forbid listing all teams; use /api/teams/my
-      return fail(res, 403, "Forbidden");
+      const user = await storage.getUser(userId);
+      return res.json(await listTeamsFor({ id: userId, role: user?.role ?? null }));
     } catch (error) {
+      if (error instanceof HttpError) return sendHttpError(res, error);
       logRouteError("Error fetching teams", error);
       fail(res, 500, "Failed to fetch teams");
     }
@@ -151,26 +84,13 @@ export function registerTeamsRoutes(app: Express): void {
   // Get user's teams (teams the user is a member of)
   app.get("/api/teams/my", isAuthenticated, async (req: any, res) => {
     try {
+      // workspaceReads.listMyTeamsFor (shared with MCP): customers 403, a manager the teams it
+      // created, anyone else the teams it is a member of.
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
-      if (user?.role === "customer") {
-        return fail(res, 403, "Customers cannot access teams");
-      }
-
-      // For managers, return teams created by them
-      if (user?.role === "manager") {
-        const createdTeams = await db
-          .select()
-          .from(teams)
-          .where(eq(teams.createdBy, userId))
-          .orderBy(desc(teams.createdAt));
-        return res.json(createdTeams);
-      }
-
-      // For agents/other roles, return teams where user is a member
-      const userTeams = await storage.getUserTeams(userId);
-      res.json(userTeams);
+      res.json(await listMyTeamsFor({ id: userId, role: user?.role ?? null }));
     } catch (error) {
+      if (error instanceof HttpError) return sendHttpError(res, error);
       logRouteError("Error fetching user teams", error);
       fail(res, 500, "Failed to fetch user teams");
     }
@@ -282,15 +202,10 @@ export function registerTeamsRoutes(app: Express): void {
       if (!viewer) {
         return fail(res, 404, "User not found", { code: "user_not_found" });
       }
-      if (viewer.role === "customer") {
-        return fail(res, 403, "Customers cannot access teams");
-      }
-      const team = await storage.getTeam(teamId);
-      if (!team) {
-        return fail(res, 404, "Team not found");
-      }
-      res.json(team);
+      // workspaceReads.getTeamFor (shared with MCP get_team): customers 403, unknown 404.
+      res.json(await getTeamFor(viewer, teamId));
     } catch (error) {
+      if (error instanceof HttpError) return sendHttpError(res, error);
       logRouteError("Error fetching team", error);
       fail(res, 500, "Failed to fetch team");
     }
@@ -311,40 +226,9 @@ export function registerTeamsRoutes(app: Express): void {
         return fail(res, 404, "User not found", { code: "user_not_found" });
       }
 
-      // Check if user has permission to view team members
-      if (user.role === "customer") {
-        return fail(res, 403, "Customers cannot access team members");
-      }
-
-      // For agents, check if they're a member of the team
-      if (user.role === "agent") {
-        const userTeams = await storage.getUserTeams(userId);
-        const isMember = userTeams.some((team) => team.id === teamId);
-        if (!isMember) {
-          return fail(res, 403, "You can only view members of teams you belong to");
-        }
-      }
-
-      // For managers, check if they manage a department that contains this team
-      if (user.role === "manager") {
-        const team = await storage.getTeam(teamId);
-        if (team?.departmentId) {
-          const departmentResults = await db
-            .select()
-            .from(departments)
-            .where(
-              and(
-                eq(departments.id, team.departmentId),
-                eq(departments.managerId as any, userId)
-              )
-            );
-          if (departmentResults.length === 0) {
-            return fail(res, 403, "You can only view members of teams in your departments");
-          }
-        }
-      }
-
-      // Admin and authorized users can proceed
+      // workspaceReads.assertMayViewTeamMembers (shared with MCP get_team): customers 403, an
+      // agent only for its own teams, a manager only for teams in its departments.
+      await assertMayViewTeamMembers(user, teamId);
       const members = await storage.getTeamMembers(teamId);
 
       // If taskId is provided, filter out members already assigned to this task
@@ -370,20 +254,8 @@ export function registerTeamsRoutes(app: Express): void {
         );
       }
 
-      // Add isAdmin flag to each member (remove role field from response)
-      const membersWithAdminFlag = await Promise.all(
-        filteredMembers.map(async (member) => {
-          const { role: _role, ...memberWithoutRole } = member;
-          const isAdmin = await storage.isTeamAdmin(member.userId, teamId);
-          return {
-            ...memberWithoutRole,
-            user: projectUserForViewer(user, memberWithoutRole.user),
-            isAdmin,
-          };
-        })
-      );
-
-      res.json(membersWithAdminFlag);
+      // isAdmin flag, no member role, the user projected for the viewer (shared with MCP get_team).
+      res.json(await presentTeamMembers(user, teamId, filteredMembers));
     } catch (error) {
       if (error instanceof HttpError) return next(error);
       logRouteError("Error fetching team members", error);

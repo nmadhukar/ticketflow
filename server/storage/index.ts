@@ -2976,11 +2976,44 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
-  async markNotificationRead(id: number): Promise<void> {
-    await db
+  async listNotifications(
+    userId: string,
+    opts: { unreadOnly: boolean; since?: Date; limit: number }
+  ): Promise<Notification[]> {
+    return await db
+      .select()
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          opts.unreadOnly ? eq(notifications.isRead, false) : undefined,
+          // created_at holds microseconds but a client's cursor comes back in milliseconds:
+          // compare at millisecond precision, or the newest row repeats on every poll. The column
+          // is UTC wall-clock `timestamp`; pass the ISO string as drizzle's own mapping does (a raw
+          // Date param would be sent in the server's local zone).
+          opts.since
+            ? sql`date_trunc('milliseconds', ${notifications.createdAt}) > ${opts.since.toISOString()}::timestamp`
+            : undefined
+        )
+      )
+      .orderBy(desc(notifications.createdAt), desc(notifications.id))
+      .limit(opts.limit);
+  }
+
+  async markNotificationsRead(userId: string, ids?: number[]): Promise<number> {
+    // Scoped to the owner: an id that belongs to someone else matches nothing.
+    const changed = await db
       .update(notifications)
       .set({ isRead: true })
-      .where(eq(notifications.id, id));
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          eq(notifications.isRead, false),
+          ids ? inArray(notifications.id, ids) : undefined
+        )
+      )
+      .returning({ id: notifications.id });
+    return changed.length;
   }
 
   async markAllNotificationsRead(userId: string): Promise<void> {
