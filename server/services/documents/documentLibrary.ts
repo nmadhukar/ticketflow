@@ -59,25 +59,31 @@ export const SNIPPET_CHARS = 300;
 const SNIPPET_LEAD = 120;
 export const SEARCH_MAX_TERMS = 12;
 
-/** Common English words that carry no meaning in a search ("How do I set the key?" searches set, key). */
+/**
+ * Common English words that carry no meaning in a search ("How do I set the key?" searches set,
+ * key). Review N4: "it", "us", "am" and "no" are NOT here: IT is a department, US a country, AM a
+ * time and NO an abbreviation, and a lower-cased query cannot tell them apart.
+ */
 const STOPWORDS = new Set(
   (
-    "a about after all also am an and any are as at be been before being but by can could did do does doing " +
-    "for from get had has have having he her here hers him his how i if in into is it its just let me might " +
-    "more most must my no nor not of off on once only or other our ours out over please shall she should so " +
+    "a about after all also an and any are as at be been before being but by can could did do does doing " +
+    "for from get had has have having he her here hers him his how i if in into is its just let me might " +
+    "more most must my nor not of off on once only or other our ours out over please shall she should so " +
     "some such than that the their theirs them then there these they this those through to too under until " +
-    "up us very was we were what when where which while who whom whose why will with would you your yours"
+    "up very was we were what when where which while who whom whose why will with would you your yours"
   ).split(" ")
 );
 
-/**
- * The keywords of a query (review I2): lower-cased words (letters and digits; punctuation, LIKE
- * wildcards included, separates words), without stopwords and one-character words, each once, at
- * most SEARCH_MAX_TERMS. "How do I set the DoseSpot clinic key?" gives set, dosespot, clinic, key.
- */
 // Unicode letters and digits make words (built with the constructor: the test tsconfig targets ES5 for the `u` literal check).
 const NON_WORD = new RegExp("[^\\p{L}\\p{N}]+", "u");
 
+/**
+ * The search terms of a query (reviews I2 and N4): lower-cased words (letters and digits;
+ * punctuation, LIKE wildcards included, separates words), without stopwords and one-character
+ * words, each once, at most SEARCH_MAX_TERMS. "How do I set the DoseSpot clinic key?" gives set,
+ * dosespot, clinic, key. When that leaves nothing ("AT&T", "C++", "how do I"), the whole trimmed,
+ * lower-cased query is the one term, matched as a phrase; only an empty query has no term.
+ */
 export function searchTerms(query: string): string[] {
   const terms: string[] = [];
   for (const word of query.toLowerCase().split(NON_WORD)) {
@@ -85,7 +91,9 @@ export function searchTerms(query: string): string[] {
     terms.push(word);
     if (terms.length === SEARCH_MAX_TERMS) break;
   }
-  return terms;
+  if (terms.length > 0) return terms;
+  const phrase = query.trim().toLowerCase();
+  return phrase ? [phrase] : [];
 }
 
 export interface SearchHit {

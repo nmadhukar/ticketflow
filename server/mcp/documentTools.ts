@@ -71,15 +71,9 @@ function present(args: Record<string, unknown>): Record<string, unknown> {
 }
 
 const searchInput = z.object({
-  // Review I2: the query is split into keywords; one with none (only stopwords or punctuation) is refused, not matched to nothing.
-  query: z
-    .string()
-    .trim()
-    .min(1, "Required")
-    .max(200)
-    .refine((q) => searchTerms(q).length > 0, {
-      message: "Use at least one keyword, e.g. \"DoseSpot clinic key\" (common words such as how, do, the are ignored)",
-    }),
+  // Reviews I2 and N4: the query is split into keywords; one with none ("AT&T") is searched as a
+  // phrase, so only an empty or whitespace-only query is refused.
+  query: z.string().trim().min(1, "Required: the key words to find, e.g. \"DoseSpot clinic key\"").max(200),
   type: z.enum(DOCUMENT_TYPES, { errorMap: () => ({ message: `Must be one of: ${TYPE_LIST}` }) }).optional(),
   limit: z.number().int().min(1).max(SEARCH_MAX_LIMIT).default(10),
 });
@@ -112,9 +106,9 @@ export function registerDocumentTools(server: McpServer, user: User): void {
   server.registerTool(
     "search_documents",
     {
-      description: `Search the organisation's documents: help documents (type help), company policies (policy), guidelines (guideline, the user guides) and knowledge articles (knowledge). Use it BEFORE answering a how-to, setup or policy question, then read the best hit with get_document. Search with the key words of the question, e.g. "DoseSpot clinic key": each word is matched separately (case-insensitive, also inside longer words) in the title, description or summary, content and the text of an uploaded file, and a document matching ANY of them is returned. Common words (how, do, I, the...) are ignored. Documents matching more of the words come first, then those with the words in the title, then the newest. If nothing fits, try other words or synonyms. Only documents the key's owner can read in the app are searched (drafts and inactive policies only for those REST shows them to). Returns {results: [{type, id, title, category, snippet, published, matchedTerms}], returned, terms}.`,
+      description: `Search the organisation's documents: help documents (type help), company policies (policy), guidelines (guideline, the user guides) and knowledge articles (knowledge). Use it BEFORE answering a how-to, setup or policy question, then read the best hit with get_document. Search with the key words of the question, e.g. "DoseSpot clinic key": each word is matched separately (case-insensitive, also inside longer words) in the title, description or summary, content and the text of an uploaded file, and a document matching ANY of them is returned. Common words (how, do, I, the...) are ignored; a query with no other word (e.g. "AT&T") is searched as one phrase. Documents matching more of the words come first, then those with the words in the title, then the newest. If nothing fits, try other words or synonyms. Only documents the key's owner can read in the app are searched (drafts and inactive policies only for those REST shows them to). Returns {results: [{type, id, title, category, snippet, published, matchedTerms}], returned, terms}.`,
       inputSchema: lenient({
-        query: str("The key words to find, e.g. \"DoseSpot clinic key\" (1-200 characters; common words are ignored, at most 12 key words)"),
+        query: str("The key words to find, e.g. \"DoseSpot clinic key\" (1-200 characters; common words are ignored, at most 12 key words; with no other word the query is one phrase)"),
         type: str(`Only this kind of document, one of: ${TYPE_LIST}`).optional(),
         limit: anyValue().describe(`Results, 1-${SEARCH_MAX_LIMIT} (default 10); a number or a numeric string`).optional(),
       }),

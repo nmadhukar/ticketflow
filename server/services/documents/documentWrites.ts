@@ -3,7 +3,8 @@ import type { User } from "@shared/schema";
 import { storage } from "../../storage";
 import { HttpError } from "../../http/errors";
 import { sanitizeRichHtml } from "../../security/sanitizeHtml";
-import { decodeFileData, extractDocumentText, extractableType, EXTRACTED_TEXT_MAX_CHARS, type ExtractableType } from "./extractText";
+import { decodeFileData, extractableType, EXTRACTED_TEXT_MAX_CHARS, type ExtractableType } from "./extractText";
+import { fillHelpDocumentText, fillPolicyText } from "./documentText";
 import {
   assertContentAdmin,
   presentGuide,
@@ -24,8 +25,9 @@ import { GUIDE_TYPES, mcpUploadLimitBytes, mcpUploadLimitMb } from "./types";
  *
  * A file arrives as base64 (`fileBase64`) with its `filename`: .docx, .pdf, .txt or .md, at most
  * mcpUploadLimitBytes() (the REST upload limit, or what base64 fits in the JSON request limit:
- * 36 MB at the defaults, review M6). Its text is extracted with the shared helper (R90, in the
- * bounded worker); a file that gives no text stores '' ("tried, nothing extractable"). A document
+ * 36 MB at the defaults, review M6). The row is stored with extracted_text '' ("tried") first and
+ * the file's text, extracted by the shared helper in its bounded process (R90, review N1/N2),
+ * replaces it when it arrives; a file that gives no text keeps ''. A document
  * with no file stores its text in `content` and an empty file_data (both columns are NOT NULL);
  * the policy download route then serves the content. R94: MCP may create a policy from text alone,
  * although the REST upload route requires a file (an agent cannot easily attach one).
@@ -49,13 +51,12 @@ const validation = (field: string, message: string) =>
 interface DecodedFile {
   filename: string;
   base64: string;
+  buffer: Buffer;
   size: number;
   mimeType: string;
-  /** The file's text; '' when it gives none (tried, nothing extractable). */
-  extractedText: string;
 }
 
-/** Validates and decodes an uploaded file, then extracts its text. */
+/** Validates and decodes an uploaded file. Its text is extracted after the row is stored (review N2). */
 async function decodeUpload(filename: string, fileBase64: string): Promise<DecodedFile> {
   const type = extractableType(filename);
   if (!type) throw validation("filename", "filename must end in .docx, .pdf, .txt or .md");
@@ -72,9 +73,9 @@ async function decodeUpload(filename: string, fileBase64: string): Promise<Decod
   return {
     filename,
     base64: buffer.toString("base64"),
+    buffer,
     size: buffer.length,
     mimeType: MIME_BY_TYPE[type],
-    extractedText: (await extractDocumentText({ filename, data: buffer })) ?? "",
   };
 }
 
@@ -200,11 +201,13 @@ export async function createHelpDocumentAs(user: User, input: z.input<typeof hel
     filename: file?.filename ?? textFileName(v.title),
     content: v.content,
     fileData: file?.base64 ?? "",
-    extractedText: file?.extractedText ?? null,
+    // '' = tried (review N2); NULL with no file, which the backfill skips (file_data is '').
+    extractedText: file ? "" : null,
     category: v.category,
     tags: v.tags,
     uploadedBy: user.id,
   });
+  if (file) doc.extractedText = await fillHelpDocumentText(doc.id, { filename: file.filename, data: file.buffer });
   return presentHelpDocument(doc);
 }
 
@@ -218,8 +221,9 @@ export async function updateHelpDocumentAs(user: User, id: number, input: z.inpu
     category: v.category,
     content: v.content,
     tags: v.tags,
-    ...(file ? { filename: file.filename, fileData: file.base64, extractedText: file.extractedText } : {}),
+    ...(file ? { filename: file.filename, fileData: file.base64, extractedText: "" } : {}),
   });
+  if (file) doc.extractedText = await fillHelpDocumentText(id, { filename: file.filename, data: file.buffer });
   return presentHelpDocument(doc);
 }
 
@@ -235,13 +239,14 @@ export async function createPolicyAs(user: User, input: z.input<typeof policyCre
     description: v.description,
     content,
     fileData: file?.base64 ?? "",
-    extractedText: file?.extractedText ?? null,
+    extractedText: file ? "" : null,
     fileName: file?.filename ?? textFileName(v.title),
     fileSize: file?.size ?? Buffer.byteLength(content ?? "", "utf8"),
     mimeType: file?.mimeType ?? "text/plain",
     uploadedBy: user.id,
     isActive: v.isActive ?? true,
   });
+  if (file) policy.extractedText = await fillPolicyText(policy.id, { filename: file.filename, data: file.buffer });
   return presentPolicy(policy);
 }
 
@@ -262,7 +267,7 @@ export async function updatePolicyAs(user: User, id: number, input: z.input<type
     // old content (kept only when new content comes with it).
     Object.assign(update, {
       fileData: file.base64,
-      extractedText: file.extractedText,
+      extractedText: "",
       fileName: file.filename,
       fileSize: file.size,
       mimeType: file.mimeType,
@@ -272,7 +277,9 @@ export async function updatePolicyAs(user: User, id: number, input: z.input<type
     // A policy with no file is downloaded as its content: keep the size in step.
     update.fileSize = Buffer.byteLength(v.content, "utf8");
   }
-  return presentPolicy(await storage.updateCompanyPolicy(id, update));
+  const policy = await storage.updateCompanyPolicy(id, update);
+  if (file) policy.extractedText = await fillPolicyText(id, { filename: file.filename, data: file.buffer });
+  return presentPolicy(policy);
 }
 
 // ---------------------------------------------------------------- guides (POST/PUT /api/admin/guides)

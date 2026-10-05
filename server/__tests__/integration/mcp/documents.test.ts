@@ -9,7 +9,7 @@ import { resetDb } from "../helpers/testDb";
 import { createUser, loginAs } from "../helpers/fixtures";
 import { mcpFor, type McpCaller } from "../helpers/mcpClient";
 import { findSecrets } from "../helpers/noSecrets";
-import { documentXml, makeDocx, makePdf } from "../../utils/documentFiles";
+import { documentXml, inflatingDocx, inflatingPdf, makeDocx, makePdf } from "../../utils/documentFiles";
 
 /**
  * Task MCP4 (R89-R92): the organisation's documents on MCP. Help documents, company policies,
@@ -589,30 +589,34 @@ describe("startup backfill (R90)", () => {
     expect(again).toEqual({ help: { filled: 0, unsupported: 0, failed: 0 }, policies: { filled: 0, unsupported: 0, failed: 0 } });
   });
 
-  it("review I1: hostile files (a zip bomb, a corrupt pdf) are tried once in the worker, marked tried, and skipped by the next start", async () => {
+  it("review N1: hostile files (a 1 GB lying docx, a 1 GB pdf bomb, a zip bomb, a corrupt pdf) are tried once, in the bounded extractor, and skipped by the next start", async () => {
     const errors = jest.spyOn(console, "error").mockImplementation(() => undefined);
     try {
       const bomb = await makeDocx([], { documentXml: documentXml(["ha ".repeat(4_000_000)]) });
-      const [bombRow] = await db
-        .insert(helpDocuments)
-        .values({ title: "Bomb", filename: "bomb.docx", content: "x", fileData: b64(bomb) })
-        .returning();
-      const [corrupt] = await db
-        .insert(companyPolicies)
-        .values({ title: "Corrupt", fileData: b64(Buffer.from("%PDF-1.4 not really")), fileName: "c.pdf", fileSize: 10, mimeType: "application/pdf", uploadedBy: u.admin.id })
-        .returning();
-      const [good] = await db
-        .insert(helpDocuments)
-        .values({ title: "Good", filename: "good.txt", content: "x", fileData: b64(Buffer.from("plain survivor text")) })
-        .returning();
+      const insertHelp = async (title: string, filename: string, data: Buffer) =>
+        (await db.insert(helpDocuments).values({ title, filename, content: "x", fileData: b64(data) }).returning())[0];
+      const bombRow = await insertHelp("Bomb", "bomb.docx", bomb);
+      const liarRow = await insertHelp("Liar", "liar.docx", await inflatingDocx(1024 * 1024 * 1024 + 1));
+      const good = await insertHelp("Good", "good.txt", Buffer.from("plain survivor text"));
+      const insertPolicy = async (title: string, data: Buffer) =>
+        (
+          await db
+            .insert(companyPolicies)
+            .values({ title, fileData: b64(data), fileName: `${title}.pdf`, fileSize: data.length, mimeType: "application/pdf", uploadedBy: u.admin.id })
+            .returning()
+        )[0];
+      const corrupt = await insertPolicy("Corrupt", Buffer.from("%PDF-1.4 not really"));
+      const pdfBomb = await insertPolicy("PdfBomb", await inflatingPdf(1024 * 1024 * 1024 + 1));
 
+      const rssBefore = process.memoryUsage.rss();
       const counts = await backfillDocumentText(() => undefined);
-      expect(counts).toEqual({ help: { filled: 1, unsupported: 0, failed: 1 }, policies: { filled: 0, unsupported: 0, failed: 1 } });
+      expect((process.memoryUsage.rss() - rssBefore) / 1024 / 1024).toBeLessThan(200);
+      expect(counts).toEqual({ help: { filled: 1, unsupported: 0, failed: 2 }, policies: { filled: 0, unsupported: 0, failed: 2 } });
       const rows = await db.select().from(helpDocuments);
-      expect(rows.find((r) => r.id === bombRow.id)!.extractedText).toBe("");
+      for (const r of [bombRow, liarRow]) expect([r.title, rows.find((x) => x.id === r.id)!.extractedText]).toEqual([r.title, ""]);
       expect(rows.find((r) => r.id === good.id)!.extractedText).toBe("plain survivor text");
-      const [c] = await db.select().from(companyPolicies).where(eq(companyPolicies.id, corrupt.id));
-      expect(c.extractedText).toBe("");
+      const policies = await db.select().from(companyPolicies);
+      for (const p of [corrupt, pdfBomb]) expect([p.title, policies.find((x) => x.id === p.id)!.extractedText]).toEqual([p.title, ""]);
       // Logged by type only.
       for (const line of errors.mock.calls.map((x) => x.map(String).join(" "))) {
         expect(line).toMatch(/^Document text extraction failed \[[^\]]+\]$/);
@@ -628,14 +632,61 @@ describe("startup backfill (R90)", () => {
     } finally {
       errors.mockRestore();
     }
+  }, 120000);
+
+  it("review N2: a row is claimed ('') before its file is parsed, so a parse that dies leaves it tried, never retried", async () => {
+    const [row] = await db
+      .insert(helpDocuments)
+      .values({ title: "Claimed", filename: "c.docx", content: "x", fileData: b64(await makeDocx(["claimed text"])) })
+      .returning();
+    const seenDuringParse: Array<string | null> = [];
+    // The extractor "dies" mid-parse: it reports what the row held while it ran, then throws.
+    const dying = async () => {
+      const [now] = await db.select().from(helpDocuments).where(eq(helpDocuments.id, row.id));
+      seenDuringParse.push(now.extractedText);
+      throw new Error("killed mid-parse");
+    };
+    await expect(backfillDocumentText(() => undefined, { extract: dying })).rejects.toThrow("killed mid-parse");
+    expect(seenDuringParse).toEqual([""]);
+    const [after] = await db.select().from(helpDocuments).where(eq(helpDocuments.id, row.id));
+    expect(after.extractedText).toBe("");
+    // The next start does not touch it.
+    const extract = jest.fn(async () => "never");
+    expect(await backfillDocumentText(() => undefined, { extract })).toEqual({
+      help: { filled: 0, unsupported: 0, failed: 0 },
+      policies: { filled: 0, unsupported: 0, failed: 0 },
+    });
+    expect(extract).not.toHaveBeenCalled();
   });
 
-  it("does nothing, and marks nothing, when the extraction worker cannot be found", async () => {
+  it("review N2: an MCP upload stores the row with '' while its file is being parsed, and a hostile file leaves it ''", async () => {
+    const bomb = await inflatingPdf(1024 * 1024 * 1024 + 1);
+    const errors = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const pending = call("admin", "create_help_document", { title: "Upload in flight", category: "C", content: "x", filename: "b.pdf", fileBase64: b64(bomb) });
+      let seen: string | null | undefined;
+      for (let i = 0; i < 400 && seen === undefined; i++) {
+        const [r] = await db.select().from(helpDocuments).where(eq(helpDocuments.title, "Upload in flight"));
+        if (r) seen = r.extractedText;
+        else await new Promise((res) => setTimeout(res, 25));
+      }
+      expect(seen).toBe("");
+      const done = await pending;
+      expect(done.isError).toBe(false);
+      expect(done.data).toMatchObject({ title: "Upload in flight", hasFile: true, hasFileText: false });
+      const [r] = await db.select().from(helpDocuments).where(eq(helpDocuments.title, "Upload in flight"));
+      expect(r.extractedText).toBe("");
+    } finally {
+      errors.mockRestore();
+    }
+  }, 120000);
+
+  it("does nothing, and marks nothing, when the extractor file cannot be found", async () => {
     await db.insert(helpDocuments).values({ title: "Waiting", filename: "w.txt", content: "x", fileData: b64(Buffer.from("later")) });
     const lines: string[] = [];
     const counts = await backfillDocumentText((l) => lines.push(l), { workerAvailable: () => false });
     expect(counts).toBeNull();
-    expect(lines).toEqual(["Document text backfill skipped: the extraction worker file was not found"]);
+    expect(lines).toEqual(["Document text backfill skipped: the extractor file was not found"]);
     const [row] = await db.select().from(helpDocuments);
     expect(row.extractedText).toBeNull();
   });
@@ -677,20 +728,42 @@ describe("review I2: keyword search", () => {
     expect(question.data.results.map((r: { matchedTerms: number }) => r.matchedTerms)).toEqual([4, 1]);
   });
 
-  it("a query of stopwords only is a coded VALIDATION, not an empty list", async () => {
-    const res = await call("agent", "search_documents", { query: "how do I do it?" });
-    expect(res.data.code).toBe("VALIDATION");
-    expect(res.data.details.fieldErrors.query[0]).toMatch(/key ?word/i);
+  it("review N4: 'it' is a keyword: \"IT policy\" ranks the document titled \"IT policy\" first", async () => {
+    const it_ = await call("admin", "create_policy", { title: "IT policy", content: "Laptops are encrypted." });
+    await call("admin", "create_policy", { title: "Travel policy", content: "Book economy class." });
+    const res = await call("customer", "search_documents", { query: "IT policy" });
+    expect(res.data.terms).toEqual(["it", "policy"]);
+    expect(res.data.results[0]).toMatchObject({ id: it_.data.id, title: "IT policy", matchedTerms: 2 });
   });
 
-  it("punctuation, LIKE wildcards included, is not part of a keyword: '100%' searches for 100 and '%_%' has no keyword", async () => {
+  it("review N4: a query with no keyword left (\"AT&T\") is searched as one phrase, and finds it", async () => {
+    const att = await call("admin", "create_help_document", { title: "Carrier billing", category: "General", content: "Our phones are on AT&T." });
+    await call("admin", "create_help_document", { title: "Other", category: "General", content: "at the office" });
+    const res = await call("customer", "search_documents", { query: "AT&T" });
+    expect(res.isError).toBe(false);
+    expect(res.data.terms).toEqual(["at&t"]);
+    expect(res.data.results.map((r: { id: number }) => r.id)).toEqual([att.data.id]);
+    expect(res.data.results[0].snippet).toContain("AT&T");
+    // Only an empty or blank query is refused.
+    for (const query of ["", "   "]) {
+      const blank = await call("customer", "search_documents", { query });
+      expect([query, blank.isError, blank.data.code]).toEqual([query, true, "VALIDATION"]);
+    }
+    // Stopwords alone become a phrase too: no error, and nothing is matched by accident.
+    const stop = await call("customer", "search_documents", { query: "how do I do" });
+    expect(stop.isError).toBe(false);
+    expect(stop.data.terms).toEqual(["how do i do"]);
+    expect(stop.data.results).toEqual([]);
+  });
+
+  it("punctuation, LIKE wildcards included, separates keywords; a wildcard-only query is a literal phrase", async () => {
     await call("admin", "create_help_document", { title: "Discounts", category: "General", content: "Take 100% off" });
     await call("admin", "create_help_document", { title: "Plain", category: "General", content: "Nothing special 100 here" });
-    await call("admin", "create_help_document", { title: "Other", category: "General", content: "No number at all" });
+    await call("admin", "create_help_document", { title: "Code", category: "General", content: "The token %_% is literal" });
     const hits = await search("customer", "100%");
     expect(hits.map((h) => h.title).sort()).toEqual(["Discounts", "Plain"]);
-    const wild = await call("customer", "search_documents", { query: "%_%" });
-    expect(wild.data.code).toBe("VALIDATION");
+    // "%_%" has no keyword, so it is one phrase, escaped: it matches only the literal text.
+    expect((await search("customer", "%_%")).map((h) => h.title)).toEqual(["Code"]);
   });
 });
 

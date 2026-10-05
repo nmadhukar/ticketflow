@@ -497,25 +497,44 @@ the rules live in `server/services/documents/` (`documentLibrary.ts` reads and v
 `documentWrites.ts` writes, `extractText.ts` file text, `backfillText.ts` the startup backfill),
 and the REST routes use the same visibility predicates.
 
-- **Uploads that become text.** `.docx` (mammoth), `.pdf` (unpdf), `.txt` and `.md` (UTF-8). The
-  text goes in `extracted_text` (migration 0030, capped at 1,000,000 characters) on REST and MCP
-  create and update. `extracted_text` NULL means "never tried"; `''` means "tried, nothing
-  extractable" (an unsupported type, an empty document, or a file that failed or hit a limit; the
-  error type only is logged). MCP takes a file as `filename` plus `fileBase64`, at most 36 MB at
-  the defaults: the lower of `MAX_FILE_UPLOAD_SIZE_MB` (the REST limit) and what base64 fits in
-  `MAX_REQUEST_SIZE_MB` (4/3 inflation, 2 MB of headroom); the tool descriptions state the number.
-- **Extraction is bounded (review I1).** `.docx` and `.pdf` are parsed in a worker thread
-  (`server/services/documents/extractWorker.mjs`, built to `dist/documentExtractWorker.mjs` by
-  `npm run build`, found next to `dist/index.js`), never in the server's isolate: heap limit 256 MB
-  (`DOCUMENT_EXTRACT_MAX_MB`, 16-4096), 20 s wall clock then `terminate()`, at most two at once.
-  A `.docx` whose zip directory declares more than 50 MB, or more than 10 MB at a compression
-  ratio above 100, is refused before parsing; a `.pdf` over 500 pages is refused. PDF.js runs with
-  `verbosity: 0` and `isEvalSupported: false`, and the worker's console and output are discarded,
-  so no text from a file reaches the log. An out-of-memory or a timeout ends the worker only.
+- **Uploads that become text.** `.docx` (its `word/document.xml`, read by our own code), `.pdf`
+  (unpdf), `.txt` and `.md` (UTF-8). The text goes in `extracted_text` (migration 0030, capped at
+  1,000,000 characters) on REST and MCP create and update. `extracted_text` NULL means "never
+  tried"; `''` means "tried, nothing extractable" (an unsupported type, an empty document, or a
+  file that failed or hit a limit; the error type only is logged), and is written BEFORE a parse
+  starts. MCP takes a file as `filename` plus `fileBase64`, at most 36 MB at the defaults: the
+  lower of `MAX_FILE_UPLOAD_SIZE_MB` (the REST limit) and what base64 fits in `MAX_REQUEST_SIZE_MB`
+  (4/3 inflation, 2 MB of headroom); the tool descriptions state the number.
+- **Extraction runs in a separate, memory-limited process (reviews I1, N1).** `.docx` and `.pdf`
+  are parsed by `server/services/documents/extractChild.mjs` (built to
+  `dist/documentExtractChild.mjs` by `npm run build`, found next to `dist/index.js`), forked once
+  per file, at most two at once (16 more may wait; the 20 s limit counts the wait). What bounds it:
+  - RSS: the server polls the child's `/proc/<pid>/status` every 50 ms (Linux) and SIGKILLs it above
+    `DOCUMENT_EXTRACT_MAX_MB` (default 384, 64-4096); a watchdog thread inside the child applies the
+    same limit where `/proc` is absent. A V8 heap limit alone does not do this: inflated data lives
+    in ArrayBuffers, outside the heap.
+  - the kernel: the child sets its own `oom_score_adj` to 1000 (Linux), so if the container still
+    runs out of memory the OOM killer picks the child, not the server;
+  - heap `--max-old-space-size` 256 MB; 20 s wall clock, then SIGKILL;
+  - inflation: a `.docx` is never handed to a zip library. `word/document.xml` is located through
+    the zip directory and inflated with zlib's `maxOutputLength` against a 50 MB budget, so real
+    inflation is bounded whatever the headers declare; its text is read with a linear scan (runs,
+    tabs, breaks, a blank line per paragraph). A `.docx` whose directory already declares more than
+    50 MB (or more than 10 MB at a ratio above 100) is refused without a child. A `.pdf` over 500
+    pages is refused; for PDF the RSS limit is the bound.
+  - PDF.js runs with `verbosity: 0` and `isEvalSupported: false`; the child's console, stdout and
+    stderr are discarded, so no text from a file reaches the log; the child gets no server
+    environment variables.
+  A child crash, OOM kill, watchdog kill or timeout gives null and logs one line by type; the
+  server process is unaffected. Two concurrent extractions can use about 2 x 384 MB on top of the
+  server: size the container for it, or lower `DOCUMENT_EXTRACT_MAX_MB`.
 - **Backfill.** Rows with NULL `extracted_text` and a file get their text once, one row at a time,
   from `startDocumentTextBackfill`, started by `server/index.ts` after "serving on port" and not
-  awaited; each row is marked (text or `''`), so a hostile file is tried once, not at every boot.
-  If the worker file is missing the backfill logs one line and marks nothing.
+  awaited. Each row is first claimed (`''` where it is still NULL, in its own statement) and only
+  then parsed, so a parse that dies (or is killed with anything else) leaves it tried: the next
+  boot skips it, there is no crash loop. Uploads do the same: the row is stored with `''` and the
+  text replaces it when it arrives. If the extractor file is missing the backfill logs one line
+  and claims nothing.
 - **Help documents have no publish flag**: every signed-in user reads every one, as `/api/help`.
   A help document or policy created on MCP without a file stores its text in `content`, an empty
   `file_data` and the file name `<title>.txt` (a text-only policy downloads as its content).
@@ -543,8 +562,9 @@ Rulings:
 - **R90, uploads become searchable text** (`extracted_text`, migration 0030, see above).
 - **R91, one search, REST visibility.** `search_documents` (`query` 1-200, optional `type` one of
   `help`, `policy`, `guideline`, `knowledge`, `limit` 1-50, default 10) splits the query into
-  keywords (lower-cased letters and digits; English stopwords and one-character words dropped; at
-  most 12; a query with none is VALIDATION) and returns every document containing ANY keyword
+  keywords (lower-cased letters and digits; English stopwords and one-character words dropped, but
+  "it", "us", "am" and "no" are kept; at most 12; when none is left, as for "AT&T", the trimmed
+  query is one phrase term; only an empty or blank query is VALIDATION) and returns every document containing ANY keyword
   (case-insensitive ILIKE, escaped and bound) in the title, description or summary, content or
   `extracted_text`: `{results: [{type, id, title, category, snippet, published, matchedTerms}],
   returned, terms}`, the snippet about 300 characters around the earliest keyword. Ranked by the

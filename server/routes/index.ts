@@ -148,7 +148,7 @@ import {
 import { registerEmailRoutes } from "./email";
 import { parseIdParam } from "../http/params";
 import { sanitizeRichHtml } from "../security/sanitizeHtml";
-import { extractDocumentText } from "../services/documents/extractText";
+import { fillHelpDocumentText, fillPolicyText } from "../services/documents/documentText";
 import { attachmentDisposition } from "../http/contentDisposition";
 import { mayReadDraftGuides, mayReadInactivePolicies } from "../services/documents/documentLibrary";
 import { registerTeamsRoutes } from "./teams";
@@ -1777,14 +1777,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         filename,
         content,
         fileData,
-        // R90: the file's text, so search and MCP can read the document ('' = tried, no text).
-        extractedText: (await extractDocumentText({ filename, data: fileData })) ?? "",
+        // R90 / review N2: stored as '' ("tried") first, so a parse that dies is never retried;
+        // the file's text replaces it when the bounded extractor returns.
+        extractedText: "",
         category,
         tags,
         uploadedBy: userId,
       });
+      const extractedText = await fillHelpDocumentText(document.id, { filename, data: fileData });
 
-      res.json(document);
+      res.json({ ...document, extractedText });
     } catch (error) {
       logRouteError("Error creating help document", error);
       fail(res, 500, "Failed to create help document");
@@ -1804,19 +1806,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const id = parseInt(req.params.id);
       // extracted_text is written by the server only (R90).
       const { extractedText: _clientText, ...updates } = req.body ?? {};
+      let newFile: { filename?: string; data: string } | null = null;
       if (typeof updates.fileData === "string") {
         const existing = await storage.getHelpDocument(id);
         // A client may send the stored file back unchanged: extract only a new (or never-read) file.
         if (!existing || existing.fileData !== updates.fileData || existing.extractedText == null) {
-          updates.extractedText =
-            (await extractDocumentText({
-              filename: updates.filename ?? existing?.filename,
-              data: updates.fileData,
-            })) ?? "";
+          // Review N2: '' ("tried") is stored with the new file; the text replaces it when it arrives.
+          updates.extractedText = "";
+          newFile = { filename: updates.filename ?? existing?.filename, data: updates.fileData };
         }
       }
 
       const document = await storage.updateHelpDocument(id, updates);
+      if (document && newFile) {
+        document.extractedText = await fillHelpDocumentText(id, newFile);
+      }
       res.json(document);
     } catch (error) {
       logRouteError("Error updating help document", error);
@@ -2630,21 +2634,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
           description,
           content: null, // Will be extracted later if it's a text-based file
           fileData,
-          // R90: the file's text (docx, pdf, txt, md), for search and MCP.
-          extractedText:
-            (await extractDocumentText({
-              filename: req.file.originalname,
-              mimeType: req.file.mimetype,
-              data: req.file.buffer,
-            })) ?? "",
+          // R90 / review N2: '' ("tried") first; the file's text (docx, pdf, txt, md) replaces it.
+          extractedText: "",
           fileName: req.file.originalname,
           fileSize: req.file.size,
           mimeType: req.file.mimetype,
           uploadedBy: userId,
           isActive: true,
         });
+        const extractedText = await fillPolicyText(policy.id, {
+          filename: req.file.originalname,
+          mimeType: req.file.mimetype,
+          data: req.file.buffer,
+        });
 
-        res.json(policy);
+        res.json({ ...policy, extractedText });
       } catch (error) {
         logRouteError("Error creating company policy", error);
         fail(res, 500, "Failed to create company policy");
@@ -2674,18 +2678,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const fileData = req.file.buffer.toString("base64");
           updateData.fileData = fileData;
           updateData.content = null; // Will be extracted later if it's a text-based file
-          updateData.extractedText =
-            (await extractDocumentText({
-              filename: req.file.originalname,
-              mimeType: req.file.mimetype,
-              data: req.file.buffer,
-            })) ?? "";
+          // Review N2: '' ("tried") with the new file; the text replaces it below.
+          updateData.extractedText = "";
           updateData.fileName = req.file.originalname;
           updateData.fileSize = req.file.size;
           updateData.mimeType = req.file.mimetype;
         }
 
         const policy = await storage.updateCompanyPolicy(policyId, updateData);
+        if (policy && req.file) {
+          policy.extractedText = await fillPolicyText(policyId, {
+            filename: req.file.originalname,
+            mimeType: req.file.mimetype,
+            data: req.file.buffer,
+          });
+        }
         res.json(policy);
       } catch (error) {
         logRouteError("Error updating company policy", error);

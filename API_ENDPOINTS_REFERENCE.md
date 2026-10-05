@@ -573,8 +573,9 @@ route's visibility, by keywords. **R92** `initialize` returns `instructions` tel
 search the documents with the question's key words before answering how-to, setup and policy
 questions, to try other words before concluding nothing exists, to quote the title it used, and to
 say when nothing relevant is found. **R94** a policy may be created from text alone on MCP.
-Uploaded files are parsed in a bounded worker thread (256 MB heap, 20 s); a hostile file gives no
-text and never stops the server.
+Uploaded files are parsed in a separate extractor process (killed above `DOCUMENT_EXTRACT_MAX_MB`
+of RSS, default 384, or after 20 s; first in line for the kernel's OOM killer); a hostile file
+gives no text, and the server process keeps running.
 
 Tool results are JSON text. On success `isError` is absent. On failure the result has
 `isError: true` and the text is `{"code","message","details?"}` with `code` one of:
@@ -617,7 +618,7 @@ or `.offset`.
 | `get_ticket_history` | `id` | `{ticketId, history}`, as `GET /api/tasks/:id/history`. Same access as `get_ticket`: unknown `NOT_FOUND`, not visible `FORBIDDEN`. |
 | `list_notifications` | `unreadOnly?` (default true), `since?` (ISO 8601 date-time, only newer), `limit` (1-100, default 25) | `{notifications, returned, limit, hasMore}`: the owner's own, newest first. |
 | `mark_notifications_read` | `ids` (array of ids) or `all: true`, not both | `{marked}`: how many of the owner's own unread notifications were marked. Another user's id is not counted and not changed. |
-| `search_documents` | `query` (required, 1-200: key words, e.g. `DoseSpot clinic key`), `type?` (`help`, `policy`, `guideline` or `knowledge`), `limit` (1-50, default 10) | `{results: [{type, id, title, category, snippet, published, matchedTerms}], returned, terms}` over help documents, policies, guidelines and knowledge articles. The query is split into keywords (stopwords dropped, at most 12; none is `VALIDATION`); a document matching ANY of them in the title, description or summary, content or uploaded file text is returned, most keywords matched first, then keywords in the title, then newest. Each source as visible as on `GET /api/help/search`, `GET /api/company-policies`, `GET /api/guides` and `GET /api/knowledge/search` (admins also see inactive policies and unpublished articles, staff draft guides). |
+| `search_documents` | `query` (required, 1-200: key words, e.g. `DoseSpot clinic key`), `type?` (`help`, `policy`, `guideline` or `knowledge`), `limit` (1-50, default 10) | `{results: [{type, id, title, category, snippet, published, matchedTerms}], returned, terms}` over help documents, policies, guidelines and knowledge articles. The query is split into keywords (stopwords dropped, at most 12; with none left, as for `AT&T`, the query is one phrase; only an empty query is `VALIDATION`); a document matching ANY of them in the title, description or summary, content or uploaded file text is returned, most keywords matched first, then keywords in the title, then newest. Each source as visible as on `GET /api/help/search`, `GET /api/company-policies`, `GET /api/guides` and `GET /api/knowledge/search` (admins also see inactive policies and unpublished articles, staff draft guides). |
 | `get_document` | `type`, `id` (both required) | The document's metadata and readable `text` (help and policy: content plus the uploaded file's text; guideline: description and content, plus `content` HTML, `guideType`, `scribehowUrl`, `videoUrl`; knowledge: summary and content), capped at 200,000 characters with `truncated`. Never the file. Hidden or unknown: `NOT_FOUND`. |
 | `list_guideline_categories` | none | `{categories}`, as `GET /api/guide-categories`; a guideline's `category` is one of these names. |
 | `create_help_document` | `title`, `category`, `content` (required); `tags?`; `filename` + `fileBase64` (`.docx`, `.pdf`, `.txt`, `.md`, at most 36 MB at the default limits: base64 must fit in the 50 MB request) | The document. As `POST /api/admin/help`: admin only (`FORBIDDEN` otherwise). Any optional argument may be `null` (absent). |

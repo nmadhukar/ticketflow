@@ -995,32 +995,41 @@ or guidelines. Task MCP4 adds document search, reading and writing on MCP (rulin
   never aborts (a missing table is a NOTICE), and both columns are in the startup schema check, so
   the server refuses to boot without them. Numbered 0030 because 0023 is held by an open branch;
   the SQL runner applies files in name order and tolerates the gap (0014 is already followed by 0018).
-- **Two new runtime dependencies**, pinned: `mammoth` 1.13.0 (`.docx` text) and `unpdf` 1.8.1
-  (`.pdf` text; the serverless PDF.js build, pure JavaScript, no dependencies and no native code).
-  `.txt` and `.md` are read as UTF-8. Anything else, or a file that does not parse, stores `''`
-  ("tried, nothing extractable"; NULL means "never tried") and logs the error type only. Text is
-  capped at 1,000,000 characters.
-- **Extraction runs in a bounded worker thread** (fix round 1, review I1: before it, a 388 KB
-  `.docx` could abort the whole server out of memory). `npm run build` now also writes
-  `dist/documentExtractWorker.mjs`, which the server loads from next to `dist/index.js`. Limits:
-  256 MB of worker heap (`DOCUMENT_EXTRACT_MAX_MB` to change it), 20 s, two parses at a time; a
-  `.docx` declaring more than 50 MB (or more than 10 MB at a compression ratio above 100) and a
-  `.pdf` over 500 pages are refused. An out-of-memory or timeout ends only the worker. Nothing a
-  parser prints reaches the log.
+- **One new runtime dependency**, pinned: `unpdf` 1.8.1 (`.pdf` text; the serverless PDF.js
+  build, pure JavaScript, no dependencies and no native code). `.docx` text is read from
+  `word/document.xml` by our own code (zlib only): `mammoth`, added in the first commit, was
+  removed in fix round 2 because its zip library inflates without a bound. `.txt` and `.md` are
+  read as UTF-8. Anything else, or a file that does not parse, stores `''` ("tried, nothing
+  extractable"; NULL means "never tried") and logs the error type only. Text is capped at
+  1,000,000 characters.
+- **Extraction runs in a separate, memory-limited process** (fix round 2, reviews I1/N1: a
+  worker thread's heap limit does not count inflated ArrayBuffers, and a 1 MB file OOM-killed a
+  1 GiB container). `npm run build` now also writes `dist/documentExtractChild.mjs`, which the
+  server forks from next to `dist/index.js`, one process per `.docx`/`.pdf`, at most two at once.
+  The child is SIGKILLed above `DOCUMENT_EXTRACT_MAX_MB` of RSS (new, optional, default 384;
+  polled from `/proc` every 50 ms, plus a watchdog inside the child) or after 20 s; it sets its own
+  `oom_score_adj` to 1000 so the kernel's OOM killer takes it rather than the server; a `.docx`'s
+  `word/document.xml` is inflated against a 50 MB budget whatever its headers claim; a `.pdf` over
+  500 pages is refused. A kill, crash or timeout gives no text and the server keeps serving.
+  Nothing a parser prints reaches the log. Budget the container for the server plus two
+  extractors (about 2 x 384 MB), or lower `DOCUMENT_EXTRACT_MAX_MB`.
 - **Extraction on write.** REST `POST`/`PUT /api/admin/help` and `POST`/`PUT
   /api/admin/company-policies` and the MCP write tools fill `extracted_text` through one helper;
   `extracted_text` in a request body is ignored. `GET /api/help/search` now also matches the file
   text.
 - **Backfill after start.** Rows with `extracted_text` NULL and a file get their text once the
-  server is listening (after `serving on port`), one row at a time, not awaited: it never delays
-  or fails boot. Each row is marked (its text, or `''`), so a bad file is tried once, not at every
-  start. One log line: `Document text backfill: help documents N filled, N unsupported, N
-  unreadable; policies ...`. The local DoseSpot `.docx` (2 MB) extracts in about 0.2 s. Proven on
-  the built server with a zip-bomb `.docx` and an inflating `.pdf` row under `--max-old-space-size=768`:
-  it served, marked both rows, filled the real ones, and the next boot read none of them again.
+  server is listening (after `serving on port`), one row at a time, not awaited. Each row is
+  claimed first (`''`, in its own statement) and parsed only then, so a file whose parse is killed
+  is never parsed again at the next boot: no crash loop. Uploads store `''` with the file too, and
+  the text replaces it when it arrives. One log line: `Document text backfill: help documents N
+  filled, N unsupported, N unreadable; policies ...`. The local DoseSpot `.docx` (2 MB) extracts in
+  well under a second. Proven with the production image in a 1 GiB container (MCP uploads of a
+  1 MB `.docx` and `.pdf` that each inflate past 1 GB, and three boots with such a row): the server
+  was never OOM-killed; details in the MCP4 task report.
 - **Search by keywords** (fix round 1, review I2): `search_documents` matches the query's key
   words separately (any of them), so "How do I set the DoseSpot clinic key?" finds the document;
-  results matching more words come first.
+  results matching more words come first. "IT", "US", "AM" and "NO" count as words; a query with
+  no word left ("AT&T") is searched as one phrase.
 - **Policy downloads** answer any file name (an ASCII `filename` plus an RFC 5987 `filename*`);
   a name outside Latin-1 used to answer 500.
 - **R94:** MCP may create a policy from text alone (REST requires a file).
@@ -1036,8 +1045,10 @@ or guidelines. Task MCP4 adds document search, reading and writing on MCP (rulin
 
 1. After the deploy the log shows `applied 0030_document_extracted_text.sql`, `serving on port`,
    then the backfill line. For the local stack the DoseSpot document should count as `1 filled`.
-   A line `Document text backfill skipped: the extraction worker file was not found` means the
-   image lacks `dist/documentExtractWorker.mjs` (an old build command): rebuild.
+   A line `Document text backfill skipped: the extractor file was not found` means the image
+   lacks `dist/documentExtractChild.mjs` (an old build command): rebuild.
+   Optionally set `DOCUMENT_EXTRACT_MAX_MB` (the extractor's RSS limit, default 384) in Coolify;
+   it is passed through by docker-compose.
 2. Ask an agent connected over MCP a DoseSpot setup question and check that it calls
    `search_documents`, cites "Dosespot Configuration Document" and answers from it (an MCP tool
    change is verified by asking the agent, not by a connection test).

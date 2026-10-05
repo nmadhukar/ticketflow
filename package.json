@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "tsx server/index.ts",
-    "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist && esbuild server/services/documents/extractWorker.mjs --platform=node --packages=external --bundle --format=esm --outfile=dist/documentExtractWorker.mjs",
+    "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist && esbuild server/services/documents/extractChild.mjs --platform=node --packages=external --bundle --format=esm --outfile=dist/documentExtractChild.mjs",
     "start": "node dist/index.js",
     "lint": "eslint .",
     "check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.e2e.json",
@@ -92,7 +92,6 @@
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.453.0",
     "mailtrap": "^4.3.0",
-    "mammoth": "1.13.0",
     "memoizee": "^0.4.17",
     "memorystore": "^1.6.7",
     "multer": "^2.0.2",

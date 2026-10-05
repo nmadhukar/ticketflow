@@ -1,6 +1,6 @@
-import { existsSync } from "node:fs";
+import { fork } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { Worker } from "node:worker_threads";
 import { describeError } from "../../http/errors";
 
 /**
@@ -8,33 +8,43 @@ import { describeError } from "../../http/errors";
  * help_documents.extracted_text and company_policies.extracted_text calls it: the REST create and
  * update routes, the MCP write tools and the startup backfill.
  *
- * Supported: .docx (mammoth extractRawText), .pdf (unpdf, the serverless PDF.js build), .txt and
- * .md (UTF-8). The type comes from the file name's extension, else from the MIME type. Anything
- * else, or a file that does not parse, gives null; a failure is logged by error type only (a
- * document's text or a parser message never reaches the log).
+ * Supported: .docx (word/document.xml read by ./extractChild.mjs), .pdf (unpdf, the serverless
+ * PDF.js build), .txt and .md (UTF-8). The type comes from the file name's extension, else from
+ * the MIME type. Anything else, or a file that does not parse, gives null; a failure is logged by
+ * error type only (a document's text or a parser message never reaches the log).
  *
- * Review I1: a .docx or .pdf is parsed in a worker thread (./extractWorker.mjs), never in the
- * server's isolate. A small hostile file (a zip bomb, an inflating PDF stream) can exhaust memory
- * or CPU, and an out-of-memory abort cannot be caught: in a worker it only ends the worker.
- * - heap limit: EXTRACT_DEFAULT_MAX_MEMORY_MB (256), DOCUMENT_EXTRACT_MAX_MB overrides;
- * - time limit: EXTRACT_TIMEOUT_MS (20 s), then worker.terminate();
- * - a .docx is refused before any parsing when its zip central directory says it inflates past
- *   DOCX_MAX_UNCOMPRESSED_BYTES, or past DOCX_RATIO_FLOOR_BYTES at an absurd compression ratio;
- * - a .pdf with more than PDF_MAX_PAGES pages is refused;
- * - at most MAX_CONCURRENT_EXTRACTIONS workers at once (the others wait their turn).
+ * Reviews I1 and N1: a .docx or .pdf is parsed in a separate PROCESS (./extractChild.mjs), never
+ * in the server. A small hostile file (a zip bomb, an inflating PDF stream) can grow memory
+ * outside any V8 heap limit (ArrayBuffers), so the bounds are on the child process as a whole:
+ * - RSS: the parent polls /proc/<pid>/status (Linux) every 50 ms and SIGKILLs the child above
+ *   DOCUMENT_EXTRACT_MAX_MB (default EXTRACT_DEFAULT_MAX_RSS_MB, 384); a watchdog thread in the
+ *   child enforces the same limit from inside (the fallback where /proc is absent);
+ * - the kernel: on Linux the child sets its oom_score_adj to 1000, so an OOM kill takes it, not the server;
+ * - heap: --max-old-space-size (EXTRACT_CHILD_HEAP_MB, at most 256);
+ * - time: EXTRACT_TIMEOUT_MS (20 s) from the call, queue wait included, then SIGKILL;
+ * - inflation: a .docx's word/document.xml is inflated with zlib's maxOutputLength against
+ *   DOCX_INFLATE_BUDGET_BYTES, whatever its zip headers declare (and a .docx whose directory
+ *   already declares too much is refused here without starting a child); a .pdf over
+ *   PDF_MAX_PAGES pages is refused;
+ * - concurrency: at most MAX_CONCURRENT_EXTRACTIONS children, MAX_QUEUED_EXTRACTIONS waiting.
+ * A crash, an OOM kill, a watchdog kill or a timeout all give null; the server carries on.
  */
 
 export const EXTRACTED_TEXT_MAX_CHARS = 1_000_000;
 export const EXTRACT_TIMEOUT_MS = 20_000;
-export const EXTRACT_DEFAULT_MAX_MEMORY_MB = 256;
-export const DOCX_MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
+export const EXTRACT_DEFAULT_MAX_RSS_MB = 384;
+export const EXTRACT_CHILD_HEAP_MB = 256;
+export const DOCX_INFLATE_BUDGET_BYTES = 50 * 1024 * 1024;
+export const DOCX_MAX_UNCOMPRESSED_BYTES = DOCX_INFLATE_BUDGET_BYTES;
 export const DOCX_RATIO_FLOOR_BYTES = 10 * 1024 * 1024;
 export const DOCX_MAX_RATIO = 100;
 export const PDF_MAX_PAGES = 500;
 export const MAX_CONCURRENT_EXTRACTIONS = 2;
-/** The worker's file name in dist/, next to index.js (package.json `build`). */
-export const WORKER_BUNDLE_NAME = "documentExtractWorker.mjs";
-const WORKER_SOURCE_NAME = "extractWorker.mjs";
+export const MAX_QUEUED_EXTRACTIONS = 16;
+const RSS_POLL_MS = 50;
+/** The extractor's file name in dist/, next to index.js (package.json `build`). */
+export const CHILD_BUNDLE_NAME = "documentExtractChild.mjs";
+const CHILD_SOURCE_NAME = "extractChild.mjs";
 
 export type ExtractableType = "docx" | "pdf" | "txt" | "md";
 export const EXTRACTABLE_EXTENSIONS: readonly ExtractableType[] = ["docx", "pdf", "txt", "md"];
@@ -77,8 +87,8 @@ function tidy(text: string): string {
 /**
  * The totals a zip's central directory declares, without inflating anything; null when the bytes
  * are not a zip this code reads (no end-of-central-directory record, a truncated directory, or a
- * Zip64 archive, which no real .docx needs). The declared sizes can lie: the worker's heap limit
- * is the backstop for that.
+ * Zip64 archive, which no real .docx needs). The declared sizes can lie, so this only refuses
+ * the honest bombs early; the child's inflation budget is the real bound.
  */
 export function inspectZip(buf: Buffer): { entries: number; compressed: number; uncompressed: number } | null {
   if (buf.length < 22) return null;
@@ -117,63 +127,97 @@ function docxRefusal(buf: Buffer): string | null {
   return null;
 }
 
-// ---------------------------------------------------------------- the worker
+// ---------------------------------------------------------------- the extractor process
 
-/** The worker heap limit in MB: DOCUMENT_EXTRACT_MAX_MB (16-4096) or the default. */
+/** The extractor's RSS limit in MB: DOCUMENT_EXTRACT_MAX_MB (64-4096) or the default. */
 export function extractMemoryLimitMb(env: Record<string, string | undefined> = process.env): number {
   const raw = env.DOCUMENT_EXTRACT_MAX_MB?.trim() ?? "";
   const n = Number(raw);
-  return /^[0-9]+$/.test(raw) && n >= 16 && n <= 4096 ? n : EXTRACT_DEFAULT_MAX_MEMORY_MB;
+  return /^[0-9]+$/.test(raw) && n >= 64 && n <= 4096 ? n : EXTRACT_DEFAULT_MAX_RSS_MB;
 }
 
 /**
- * Where the worker file may be, in order: next to the bundle (production runs `node
- * dist/index.js`, and dist/ holds WORKER_BUNDLE_NAME; the entry's path, not the cwd, as
+ * Where the extractor may be, in order: next to the bundle (production runs `node
+ * dist/index.js`, and dist/ holds CHILD_BUNDLE_NAME; the entry's path, not the cwd, as
  * server/bootGuard.ts does); beside this file when it runs as CommonJS (Jest); in the source tree
  * under the entry (`tsx server/index.ts`) or the working directory.
  */
-export function extractWorkerCandidates(entry: string | undefined = process.argv[1]): string[] {
+export function extractChildCandidates(entry: string | undefined = process.argv[1]): string[] {
   const out: string[] = [];
   const entryDir = entry ? path.dirname(path.resolve(entry)) : null;
-  if (entryDir) out.push(path.join(entryDir, WORKER_BUNDLE_NAME));
-  if (typeof __dirname !== "undefined") out.push(path.join(__dirname, WORKER_SOURCE_NAME));
-  if (entryDir) out.push(path.join(entryDir, "services", "documents", WORKER_SOURCE_NAME));
-  out.push(path.resolve("server", "services", "documents", WORKER_SOURCE_NAME));
+  if (entryDir) out.push(path.join(entryDir, CHILD_BUNDLE_NAME));
+  if (typeof __dirname !== "undefined") out.push(path.join(__dirname, CHILD_SOURCE_NAME));
+  if (entryDir) out.push(path.join(entryDir, "services", "documents", CHILD_SOURCE_NAME));
+  out.push(path.resolve("server", "services", "documents", CHILD_SOURCE_NAME));
   return out;
 }
 
-let workerFile: string | null | undefined;
+let childFile: string | null | undefined;
 
-/** The worker file in use, or null when none of the candidates exists. */
-export function extractWorkerFile(): string | null {
-  if (workerFile === undefined) workerFile = extractWorkerCandidates().find((p) => existsSync(p)) ?? null;
-  return workerFile;
+/** The extractor file in use, or null when none of the candidates exists. */
+export function extractChildFile(): string | null {
+  if (childFile === undefined) childFile = extractChildCandidates().find((p) => existsSync(p)) ?? null;
+  return childFile;
 }
 
-/** False when .docx and .pdf cannot be parsed here (the worker file is missing): the backfill then waits. */
+/** False when .docx and .pdf cannot be parsed here (the extractor file is missing): the backfill then waits. */
 export function documentExtractionAvailable(): boolean {
-  return extractWorkerFile() !== null;
+  return extractChildFile() !== null;
 }
 
-let running = 0;
-const waiting: Array<() => void> = [];
-
-async function withSlot<T>(run: () => Promise<T>): Promise<T> {
-  if (running >= MAX_CONCURRENT_EXTRACTIONS) await new Promise<void>((resolve) => waiting.push(resolve));
-  running++;
-  try {
-    return await run();
-  } finally {
-    running--;
-    waiting.shift()?.();
-  }
+/**
+ * A counting semaphore (review N6). A released slot passes straight to the next waiter, so the
+ * count never drops in between and no third caller can slip in; a waiter gives up after `waitMs`
+ * ("timeout"), and when `maxQueue` callers already wait a new one is refused at once ("full").
+ */
+export function createSemaphore(max: number, maxQueue: number) {
+  let active = 0;
+  const queue: Array<() => void> = [];
+  return {
+    get active() {
+      return active;
+    },
+    get waiting() {
+      return queue.length;
+    },
+    acquire(waitMs: number): Promise<"granted" | "timeout" | "full"> {
+      if (active < max) {
+        active++;
+        return Promise.resolve("granted");
+      }
+      if (queue.length >= maxQueue) return Promise.resolve("full");
+      if (waitMs <= 0) return Promise.resolve("timeout");
+      return new Promise((resolve) => {
+        const grant = () => {
+          clearTimeout(timer);
+          resolve("granted");
+        };
+        const timer = setTimeout(() => {
+          const i = queue.indexOf(grant);
+          if (i >= 0) queue.splice(i, 1);
+          resolve("timeout");
+        }, waitMs);
+        queue.push(grant);
+      });
+    },
+    release(): void {
+      const next = queue.shift();
+      if (next) next();
+      else active--;
+    },
+  };
 }
+
+const slots = createSemaphore(MAX_CONCURRENT_EXTRACTIONS, MAX_QUEUED_EXTRACTIONS);
+
+/** How many extractor processes run now (for tests and diagnostics). */
+export const activeExtractions = (): number => slots.active;
 
 export interface ExtractOptions {
-  /** Wall-clock limit for one parse (default EXTRACT_TIMEOUT_MS). */
+  /** Wall-clock limit for one extraction, queue wait included (default EXTRACT_TIMEOUT_MS). */
   timeoutMs?: number;
-  /** Worker heap limit (default extractMemoryLimitMb()). */
-  maxMemoryMb?: number;
+  /** The extractor's RSS limit in MB (default extractMemoryLimitMb()). */
+  maxRssMb?: number;
   /** PDF page cap (default PDF_MAX_PAGES). */
   maxPdfPages?: number;
 }
@@ -183,43 +227,82 @@ const failed = (type: string): null => {
   return null;
 };
 
-function parseInWorker(type: "docx" | "pdf", buffer: Buffer, opts: ExtractOptions): Promise<string | null> {
-  const file = extractWorkerFile();
-  if (!file) return Promise.resolve(failed("worker missing"));
-  return withSlot(
-    () =>
-      new Promise<string | null>((resolve) => {
-        // The worker gets its own copy of the bytes (transferred, not shared).
-        const bytes = new Uint8Array(buffer.length);
-        bytes.set(buffer);
-        let settled = false;
-        const worker = new Worker(file, {
-          workerData: { type, bytes, maxChars: EXTRACTED_TEXT_MAX_CHARS, maxPdfPages: opts.maxPdfPages ?? PDF_MAX_PAGES },
-          transferList: [bytes.buffer],
-          resourceLimits: { maxOldGenerationSizeMb: opts.maxMemoryMb ?? extractMemoryLimitMb() },
-          // Its output is discarded (review M1); it inherits no runtime flags from this process.
-          stdout: true,
-          stderr: true,
-          execArgv: [],
-        });
-        worker.stdout.resume();
-        worker.stderr.resume();
-        const finish = (text: string | null, failure?: string) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          void worker.terminate();
-          resolve(failure ? failed(failure) : text);
-        };
-        const timer = setTimeout(() => finish(null, "timeout"), opts.timeoutMs ?? EXTRACT_TIMEOUT_MS);
-        worker.on("message", (m: { ok?: boolean; text?: unknown; error?: unknown }) => {
-          if (m?.ok === true && typeof m.text === "string") finish(m.text);
-          else finish(null, typeof m?.error === "string" ? m.error : "worker error");
-        });
-        worker.on("error", (error) => finish(null, describeError(error)));
-        worker.on("exit", (code) => finish(null, `worker exit ${code}`));
-      })
-  );
+/** VmRSS of a process in bytes, from /proc (Linux); null where it cannot be read. */
+function procRss(pid: number): number | null {
+  try {
+    const m = /VmRSS:\s+(\d+)\s+kB/.exec(readFileSync(`/proc/${pid}/status`, "utf8"));
+    return m ? Number(m[1]) * 1024 : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The environment the extractor gets: what Node needs to start, none of the server's settings or secrets. */
+function childEnv(): NodeJS.ProcessEnv {
+  const keep = ["PATH", "Path", "SystemRoot", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR", "HOME"];
+  const env: NodeJS.ProcessEnv = {};
+  for (const k of keep) if (process.env[k] !== undefined) env[k] = process.env[k];
+  return env;
+}
+
+function runChild(file: string, type: "docx" | "pdf", buffer: Buffer, opts: ExtractOptions, timeLeftMs: number) {
+  return new Promise<string | null>((resolve) => {
+    const rssLimitMb = opts.maxRssMb ?? extractMemoryLimitMb();
+    const heapMb = Math.max(32, Math.min(EXTRACT_CHILD_HEAP_MB, rssLimitMb - 64));
+    let settled = false;
+    const child = fork(file, [], {
+      execArgv: [`--max-old-space-size=${heapMb}`],
+      // Its output is ignored (review M1); messages go over IPC.
+      stdio: ["ignore", "ignore", "ignore", "ipc"],
+      serialization: "advanced",
+      env: childEnv(),
+    });
+    const finish = (text: string | null, failure?: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearInterval(poll);
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      resolve(failure ? failed(failure) : text);
+    };
+    const timer = setTimeout(() => finish(null, "timeout"), Math.max(1, timeLeftMs));
+    const limitBytes = rssLimitMb * 1024 * 1024;
+    let pollable = process.platform === "linux";
+    const poll = setInterval(() => {
+      if (!pollable || child.pid === undefined) return;
+      const rss = procRss(child.pid);
+      if (rss === null) pollable = false;
+      else if (rss > limitBytes) finish(null, "memory limit");
+    }, RSS_POLL_MS);
+    child.on("message", (m: { ok?: boolean; text?: unknown; error?: unknown }) => {
+      if (m?.ok === true && typeof m.text === "string") finish(m.text);
+      else finish(null, typeof m?.error === "string" ? m.error : "extractor error");
+    });
+    child.on("error", (error) => finish(null, describeError(error)));
+    child.on("exit", (code, signal) => finish(null, signal ? `extractor killed ${signal}` : `extractor exit ${code}`));
+    child.send({
+      type,
+      bytes: buffer,
+      maxChars: EXTRACTED_TEXT_MAX_CHARS,
+      maxPdfPages: opts.maxPdfPages ?? PDF_MAX_PAGES,
+      docxBudget: DOCX_INFLATE_BUDGET_BYTES,
+      rssLimitMb,
+    });
+  });
+}
+
+async function parseInChild(type: "docx" | "pdf", buffer: Buffer, opts: ExtractOptions): Promise<string | null> {
+  const file = extractChildFile();
+  if (!file) return failed("extractor missing");
+  const deadline = Date.now() + (opts.timeoutMs ?? EXTRACT_TIMEOUT_MS);
+  const slot = await slots.acquire(deadline - Date.now());
+  if (slot === "full") return failed("busy");
+  if (slot === "timeout") return failed("timeout");
+  try {
+    return await runChild(file, type, buffer, opts, deadline - Date.now());
+  } finally {
+    slots.release();
+  }
 }
 
 export interface DocumentFile {
@@ -245,7 +328,7 @@ export async function extractDocumentText(file: DocumentFile, opts: ExtractOptio
       const refusal = docxRefusal(buffer);
       if (refusal) return failed(refusal);
     }
-    return await parseInWorker(type, buffer, opts);
+    return await parseInChild(type, buffer, opts);
   } catch (error) {
     return failed(describeError(error));
   }
