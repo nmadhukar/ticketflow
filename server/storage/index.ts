@@ -80,6 +80,8 @@ import {
   type Notification,
   type InsertNotification,
   bedrockSettings,
+  aiSettings,
+  type AISettings,
   type BedrockSettings,
   type InsertBedrockSettings,
   aiUsage,
@@ -1904,6 +1906,49 @@ export class DatabaseStorage implements IStorage {
 
   async revokeApiKey(id: number): Promise<void> {
     await db.update(apiKeys).set({ isActive: false }).where(eq(apiKeys.id, id));
+  }
+
+  // Provider-neutral AI settings. Mirror only rollback-compatible business fields.
+  async getAISettings(): Promise<AISettings | undefined> {
+    const [settings] = await db.select().from(aiSettings).where(eq(aiSettings.id, 1));
+    return settings;
+  }
+
+  async updateAISettings(patch: Partial<AISettings>, updatedBy: string): Promise<AISettings> {
+    const businessFields = {
+      autoResponseEnabled: patch.autoResponseEnabled,
+      confidenceThreshold: patch.confidenceThreshold,
+      maxResponseLength: patch.maxResponseLength,
+      responseTimeout: patch.responseTimeout,
+      autoLearnEnabled: patch.autoLearnEnabled,
+      minResolutionScore: patch.minResolutionScore,
+      articleApprovalRequired: patch.articleApprovalRequired,
+      complexityThreshold: patch.complexityThreshold,
+      escalationEnabled: patch.escalationEnabled,
+      escalationTeamId: patch.escalationTeamId,
+      temperature: patch.temperature,
+      maxTokens: patch.maxTokens,
+      dailyLimitUsd: patch.dailyLimitUsd,
+      monthlyLimitUsd: patch.monthlyLimitUsd,
+      maxTokensPerRequest: patch.maxTokensPerRequest,
+      maxRequestsPerMinute: patch.maxRequestsPerMinute,
+    };
+    return db.transaction(async (tx) => {
+      const [row] = await tx.insert(aiSettings)
+        .values({ id: 1, modelId: patch.modelId, ...businessFields, isActive: patch.isActive, updatedBy })
+        .onConflictDoUpdate({
+          target: aiSettings.id,
+          set: { modelId: patch.modelId, ...businessFields, isActive: patch.isActive, updatedBy, updatedAt: new Date() },
+        }).returning();
+
+      const [activeLegacy] = await tx.select({ id: bedrockSettings.id }).from(bedrockSettings)
+        .where(eq(bedrockSettings.isActive, true)).limit(1);
+      if (activeLegacy) {
+        await tx.update(bedrockSettings).set({ ...businessFields, updatedBy, updatedAt: new Date() })
+          .where(eq(bedrockSettings.id, activeLegacy.id));
+      }
+      return row;
+    });
   }
 
   // Bedrock settings operations

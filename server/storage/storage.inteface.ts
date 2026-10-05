@@ -1,5 +1,6 @@
 import {
   type AIUsage,
+  type AISettings,
   type AiChatMessage,
   type ApiKey,
   type BedrockSettings,
@@ -344,6 +345,8 @@ export interface IStorage {
   revokeApiKey(id: number): Promise<void>;
 
   // Bedrock settings operations
+  getAISettings(): Promise<AISettings | undefined>;
+  updateAISettings(patch: Partial<AISettings>, updatedBy: string): Promise<AISettings>;
   getBedrockSettings(): Promise<BedrockSettings | undefined>;
   updateBedrockSettings(
     settings: InsertBedrockSettings,
