@@ -67,6 +67,8 @@ export interface SeederSet {
   emailTemplates(): Promise<void>;
   /** Startup data fix-up: a stored `user_invitation` still equal to the OLD default (with the Department line) becomes the new default. Runs right after emailTemplates. */
   updateOldInvitationTemplate?(): Promise<unknown>;
+  /** R90: text for documents uploaded before extraction existed. Started after the bootstrap admin, not awaited: never blocks or fails boot. */
+  backfillDocumentText?(): Promise<unknown>;
   demoUsers(): Promise<void>;
   departments(): Promise<void>;
   teams(): Promise<void>;
@@ -86,7 +88,9 @@ async function defaultSeeders(): Promise<SeederSet> {
   const { deactivateLegacyApiKeys } = await import("./legacyApiKeyFixup");
   const { ensureAiSystemUser } = await import("../utils/aiSystemUser");
   const { updateOldInvitationTemplate } = await import("./invitationTemplateFixup");
+  const { backfillDocumentText } = await import("../services/documents/backfillText");
   return {
+    backfillDocumentText: () => backfillDocumentText(),
     aiSystemUser: ensureAiSystemUser,
     migrateLegacyRoles,
     migrateAssigneeTypes,
@@ -125,6 +129,8 @@ export async function runSeeders(
   await bestEffort("default email templates", s.emailTemplates);
   if (s.updateOldInvitationTemplate) await bestEffort("invitation template update", s.updateOldInvitationTemplate);
   await required("bootstrap admin", () => s.bootstrapAdmin(env));
+  // Best effort and NOT awaited (R90): parsing old uploads must not hold up or stop the server.
+  if (s.backfillDocumentText) void bestEffort("document text backfill", s.backfillDocumentText);
 
   if (env.SEED_DEMO_DATA !== "true") return;
 

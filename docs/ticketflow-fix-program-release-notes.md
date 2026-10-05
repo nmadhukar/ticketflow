@@ -982,3 +982,44 @@ merged schema: `db:migrate-sql` on the empty database (`fresh database ... nothi
    address your proxies saw). With the default of 1 behind two proxies every client appears as the
    inner proxy.
 7. Verify the deployed commit through Coolify's deployment record, not a bundle hash.
+
+## 8. MCP documents (2026-10-05)
+
+An uploaded help document (the DoseSpot configuration `.docx`) was invisible to MCP: its text was
+only in `file_data` (base64), nothing extracted it, and no MCP tool read help documents, policies
+or guidelines. Task MCP4 adds document search, reading and writing on MCP (rulings R89 to R92,
+`DEVELOPER_DOCUMENTATION.md`, MCP Server).
+
+- **Migration 0030** (`0030_document_extracted_text.sql`) adds a nullable `extracted_text` text
+  column to `help_documents` and `company_policies`. Idempotent (`ADD COLUMN IF NOT EXISTS`), it
+  never aborts (a missing table is a NOTICE), and both columns are in the startup schema check, so
+  the server refuses to boot without them. Numbered 0030 because 0023 is held by an open branch;
+  the SQL runner applies files in name order and tolerates the gap (0014 is already followed by 0018).
+- **Two new runtime dependencies**, pinned: `mammoth` 1.13.0 (`.docx` text) and `unpdf` 1.8.1
+  (`.pdf` text; the serverless PDF.js build, pure JavaScript, no dependencies and no native code).
+  `.txt` and `.md` are read as UTF-8. Anything else, or a file that does not parse, keeps
+  `extracted_text` null and logs the error type only. Text is capped at 1,000,000 characters.
+- **Extraction on write.** REST `POST`/`PUT /api/admin/help` and `POST`/`PUT
+  /api/admin/company-policies` and the MCP write tools fill `extracted_text` through one helper;
+  `extracted_text` in a request body is ignored. `GET /api/help/search` now also matches the file
+  text.
+- **Backfill at startup.** Rows with `extracted_text` null and a file get their text after the
+  bootstrap admin step, best effort and not awaited: it never delays or fails boot. One log line:
+  `Document text backfill: help documents N filled, N unsupported, N unreadable; policies ...`. The
+  local DoseSpot `.docx` (2 MB) extracts in about 0.2 s. An unreadable supported file stays null and
+  is tried again at the next start.
+- **New MCP tools (31 in all):** `search_documents`, `get_document`, `list_guideline_categories`,
+  and `create_`/`update_` for help documents, policies, guidelines and knowledge articles
+  (`update_*` also publishes and unpublishes). Writes are admin only, as REST; delete stays UI-only.
+  Every tool still rides on the key's `mcp:tickets` permission.
+- **Server instructions:** `initialize` now returns `instructions` asking the model to search the
+  documents before answering how-to, setup and policy questions, quote the title, and say when
+  nothing is found.
+
+### Deploy checks
+
+1. After the deploy the log shows `applied 0030_document_extracted_text.sql`, then the backfill
+   line. For the local stack the DoseSpot document should count as `1 filled`.
+2. Ask an agent connected over MCP a DoseSpot setup question and check that it calls
+   `search_documents`, cites "Dosespot Configuration Document" and answers from it (an MCP tool
+   change is verified by asking the agent, not by a connection test).

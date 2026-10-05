@@ -565,6 +565,14 @@ Rulings for the app tools (MCP2):
 - **R88, notifications are pulled.** MCP has no push: an agent polls `list_notifications` (with
   `since`) and clears with `mark_notifications_read`. Ticket events are also in `list_activity`.
 
+Rulings for the document tools (MCP4): **R89** content writes (help documents, policies,
+guidelines, knowledge articles: create, update, publish or unpublish) are allowed, admin only as
+their REST admin routes; deleting stays in the UI. **R90** uploaded `.docx`, `.pdf`, `.txt` and
+`.md` files become searchable text. **R91** `search_documents` covers all four with each REST read
+route's visibility. **R92** `initialize` returns `instructions` telling the model to search the
+documents before answering how-to, setup and policy questions, to quote the title it used, and to
+say when nothing relevant is found.
+
 Tool results are JSON text. On success `isError` is absent. On failure the result has
 `isError: true` and the text is `{"code","message","details?"}` with `code` one of:
 
@@ -606,6 +614,17 @@ or `.offset`.
 | `get_ticket_history` | `id` | `{ticketId, history}`, as `GET /api/tasks/:id/history`. Same access as `get_ticket`: unknown `NOT_FOUND`, not visible `FORBIDDEN`. |
 | `list_notifications` | `unreadOnly?` (default true), `since?` (ISO 8601 date-time, only newer), `limit` (1-100, default 25) | `{notifications, returned, limit, hasMore}`: the owner's own, newest first. |
 | `mark_notifications_read` | `ids` (array of ids) or `all: true`, not both | `{marked}`: how many of the owner's own unread notifications were marked. Another user's id is not counted and not changed. |
+| `search_documents` | `query` (required, 1-200), `type?` (`help`, `policy`, `guideline` or `knowledge`), `limit` (1-50, default 10) | `{results: [{type, id, title, category, snippet, published}], returned}` over help documents, policies, guidelines and knowledge articles (title, description or summary, content, uploaded file text), each as visible as on `GET /api/help/search`, `GET /api/company-policies`, `GET /api/guides` and `GET /api/knowledge/search` (admins also see inactive policies and unpublished articles, staff draft guides). Title matches first, then newest. |
+| `get_document` | `type`, `id` (both required) | The document's metadata and readable `text` (help and policy: content plus the uploaded file's text; guideline: description and content, plus `content` HTML, `guideType`, `scribehowUrl`, `videoUrl`; knowledge: summary and content), capped at 200,000 characters with `truncated`. Never the file. Hidden or unknown: `NOT_FOUND`. |
+| `list_guideline_categories` | none | `{categories}`, as `GET /api/guide-categories`; a guideline's `category` is one of these names. |
+| `create_help_document` | `title`, `category`, `content` (required); `tags?`; `filename` + `fileBase64` (`.docx`, `.pdf`, `.txt`, `.md`, at most the upload limit) | The document. As `POST /api/admin/help`: admin only (`FORBIDDEN` otherwise). |
+| `update_help_document` | `id` (required); any of the create fields | The document. As `PUT /api/admin/help/:id`: admin only; unknown `NOT_FOUND`. |
+| `create_policy` | `title` (required); `content` or a file (`filename` + `fileBase64`); `description?`, `isActive?` (default true) | The policy. As `POST /api/admin/company-policies`: admin only. |
+| `update_policy` | `id` (required); any of the create fields; `isActive` publishes or unpublishes | The policy. As `PUT /api/admin/company-policies/:id` and `POST /api/admin/company-policies/:id/toggle`: admin only. |
+| `create_guideline` | `title`, `category` (a name), `content` (required); `type?` (`html`, `scribehow`, `video`; default `html`), `description?`, `scribehowUrl?`, `videoUrl?`, `tags?`, `isPublished?` (default true) | The guideline, HTML sanitised. As `POST /api/admin/guides`: admin only. |
+| `update_guideline` | `id` (required); any of the create fields; `isPublished` publishes or unpublishes | The guideline. As `PUT /api/admin/guides/:id`: admin only. |
+| `create_knowledge_article` | `title`, `content` (required); `summary?`, `category?` (default `general`), `tags?`, `isPublished?` (default false) | The article. As `POST /api/admin/knowledge`: admin only. |
+| `update_knowledge_article` | `id` (required); any of the create fields; `isPublished` publishes or unpublishes (status moves with it) | The article. As `PUT /api/admin/knowledge/:id` and `PATCH /api/admin/knowledge/:id/publish`: admin only. |
 
 Assigning a ticket needs no tool of its own: `update_ticket` with `assigneeId`/`assigneeType`/
 `assigneeTeamId` is `PATCH /api/tasks/:id` (same field table and rules).

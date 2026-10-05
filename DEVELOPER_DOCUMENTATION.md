@@ -481,12 +481,34 @@ All endpoints return consistent error format:
 `POST /api/mcp` is a stateless Model Context Protocol server for agents holding an API key with
 the `mcp:tickets` permission. The full contract (errors, argument rules, every tool's arguments
 and result) is section 15 of `API_ENDPOINTS_REFERENCE.md`. Code: `server/mcp/` (`tools.ts` for
-tickets, `appTools.ts` for the rest, `args.ts` for id and paging parsing).
+tickets, `appTools.ts` for the rest of the app, `documentTools.ts` for documents, `args.ts` for id
+and paging parsing).
 
-Tools: `create_ticket`, `get_ticket`, `list_tickets`, `update_ticket` (also assigns), `close_ticket`,
+Tools (31): `create_ticket`, `get_ticket`, `list_tickets`, `update_ticket` (also assigns), `close_ticket`,
 `reopen_ticket`, `delete_ticket`, `add_comment`, `get_ticket_history`, `whoami`, `list_users`,
 `list_teams`, `get_team`, `list_departments`, `search_knowledge`, `get_knowledge_article`,
-`get_stats`, `list_activity`, `list_notifications`, `mark_notifications_read`.
+`get_stats`, `list_activity`, `list_notifications`, `mark_notifications_read`, and the document
+tools (task MCP4): `search_documents`, `get_document`, `list_guideline_categories`,
+`create_help_document`, `update_help_document`, `create_policy`, `update_policy`,
+`create_guideline`, `update_guideline`, `create_knowledge_article`, `update_knowledge_article`.
+
+Documents on MCP (help documents, company policies, guidelines = user guides, knowledge articles):
+the rules live in `server/services/documents/` (`documentLibrary.ts` reads and visibility,
+`documentWrites.ts` writes, `extractText.ts` file text, `backfillText.ts` the startup backfill),
+and the REST routes use the same visibility predicates.
+
+- **Uploads that become text.** `.docx` (mammoth), `.pdf` (unpdf), `.txt` and `.md` (UTF-8). The
+  text goes in `extracted_text` (migration 0030, capped at 1,000,000 characters) on REST and MCP
+  create and update; anything else, or a file that does not parse, leaves it null and logs the
+  error type only. MCP takes a file as `filename` plus `fileBase64`, at most
+  `MAX_FILE_UPLOAD_SIZE_MB` (default 50, the REST limit). Rows uploaded before this get their text
+  from a best-effort backfill started at boot (not awaited).
+- **Help documents have no publish flag**: every signed-in user reads every one, as `/api/help`.
+  A help document or policy created on MCP without a file stores its text in `content`, an empty
+  `file_data` and the file name `<title>.txt` (a text-only policy downloads as its content).
+- Under Jest, `unpdf` is loaded through Node's own `require` (`jest.config.mjs` maps it to
+  `server/__tests__/utils/unpdfNative.cjs`), because its PDF.js build is an ES module loaded with a
+  dynamic `import()` that Jest's CommonJS registry cannot run. Production imports it directly.
 
 Rulings:
 
@@ -500,6 +522,24 @@ Rulings:
   providers, API keys, Teams settings, invitations.
 - **R88, notifications are pulled**: `list_notifications` (`unreadOnly`, `since`, `limit`) and
   `mark_notifications_read` (own notifications only).
+- **R89, content writes are allowed on MCP** (owner decision 2026-10-05): create, update and
+  publish or unpublish help documents, policies (`isActive`), guidelines (`isPublished`) and
+  knowledge articles (`isPublished`, which moves `status` with it as the publish route does). Each
+  write mirrors its REST admin route: admin only (stored role `admin`, else FORBIDDEN "Admin access
+  required"), the same validation and storage call. Deleting stays UI-only. R87 holds for
+  everything else.
+- **R90, uploads become searchable text** (`extracted_text`, migration 0030, see above).
+- **R91, one search, REST visibility.** `search_documents` (`query` 1-200, optional `type` one of
+  `help`, `policy`, `guideline`, `knowledge`, `limit` 1-50, default 10) looks in the title,
+  description or summary, content and `extracted_text`, and returns `{type, id, title, category,
+  snippet, published}` (about 300 characters around the first match), title matches first, then
+  newest. Each source shows exactly what its REST read route shows the caller: help, everyone;
+  inactive policies, admins only; draft guidelines, staff only; unpublished knowledge, admins
+  only. `get_document` (`type`, `id`) returns the metadata and the readable text (`text`, capped at
+  200,000 characters, `truncated`), never `file_data`; a hidden row is NOT_FOUND, as REST's 404.
+- **R92, server instructions.** `initialize` carries `instructions`: search the documents (then
+  `get_document`) before answering a how-to, setup or policy question, quote the title used, and
+  say plainly when nothing relevant is found (`MCP_INSTRUCTIONS` in `server/mcp/server.ts`).
 
 Example client configuration (Streamable HTTP; the key comes from the environment):
 

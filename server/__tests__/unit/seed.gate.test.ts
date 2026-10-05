@@ -188,3 +188,39 @@ describe("leftover demo logins", () => {
     expect(s.deactivateDemoAccounts).toHaveBeenCalledWith(env);
   });
 });
+
+describe("document text backfill (R90)", () => {
+  it("starts after the bootstrap admin and is not awaited: a slow backfill does not hold startup", async () => {
+    const order: string[] = [];
+    const s = fakeSeeders();
+    s.bootstrapAdmin.mockImplementation(async () => {
+      order.push("bootstrap");
+    });
+    let finish: () => void = () => undefined;
+    const backfill = jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          order.push("backfill started");
+          finish = resolve;
+        })
+    );
+    await runSeeders({ NODE_ENV: "production" }, { ...asSet(s), backfillDocumentText: backfill });
+    expect(order).toEqual(["bootstrap", "backfill started"]);
+    finish();
+  });
+
+  it("a failing backfill never fails startup and is logged by error type only", async () => {
+    const errors = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    const s = fakeSeeders();
+    const backfill = jest.fn(async () => {
+      throw Object.assign(new Error("connect to postgres://u:secret@db failed"), { code: "ECONNREFUSED" });
+    });
+    await expect(runSeeders({ NODE_ENV: "production" }, { ...asSet(s), backfillDocumentText: backfill })).resolves.toBeUndefined();
+    await new Promise((r) => setImmediate(r));
+    expect(backfill).toHaveBeenCalledTimes(1);
+    const line = errors.mock.calls.map((c) => c.join(" ")).join("\n");
+    errors.mockRestore();
+    expect(line).toContain('Startup step "document text backfill" failed; continuing without it [Error ECONNREFUSED]');
+    expect(line).not.toContain("secret");
+  });
+});

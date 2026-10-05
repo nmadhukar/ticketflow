@@ -701,6 +701,9 @@ export const helpDocuments = pgTable("help_documents", {
   filename: varchar("filename").notNull(),
   content: text("content").notNull(), // Extracted text content for search
   fileData: text("file_data").notNull(), // Base64 encoded file data
+  // R90 (migration 0030): the uploaded file's text, for search and MCP reads. Null: no file,
+  // an unsupported type or a file that did not parse. Server-written only.
+  extractedText: text("extracted_text"),
   uploadedBy: varchar("uploaded_by").references(() => users.id),
   category: varchar("category"),
   tags: text("tags").array(),
@@ -809,6 +812,8 @@ export const companyPolicies = pgTable("company_policies", {
   description: text("description"),
   content: text("content"), // Extracted text content for search (nullable for binary files)
   fileData: text("file_data").notNull(), // Base64 encoded file data
+  // R90 (migration 0030): the uploaded file's text, as help_documents.extracted_text.
+  extractedText: text("extracted_text"),
   fileName: varchar("file_name", { length: 255 }).notNull(),
   fileSize: integer("file_size").notNull(),
   mimeType: varchar("mime_type", { length: 100 }).notNull(),

@@ -148,6 +148,8 @@ import {
 import { registerEmailRoutes } from "./email";
 import { parseIdParam } from "../http/params";
 import { sanitizeRichHtml } from "../security/sanitizeHtml";
+import { extractDocumentText } from "../services/documents/extractText";
+import { mayReadDraftGuides, mayReadInactivePolicies } from "../services/documents/documentLibrary";
 import { registerTeamsRoutes } from "./teams";
 import { registerIdParams } from "../http/install";
 import {
@@ -1774,6 +1776,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         filename,
         content,
         fileData,
+        // R90: the file's text, so search and MCP can read the document (null if unsupported).
+        extractedText: await extractDocumentText({ filename, data: fileData }),
         category,
         tags,
         uploadedBy: userId,
@@ -1797,7 +1801,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const id = parseInt(req.params.id);
-      const updates = req.body;
+      // extracted_text is written by the server only (R90).
+      const { extractedText: _clientText, ...updates } = req.body ?? {};
+      if (typeof updates.fileData === "string") {
+        const existing = await storage.getHelpDocument(id);
+        // A client may send the stored file back unchanged: extract only a new (or never-read) file.
+        if (!existing || existing.fileData !== updates.fileData || existing.extractedText == null) {
+          updates.extractedText = await extractDocumentText({
+            filename: updates.filename ?? existing?.filename,
+            data: updates.fileData,
+          });
+        }
+      }
 
       const document = await storage.updateHelpDocument(id, updates);
       res.json(document);
@@ -1853,8 +1868,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/guides", isAuthenticated, async (req, res) => {
     try {
       const { published } = req.query;
+      // mayReadDraftGuides is the rule MCP's search_documents and get_document apply too (R91).
       const publishedOnly =
-        !isStaffRole((req.user as any)?.role) || published === "true";
+        !mayReadDraftGuides((req.user as any)?.role) || published === "true";
       const guides = await storage.getUserGuides(
         publishedOnly ? { isPublished: true } : undefined
       );
@@ -1873,7 +1889,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (
         !guide ||
-        (guide.isPublished !== true && !isStaffRole((req.user as any)?.role))
+        (guide.isPublished !== true && !mayReadDraftGuides((req.user as any)?.role))
       ) {
         return fail(res, 404, "Guide not found");
       }
@@ -2549,8 +2565,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Company Policy endpoints
   // Retired (inactive) policies are for admins only: everyone else gets the
   // active ones, and a retired policy is 404 by id and by download.
+  // The rule MCP's search_documents and get_document apply too (R91).
   const isAdminCaller = (req: any): boolean =>
-    normalizeRole(req.user?.role) === "admin";
+    mayReadInactivePolicies(req.user?.role);
 
   app.get("/api/company-policies", isAuthenticated, async (req, res) => {
     try {
@@ -2611,6 +2628,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           description,
           content: null, // Will be extracted later if it's a text-based file
           fileData,
+          // R90: the file's text (docx, pdf, txt, md), for search and MCP.
+          extractedText: await extractDocumentText({
+            filename: req.file.originalname,
+            mimeType: req.file.mimetype,
+            data: req.file.buffer,
+          }),
           fileName: req.file.originalname,
           fileSize: req.file.size,
           mimeType: req.file.mimetype,
@@ -2648,6 +2671,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const fileData = req.file.buffer.toString("base64");
           updateData.fileData = fileData;
           updateData.content = null; // Will be extracted later if it's a text-based file
+          updateData.extractedText = await extractDocumentText({
+            filename: req.file.originalname,
+            mimeType: req.file.mimetype,
+            data: req.file.buffer,
+          });
           updateData.fileName = req.file.originalname;
           updateData.fileSize = req.file.size;
           updateData.mimeType = req.file.mimetype;
