@@ -123,8 +123,8 @@ Expected: PASS; migration preserves legacy storage and repeated application.
 - Create: `server/services/ai/aiModelClient.ts`
 - Create: `server/services/ai/openRouterClient.ts`
 - Create: `server/services/ai/openRouterPricing.ts`
-- Create: `server/services/ai/__tests__/openRouterClient.test.ts`
-- Create: `server/services/ai/__tests__/openRouterPricing.test.ts`
+- Create: `server/__tests__/unit/openRouterClient.test.ts`
+- Create: `server/__tests__/unit/openRouterPricing.test.ts`
 - Modify: `server/services/ai/aiErrors.ts`
 - Modify: `server/env.ts`
 - Test: `server/__tests__/unit/secrets.failclosed.test.ts`
@@ -153,7 +153,7 @@ Test request URL, bearer header, selected model, messages, operation cap/tempera
 
 - [ ] **Step 2: Run focused tests and observe failure**
 
-Run: `npm.cmd test -- --runTestsByPath server/services/ai/__tests__/openRouterClient.test.ts`
+Run: `npm.cmd test -- --runTestsByPath server/__tests__/unit/openRouterClient.test.ts`
 Expected: FAIL because client module is not implemented.
 
 - [ ] **Step 3: Define the typed model-client contract and safe error type**
@@ -192,7 +192,7 @@ Add `OPENROUTER_API_KEY` to `server/env.ts` as an optional secret. Status/config
 
 - [ ] **Step 7: Run provider boundary tests**
 
-Run: `npm.cmd test -- --runTestsByPath server/services/ai/__tests__/openRouterClient.test.ts server/services/ai/__tests__/openRouterPricing.test.ts server/__tests__/unit/secrets.failclosed.test.ts`
+Run: `npm.cmd test -- --runTestsByPath server/__tests__/unit/openRouterClient.test.ts server/__tests__/unit/openRouterPricing.test.ts server/__tests__/unit/secrets.failclosed.test.ts`
 Expected: PASS with sanitized distinct errors and preflight price state.
 
 ### Task 3: Move all model workflows and cost enforcement behind `AiModelClient`
@@ -212,7 +212,7 @@ Expected: PASS with sanitized distinct errors and preflight price state.
 - Modify: `server/__tests__/integration/ai.caveats.test.ts`
 - Modify: `server/__tests__/unit/aiAutoResponse.test.ts`
 - Modify: `server/__tests__/mocks/aws-bedrock.mock.ts` (replace active AI mock boundary)
-- Create: `server/services/ai/__tests__/aiBudget.test.ts`
+- Create: `server/__tests__/unit/aiBudget.test.ts`
 
 **Interfaces:**
 - Consumes: `AISettings` from Task 1 and `AiModelClient` / OpenRouter error / price contracts from Task 2.
@@ -232,7 +232,7 @@ Define `assertBudgetAvailable(input: { promptTokens: number; maxOutputTokens: nu
 
 - [ ] **Step 2: Run budget tests and observe failure**
 
-Run: `npm.cmd test -- --runTestsByPath server/services/ai/__tests__/aiBudget.test.ts`
+Run: `npm.cmd test -- --runTestsByPath server/__tests__/unit/aiBudget.test.ts`
 Expected: FAIL until the provider-neutral accounting contract is integrated.
 
 - [ ] **Step 3: Update settings access and cost monitoring**
@@ -291,7 +291,7 @@ Move tests to mock `fetch` at the client boundary, retaining workflow assertions
 
 - [ ] **Step 8: Run focused AI suite and typecheck**
 
-Run: `npm.cmd test -- --runTestsByPath server/services/ai/__tests__/openRouterClient.test.ts server/services/ai/__tests__/openRouterPricing.test.ts server/services/ai/__tests__/aiBudget.test.ts server/__tests__/integration/ai.routes.test.ts server/__tests__/integration/ai.caveats.test.ts server/__tests__/unit/aiAutoResponse.test.ts`
+Run: `npm.cmd test -- --runTestsByPath server/__tests__/unit/openRouterClient.test.ts server/__tests__/unit/openRouterPricing.test.ts server/__tests__/unit/aiBudget.test.ts server/__tests__/integration/ai.routes.test.ts server/__tests__/integration/ai.caveats.test.ts server/__tests__/unit/aiAutoResponse.test.ts`
 Run: `npm.cmd run check`
 Expected: PASS; confirm `rg -n "BedrockRuntime|BEDROCK_PRICING|bedrockIntegration" server/services/ai server/routes/index.ts` finds no direct model call or active provider guard (compatibility wrapper names can remain only if provider-neutral internally).
 
