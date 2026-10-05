@@ -2,14 +2,14 @@ import request from "supertest";
 import { eq } from "drizzle-orm";
 import { companyPolicies, helpDocuments, knowledgeArticles, userGuideCategories, userGuides, type User } from "@shared/schema";
 import { db } from "../../../storage/db";
-import { backfillDocumentText } from "../../../services/documents/backfillText";
+import { backfillDocumentText, startDocumentTextBackfill } from "../../../services/documents/backfillText";
 import { MCP_INSTRUCTIONS } from "../../../mcp/server";
 import { createTestApp } from "../helpers/testApp";
 import { resetDb } from "../helpers/testDb";
 import { createUser, loginAs } from "../helpers/fixtures";
 import { mcpFor, type McpCaller } from "../helpers/mcpClient";
 import { findSecrets } from "../helpers/noSecrets";
-import { makeDocx, makePdf } from "../../utils/documentFiles";
+import { documentXml, makeDocx, makePdf } from "../../utils/documentFiles";
 
 /**
  * Task MCP4 (R89-R92): the organisation's documents on MCP. Help documents, company policies,
@@ -124,7 +124,8 @@ describe("help documents", () => {
       .put(`/api/admin/help/${id}`)
       .send({ filename: "vpn.pdf", fileData: b64(makePdf("New VPN steps from the PDF")) });
     expect(replaced.body.extractedText).toContain("New VPN steps from the PDF");
-    expect(await search("agent", "Old VPN steps")).toEqual([]);
+    // Search matches any keyword (I2): "Old" alone tells the old text from the new one.
+    expect(await search("agent", "Old")).toEqual([]);
     expect((await search("agent", "New VPN steps")).map((h) => h.id)).toEqual([id]);
   });
 
@@ -245,7 +246,7 @@ describe("company policies", () => {
 
     const updated = await call("admin", "update_policy", { id: text.data.id, content: "Smart casual every day." });
     expect(updated.data.text).toContain("Smart casual every day.");
-    expect(await search("customer", "Business casual")).toEqual([]);
+    expect(await search("customer", "Business")).toEqual([]);
     expect((await search("customer", "Smart casual")).map((h) => h.id)).toEqual([text.data.id]);
   });
 
@@ -541,7 +542,7 @@ describe("R92: server instructions", () => {
 // ---------------------------------------------------------------------------------------- backfill
 
 describe("startup backfill (R90)", () => {
-  it("fills a pre-existing row whose extracted_text is null, leaves an unsupported one null, and the filled one becomes searchable", async () => {
+  it("fills a pre-existing row whose extracted_text is null, marks an unsupported one tried (''), and the filled one becomes searchable", async () => {
     const docx = await makeDocx(["Legacy upload about the DoseSpot clinic key"]);
     const [legacy] = await db
       .insert(helpDocuments)
@@ -574,7 +575,8 @@ describe("startup backfill (R90)", () => {
     const [filled] = await db.select().from(helpDocuments).where(eq(helpDocuments.id, legacy.id));
     expect(filled.extractedText).toContain("DoseSpot clinic key");
     const [unsupported] = await db.select().from(helpDocuments).where(eq(helpDocuments.id, oldWord.id));
-    expect(unsupported.extractedText).toBeNull();
+    // '' = tried, nothing extractable (review I1): never read again. NULL = never tried.
+    expect(unsupported.extractedText).toBe("");
     const [p] = await db.select().from(companyPolicies).where(eq(companyPolicies.id, policy.id));
     expect(p.extractedText).toContain("overtime");
 
@@ -582,8 +584,151 @@ describe("startup backfill (R90)", () => {
     expect(hits.map((h) => h.id)).toEqual([legacy.id]);
     expect(hits[0].snippet).toContain("DoseSpot clinic key");
 
-    // A second run finds nothing left to do.
+    // A second run finds nothing left to do: every row was tried once.
     const again = await backfillDocumentText(() => undefined);
-    expect(again).toEqual({ help: { filled: 0, unsupported: 1, failed: 0 }, policies: { filled: 0, unsupported: 0, failed: 0 } });
+    expect(again).toEqual({ help: { filled: 0, unsupported: 0, failed: 0 }, policies: { filled: 0, unsupported: 0, failed: 0 } });
+  });
+
+  it("review I1: hostile files (a zip bomb, a corrupt pdf) are tried once in the worker, marked tried, and skipped by the next start", async () => {
+    const errors = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const bomb = await makeDocx([], { documentXml: documentXml(["ha ".repeat(4_000_000)]) });
+      const [bombRow] = await db
+        .insert(helpDocuments)
+        .values({ title: "Bomb", filename: "bomb.docx", content: "x", fileData: b64(bomb) })
+        .returning();
+      const [corrupt] = await db
+        .insert(companyPolicies)
+        .values({ title: "Corrupt", fileData: b64(Buffer.from("%PDF-1.4 not really")), fileName: "c.pdf", fileSize: 10, mimeType: "application/pdf", uploadedBy: u.admin.id })
+        .returning();
+      const [good] = await db
+        .insert(helpDocuments)
+        .values({ title: "Good", filename: "good.txt", content: "x", fileData: b64(Buffer.from("plain survivor text")) })
+        .returning();
+
+      const counts = await backfillDocumentText(() => undefined);
+      expect(counts).toEqual({ help: { filled: 1, unsupported: 0, failed: 1 }, policies: { filled: 0, unsupported: 0, failed: 1 } });
+      const rows = await db.select().from(helpDocuments);
+      expect(rows.find((r) => r.id === bombRow.id)!.extractedText).toBe("");
+      expect(rows.find((r) => r.id === good.id)!.extractedText).toBe("plain survivor text");
+      const [c] = await db.select().from(companyPolicies).where(eq(companyPolicies.id, corrupt.id));
+      expect(c.extractedText).toBe("");
+      // Logged by type only.
+      for (const line of errors.mock.calls.map((x) => x.map(String).join(" "))) {
+        expect(line).toMatch(/^Document text extraction failed \[[^\]]+\]$/);
+      }
+
+      // The next start reads none of them again.
+      errors.mockClear();
+      expect(await backfillDocumentText(() => undefined)).toEqual({
+        help: { filled: 0, unsupported: 0, failed: 0 },
+        policies: { filled: 0, unsupported: 0, failed: 0 },
+      });
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  it("does nothing, and marks nothing, when the extraction worker cannot be found", async () => {
+    await db.insert(helpDocuments).values({ title: "Waiting", filename: "w.txt", content: "x", fileData: b64(Buffer.from("later")) });
+    const lines: string[] = [];
+    const counts = await backfillDocumentText((l) => lines.push(l), { workerAvailable: () => false });
+    expect(counts).toBeNull();
+    expect(lines).toEqual(["Document text backfill skipped: the extraction worker file was not found"]);
+    const [row] = await db.select().from(helpDocuments);
+    expect(row.extractedText).toBeNull();
+  });
+
+  it("startDocumentTextBackfill never rejects: a failure is one line by error type", async () => {
+    const errors = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await expect(
+        startDocumentTextBackfill(async () => {
+          throw Object.assign(new Error("connect postgres://u:secret@db"), { code: "ECONNREFUSED" });
+        })
+      ).resolves.toBeUndefined();
+      expect(errors.mock.calls.map((c) => c.join(" "))).toEqual(["Document text backfill failed [Error ECONNREFUSED]"]);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------------------- review fixes
+
+describe("review I2: keyword search", () => {
+  it("finds a document from the key words of a question, in any order, and ranks the all-terms match first", async () => {
+    const doc = await call("admin", "create_help_document", {
+      title: "Prescribing setup",
+      category: "Technical",
+      content: "Enter the DoseSpot clinic key under Settings",
+    });
+    const partial = await call("admin", "create_help_document", { title: "Office", category: "General", content: "Who holds the office key" });
+    for (const query of ["DoseSpot key", "clinic key settings", "How do I set the DoseSpot clinic key?", "Dose Spot"]) {
+      const res = await call("customer", "search_documents", { query });
+      expect([query, res.isError]).toEqual([query, false]);
+      expect([query, res.data.results[0]?.id]).toEqual([query, doc.data.id]);
+      expect([query, res.data.results[0].snippet]).toEqual([query, expect.stringContaining("DoseSpot clinic key")]);
+    }
+    const question = await call("customer", "search_documents", { query: "How do I set the DoseSpot clinic key?" });
+    expect(question.data.terms).toEqual(["set", "dosespot", "clinic", "key"]);
+    expect(question.data.results.map((r: { id: number }) => r.id)).toEqual([doc.data.id, partial.data.id]);
+    expect(question.data.results.map((r: { matchedTerms: number }) => r.matchedTerms)).toEqual([4, 1]);
+  });
+
+  it("a query of stopwords only is a coded VALIDATION, not an empty list", async () => {
+    const res = await call("agent", "search_documents", { query: "how do I do it?" });
+    expect(res.data.code).toBe("VALIDATION");
+    expect(res.data.details.fieldErrors.query[0]).toMatch(/key ?word/i);
+  });
+
+  it("punctuation, LIKE wildcards included, is not part of a keyword: '100%' searches for 100 and '%_%' has no keyword", async () => {
+    await call("admin", "create_help_document", { title: "Discounts", category: "General", content: "Take 100% off" });
+    await call("admin", "create_help_document", { title: "Plain", category: "General", content: "Nothing special 100 here" });
+    await call("admin", "create_help_document", { title: "Other", category: "General", content: "No number at all" });
+    const hits = await search("customer", "100%");
+    expect(hits.map((h) => h.title).sort()).toEqual(["Discounts", "Plain"]);
+    const wild = await call("customer", "search_documents", { query: "%_%" });
+    expect(wild.data.code).toBe("VALIDATION");
+  });
+});
+
+describe("review minors", () => {
+  it("M2 (review M5): a policy file name outside Latin-1 downloads with an ASCII fallback and an RFC 5987 filename*", async () => {
+    const name = 'Zasady "łódź" 政策.txt';
+    const created = await call("admin", "create_policy", { title: "Unicode", filename: name, fileBase64: b64(Buffer.from("unicode policy body")) });
+    expect(created.isError).toBe(false);
+    const res = await (await rest("customer")).get(`/api/company-policies/${created.data.id}/download`);
+    expect(res.status).toBe(200);
+    expect(res.text).toBe("unicode policy body");
+    const header = res.headers["content-disposition"] as string;
+    expect(header).toBe(
+      `attachment; filename="Zasady ___d__ __.txt"; filename*=UTF-8''${encodeURIComponent(name).replace(/['()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase())}`
+    );
+    expect(header).not.toMatch(/[\r\n]/);
+  });
+
+  it("M4: null in an optional argument counts as absent, not as a protocol error", async () => {
+    const policy = await call("admin", "create_policy", { title: "Nulls", content: "text", description: null, isActive: null, filename: null, fileBase64: null });
+    expect(policy.isError).toBe(false);
+    expect(policy.data.isActive).toBe(true);
+    const updated = await call("admin", "update_policy", { id: policy.data.id, description: null, isActive: false });
+    expect(updated.isError).toBe(false);
+    expect(updated.data.isActive).toBe(false);
+    const found = await call("admin", "search_documents", { query: "Nulls", type: null, limit: null });
+    expect(found.isError).toBe(false);
+    const article = await call("admin", "create_knowledge_article", { title: "A", content: "B", tags: null, summary: null, category: null, isPublished: null });
+    expect(article.isError).toBe(false);
+    expect(article.data).toMatchObject({ isPublished: false, category: "general" });
+    const guide = await call("admin", "create_guideline", { title: "G", category: "C", content: "x", type: null, tags: null, isPublished: null, videoUrl: null });
+    expect(guide.isError).toBe(false);
+    const help = await call("admin", "update_help_document", {
+      id: (await call("admin", "create_help_document", { title: "H", category: "C", content: "x", tags: null })).data.id,
+      title: "H2",
+      tags: null,
+      filename: null,
+    });
+    expect(help.data.title).toBe("H2");
   });
 });

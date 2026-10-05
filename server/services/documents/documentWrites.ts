@@ -11,7 +11,7 @@ import {
   presentKnowledgeArticle,
   presentPolicy,
 } from "./documentLibrary";
-import { GUIDE_TYPES } from "./types";
+import { GUIDE_TYPES, mcpUploadLimitBytes, mcpUploadLimitMb } from "./types";
 
 /**
  * Content writes on MCP (task MCP4, R89): create, update and publish or unpublish help documents,
@@ -23,9 +23,12 @@ import { GUIDE_TYPES } from "./types";
  * leaves it). Deleting is not here: it stays in the UI.
  *
  * A file arrives as base64 (`fileBase64`) with its `filename`: .docx, .pdf, .txt or .md, at most
- * MAX_FILE_UPLOAD_SIZE_MB (the REST upload limit, default 50). Its text is extracted with the
- * shared helper (R90). A document with no file stores its text in `content` and an empty
- * file_data (both columns are NOT NULL); the policy download route then serves the content.
+ * mcpUploadLimitBytes() (the REST upload limit, or what base64 fits in the JSON request limit:
+ * 36 MB at the defaults, review M6). Its text is extracted with the shared helper (R90, in the
+ * bounded worker); a file that gives no text stores '' ("tried, nothing extractable"). A document
+ * with no file stores its text in `content` and an empty file_data (both columns are NOT NULL);
+ * the policy download route then serves the content. R94: MCP may create a policy from text alone,
+ * although the REST upload route requires a file (an agent cannot easily attach one).
  */
 
 const MIME_BY_TYPE: Record<ExtractableType, string> = {
@@ -35,11 +38,8 @@ const MIME_BY_TYPE: Record<ExtractableType, string> = {
   md: "text/markdown",
 };
 
-/** The REST upload limit (multer in server/routes/index.ts), in bytes. */
-export function maxUploadBytes(): number {
-  const mb = parseInt(process.env.MAX_FILE_UPLOAD_SIZE_MB || "50", 10);
-  return (Number.isFinite(mb) && mb > 0 ? mb : 50) * 1024 * 1024;
-}
+/** The MCP file limit in bytes (see mcpUploadLimitBytes). */
+export const maxUploadBytes = (): number => mcpUploadLimitBytes();
 
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
@@ -51,7 +51,8 @@ interface DecodedFile {
   base64: string;
   size: number;
   mimeType: string;
-  extractedText: string | null;
+  /** The file's text; '' when it gives none (tried, nothing extractable). */
+  extractedText: string;
 }
 
 /** Validates and decodes an uploaded file, then extracts its text. */
@@ -66,14 +67,14 @@ async function decodeUpload(filename: string, fileBase64: string): Promise<Decod
   const buffer = decodeFileData(compact);
   if (buffer.length === 0) throw validation("fileBase64", "The file is empty");
   if (buffer.length > maxUploadBytes()) {
-    throw validation("fileBase64", `The file is larger than the upload limit (${maxUploadBytes() / 1024 / 1024} MB)`);
+    throw validation("fileBase64", `The file is larger than the MCP upload limit (${mcpUploadLimitMb()} MB)`);
   }
   return {
     filename,
     base64: buffer.toString("base64"),
     size: buffer.length,
     mimeType: MIME_BY_TYPE[type],
-    extractedText: await extractDocumentText({ filename, data: buffer }),
+    extractedText: (await extractDocumentText({ filename, data: buffer })) ?? "",
   };
 }
 

@@ -499,16 +499,28 @@ and the REST routes use the same visibility predicates.
 
 - **Uploads that become text.** `.docx` (mammoth), `.pdf` (unpdf), `.txt` and `.md` (UTF-8). The
   text goes in `extracted_text` (migration 0030, capped at 1,000,000 characters) on REST and MCP
-  create and update; anything else, or a file that does not parse, leaves it null and logs the
-  error type only. MCP takes a file as `filename` plus `fileBase64`, at most
-  `MAX_FILE_UPLOAD_SIZE_MB` (default 50, the REST limit). Rows uploaded before this get their text
-  from a best-effort backfill started at boot (not awaited).
+  create and update. `extracted_text` NULL means "never tried"; `''` means "tried, nothing
+  extractable" (an unsupported type, an empty document, or a file that failed or hit a limit; the
+  error type only is logged). MCP takes a file as `filename` plus `fileBase64`, at most 36 MB at
+  the defaults: the lower of `MAX_FILE_UPLOAD_SIZE_MB` (the REST limit) and what base64 fits in
+  `MAX_REQUEST_SIZE_MB` (4/3 inflation, 2 MB of headroom); the tool descriptions state the number.
+- **Extraction is bounded (review I1).** `.docx` and `.pdf` are parsed in a worker thread
+  (`server/services/documents/extractWorker.mjs`, built to `dist/documentExtractWorker.mjs` by
+  `npm run build`, found next to `dist/index.js`), never in the server's isolate: heap limit 256 MB
+  (`DOCUMENT_EXTRACT_MAX_MB`, 16-4096), 20 s wall clock then `terminate()`, at most two at once.
+  A `.docx` whose zip directory declares more than 50 MB, or more than 10 MB at a compression
+  ratio above 100, is refused before parsing; a `.pdf` over 500 pages is refused. PDF.js runs with
+  `verbosity: 0` and `isEvalSupported: false`, and the worker's console and output are discarded,
+  so no text from a file reaches the log. An out-of-memory or a timeout ends the worker only.
+- **Backfill.** Rows with NULL `extracted_text` and a file get their text once, one row at a time,
+  from `startDocumentTextBackfill`, started by `server/index.ts` after "serving on port" and not
+  awaited; each row is marked (text or `''`), so a hostile file is tried once, not at every boot.
+  If the worker file is missing the backfill logs one line and marks nothing.
 - **Help documents have no publish flag**: every signed-in user reads every one, as `/api/help`.
   A help document or policy created on MCP without a file stores its text in `content`, an empty
   `file_data` and the file name `<title>.txt` (a text-only policy downloads as its content).
-- Under Jest, `unpdf` is loaded through Node's own `require` (`jest.config.mjs` maps it to
-  `server/__tests__/utils/unpdfNative.cjs`), because its PDF.js build is an ES module loaded with a
-  dynamic `import()` that Jest's CommonJS registry cannot run. Production imports it directly.
+- **Policy downloads** send `Content-Disposition` with an ASCII `filename` and an RFC 5987
+  `filename*` (`server/http/contentDisposition.ts`), so any file name downloads.
 
 Rulings:
 
@@ -530,16 +542,25 @@ Rulings:
   everything else.
 - **R90, uploads become searchable text** (`extracted_text`, migration 0030, see above).
 - **R91, one search, REST visibility.** `search_documents` (`query` 1-200, optional `type` one of
-  `help`, `policy`, `guideline`, `knowledge`, `limit` 1-50, default 10) looks in the title,
-  description or summary, content and `extracted_text`, and returns `{type, id, title, category,
-  snippet, published}` (about 300 characters around the first match), title matches first, then
-  newest. Each source shows exactly what its REST read route shows the caller: help, everyone;
+  `help`, `policy`, `guideline`, `knowledge`, `limit` 1-50, default 10) splits the query into
+  keywords (lower-cased letters and digits; English stopwords and one-character words dropped; at
+  most 12; a query with none is VALIDATION) and returns every document containing ANY keyword
+  (case-insensitive ILIKE, escaped and bound) in the title, description or summary, content or
+  `extracted_text`: `{results: [{type, id, title, category, snippet, published, matchedTerms}],
+  returned, terms}`, the snippet about 300 characters around the earliest keyword. Ranked by the
+  number of keywords matched, then keywords in the title, then newest (NULL dates last). Each
+  source shows exactly what its REST read route shows the caller: help, everyone;
   inactive policies, admins only; draft guidelines, staff only; unpublished knowledge, admins
   only. `get_document` (`type`, `id`) returns the metadata and the readable text (`text`, capped at
   200,000 characters, `truncated`), never `file_data`; a hidden row is NOT_FOUND, as REST's 404.
 - **R92, server instructions.** `initialize` carries `instructions`: search the documents (then
-  `get_document`) before answering a how-to, setup or policy question, quote the title used, and
-  say plainly when nothing relevant is found (`MCP_INSTRUCTIONS` in `server/mcp/server.ts`).
+  `get_document`) before answering a how-to, setup or policy question, with the question's key
+  words (e.g. "DoseSpot clinic key"), trying other words or synonyms before concluding nothing
+  exists; quote the title used, and say plainly when nothing relevant is found (`MCP_INSTRUCTIONS`
+  in `server/mcp/server.ts`).
+- **R94, text-only policies on MCP.** `create_policy` accepts a policy from text alone, although
+  `POST /api/admin/company-policies` requires a file (an agent cannot easily attach one);
+  `update_policy` may edit `content`. Optional MCP arguments also accept `null`, meaning absent.
 
 Example client configuration (Streamable HTTP; the key comes from the environment):
 

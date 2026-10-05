@@ -44,8 +44,6 @@ const common = {
     '^@/(.*)$': '<rootDir>/client/src/$1',
     // tsconfig baseUrl is '.', so some server files import 'server/...' bare
     '^server/(.*)$': '<rootDir>/server/$1',
-    // unpdf (PDF text, R90) loads PDF.js with a native dynamic import(): load it through Node's own require.
-    '^unpdf$': '<rootDir>/server/__tests__/utils/unpdfNative.cjs',
   },
   moduleFileExtensions: ['ts', 'tsx', 'js', 'json'],
 };

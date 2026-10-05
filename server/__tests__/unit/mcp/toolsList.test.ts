@@ -23,6 +23,7 @@ jest.mock("../../../services/documents/documentWrites", () => ({}));
 
 import { TICKET_CATEGORIES } from "@shared/constants";
 import { MCP_INSTRUCTIONS, createMcpServer } from "../../../mcp/server";
+import { mcpUploadLimitBytes } from "../../../services/documents/types";
 import { TicketError } from "../../../services/tickets/ticketError";
 import * as service from "../../../services/tickets/ticketService";
 
@@ -134,14 +135,30 @@ describe("MCP tools/list", () => {
     for (const name of ["create_guideline", "update_guideline"]) {
       expect(schemaOf(name).properties.type.description).toEqual(expect.stringContaining("html, scribehow, video"));
     }
-    for (const name of ["create_policy", "update_policy"]) expect(typesOf(schemaOf(name).properties.isActive)).toEqual(["boolean"]);
+    // Optional fields also accept null, which counts as absent (review M4).
+    for (const name of ["create_policy", "update_policy"]) expect(typesOf(schemaOf(name).properties.isActive)).toEqual(["boolean", "null"]);
     for (const name of ["create_guideline", "update_guideline", "create_knowledge_article", "update_knowledge_article"]) {
-      expect(typesOf(schemaOf(name).properties.isPublished)).toEqual(["boolean"]);
+      expect(typesOf(schemaOf(name).properties.isPublished)).toEqual(["boolean", "null"]);
     }
     for (const name of ["create_help_document", "update_help_document", "create_policy", "update_policy"]) {
       expect(schemaOf(name).properties.filename.description).toMatch(/\.docx, \.pdf, \.txt or \.md/);
-      expect(typesOf(schemaOf(name).properties.fileBase64)).toEqual(["string"]);
+      expect(typesOf(schemaOf(name).properties.fileBase64)).toEqual(["string", "null"]);
+      // Review M6: the real limit, after base64 inflation under the 50 MB request limit.
+      expect(schemaOf(name).properties.fileBase64.description).toContain("36 MB");
     }
+    for (const [name, field] of [
+      ["search_documents", "type"],
+      ["create_help_document", "tags"],
+      ["create_knowledge_article", "summary"],
+      ["update_guideline", "videoUrl"],
+    ]) {
+      expect([name, field, typesOf(schemaOf(name).properties[field])]).toEqual([name, field, expect.arrayContaining(["null"])]);
+    }
+    // Review I2: the query is key words, matched separately.
+    expect(schemaOf("search_documents").properties.query.description).toMatch(/key ?words/i);
+    expect(schemaOf("search_documents").properties.query.description).toContain("DoseSpot clinic key");
+    // R94: a text-only policy is allowed on MCP, and the description says so.
+    expect(tools.find((t) => t.name === "create_policy")!.description).toMatch(/R94/);
   });
 
   it("R92: initialize carries the server instructions: search the documents first, quote the title, say when nothing is found", async () => {
@@ -152,6 +169,17 @@ describe("MCP tools/list", () => {
     expect(instructions).toMatch(/search_documents.*get_document/);
     expect(instructions).toMatch(/title/);
     expect(instructions).toMatch(/nothing relevant is found/i);
+    // Review I2: search with key words, and try other words before concluding nothing exists.
+    expect(instructions).toContain("DoseSpot clinic key");
+    expect(instructions).toMatch(/other words or synonyms/);
+  });
+
+  it("review M6: the MCP file limit is the REST upload limit, or what base64 fits in the request limit, whichever is lower", () => {
+    const mb = 1024 * 1024;
+    expect(mcpUploadLimitBytes({})).toBe(36 * mb);
+    expect(mcpUploadLimitBytes({ MAX_FILE_UPLOAD_SIZE_MB: "10" })).toBe(10 * mb);
+    expect(mcpUploadLimitBytes({ MAX_REQUEST_SIZE_MB: "100" })).toBe(50 * mb);
+    expect(mcpUploadLimitBytes({ MAX_REQUEST_SIZE_MB: "abc", MAX_FILE_UPLOAD_SIZE_MB: "x" })).toBe(36 * mb);
   });
 
   it("I2: every by-id tool advertises `id` as required, with a type, so a client or model cannot leave it out", async () => {

@@ -149,6 +149,7 @@ import { registerEmailRoutes } from "./email";
 import { parseIdParam } from "../http/params";
 import { sanitizeRichHtml } from "../security/sanitizeHtml";
 import { extractDocumentText } from "../services/documents/extractText";
+import { attachmentDisposition } from "../http/contentDisposition";
 import { mayReadDraftGuides, mayReadInactivePolicies } from "../services/documents/documentLibrary";
 import { registerTeamsRoutes } from "./teams";
 import { registerIdParams } from "../http/install";
@@ -1776,8 +1777,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         filename,
         content,
         fileData,
-        // R90: the file's text, so search and MCP can read the document (null if unsupported).
-        extractedText: await extractDocumentText({ filename, data: fileData }),
+        // R90: the file's text, so search and MCP can read the document ('' = tried, no text).
+        extractedText: (await extractDocumentText({ filename, data: fileData })) ?? "",
         category,
         tags,
         uploadedBy: userId,
@@ -1807,10 +1808,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const existing = await storage.getHelpDocument(id);
         // A client may send the stored file back unchanged: extract only a new (or never-read) file.
         if (!existing || existing.fileData !== updates.fileData || existing.extractedText == null) {
-          updates.extractedText = await extractDocumentText({
-            filename: updates.filename ?? existing?.filename,
-            data: updates.fileData,
-          });
+          updates.extractedText =
+            (await extractDocumentText({
+              filename: updates.filename ?? existing?.filename,
+              data: updates.fileData,
+            })) ?? "";
         }
       }
 
@@ -2629,11 +2631,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           content: null, // Will be extracted later if it's a text-based file
           fileData,
           // R90: the file's text (docx, pdf, txt, md), for search and MCP.
-          extractedText: await extractDocumentText({
-            filename: req.file.originalname,
-            mimeType: req.file.mimetype,
-            data: req.file.buffer,
-          }),
+          extractedText:
+            (await extractDocumentText({
+              filename: req.file.originalname,
+              mimeType: req.file.mimetype,
+              data: req.file.buffer,
+            })) ?? "",
           fileName: req.file.originalname,
           fileSize: req.file.size,
           mimeType: req.file.mimetype,
@@ -2671,11 +2674,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const fileData = req.file.buffer.toString("base64");
           updateData.fileData = fileData;
           updateData.content = null; // Will be extracted later if it's a text-based file
-          updateData.extractedText = await extractDocumentText({
-            filename: req.file.originalname,
-            mimeType: req.file.mimetype,
-            data: req.file.buffer,
-          });
+          updateData.extractedText =
+            (await extractDocumentText({
+              filename: req.file.originalname,
+              mimeType: req.file.mimetype,
+              data: req.file.buffer,
+            })) ?? "";
           updateData.fileName = req.file.originalname;
           updateData.fileSize = req.file.size;
           updateData.mimeType = req.file.mimetype;
@@ -2754,7 +2758,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.setHeader("Content-Type", policy.mimeType);
         res.setHeader(
           "Content-Disposition",
-          `attachment; filename="${policy.fileName}"`
+          // Review M5: a name outside Latin-1, a quote or a line break would make Node refuse the header (a 500).
+          attachmentDisposition(policy.fileName)
         );
         res.send(fileBuffer);
       } catch (error) {

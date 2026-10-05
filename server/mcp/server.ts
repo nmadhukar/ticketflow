@@ -11,6 +11,7 @@ import { registerDocumentTools } from "./documentTools";
 export const MCP_INSTRUCTIONS = [
   "TicketFlow holds this organisation's help documents, company policies, guidelines and knowledge articles.",
   "Before answering a how-to, setup or policy question, call search_documents, then get_document on the best result, and answer from that text.",
+  "Search with the key words of the question, for example 'DoseSpot clinic key', and try other words or synonyms before concluding that nothing exists.",
   "Quote the title of every document you used.",
   "If nothing relevant is found, say so plainly instead of guessing.",
 ].join(" ");

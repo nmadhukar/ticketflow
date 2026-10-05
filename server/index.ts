@@ -120,6 +120,11 @@ app.use(requestLogger(log));
   server
     .listen(listenOptions, () => {
       log(`serving on port ${port}`);
+      // R90 backfill, after listen and not awaited (review I1): text for documents uploaded before
+      // extraction existed. Every parse runs in a bounded worker; nothing here can stop the server.
+      import("./services/documents/backfillText")
+        .then(({ startDocumentTextBackfill }) => startDocumentTextBackfill())
+        .catch((error) => console.error(`Document text backfill failed [${describeError(error)}]`));
     })
     .on("error", (error) => {
       console.error("Server startup error:", error);
