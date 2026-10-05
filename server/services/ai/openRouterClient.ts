@@ -23,7 +23,7 @@ export function createOpenRouterClient(options: {
   getModelPrice?: (modelId: string) => Promise<ModelPrice | null>;
 } = {}): AiModelClient {
   const getApiKey = options.getApiKey ?? readOpenRouterApiKey;
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl: typeof fetch = options.fetchImpl ?? ((...args) => globalThis.fetch(...args));
   const getModelPrice = options.getModelPrice ?? createOpenRouterPricing({ getApiKey, fetchImpl }).getModelPrice;
 
   return {

@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next";
 interface SidebarProps { className?: string; onNavigate?: () => void }
 const adminGroups = [
   { title: "management_title", icon: Users, items: ["users", "invitations", "teams"] },
-  { title: "configuration_title", icon: Settings, items: ["company-console", "ai-settings"] },
+  { title: "configuration_title", icon: Settings, items: ["company-console", "ai-settings", "storage-settings"] },
   { title: "analytics_title", icon: Brain, items: ["ai-analytics", "learning-queue"] },
   { title: "content_title", icon: BookOpen, items: ["help", "policies", "guidelines"] },
   { title: "integrations_title", icon: Plug, items: ["sso", "ms-teams-integration", "developer-resources"] },

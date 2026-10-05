@@ -1,7 +1,7 @@
 /**
  * AI Help Chatbot Component
  *
- * Provides intelligent help assistance using AWS Bedrock Claude 3 Sonnet.
+ * Provides intelligent help assistance through the configured AI model.
  * Key features:
  * - Floating chat interface accessible from all authenticated pages
  * - Minimize/maximize functionality for non-intrusive access

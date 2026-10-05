@@ -50,7 +50,7 @@ describe("S3 retains its legacy AWS credential store after the AI migration", ()
 
     const client = (S3Client as jest.Mock).mock.results[0].value;
     expect(client.config).toEqual({ region: "us-west-2", credentials: { accessKeyId: "retained-access", secretAccessKey: "retained-secret" } });
-    expect(client.send.mock.calls.map(([command]: [unknown]) => command.constructor)).toEqual([PutObjectCommand, HeadObjectCommand, DeleteObjectCommand]);
+    expect(client.send.mock.calls.map(([command]: [object]) => command.constructor)).toEqual([PutObjectCommand, HeadObjectCommand, DeleteObjectCommand]);
     expect((getSignedUrl as jest.Mock).mock.calls[0][1]).toBeInstanceOf(GetObjectCommand);
     expect((getSignedUrl as jest.Mock).mock.calls[0][2]).toEqual({ expiresIn: 3600 });
   });

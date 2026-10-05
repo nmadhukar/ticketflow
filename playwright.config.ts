@@ -58,6 +58,7 @@ const BLANKED_ENV = Object.fromEntries(
     "SNS_INBOUND_TOPIC_ARN",
     "BEDROCK_ACCESS_KEY_ID",
     "BEDROCK_SECRET_ACCESS_KEY",
+    "OPENROUTER_API_KEY",
     "SMTP_HOST",
     "SMTP_USER",
     "SMTP_PASS",

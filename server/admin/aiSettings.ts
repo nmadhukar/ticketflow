@@ -1,6 +1,8 @@
 import { AISettings } from "@shared/interfaces";
 import { storage } from "../storage";
 import { logRouteError } from "../http/errors";
+import { readOpenRouterApiKey } from "../env";
+import { DEFAULT_OPENROUTER_MODEL } from "../services/ai/openRouterClient";
 
 const DEFAULT_SETTINGS: AISettings = {
   autoResponseEnabled: true,
@@ -16,36 +18,46 @@ const DEFAULT_SETTINGS: AISettings = {
   escalationEnabled: true,
   escalationTeamId: undefined,
 
-  bedrockModel: "",
+  modelId: DEFAULT_OPENROUTER_MODEL,
+  isActive: true,
+  dailyLimitUsd: 50,
+  monthlyLimitUsd: 100,
+  maxTokensPerRequest: 3000,
+  openRouterKeyConfigured: false,
   temperature: 0.3,
   maxTokens: 2000,
 };
 
 export async function getAISettings(): Promise<AISettings> {
   try {
-    const settings = await storage.getBedrockSettings();
+    const settings = await storage.getAISettings();
     if (!settings) {
-      return DEFAULT_SETTINGS;
+      return { ...DEFAULT_SETTINGS, isActive: false, openRouterKeyConfigured: !!readOpenRouterApiKey() };
     }
 
     return {
       autoResponseEnabled: settings.autoResponseEnabled ?? true,
-      confidenceThreshold: Number(settings.confidenceThreshold || 0.7),
-      maxResponseLength: settings.maxResponseLength || 1000,
-      responseTimeout: settings.responseTimeout || 30,
+      confidenceThreshold: Number(settings.confidenceThreshold ?? 0.7),
+      maxResponseLength: settings.maxResponseLength ?? 1000,
+      responseTimeout: settings.responseTimeout ?? 30,
       autoLearnEnabled: settings.autoLearnEnabled ?? true,
-      minResolutionScore: Number(settings.minResolutionScore || 0.8),
+      minResolutionScore: Number(settings.minResolutionScore ?? 0.8),
       articleApprovalRequired: settings.articleApprovalRequired ?? true,
-      complexityThreshold: settings.complexityThreshold || 70,
+      complexityThreshold: settings.complexityThreshold ?? 70,
       escalationEnabled: settings.escalationEnabled ?? true,
       escalationTeamId: settings.escalationTeamId || undefined,
-      bedrockModel: settings.bedrockModelId || "",
-      temperature: Number(settings.temperature || 0.3),
-      maxTokens: settings.maxTokens || 2000,
+      modelId: settings.modelId || DEFAULT_OPENROUTER_MODEL,
+      isActive: settings.isActive ?? true,
+      dailyLimitUsd: Number(settings.dailyLimitUsd ?? 50),
+      monthlyLimitUsd: Number(settings.monthlyLimitUsd ?? 100),
+      maxTokensPerRequest: settings.maxTokensPerRequest ?? 3000,
+      openRouterKeyConfigured: !!readOpenRouterApiKey(),
+      temperature: Number(settings.temperature ?? 0.3),
+      maxTokens: settings.maxTokens ?? 2000,
     };
   } catch (error) {
     logRouteError("Error loading AI settings", error);
-    return DEFAULT_SETTINGS;
+    return { ...DEFAULT_SETTINGS, isActive: false, openRouterKeyConfigured: !!readOpenRouterApiKey() };
   }
 }
 
@@ -56,8 +68,13 @@ export async function saveAISettings(
   const current = await getAISettings();
   const merged = validateAISettings({ ...current, ...settings });
 
-  await storage.updateBedrockSettings(
+  await storage.updateAISettings(
     {
+      modelId: merged.modelId,
+      isActive: merged.isActive,
+      dailyLimitUsd: merged.dailyLimitUsd.toString(),
+      monthlyLimitUsd: merged.monthlyLimitUsd.toString(),
+      maxTokensPerRequest: merged.maxTokensPerRequest,
       autoResponseEnabled: merged.autoResponseEnabled,
       confidenceThreshold: merged.confidenceThreshold.toString(),
       maxResponseLength: merged.maxResponseLength,
@@ -70,7 +87,6 @@ export async function saveAISettings(
       escalationTeamId: merged.escalationTeamId || null,
       temperature: merged.temperature.toString(),
       maxTokens: merged.maxTokens,
-      // Note: bedrockModel is stored in bedrockModelId, not updated here
     },
     userId
   );
@@ -101,7 +117,12 @@ export function validateAISettings(input: AISettings): AISettings {
         ? Number(input.escalationTeamId)
         : undefined,
 
-    bedrockModel: String(input.bedrockModel || DEFAULT_SETTINGS.bedrockModel),
+    modelId: String(input.modelId || DEFAULT_SETTINGS.modelId).trim(),
+    isActive: !!input.isActive,
+    dailyLimitUsd: clamp(Number(input.dailyLimitUsd), 0, 1000000),
+    monthlyLimitUsd: clamp(Number(input.monthlyLimitUsd), 0, 1000000),
+    maxTokensPerRequest: clamp(Number(input.maxTokensPerRequest), 1, 1000000),
+    openRouterKeyConfigured: !!readOpenRouterApiKey(),
     temperature: clamp(Number(input.temperature), 0, 1),
     maxTokens: clamp(Number(input.maxTokens), 100, 4000),
   };

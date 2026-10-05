@@ -1,1429 +1,180 @@
-/**
- * AI Settings Configuration Interface
- *
- * Advanced configuration panel for fine-tuning AI-powered features using AWS Bedrock.
- * This interface allows administrators to:
- *
- * Auto-Response Configuration:
- * - Enable/disable automatic response generation
- * - Set confidence thresholds for when to send auto-responses
- * - Configure response timeouts and length limits
- * - Monitor response effectiveness and accuracy
- *
- * Knowledge Base Learning:
- * - Enable automatic learning from resolved tickets
- * - Set minimum resolution scores for article creation
- * - Configure approval workflows for AI-generated content
- * - Monitor learning queue and processing status
- *
- * Escalation Management:
- * - Set complexity thresholds for automatic escalation
- * - Configure escalation teams and workflows
- * - Define escalation criteria and routing rules
- *
- * Model Configuration:
- * - Select between different Claude 3 Sonnet variants
- * - Adjust temperature for response creativity/consistency
- * - Set token limits for cost and performance optimization
- * - Configure rate limiting for API usage control
- *
- * Analytics and Monitoring:
- * - Real-time usage statistics and metrics
- * - Cost tracking and optimization recommendations
- * - Performance monitoring and optimization
- * - Error tracking and resolution guidance
- */
-
-import { useState, useEffect } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
-import { useBedrockCostNotifications } from "@/hooks/useBedrockCostNotifications";
-import { useDepartmentTeams } from "@/hooks/useDepartments";
-import { useAuth } from "@/hooks/useAuth";
-
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
+import { AlertCircle, ArrowUpRight, CheckCircle2, Loader2, Save, Sparkles } from "lucide-react";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Slider } from "@/components/ui/slider";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { useToast } from "@/hooks/use-toast";
-import {
-  Brain,
-  Settings,
-  Sliders,
-  Save,
-  AlertTriangle,
-  Shield,
-  RefreshCw,
-  Pencil,
-  XIcon,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
 
 interface AISettings {
-  // AI Response Settings
+  modelId: string;
+  isActive: boolean;
+  openRouterKeyConfigured: boolean;
   autoResponseEnabled: boolean;
   confidenceThreshold: number;
   maxResponseLength: number;
   responseTimeout: number;
-
-  // Knowledge Base Settings
   autoLearnEnabled: boolean;
   minResolutionScore: number;
   articleApprovalRequired: boolean;
-
-  // Escalation Settings
-  complexityThreshold: number;
-  escalationEnabled: boolean;
-  escalationTeamId?: number;
-
-  // Model Settings
-  bedrockModel: string;
   temperature: number;
   maxTokens: number;
+  maxTokensPerRequest: number;
+  dailyLimitUsd: number;
+  monthlyLimitUsd: number;
 }
 
-/** Escalation settings are not active (ruling R23): flip this only when the server acts on them. */
-const ESCALATION_ACTIVE = false;
+const connectionMessages: Record<string, string> = {
+  not_configured: "Add OPENROUTER_API_KEY to the server environment and restart the app.",
+  auth: "OpenRouter rejected the server key. Check the deployed credential.",
+  credits: "OpenRouter credits are unavailable for this account.",
+  timeout: "OpenRouter did not respond in time. Try again shortly.",
+  rate_limit: "OpenRouter is rate limiting requests. Try again shortly.",
+  price_unavailable: "Pricing is unavailable for this model. Choose another model.",
+  quota_exceeded: "The test would exceed the configured AI spending limit.",
+  invalid_output: "The model returned an invalid response.",
+  empty_output: "The model returned no visible text. Try a model with a larger output budget.",
+  provider_failure: "OpenRouter could not complete the test. Try again shortly.",
+};
+
+function NumberField({ id, label, value, min, max, step = 1, hint, onChange }: {
+  id: string; label: string; value: number; min: number; max: number; step?: number;
+  hint?: string; onChange: (value: number) => void;
+}) {
+  return <div className="space-y-2">
+    <Label htmlFor={id}>{label}</Label>
+    <Input id={id} type="number" min={min} max={max} step={step} value={value}
+      onChange={(event) => onChange(Number(event.target.value))}
+      className="h-11 tabular-nums" />
+    {hint && <p className="text-sm text-muted-foreground">{hint}</p>}
+  </div>;
+}
+
+function ToggleRow({ id, title, description, checked, onChange }: {
+  id: string; title: string; description: string; checked: boolean; onChange: (value: boolean) => void;
+}) {
+  return <div className="flex min-h-16 items-center justify-between gap-4 rounded-xl border bg-background/60 px-4 py-3">
+    <div className="space-y-1">
+      <Label htmlFor={id} className="cursor-pointer font-medium">{title}</Label>
+      <p className="text-sm text-muted-foreground">{description}</p>
+    </div>
+    <Switch id={id} checked={checked} onCheckedChange={onChange} aria-label={title} />
+  </div>;
+}
 
 export default function AISettings() {
   const { toast } = useToast();
-  const { user } = useAuth();
-  const { handleApiError } = useBedrockCostNotifications();
-  const [_hasChanges, setHasChanges] = useState(false);
-  const [testingConnection, setTestingConnection] = useState(false);
+  const [draft, setDraft] = useState<AISettings | null>(null);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const { data, isLoading, isError, refetch } = useQuery<AISettings>({ queryKey: ["/api/ai/settings"] });
 
-  // Cost limits state
-  const [isEditingCostLimits, setIsEditingCostLimits] = useState(false);
-  const [costLimits, setCostLimits] = useState({
-    dailyLimitUSD: 50.0,
-    monthlyLimitUSD: 100.0,
-    maxTokensPerRequest: 3000,
-  });
+  useEffect(() => { if (data) setDraft(data); }, [data]);
 
-  // Fetch current settings
-  const { data: settings, isLoading } = useQuery({
-    queryKey: ["/api/admin/ai-settings"],
-  });
-
-  // Fetch departments for escalation team selection
-  const { data: departments } = useQuery({
-    queryKey: ["/api/teams/departments"],
-  });
-
-  // State for escalation department selection
-  const [escalationDepartmentId, setEscalationDepartmentId] = useState<
-    number | undefined
-  >(undefined);
-
-  // Fetch teams for the selected department
-  const { data: departmentTeams } = useDepartmentTeams(escalationDepartmentId);
-
-  // Fetch Bedrock settings
-  const { data: bedrockData } = useQuery({
-    queryKey: ["/api/bedrock/settings"],
-  });
-
-  const { data: costStats } = useQuery({
-    queryKey: ["/api/bedrock/cost-statistics"],
-  });
-
-  useEffect(() => {
-    if (costStats && (costStats as any).limits && !isEditingCostLimits) {
-      setCostLimits((prev) => ({
-        ...prev,
-        ...(costStats as any).limits,
-      }));
-    }
-  }, [costStats, isEditingCostLimits]);
-
-  const [formData, setFormData] = useState<AISettings>({
-    autoResponseEnabled: true,
-    confidenceThreshold: 0.7,
-    maxResponseLength: 1000,
-    responseTimeout: 30,
-    autoLearnEnabled: true,
-    minResolutionScore: 0.8,
-    articleApprovalRequired: true,
-    complexityThreshold: 70,
-    escalationEnabled: true,
-    escalationTeamId: undefined,
-    bedrockModel: "amazon.titan-text-express-v1",
-    temperature: 0.3,
-    maxTokens: 2000,
-  });
-
-  // Bedrock settings state
-  const [bedrockSettings, setBedrockSettings] = useState({
-    bedrockAccessKeyId: "",
-    bedrockSecretAccessKey: "",
-    bedrockRegion: "us-east-1",
-    bedrockModelId: "amazon.titan-text-express-v1",
-    hasBedrockSecret: false,
-  });
-
-  // Load settings when data is fetched
-  useEffect(() => {
-    if (settings) {
-      setFormData(settings as AISettings);
-    }
-  }, [settings]);
-
-  // Derive department from existing escalation team when settings load
-  useEffect(() => {
-    if (formData.escalationTeamId && !escalationDepartmentId) {
-      // Fetch the team to get its department
-      const fetchTeamDepartment = async () => {
-        try {
-          const res = await apiRequest(
-            "GET",
-            `/api/teams/${formData.escalationTeamId}`
-          );
-          const team = await res.json();
-          if (team?.departmentId) {
-            setEscalationDepartmentId(team.departmentId);
-          }
-        } catch (error) {
-          console.error("Failed to fetch team department:", error);
-        }
-      };
-      fetchTeamDepartment();
-    }
-  }, [formData.escalationTeamId, escalationDepartmentId]);
-
-  // Load Bedrock settings when data is fetched
-  useEffect(() => {
-    if (bedrockData && typeof bedrockData === "object") {
-      setBedrockSettings({
-        bedrockAccessKeyId: (bedrockData as any).bedrockAccessKeyId || "",
-        bedrockSecretAccessKey:
-          (bedrockData as any).bedrockSecretAccessKey || "",
-        bedrockRegion: (bedrockData as any).bedrockRegion || "us-east-1",
-        bedrockModelId:
-          (bedrockData as any).bedrockModelId || "amazon.titan-text-express-v1",
-        hasBedrockSecret: (bedrockData as any).hasBedrockSecret || false,
-      });
-    }
-  }, [bedrockData]);
-
-  // Update settings mutation
-  const updateSettings = useMutation({
-    mutationFn: async (data: AISettings) => {
-      const res = await apiRequest("PUT", "/api/admin/ai-settings", data);
-      return res.json();
+  const save = useMutation({
+    mutationFn: async (settings: AISettings) => {
+      const { openRouterKeyConfigured: _status, ...payload } = settings;
+      const response = await apiRequest("POST", "/api/ai/settings", payload);
+      return response.json() as Promise<AISettings>;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/ai-settings"] });
-      setHasChanges(false);
-      toast({
-        title: "Settings saved",
-        description: "AI settings have been updated successfully.",
-      });
+    onSuccess: (saved) => {
+      queryClient.setQueryData(["/api/ai/settings"], saved);
+      setDraft(saved);
+      toast({ title: "AI settings saved", description: "The model, workflows, and limits are up to date." });
     },
-    onError: (error: Error) => {
-      toast({
-        title: "Failed to save settings",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
+    onError: (error: Error) => toast({ title: "Settings were not saved", description: error.message, variant: "destructive" }),
   });
 
-  // Update Bedrock settings mutation
-  const updateBedrockSettings = useMutation({
-    mutationFn: async (data: any) => {
-      const res = await apiRequest("POST", "/api/bedrock/settings", data);
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/bedrock/settings"] });
-      toast({
-        title: "Bedrock settings saved",
-        description: "AWS Bedrock configuration has been updated successfully.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Failed to save Bedrock settings",
-        description:
-          error.message || "An error occurred while saving Bedrock settings.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  // Test Bedrock connection
   const testConnection = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/admin/ai-settings/test");
-      return res.json();
+      const response = await apiRequest("POST", "/api/ai/test-connection");
+      return response.json() as Promise<{ success: boolean; code?: string }>;
     },
-    onSuccess: (data) => {
-      if (data.success) {
-        toast({
-          title: "Connection successful",
-          description: `AWS Bedrock is properly configured and accessible. Cost: $${
-            data.costEstimate?.estimatedCost?.toFixed(4) || "0.0000"
-          }`,
-        });
-      } else {
-        toast({
-          title: "Connection failed",
-          description: data.message || "Failed to connect to Bedrock",
-          variant: "destructive",
-        });
-      }
-    },
-    onError: (error: Error) => {
-      handleApiError(error);
+    onSuccess: () => setTestResult({ success: true, message: "OpenRouter answered the test request." }),
+    onError: (error: Error & { data?: { code?: string } }) => {
+      const code = error.data?.code || "provider_failure";
+      setTestResult({ success: false, message: connectionMessages[code] || connectionMessages.provider_failure });
     },
   });
 
-  // Update cost limits mutation
-  const updateCostLimitsMutation = useMutation({
-    mutationFn: async (limits: any) => {
-      const res = await apiRequest("PUT", "/api/bedrock/cost-limits", limits);
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["/api/bedrock/cost-statistics"],
-      });
-      setIsEditingCostLimits(false);
-      toast({
-        title: "Cost limits updated",
-        description: "Cost limits have been saved successfully.",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Failed to update cost limits",
-        description:
-          error.message || "An error occurred while updating cost limits.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  // localStorage utility functions
-  const getStorageKey = (feature: string) => {
-    const userId = (user as any)?.id || "anonymous";
-    return `ai-settings-backup-${userId}-${feature}`;
-  };
-
-  const saveBackupToLocalStorage = (
-    feature: "autoResponse" | "escalation" | "autoLearn",
-    values: any
-  ) => {
-    try {
-      const key = getStorageKey(feature);
-      localStorage.setItem(key, JSON.stringify(values));
-    } catch (error) {
-      console.error("Failed to save backup to localStorage:", error);
-    }
-  };
-
-  const getBackupFromLocalStorage = (
-    feature: "autoResponse" | "escalation" | "autoLearn"
-  ) => {
-    try {
-      const key = getStorageKey(feature);
-      const data = localStorage.getItem(key);
-      return data ? JSON.parse(data) : null;
-    } catch (error) {
-      console.error("Failed to get backup from localStorage:", error);
-      return null;
-    }
-  };
-
-  const clearBackupFromLocalStorage = (
-    feature: "autoResponse" | "escalation" | "autoLearn"
-  ) => {
-    try {
-      const key = getStorageKey(feature);
-      localStorage.removeItem(key);
-    } catch (error) {
-      console.error("Failed to clear backup from localStorage:", error);
-    }
-  };
-
-  const handleChange = (key: keyof AISettings, value: any) => {
-    setFormData((prev) => ({ ...prev, [key]: value }));
-    setHasChanges(true);
-  };
-
-  // Handle feature toggle with confirmation
-  const handleFeatureToggle = (
-    feature: "autoResponse" | "escalation" | "autoLearn",
-    enabled: boolean
-  ) => {
-    // If enabling, just toggle (no confirmation needed)
-    if (enabled) {
-      // Remove from reset list if it was there
-      setFeaturesToReset((prev) => {
-        const updated = { ...prev };
-        delete updated[feature];
-        return updated;
-      });
-      clearBackupFromLocalStorage(feature);
-
-      if (feature === "autoResponse") {
-        handleChange("autoResponseEnabled", true);
-      } else if (feature === "escalation") {
-        handleChange("escalationEnabled", true);
-      } else if (feature === "autoLearn") {
-        handleChange("autoLearnEnabled", true);
-      }
-      return;
-    }
-
-    // If disabling, show confirmation dialog
-    // First, backup current values
-    let backupValues: any = {};
-    if (feature === "autoResponse") {
-      backupValues = {
-        confidenceThreshold: formData.confidenceThreshold,
-        maxResponseLength: formData.maxResponseLength,
-        responseTimeout: formData.responseTimeout,
-      };
-    } else if (feature === "escalation") {
-      backupValues = {
-        complexityThreshold: formData.complexityThreshold,
-        escalationTeamId: formData.escalationTeamId,
-        escalationDepartmentId: escalationDepartmentId,
-      };
-    } else if (feature === "autoLearn") {
-      backupValues = {
-        minResolutionScore: formData.minResolutionScore,
-        articleApprovalRequired: formData.articleApprovalRequired,
-      };
-    }
-
-    saveBackupToLocalStorage(feature, backupValues);
-
-    // Disable the feature immediately (user can cancel to restore)
-    if (feature === "autoResponse") {
-      handleChange("autoResponseEnabled", false);
-    } else if (feature === "escalation") {
-      handleChange("escalationEnabled", false);
-    } else if (feature === "autoLearn") {
-      handleChange("autoLearnEnabled", false);
-    }
-
-    setConfirmationDialog({
-      open: true,
-      feature,
-      action: null,
-    });
-  };
-
-  // Handle confirmation dialog actions
-  const handleConfirmationAction = (action: "reset" | "keep" | "cancel") => {
-    if (!confirmationDialog.feature) return;
-
-    if (action === "cancel") {
-      // Restore toggle to enabled state and restore values from backup
-      const backup = getBackupFromLocalStorage(confirmationDialog.feature);
-
-      if (confirmationDialog.feature === "autoResponse") {
-        handleChange("autoResponseEnabled", true);
-        if (backup) {
-          setFormData((prev) => ({
-            ...prev,
-            confidenceThreshold: backup.confidenceThreshold,
-            maxResponseLength: backup.maxResponseLength,
-            responseTimeout: backup.responseTimeout,
-          }));
-        }
-      } else if (confirmationDialog.feature === "escalation") {
-        handleChange("escalationEnabled", true);
-        if (backup) {
-          setFormData((prev) => ({
-            ...prev,
-            complexityThreshold: backup.complexityThreshold,
-            escalationTeamId: backup.escalationTeamId,
-          }));
-          if (backup.escalationDepartmentId) {
-            setEscalationDepartmentId(backup.escalationDepartmentId);
-          }
-        }
-      } else if (confirmationDialog.feature === "autoLearn") {
-        handleChange("autoLearnEnabled", true);
-        if (backup) {
-          setFormData((prev) => ({
-            ...prev,
-            minResolutionScore: backup.minResolutionScore,
-            articleApprovalRequired: backup.articleApprovalRequired,
-          }));
-        }
-      }
-      clearBackupFromLocalStorage(confirmationDialog.feature);
-    } else if (action === "reset") {
-      // Mark feature for reset on save
-      setFeaturesToReset((prev) => ({
-        ...prev,
-        [confirmationDialog.feature!]: true,
-      }));
-      // Toggle is already disabled by handleFeatureToggle
-    } else if (action === "keep") {
-      // Keep current values, don't reset
-      setFeaturesToReset((prev) => {
-        const updated = { ...prev };
-        delete updated[confirmationDialog.feature!];
-        return updated;
-      });
-      // Toggle is already disabled by handleFeatureToggle
-    }
-
-    setConfirmationDialog({ open: false, feature: null, action: null });
-  };
-
-  const handleSave = async () => {
-    // Create a copy of formData to modify
-    const dataToSave = { ...formData };
-
-    // Reset values for disabled features that are marked for reset
-    if (featuresToReset.autoResponse && !dataToSave.autoResponseEnabled) {
-      dataToSave.confidenceThreshold =
-        DEFAULT_VALUES.autoResponse.confidenceThreshold;
-      dataToSave.maxResponseLength =
-        DEFAULT_VALUES.autoResponse.maxResponseLength;
-      dataToSave.responseTimeout = DEFAULT_VALUES.autoResponse.responseTimeout;
-      clearBackupFromLocalStorage("autoResponse");
-    }
-
-    if (featuresToReset.escalation && !dataToSave.escalationEnabled) {
-      dataToSave.complexityThreshold =
-        DEFAULT_VALUES.escalation.complexityThreshold;
-      dataToSave.escalationTeamId = DEFAULT_VALUES.escalation.escalationTeamId;
-      setEscalationDepartmentId(undefined);
-      clearBackupFromLocalStorage("escalation");
-    }
-
-    if (featuresToReset.autoLearn && !dataToSave.autoLearnEnabled) {
-      dataToSave.minResolutionScore =
-        DEFAULT_VALUES.autoLearn.minResolutionScore;
-      dataToSave.articleApprovalRequired =
-        DEFAULT_VALUES.autoLearn.articleApprovalRequired;
-      clearBackupFromLocalStorage("autoLearn");
-    }
-
-    // Clear reset tracking
-    setFeaturesToReset({});
-
-    await updateSettings.mutateAsync(dataToSave);
-  };
-
-  const handleBedrockChange = (field: string, value: any) => {
-    setBedrockSettings((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const handleSaveBedrockSettings = async () => {
-    await updateBedrockSettings.mutateAsync(bedrockSettings);
-  };
-
-  const handleTestConnection = async () => {
-    setTestingConnection(true);
-    await testConnection.mutateAsync();
-    setTestingConnection(false);
-  };
-
-  const handleSaveCostLimits = () => {
-    updateCostLimitsMutation.mutate(costLimits);
-  };
-
-  // Workflow (Auto-Response, Escalation, Learning) edit management
-  const [isEditingWorkflow, setIsEditingWorkflow] = useState(false);
-  const [workflowSnapshot, setWorkflowSnapshot] =
-    useState<Partial<AISettings> | null>(null);
-  const workflowFields: (keyof AISettings)[] = [
-    "autoResponseEnabled",
-    "confidenceThreshold",
-    "maxResponseLength",
-    "responseTimeout",
-    "escalationEnabled",
-    "complexityThreshold",
-    "escalationTeamId",
-    "autoLearnEnabled",
-    "minResolutionScore",
-    "articleApprovalRequired",
-  ];
-  const isWorkflowDirty = (() => {
-    if (!workflowSnapshot) return false;
-    return workflowFields.some(
-      (k) => (formData as any)[k] !== (workflowSnapshot as any)[k]
-    );
-  })();
-
-  // Confirmation dialog state for feature disabling
-  const [confirmationDialog, setConfirmationDialog] = useState<{
-    open: boolean;
-    feature: "autoResponse" | "escalation" | "autoLearn" | null;
-    action: "reset" | "keep" | null;
-  }>({
-    open: false,
-    feature: null,
-    action: null,
-  });
-
-  // Track which features should be reset to defaults on save
-  const [featuresToReset, setFeaturesToReset] = useState<{
-    autoResponse?: boolean;
-    escalation?: boolean;
-    autoLearn?: boolean;
-  }>({});
-
-  // Default values
-  const DEFAULT_VALUES = {
-    autoResponse: {
-      confidenceThreshold: 0.7,
-      maxResponseLength: 1000,
-      responseTimeout: 30,
-    },
-    escalation: {
-      complexityThreshold: 70,
-      escalationTeamId: undefined,
-    },
-    autoLearn: {
-      minResolutionScore: 0.8,
-      articleApprovalRequired: true,
-    },
-  };
-
-  const getConfidenceLabel = (value: number) => {
-    if (value >= 0.8) return "High (80%+)";
-    if (value >= 0.6) return "Medium (60%+)";
-    if (value >= 0.4) return "Low (40%+)";
-    return "Very Low";
-  };
-
-  const getComplexityLabel = (value: number) => {
-    if (value >= 80) return "Very Complex (80+)";
-    if (value >= 60) return "Complex (60+)";
-    if (value >= 40) return "Moderate (40+)";
-    return "Simple";
-  };
-
-  if (isLoading) {
-    return (
-      <div className="container mx-auto py-6">
-        <div className="flex items-center justify-center h-96">
-          <div className="text-center">
-            <Brain className="h-8 w-8 animate-pulse mx-auto mb-4" />
-            <p>Loading AI settings...</p>
-          </div>
-        </div>
-      </div>
-    );
+  if (isLoading || !draft) {
+    if (isError) return <div className="mx-auto max-w-5xl p-6">
+      <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertTitle>AI settings are unavailable</AlertTitle><AlertDescription>Check the connection and try again.</AlertDescription></Alert>
+      <Button variant="outline" className="mt-4" onClick={() => void refetch()}>Retry</Button>
+    </div>;
+    return <div className="flex min-h-64 items-center justify-center" role="status"><Loader2 className="h-6 w-6 animate-spin" /><span className="sr-only">Loading AI settings</span></div>;
   }
 
-  const bedrockConfigured = (bedrockData as any)?.hasBedrockSecret || false;
+  const change = <K extends keyof AISettings>(key: K, value: AISettings[K]) => setDraft((current) => current ? { ...current, [key]: value } : current);
+  const dirty = !!data && JSON.stringify(draft) !== JSON.stringify(data);
+  const canTest = draft.openRouterKeyConfigured && draft.isActive && !dirty;
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>
-          <p className="text-muted-foreground">
-            Configure AI-powered features and thresholds for the help-desk
-            system
-          </p>
-        </CardTitle>
+  return <main className="mx-auto w-full max-w-5xl space-y-6 px-4 py-6 sm:px-6 lg:py-8">
+    <header className="flex flex-wrap items-start justify-between gap-4">
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 text-primary"><Sparkles className="h-5 w-5" aria-hidden="true" /><span className="text-xs font-semibold uppercase tracking-[0.14em]">Configuration</span></div>
+        <h1 className="text-2xl font-semibold tracking-tight text-balance sm:text-3xl">AI settings</h1>
+        <p className="max-w-2xl text-sm text-muted-foreground text-pretty">Choose the OpenRouter model, control automatic features, and keep spending within your limits.</p>
+      </div>
+      <Button asChild variant="outline" className="min-h-10"><Link href="/admin/storage-settings">AWS storage settings <ArrowUpRight className="ml-2 h-4 w-4" aria-hidden="true" /></Link></Button>
+    </header>
+
+    <Card className="shadow-sm">
+      <CardHeader className="space-y-3 sm:flex sm:flex-row sm:items-start sm:justify-between sm:space-y-0">
+        <div><CardTitle>OpenRouter connection</CardTitle><CardDescription className="mt-1">The API key stays on the server and is never shown here.</CardDescription></div>
+        <Badge variant={draft.openRouterKeyConfigured ? "secondary" : "destructive"} className="w-fit gap-1.5 px-3 py-1.5">
+          {draft.openRouterKeyConfigured ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
+          {draft.openRouterKeyConfigured ? "Server key configured" : "Server key missing"}
+        </Badge>
       </CardHeader>
-
-      <CardContent className="flex flex-col gap-10">
-        {/* AWS Bedrock Configuration */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Shield className="h-5 w-5" />
-              <Label className="text-lg font-medium">
-                AWS Bedrock Configuration
-              </Label>
-            </CardTitle>
-            <CardDescription>
-              Configure AWS Bedrock credentials and model settings for AI
-              features
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {!bedrockConfigured && (
-              <Alert variant="destructive">
-                <AlertTitle>AWS Bedrock not configured</AlertTitle>
-                <AlertDescription>
-                  Add credentials to enable AI features. Rate limits will not be
-                  exercised until configured.
-                </AlertDescription>
-              </Alert>
-            )}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-              <div className="space-y-2">
-                <Label htmlFor="bedrockAccessKeyId">AWS Access Key ID</Label>
-                <Input
-                  id="bedrockAccessKeyId"
-                  type="text"
-                  value={bedrockSettings.bedrockAccessKeyId}
-                  onChange={(e) =>
-                    handleBedrockChange("bedrockAccessKeyId", e.target.value)
-                  }
-                  placeholder="AKIA..."
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="bedrockSecretAccessKey">
-                  AWS Secret Access Key
-                </Label>
-                <Input
-                  id="bedrockSecretAccessKey"
-                  type="password"
-                  value={bedrockSettings.bedrockSecretAccessKey}
-                  onChange={(e) =>
-                    handleBedrockChange(
-                      "bedrockSecretAccessKey",
-                      e.target.value
-                    )
-                  }
-                  placeholder="Enter secret key..."
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-              <div className="space-y-2">
-                <Label htmlFor="bedrockRegion">AWS Region</Label>
-                <Select
-                  value={bedrockSettings.bedrockRegion}
-                  onValueChange={(value) =>
-                    handleBedrockChange("bedrockRegion", value)
-                  }
-                >
-                  <SelectTrigger id="bedrockRegion">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="us-east-1">
-                      US East (N. Virginia)
-                    </SelectItem>
-                    <SelectItem value="us-west-2">US West (Oregon)</SelectItem>
-                    <SelectItem value="eu-central-1">
-                      Europe (Frankfurt)
-                    </SelectItem>
-                    <SelectItem value="ap-southeast-1">
-                      Asia Pacific (Singapore)
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="bedrockModelId">Bedrock Model</Label>
-                <Select
-                  value={bedrockSettings.bedrockModelId}
-                  onValueChange={(value) =>
-                    handleBedrockChange("bedrockModelId", value)
-                  }
-                >
-                  <SelectTrigger id="bedrockModelId">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="amazon.titan-text-express-v1">
-                      Amazon Titan Text Express (Recommended)
-                    </SelectItem>
-                    <SelectItem value="amazon.titan-text-lite-v1">
-                      Amazon Titan Text Lite (Fast & Affordable)
-                    </SelectItem>
-                    <SelectItem value="ai21.j2-mid-v1">
-                      AI21 Jurassic Mid (Balanced)
-                    </SelectItem>
-                    <SelectItem value="ai21.j2-ultra-v1">
-                      AI21 Jurassic Ultra (Advanced)
-                    </SelectItem>
-                    <SelectItem value="meta.llama2-13b-chat-v1">
-                      Meta Llama 2 13B (Open Source)
-                    </SelectItem>
-                    <SelectItem value="meta.llama2-70b-chat-v1">
-                      Meta Llama 2 70B (Large)
-                    </SelectItem>
-                    <SelectItem value="meta.llama3-8b-instruct-v1:0">
-                      Meta Llama 3 8B (Latest)
-                    </SelectItem>
-                    <SelectItem value="meta.llama3-70b-instruct-v1:0">
-                      Meta Llama 3 70B (Latest Large)
-                    </SelectItem>
-                    <SelectItem value="anthropic.claude-3-sonnet-20240229-v1:0">
-                      Claude 3 Sonnet (Limited Regions)
-                    </SelectItem>
-                    <SelectItem value="anthropic.claude-3-haiku-20240307-v1:0">
-                      Claude 3 Haiku (Limited Regions)
-                    </SelectItem>
-                    <SelectItem value="anthropic.claude-3-opus-20240229-v1:0">
-                      Claude 3 Opus (Limited Regions)
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-              <div className="space-y-2">
-                <Label>Temperature</Label>
-                <p className="text-sm text-muted-foreground">
-                  Controls randomness (0 = focused, 1 = creative)
-                </p>
-                <div className="flex items-center gap-2">
-                  <Slider
-                    value={[formData.temperature]}
-                    onValueChange={([value]) =>
-                      handleChange("temperature", value)
-                    }
-                    min={0}
-                    max={1}
-                    step={0.1}
-                    className="flex-1"
-                  />
-                  <span className="w-12 text-right font-medium">
-                    {formData.temperature.toFixed(1)}
-                  </span>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="maxTokens">Max Tokens (model output)</Label>
-                <Input
-                  id="maxTokens"
-                  type="number"
-                  value={formData.maxTokens}
-                  onChange={(e) =>
-                    handleChange("maxTokens", parseInt(e.target.value))
-                  }
-                  min={100}
-                  max={4000}
-                  step={100}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Upper bound for AI response length.
-                </p>
-              </div>
-            </div>
-          </CardContent>
-          <CardFooter className="flex items-center gap-5">
-            <Button
-              onClick={handleSaveBedrockSettings}
-              disabled={updateBedrockSettings.isPending}
-            >
-              <Save className="h-4 w-4" />
-              Save Bedrock Settings
-            </Button>
-            <Button
-              onClick={handleTestConnection}
-              disabled={testingConnection}
-              variant="outline"
-            >
-              <RefreshCw
-                className={cn("h-4 w-4", testingConnection && "animate-spin")}
-              />
-              Test Connection
-            </Button>
-          </CardFooter>
-        </Card>
-
-        {/* Cost Limits Configuration */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Shield className="h-5 w-5" />
-              <Label className="text-lg font-medium">
-                Cost Limits Configuration
-              </Label>
-            </CardTitle>
-            <CardDescription>
-              Configure cost limits to prevent unexpected AWS Bedrock charges
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-              <div className="space-y-2">
-                <Label htmlFor="dailyLimit">Daily Limit (USD)</Label>
-                <Input
-                  id="dailyLimit"
-                  type="number"
-                  step="0.01"
-                  value={costLimits.dailyLimitUSD || ""}
-                  onChange={(e) =>
-                    setCostLimits((prev) => ({
-                      ...prev,
-                      dailyLimitUSD: parseFloat(e.target.value) || 0,
-                    }))
-                  }
-                  disabled={!isEditingCostLimits}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="monthlyLimit">Monthly Limit (USD)</Label>
-                <Input
-                  id="monthlyLimit"
-                  type="number"
-                  step="0.01"
-                  value={costLimits.monthlyLimitUSD || ""}
-                  onChange={(e) =>
-                    setCostLimits((prev) => ({
-                      ...prev,
-                      monthlyLimitUSD: parseFloat(e.target.value) || 0,
-                    }))
-                  }
-                  disabled={!isEditingCostLimits}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="maxTokens">Max Tokens per Request</Label>
-                <Input
-                  id="maxTokens"
-                  type="number"
-                  value={costLimits.maxTokensPerRequest || ""}
-                  onChange={(e) =>
-                    setCostLimits((prev) => ({
-                      ...prev,
-                      maxTokensPerRequest: parseInt(e.target.value) || 0,
-                    }))
-                  }
-                  disabled={!isEditingCostLimits}
-                />
-              </div>
-            </div>
-          </CardContent>
-          <CardFooter className="flex items-center gap-5">
-            {!isEditingCostLimits ? (
-              <Button onClick={() => setIsEditingCostLimits(true)}>
-                <Settings className="h-3 w-3" />
-                Edit Limits
-              </Button>
-            ) : (
-              <>
-                <Button
-                  onClick={handleSaveCostLimits}
-                  disabled={updateCostLimitsMutation.isPending}
-                >
-                  <Save className="h-4 w-4" />
-                  Save Limits
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setIsEditingCostLimits(false)}
-                >
-                  <XIcon className="h-4 w-4" />
-                  Cancel
-                </Button>
-              </>
-            )}
-          </CardFooter>
-        </Card>
-
-        {/* AI Workflow: Auto-Response, Escalation, Learning */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Sliders className="h-5 w-5" />
-              <Label className="text-lg font-medium">
-                AI Workflow: Auto-Response, Escalation, Learning
-              </Label>
-            </CardTitle>
-            <CardDescription>
-              Configure thresholds and behavior for the AI ticket workflow
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid grid-cols-1 gap-10">
-            {/* Auto-Response */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Enable Auto-Response</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Automatically generate responses for new tickets
-                  </p>
-                </div>
-                <Switch
-                  checked={formData.autoResponseEnabled}
-                  onCheckedChange={(checked) =>
-                    handleFeatureToggle("autoResponse", checked)
-                  }
-                  disabled={!isEditingWorkflow}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Confidence Threshold</Label>
-                <p className="text-sm text-muted-foreground">
-                  Minimum confidence score required to apply auto-response
-                </p>
-                <div className="flex items-center gap-4">
-                  <Slider
-                    value={[formData.confidenceThreshold]}
-                    onValueChange={([value]) =>
-                      handleChange("confidenceThreshold", value)
-                    }
-                    min={0}
-                    max={1}
-                    step={0.1}
-                    className="flex-1"
-                    disabled={!isEditingWorkflow}
-                  />
-                  <div className="w-32 text-right">
-                    <span className="font-medium">
-                      {(formData.confidenceThreshold * 100).toFixed(0)}%
-                    </span>
-                    <span className="text-sm text-muted-foreground ml-2">
-                      {getConfidenceLabel(formData.confidenceThreshold)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="maxResponseLength">Max Response Length</Label>
-                  <Input
-                    id="maxResponseLength"
-                    type="number"
-                    value={formData.maxResponseLength}
-                    onChange={(e) =>
-                      handleChange(
-                        "maxResponseLength",
-                        parseInt(e.target.value)
-                      )
-                    }
-                    min={100}
-                    max={5000}
-                    disabled={!isEditingWorkflow}
-                  />
-                  <p className="text-xs text-muted-foreground">Characters</p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="responseTimeout">Response Timeout</Label>
-                  <Input
-                    id="responseTimeout"
-                    type="number"
-                    value={formData.responseTimeout}
-                    onChange={(e) =>
-                      handleChange("responseTimeout", parseInt(e.target.value))
-                    }
-                    min={5}
-                    max={120}
-                    disabled={!isEditingWorkflow}
-                  />
-                  <p className="text-xs text-muted-foreground">Seconds</p>
-                </div>
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Escalation controls are hidden: the stored fields and the API still accept them, but nothing acts on them (no ticket is reassigned from these settings). */}
-            {ESCALATION_ACTIVE && (
-            <>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Enable Auto-Escalation</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Automatically escalate complex tickets
-                  </p>
-                </div>
-                <Switch
-                  checked={formData.escalationEnabled}
-                  onCheckedChange={(checked) =>
-                    handleFeatureToggle("escalation", checked)
-                  }
-                  disabled={!isEditingWorkflow}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Complexity Threshold</Label>
-                <p className="text-sm text-muted-foreground">
-                  Tickets above this complexity score will be escalated
-                </p>
-                <div className="flex items-center gap-4">
-                  <Slider
-                    value={[formData.complexityThreshold]}
-                    onValueChange={([value]) =>
-                      handleChange("complexityThreshold", value)
-                    }
-                    min={0}
-                    max={100}
-                    step={10}
-                    className="flex-1"
-                    disabled={!isEditingWorkflow}
-                  />
-                  <div className="w-32 text-right">
-                    <span className="font-medium">
-                      {formData.complexityThreshold}
-                    </span>
-                    <span className="text-sm text-muted-foreground ml-2">
-                      {getComplexityLabel(formData.complexityThreshold)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="escalationDepartment">
-                  Select team for escalations
-                </Label>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  {/* Department Selection */}
-                  <Select
-                    value={escalationDepartmentId?.toString() || ""}
-                    onValueChange={(value) => {
-                      const deptId = value ? parseInt(value) : undefined;
-                      setEscalationDepartmentId(deptId);
-                      // Clear team selection when department changes
-                      handleChange("escalationTeamId", undefined);
-                    }}
-                    disabled={!isEditingWorkflow}
-                  >
-                    <SelectTrigger id="escalationDepartment">
-                      <SelectValue placeholder="Select department for escalations" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(departments as any)?.map((dept: any) => (
-                        <SelectItem key={dept.id} value={dept.id.toString()}>
-                          {dept.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  {/* Team Selection */}
-                  <Select
-                    value={formData.escalationTeamId?.toString() || ""}
-                    onValueChange={(value) =>
-                      handleChange(
-                        "escalationTeamId",
-                        value ? parseInt(value) : undefined
-                      )
-                    }
-                    disabled={!isEditingWorkflow || !escalationDepartmentId}
-                  >
-                    <SelectTrigger id="escalationTeam">
-                      <SelectValue
-                        placeholder={
-                          !escalationDepartmentId
-                            ? "Select department first"
-                            : departmentTeams && departmentTeams.length > 0
-                            ? "Select team"
-                            : "No teams available"
-                        }
-                      />
-                    </SelectTrigger>
-                    {departmentTeams && departmentTeams.length > 0 && (
-                      <SelectContent>
-                        {departmentTeams.map((team: any) => (
-                          <SelectItem key={team.id} value={team.id.toString()}>
-                            {team.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    )}
-                  </Select>
-                  {escalationDepartmentId && departmentTeams?.length === 0 && (
-                    <p className="text-sm text-muted-foreground">
-                      This department has no teams. Please create a team first.
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <Separator />
-            </>
-            )}
-
-            {/* Knowledge Learning */}
-            <div className="space-y-4 col-span-1 md:col-span-2 lg:col-span-1">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Enable Auto-Learning</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Automatically create knowledge articles from resolved
-                    tickets
-                  </p>
-                </div>
-                <Switch
-                  checked={formData.autoLearnEnabled}
-                  onCheckedChange={(checked) =>
-                    handleFeatureToggle("autoLearn", checked)
-                  }
-                  disabled={!isEditingWorkflow}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Minimum Resolution Score</Label>
-                <p className="text-sm text-muted-foreground">
-                  Only learn from tickets with high resolution quality
-                </p>
-                <div className="flex items-center gap-4">
-                  <Slider
-                    value={[formData.minResolutionScore]}
-                    onValueChange={([value]) =>
-                      handleChange("minResolutionScore", value)
-                    }
-                    min={0}
-                    max={1}
-                    step={0.1}
-                    className="flex-1"
-                    disabled={!isEditingWorkflow}
-                  />
-                  <div className="w-24 text-right">
-                    <span className="font-medium">
-                      {(formData.minResolutionScore * 100).toFixed(0)}%
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Require Article Approval</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Knowledge articles need manual approval before publishing
-                  </p>
-                </div>
-                <Switch
-                  checked={formData.articleApprovalRequired}
-                  onCheckedChange={(checked) =>
-                    handleChange("articleApprovalRequired", checked)
-                  }
-                  disabled={!isEditingWorkflow}
-                />
-              </div>
-            </div>
-          </CardContent>
-          <CardFooter className="flex items-center gap-10">
-            {isWorkflowDirty && (
-              <p className="flex items-center gap-2 ext-muted-foreground">
-                <AlertTriangle className="h-4 w-4 text-amber-500" />
-                You have unsaved workflow changes
-              </p>
-            )}
-
-            <div className="flex items-center gap-5">
-              {!isEditingWorkflow ? (
-                <Button
-                  variant="default"
-                  onClick={() => {
-                    setWorkflowSnapshot(
-                      workflowFields.reduce((acc, k) => {
-                        (acc as any)[k] = (formData as any)[k];
-                        return acc;
-                      }, {} as Partial<AISettings>)
-                    );
-                    setIsEditingWorkflow(true);
-                  }}
-                >
-                  <Pencil className="h-4 w-4 mr-1" />
-                  Edit AI Workflow
-                </Button>
-              ) : (
-                <>
-                  <Button
-                    onClick={async () => {
-                      await handleSave();
-                      setIsEditingWorkflow(false);
-                      setWorkflowSnapshot(null);
-                    }}
-                    disabled={!isWorkflowDirty || updateSettings.isPending}
-                  >
-                    <Save className="h-4 w-4" />
-                    Save Workflow
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      // Restore from workflow snapshot
-                      if (workflowSnapshot) {
-                        const restored: any = { ...formData };
-                        workflowFields.forEach((k) => {
-                          (restored as any)[k] = (workflowSnapshot as any)[k];
-                        });
-                        setFormData(restored);
-                      }
-
-                      // Restore from localStorage backups if available
-                      const autoResponseBackup =
-                        getBackupFromLocalStorage("autoResponse");
-                      if (autoResponseBackup) {
-                        setFormData((prev) => ({
-                          ...prev,
-                          confidenceThreshold:
-                            autoResponseBackup.confidenceThreshold,
-                          maxResponseLength:
-                            autoResponseBackup.maxResponseLength,
-                          responseTimeout: autoResponseBackup.responseTimeout,
-                        }));
-                        clearBackupFromLocalStorage("autoResponse");
-                      }
-
-                      const escalationBackup =
-                        getBackupFromLocalStorage("escalation");
-                      if (escalationBackup) {
-                        setFormData((prev) => ({
-                          ...prev,
-                          complexityThreshold:
-                            escalationBackup.complexityThreshold,
-                          escalationTeamId: escalationBackup.escalationTeamId,
-                        }));
-                        if (escalationBackup.escalationDepartmentId) {
-                          setEscalationDepartmentId(
-                            escalationBackup.escalationDepartmentId
-                          );
-                        }
-                        clearBackupFromLocalStorage("escalation");
-                      }
-
-                      const autoLearnBackup =
-                        getBackupFromLocalStorage("autoLearn");
-                      if (autoLearnBackup) {
-                        setFormData((prev) => ({
-                          ...prev,
-                          minResolutionScore:
-                            autoLearnBackup.minResolutionScore,
-                          articleApprovalRequired:
-                            autoLearnBackup.articleApprovalRequired,
-                        }));
-                        clearBackupFromLocalStorage("autoLearn");
-                      }
-
-                      // Clear reset tracking
-                      setFeaturesToReset({});
-                      setIsEditingWorkflow(false);
-                      setWorkflowSnapshot(null);
-                    }}
-                  >
-                    <XIcon className="h-4 w-4" />
-                    Cancel
-                  </Button>
-                </>
-              )}
-            </div>
-          </CardFooter>
-        </Card>
+      <CardContent className="space-y-5">
+        {!draft.openRouterKeyConfigured && <Alert><AlertCircle className="h-4 w-4" /><AlertTitle>AI is unavailable</AlertTitle><AlertDescription>Set OPENROUTER_API_KEY in the deployment environment to enable model calls.</AlertDescription></Alert>}
+        <ToggleRow id="ai-active" title="Enable AI model calls" description="Turn off model calls without changing the saved configuration." checked={draft.isActive} onChange={(value) => change("isActive", value)} />
+        <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+          <div className="space-y-2"><Label htmlFor="ai-model">OpenRouter model ID</Label><Input id="ai-model" className="h-11 font-mono text-sm" value={draft.modelId} onChange={(event) => change("modelId", event.target.value)} placeholder="deepseek/deepseek-v4-pro" /><p className="text-sm text-muted-foreground">Use the exact model ID shown by OpenRouter.</p></div>
+          <Button type="button" variant="outline" className="min-h-11" disabled={!canTest || testConnection.isPending} onClick={() => { setTestResult(null); testConnection.mutate(); }}>{testConnection.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Test connection</Button>
+        </div>
+        {dirty && <p className="text-sm text-muted-foreground">Save your changes before testing the connection.</p>}
+        {testResult && <Alert variant={testResult.success ? "default" : "destructive"} role="status">{testResult.success ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}<AlertTitle>{testResult.success ? "Connection successful" : "Connection failed"}</AlertTitle><AlertDescription>{testResult.message}</AlertDescription></Alert>}
       </CardContent>
-
-      {/* Confirmation Dialog for Feature Disabling */}
-      <AlertDialog
-        open={confirmationDialog.open}
-        onOpenChange={(open) => {
-          if (!open) {
-            // If dialog is closed without action, treat as cancel
-            handleConfirmationAction("cancel");
-          }
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Disable{" "}
-              {confirmationDialog.feature === "autoResponse"
-                ? "Auto-Response"
-                : confirmationDialog.feature === "escalation"
-                ? "Auto-Escalation"
-                : "Auto-Learning"}
-              ?
-            </AlertDialogTitle>
-            <AlertDialogDescription className="space-y-3">
-              {confirmationDialog.feature === "autoResponse" && (
-                <>
-                  <p>
-                    Disabling Auto-Response will reset the following settings to
-                    defaults when you save:
-                  </p>
-                  <ul className="list-disc list-inside space-y-1 text-sm">
-                    <li>Confidence Threshold: 70%</li>
-                    <li>Max Response Length: 1000 characters</li>
-                    <li>Response Timeout: 30 seconds</li>
-                  </ul>
-                </>
-              )}
-              {confirmationDialog.feature === "escalation" && (
-                <>
-                  <p>
-                    Disabling Auto-Escalation will reset the following settings
-                    to defaults when you save:
-                  </p>
-                  <ul className="list-disc list-inside space-y-1 text-sm">
-                    <li>Complexity Threshold: 70</li>
-                    <li>Escalation Team: (cleared)</li>
-                  </ul>
-                </>
-              )}
-              {confirmationDialog.feature === "autoLearn" && (
-                <>
-                  <p>
-                    Disabling Auto-Learning will reset the following settings to
-                    defaults when you save:
-                  </p>
-                  <ul className="list-disc list-inside space-y-1 text-sm">
-                    <li>Minimum Resolution Score: 80%</li>
-                    <li>Article Approval Required: Yes</li>
-                  </ul>
-                </>
-              )}
-              <Separator className="my-3" />
-              <p>
-                Your current values will be saved locally and can be restored if
-                you cancel.
-              </p>
-              <p className="font-medium">What would you like to do?</p>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel
-              onClick={() => handleConfirmationAction("cancel")}
-            >
-              Cancel
-            </AlertDialogCancel>
-            <Button
-              variant="outline"
-              onClick={() => handleConfirmationAction("keep")}
-            >
-              Keep Current Values
-            </Button>
-            <AlertDialogAction
-              onClick={() => handleConfirmationAction("reset")}
-            >
-              Reset to Defaults
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </Card>
-  );
+
+    <Card className="shadow-sm">
+      <CardHeader><CardTitle>Ticket workflows</CardTitle><CardDescription>Control when Ticketflow responds and learns from resolved work.</CardDescription></CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <ToggleRow id="auto-response" title="Automatic responses" description="Prepare replies when new tickets qualify." checked={draft.autoResponseEnabled} onChange={(value) => change("autoResponseEnabled", value)} />
+          <ToggleRow id="auto-learn" title="Learn from resolved tickets" description="Build knowledge suggestions from completed work." checked={draft.autoLearnEnabled} onChange={(value) => change("autoLearnEnabled", value)} />
+          <ToggleRow id="approval-required" title="Require article approval" description="A person reviews AI-generated articles before publishing." checked={draft.articleApprovalRequired} onChange={(value) => change("articleApprovalRequired", value)} />
+        </div>
+        <div className="grid gap-5 border-t pt-5 sm:grid-cols-2 lg:grid-cols-4">
+          <NumberField id="confidence" label="Reply confidence (%)" value={Math.round(draft.confidenceThreshold * 100)} min={0} max={100} hint="Minimum confidence for automatic replies." onChange={(value) => change("confidenceThreshold", value / 100)} />
+          <NumberField id="response-length" label="Reply length (characters)" value={draft.maxResponseLength} min={100} max={5000} onChange={(value) => change("maxResponseLength", value)} />
+          <NumberField id="response-timeout" label="Response timeout (seconds)" value={draft.responseTimeout} min={5} max={120} onChange={(value) => change("responseTimeout", value)} />
+          <NumberField id="resolution-score" label="Learning quality (%)" value={Math.round(draft.minResolutionScore * 100)} min={0} max={100} onChange={(value) => change("minResolutionScore", value / 100)} />
+        </div>
+      </CardContent>
+    </Card>
+
+    <Card className="shadow-sm">
+      <CardHeader><CardTitle>Model and spending limits</CardTitle><CardDescription>Requests are checked against these limits before the model is called. Costs remain estimates until OpenRouter confirms billing.</CardDescription></CardHeader>
+      <CardContent className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <NumberField id="daily-limit" label="Daily limit (USD)" value={draft.dailyLimitUsd} min={0} max={1000000} step={0.01} onChange={(value) => change("dailyLimitUsd", value)} />
+        <NumberField id="monthly-limit" label="Monthly limit (USD)" value={draft.monthlyLimitUsd} min={0} max={1000000} step={0.01} onChange={(value) => change("monthlyLimitUsd", value)} />
+        <NumberField id="request-tokens" label="Tokens per request" value={draft.maxTokensPerRequest} min={1} max={1000000} onChange={(value) => change("maxTokensPerRequest", value)} />
+        <NumberField id="output-tokens" label="Maximum output tokens" value={draft.maxTokens} min={100} max={4000} onChange={(value) => change("maxTokens", value)} />
+        <NumberField id="temperature" label="Temperature" value={draft.temperature} min={0} max={1} step={0.1} hint="Lower values produce more consistent responses." onChange={(value) => change("temperature", value)} />
+      </CardContent>
+    </Card>
+
+    <div className="sticky bottom-20 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-background/95 px-4 py-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      <p className="text-sm text-muted-foreground" role="status">{dirty ? "You have unsaved changes." : "All changes saved."}</p>
+      <div className="flex gap-2"><Button type="button" variant="outline" disabled={!dirty || save.isPending} onClick={() => setDraft(data ?? draft)}>Discard</Button><Button type="button" disabled={!dirty || save.isPending || !draft.modelId.trim()} onClick={() => save.mutate(draft)}>{save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Save settings</Button></div>
+    </div>
+  </main>;
 }

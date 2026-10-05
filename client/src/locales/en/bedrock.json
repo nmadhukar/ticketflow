@@ -33,7 +33,7 @@
   },
   "recent": {
     "title": "Recent Usage",
-    "desc": "Last 10 Bedrock API calls with cost information.",
+    "desc": "Recent AI requests. Pending charges are estimates until billing is verified.",
     "table": {
       "time": "Time",
       "operation": "Operation",

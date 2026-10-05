@@ -33,7 +33,7 @@
   },
   "recent": {
     "title": "Uso reciente",
-    "desc": "Últimas 10 llamadas a la API de Bedrock con información de costos.",
+    "desc": "Solicitudes de IA recientes. Los cargos pendientes son estimaciones hasta confirmar la facturación.",
     "table": {
       "time": "Hora",
       "operation": "Operación",

@@ -10,6 +10,7 @@
   "configuration_title": "Configuración",
   "company-console": "Consola de la empresa",
   "ai-settings": "Configuración de IA",
+  "storage-settings": "Almacenamiento AWS",
   "analytics_title": "Analítica e información",
   "ai-analytics": "Rendimiento de IA",
   "learning-queue": "Cola de aprendizaje",

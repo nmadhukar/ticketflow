@@ -1,7 +1,7 @@
 /**
  * AI-Powered Ticket Analysis and Auto-Response System
  *
- * This module provides intelligent ticket analysis using AWS Bedrock Claude 3 Sonnet model.
+ * This module provides intelligent ticket analysis using the configured AI model.
  * Key features:
  * - Automatic ticket classification and priority assessment
  * - Intelligent response generation for common issues
@@ -11,16 +11,15 @@
  */
 
 import { storage } from "../../storage";
-import { getAISettings } from "../../admin/aiSettings";
 import { logSecurityEvent } from "../../security";
 import { buildAutoResponsePrompt, buildTicketAnalysisPrompt } from "./prompts";
 import {
-  getBedrockClient,
   runTicketAnalysisPrompt,
   runAutoResponseForTicketPrompt,
 } from "./bedrockIntegration";
 import { extractJSON } from "./jsonUtils";
 import { describeAIError, isQuotaBlocked } from "./aiErrors";
+import { z } from "zod";
 
 /**
  * Structure for AI ticket analysis results
@@ -55,8 +54,27 @@ export interface AutoResponse {
   escalationNeeded: boolean;
 }
 
+const ticketAnalysisSchema = z.object({
+  complexity: z.enum(["low", "medium", "high", "critical"]),
+  category: z.enum(["bug", "feature", "support", "enhancement", "incident", "request"]),
+  priority: z.enum(["low", "medium", "high", "urgent"]),
+  estimatedResolutionTime: z.number().finite().nonnegative(),
+  suggestedAssignee: z.string().optional(),
+  tags: z.array(z.string()),
+  confidence: z.number().finite().min(0).max(100),
+  reasoning: z.string(),
+});
+
+const autoResponseSchema = z.object({
+  response: z.string().min(1),
+  confidence: z.number().finite().min(0).max(100),
+  knowledgeBaseArticles: z.array(z.string()),
+  followUpActions: z.array(z.string()),
+  escalationNeeded: z.boolean(),
+});
+
 /**
- * Core AI analysis function using Claude 3 Sonnet
+ * Core AI analysis function
  *
  * Analyzes ticket content to determine:
  * - Complexity level (low/medium/high/critical)
@@ -75,18 +93,7 @@ export const analyzeTicket = async (ticketData: {
   priority?: string;
   reporterId: string;
 }): Promise<TicketAnalysis | null> => {
-  const { bedrockClient, bedrockModelId: modelId } = await getBedrockClient();
-  if (!bedrockClient || !modelId) {
-    console.error("No Bedrock model configured for ticket analysis");
-    return null;
-  }
-
   try {
-    const settings = await getAISettings();
-    const timeoutMs =
-      Math.max(5, Math.min(120, Number(settings.responseTimeout || 30))) * 1000;
-    const abortController = new AbortController();
-    const _timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
     const prompt = buildTicketAnalysisPrompt(ticketData);
 
     const result = await runTicketAnalysisPrompt(prompt);
@@ -97,7 +104,7 @@ export const analyzeTicket = async (ticketData: {
       throw new Error("Empty response after JSON extraction");
     }
 
-    const analysis = JSON.parse(cleanedResponse) as TicketAnalysis;
+    const analysis = ticketAnalysisSchema.parse(JSON.parse(cleanedResponse));
 
     // Store analysis in database
     await storage.saveTicketAnalysis(ticketData.reporterId, {
@@ -146,19 +153,7 @@ export const generateAutoResponseForTicket = async (
   analysis: TicketAnalysis,
   knowledgeBaseContext?: string[]
 ): Promise<AutoResponse | null> => {
-  const { bedrockClient, bedrockModelId: modelId } = await getBedrockClient();
-  if (!bedrockClient || !modelId) {
-    console.error("No Bedrock model configured for auto response");
-    return null;
-  }
-
   try {
-    const settings = await getAISettings();
-    const timeoutMs =
-      Math.max(5, Math.min(120, Number(settings.responseTimeout || 30))) * 1000;
-    const abortController = new AbortController();
-    const _timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
-
     const knowledgeContext =
       knowledgeBaseContext && knowledgeBaseContext.length > 0
         ? knowledgeBaseContext.join("\n---\n")
@@ -181,7 +176,7 @@ export const generateAutoResponseForTicket = async (
       throw new Error("Empty response after JSON extraction");
     }
 
-    const autoResponse = JSON.parse(cleanedResponse) as AutoResponse;
+    const autoResponse = autoResponseSchema.parse(JSON.parse(cleanedResponse));
     return autoResponse;
   } catch (error) {
     console.error("AI auto-response generation error:", describeAIError(error));

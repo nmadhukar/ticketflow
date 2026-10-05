@@ -5,7 +5,7 @@
  * - User Management: View, edit, approve, ban users with role assignments
  * - System Settings: Company branding, ticket numbering, email configuration
  * - API Key Management: Create, manage, and monitor API keys with proper security
- * - AWS Integration: Separate configuration for SES (email) and Bedrock (AI)
+ * - AWS Integration: SES email and S3 storage settings are separate from OpenRouter AI.
  * - Microsoft 365 SSO: Configure enterprise authentication integration
  * - Help Documentation: Manage help documents and policy files for AI chatbot
  * - Email Templates: Customize system email templates for various events
@@ -31,6 +31,7 @@ import Policies from "@/pages/admin/DocsGuides/Policies";
 import Invitations from "@/pages/admin/UsersGroups/invitations";
 import AiAnalytics from "@/pages/admin/AnalyticsInsights/ai-analytics";
 import AISettings from "@/pages/admin/Configuration/ai-settings";
+import StorageSettings from "@/pages/admin/Configuration/storage-settings";
 import LearningAnalytics from "@/pages/admin/AnalyticsInsights/learning-analytics";
 import { useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
@@ -55,6 +56,7 @@ const sections: Record<string, JSX.Element> = {
   sso: <Ms365Sso />,
   "ms-teams-integration": <MsTeamIntegration />,
   "ai-settings": <AISettings />,
+  "storage-settings": <StorageSettings />,
   "ai-analytics": <AiAnalytics />,
   "learning-queue": <LearningAnalytics />,
   guidelines: <AdminGuides />,

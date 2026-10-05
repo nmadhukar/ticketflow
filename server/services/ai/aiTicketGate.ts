@@ -4,6 +4,8 @@ import { asyncHandler, HttpError } from "../../http/errors";
 import { assertTaskAccess, type AccessUser } from "../../permissions/ticketAccess";
 import { isStaffRole } from "../../permissions/staff";
 import { storage } from "../../storage";
+import { getAISettings } from "../../admin/aiSettings";
+import { isOpenRouterConfigured } from "../../env";
 
 /** Same id rules as parseIdParam (positive integer, digits only) and the int4 column: no booleans, arrays or floats. */
 const INT4_MAX = 2147483647;
@@ -31,8 +33,8 @@ export const loadAiTicket = asyncHandler(async (req, _res, next) => {
   const task = await storage.getTask(ticketId);
   if (!task) throw new HttpError(404, "not_found", "Ticket not found");
 
-  const bedrock = await storage.getBedrockSettings();
-  if (!bedrock?.bedrockAccessKeyId || !bedrock?.bedrockSecretAccessKey) {
+  const settings = await getAISettings();
+  if (!settings.isActive || !isOpenRouterConfigured()) {
     throw new HttpError(503, "ai_not_configured", "AI service not configured");
   }
   (req as Request & { aiTicket?: unknown }).aiTicket = task;

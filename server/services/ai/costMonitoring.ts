@@ -1,13 +1,18 @@
 /**
- * AWS Bedrock Cost Monitoring and Usage Tracking
+ * AI cost monitoring and usage tracking.
  *
- * This module provides comprehensive cost monitoring, usage tracking, and request blocking
- * for AWS Bedrock to prevent unexpected charges.
+ * This module tracks model usage and blocks requests that exceed configured limits.
  */
 
 import { storage } from "../../storage";
-import { BEDROCK_PRICING } from "./bedrockPrice";
-import { describeAIError } from "./aiErrors";
+import { AiModelError, describeAIError } from "./aiErrors";
+import { createOpenRouterPricing, estimateCostUsd, type ModelPrice } from "./openRouterPricing";
+import type { AISettings } from "@shared/interfaces";
+import { db } from "../../storage/db";
+import { aiUsage } from "@shared/schema";
+import { and, eq } from "drizzle-orm";
+
+const pricing = createOpenRouterPricing();
 
 export interface UsageRecord {
   timestamp: string;
@@ -15,6 +20,10 @@ export interface UsageRecord {
   inputTokens: number;
   outputTokens: number;
   estimatedCost: number;
+  verifiedCostUsd?: number;
+  billingStatus?: string;
+  requestedModelId?: string;
+  generationId?: string;
   operation: string;
   userId?: string;
   ticketId?: string;
@@ -25,6 +34,8 @@ export interface DailyUsage {
   totalInputTokens: number;
   totalOutputTokens: number;
   totalCost: number;
+  totalEstimatedCost: number;
+  totalVerifiedCost: number;
   requestCount: number;
   operations: { [key: string]: number };
 }
@@ -62,6 +73,10 @@ async function loadUsageRecords(): Promise<UsageRecord[]> {
       inputTokens: r.inputTokens,
       outputTokens: r.outputTokens,
       estimatedCost: Number(r.estimatedCost),
+      verifiedCostUsd: r.verifiedCostUsd == null ? undefined : Number(r.verifiedCostUsd),
+      billingStatus: r.billingStatus,
+      requestedModelId: r.requestedModelId || undefined,
+      generationId: r.generationId || undefined,
       operation: r.operation,
       userId: r.userId || undefined,
       ticketId: r.ticketId?.toString() || undefined,
@@ -77,7 +92,7 @@ async function loadUsageRecords(): Promise<UsageRecord[]> {
  */
 export async function loadCostLimits(): Promise<CostLimits> {
   try {
-    const settings = await storage.getBedrockSettings();
+    const settings = await storage.getAISettings();
     if (!settings) {
       return DEFAULT_COST_LIMITS;
     }
@@ -100,47 +115,36 @@ export async function saveCostLimits(
   limits: CostLimits,
   userId: string = "system"
 ): Promise<void> {
-  try {
-    const settings = await storage.getBedrockSettings();
-    if (settings) {
-      await storage.updateBedrockSettings(
-        {
-          dailyLimitUsd: limits.dailyLimitUSD.toString(),
-          monthlyLimitUsd: limits.monthlyLimitUSD.toString(),
-          maxTokensPerRequest: limits.maxTokensPerRequest,
-        },
-        userId
-      );
-    }
-  } catch (error) {
-    console.error("Error saving cost limits:", describeAIError(error));
-  }
+  await storage.updateAISettings(
+    {
+      dailyLimitUsd: limits.dailyLimitUSD.toString(),
+      monthlyLimitUsd: limits.monthlyLimitUSD.toString(),
+      maxTokensPerRequest: limits.maxTokensPerRequest,
+    },
+    userId
+  );
 }
 
-/**
- * Estimate cost for a request based on model and token counts
- */
-export function estimateCost(
-  modelId: string,
-  inputTokens: number,
-  outputTokens: number
-): number {
-  const pricing = BEDROCK_PRICING[modelId as keyof typeof BEDROCK_PRICING];
-  if (!pricing) {
-    console.warn(
-      `Unknown model pricing for ${modelId}, using Titan Express pricing`
-    );
-    const titanPricing = BEDROCK_PRICING["amazon.titan-text-express-v1"];
-    return (
-      (inputTokens / 1000000) * titanPricing.inputTokens +
-      (outputTokens / 1000000) * titanPricing.outputTokens
-    );
-  }
-
-  const inputCost = (inputTokens / 1000000) * pricing.inputTokens;
-  const outputCost = (outputTokens / 1000000) * pricing.outputTokens;
-
-  return inputCost + outputCost;
+export function assertBudgetAvailable(input: {
+  promptTokens: number;
+  maxOutputTokens: number;
+  price?: ModelPrice | null;
+  settings: AISettings;
+  todayUsd: number;
+  monthUsd: number;
+}): void {
+  if (!input.price) throw new AiModelError("price_unavailable");
+  const projectedTokens = input.promptTokens + input.maxOutputTokens;
+  const projectedUsd = estimateCostUsd(input.promptTokens, input.maxOutputTokens, input.price);
+  const blocked = (message: string) => {
+    const error = new Error(message);
+    (error as any).isBlocked = true;
+    (error as any).costEstimate = { inputTokens: input.promptTokens, outputTokens: input.maxOutputTokens, estimatedCost: projectedUsd };
+    throw error;
+  };
+  if (!Number.isSafeInteger(input.promptTokens) || !Number.isSafeInteger(input.maxOutputTokens) || input.promptTokens < 0 || input.maxOutputTokens <= 0 || projectedTokens > input.settings.maxTokensPerRequest) blocked("Request exceeds max tokens per request");
+  if (input.todayUsd + projectedUsd > input.settings.dailyLimitUsd) blocked("Daily cost limit exceeded");
+  if (input.monthUsd + projectedUsd > input.settings.monthlyLimitUsd) blocked("Monthly cost limit exceeded");
 }
 
 /**
@@ -148,8 +152,13 @@ export function estimateCost(
  */
 export function estimateTokens(text: string): number {
   // Rough estimation: 1 token ≈ 4 characters for English text
-  // This is conservative and may vary by model
+  // This can undercount other languages and model tokenizers; actual usage is recorded after the call.
   return Math.ceil(text.length / 4);
+}
+
+/** Conservatively estimate multilingual prompt tokens for budget preflight. */
+export function estimatePromptTokensForBudget(text: string): number {
+  return Math.ceil(Buffer.byteLength(text, "utf8") / 2) + 16;
 }
 
 /**
@@ -171,30 +180,34 @@ export function isTicketForeignKeyViolation(error: unknown): boolean {
  * Record usage for billing analysis
  */
 export async function recordUsage(
-  modelId: string,
-  inputTokens: number,
-  outputTokens: number,
-  operation: string,
-  userId?: string,
-  ticketId?: string
+  usage: {
+    modelId: string; inputTokens: number; outputTokens: number; operation: string;
+    requestedModelId?: string; generationId?: string; estimatedCost: number;
+    verifiedCostUsd?: number; billingStatus?: "estimated" | "verified";
+    userId?: string; ticketId?: string;
+  }
 ): Promise<void> {
-  const cost = estimateCost(modelId, inputTokens, outputTokens);
+  const cost = usage.estimatedCost;
 
   try {
     // Validate userId - if it's "system" or empty, set to null to avoid foreign key constraint violation
     // The user_id column is nullable, so null is valid for system operations
     const validUserId =
-      userId && userId !== "system" && userId.trim() !== "" ? userId : null;
+      usage.userId && usage.userId !== "system" && usage.userId.trim() !== "" ? usage.userId : null;
 
     const row = {
       timestamp: new Date(),
-      modelId,
-      inputTokens,
-      outputTokens,
+      modelId: usage.modelId,
+      requestedModelId: usage.requestedModelId || null,
+      generationId: usage.generationId || null,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
       estimatedCost: cost.toString(),
-      operation,
+      verifiedCostUsd: usage.verifiedCostUsd == null ? null : usage.verifiedCostUsd.toString(),
+      billingStatus: usage.billingStatus ?? "estimated",
+      operation: usage.operation,
       userId: validUserId,
-      ticketId: ticketId ? parseInt(ticketId) : null,
+      ticketId: usage.ticketId ? parseInt(usage.ticketId) : null,
     };
     try {
       await storage.recordAIUsage(row);
@@ -210,12 +223,13 @@ export async function recordUsage(
 
     // Log usage for monitoring
     console.log(
-      `[BEDROCK_USAGE] ${operation}: ${inputTokens} input + ${outputTokens} output tokens = $${cost.toFixed(
+      `[AI_USAGE] ${usage.operation}: ${usage.inputTokens} input + ${usage.outputTokens} output tokens = $${cost.toFixed(
         4
       )}`
     );
   } catch (error) {
     console.error("Error recording usage:", describeAIError(error));
+    throw error;
   }
 }
 
@@ -242,6 +256,8 @@ export async function getDailyUsage(date?: string): Promise<DailyUsage> {
     totalInputTokens: 0,
     totalOutputTokens: 0,
     totalCost: 0,
+    totalEstimatedCost: 0,
+    totalVerifiedCost: 0,
     requestCount: records.length,
     operations: {},
   };
@@ -249,7 +265,9 @@ export async function getDailyUsage(date?: string): Promise<DailyUsage> {
   records.forEach((record) => {
     summary.totalInputTokens += record.inputTokens;
     summary.totalOutputTokens += record.outputTokens;
-    summary.totalCost += Number(record.estimatedCost);
+    summary.totalEstimatedCost += Number(record.estimatedCost);
+    if (record.billingStatus === "verified" && record.verifiedCostUsd != null) summary.totalVerifiedCost += Number(record.verifiedCostUsd);
+    summary.totalCost += record.billingStatus === "verified" && record.verifiedCostUsd != null ? Number(record.verifiedCostUsd) : Number(record.estimatedCost);
     summary.operations[record.operation] =
       (summary.operations[record.operation] || 0) + 1;
   });
@@ -265,13 +283,11 @@ export async function getMonthlyUsage(
   month?: number
 ): Promise<DailyUsage> {
   const now = new Date();
-  const targetYear = year || now.getFullYear();
-  const targetMonth = month || now.getMonth() + 1;
+  const targetYear = year || now.getUTCFullYear();
+  const targetMonth = month || now.getUTCMonth() + 1;
 
-  const startDate = new Date(targetYear, targetMonth - 1, 1);
-  startDate.setHours(0, 0, 0, 0);
-  const endDate = new Date(targetYear, targetMonth, 0);
-  endDate.setHours(23, 59, 59, 999);
+  const startDate = new Date(Date.UTC(targetYear, targetMonth - 1, 1));
+  const endDate = new Date(Date.UTC(targetYear, targetMonth, 0, 23, 59, 59, 999));
 
   const records = await storage.getAIUsage({
     startDate,
@@ -283,6 +299,8 @@ export async function getMonthlyUsage(
     totalInputTokens: 0,
     totalOutputTokens: 0,
     totalCost: 0,
+    totalEstimatedCost: 0,
+    totalVerifiedCost: 0,
     requestCount: records.length,
     operations: {},
   };
@@ -290,7 +308,9 @@ export async function getMonthlyUsage(
   records.forEach((record) => {
     summary.totalInputTokens += record.inputTokens;
     summary.totalOutputTokens += record.outputTokens;
-    summary.totalCost += Number(record.estimatedCost);
+    summary.totalEstimatedCost += Number(record.estimatedCost);
+    if (record.billingStatus === "verified" && record.verifiedCostUsd != null) summary.totalVerifiedCost += Number(record.verifiedCostUsd);
+    summary.totalCost += record.billingStatus === "verified" && record.verifiedCostUsd != null ? Number(record.verifiedCostUsd) : Number(record.estimatedCost);
     summary.operations[record.operation] =
       (summary.operations[record.operation] || 0) + 1;
   });
@@ -308,11 +328,9 @@ export async function shouldBlockRequest(
   _operation: string
 ): Promise<{ blocked: boolean; reason?: string; estimatedCost: number }> {
   const limits = await loadCostLimits();
-  const estimatedCost = estimateCost(
-    modelId,
-    estimatedInputTokens,
-    estimatedOutputTokens
-  );
+  const price = await pricing.getModelPrice(modelId);
+  if (!price) throw new AiModelError("price_unavailable");
+  const estimatedCost = estimateCostUsd(estimatedInputTokens, estimatedOutputTokens, price);
 
   // Check daily cost limit
   const dailyUsage = await getDailyUsage();
@@ -355,6 +373,18 @@ export async function shouldBlockRequest(
   return { blocked: false, estimatedCost };
 }
 
+/** Reconcile only rows still estimated; repeated polls leave the first verified value intact. */
+export async function reconcileGenerationCost(generationId: string): Promise<boolean> {
+  const billed = await pricing.getGenerationCost(generationId);
+  if (!billed) return false;
+  const changed = await db.update(aiUsage).set({
+    verifiedCostUsd: billed.totalCostUsd.toString(),
+    billingStatus: "verified",
+    ...(billed.actualModel ? { modelId: billed.actualModel } : {}),
+  }).where(and(eq(aiUsage.generationId, generationId), eq(aiUsage.billingStatus, "estimated"))).returning({ id: aiUsage.id });
+  return changed.length > 0;
+}
+
 /**
  * Get cost statistics for dashboard
  */
@@ -364,6 +394,10 @@ export async function getCostStatistics(): Promise<{
   limits: CostLimits;
   recentUsage: UsageRecord[];
 }> {
+  // Generation billing can arrive after the completion response. Revisit pending
+  // rows when the dashboard is read; the conditional update is safe to repeat.
+  const pending = (await loadUsageRecords()).filter((record) => record.generationId && record.billingStatus !== "verified").slice(0, 10);
+  await Promise.all(pending.map((record) => reconcileGenerationCost(record.generationId!)));
   const [dailyUsage, monthlyUsage, limits, allUsage] = await Promise.all([
     getDailyUsage(),
     getMonthlyUsage(),
@@ -371,7 +405,7 @@ export async function getCostStatistics(): Promise<{
     loadUsageRecords(),
   ]);
 
-  const recentUsage = allUsage.slice(-10); // Last 10 requests
+  const recentUsage = allUsage.slice(0, 10); // Storage returns newest first.
 
   return {
     dailyUsage,
@@ -420,6 +454,10 @@ export async function exportUsageData(
     inputTokens: r.inputTokens,
     outputTokens: r.outputTokens,
     estimatedCost: Number(r.estimatedCost),
+    verifiedCostUsd: r.verifiedCostUsd == null ? undefined : Number(r.verifiedCostUsd),
+    billingStatus: r.billingStatus,
+    requestedModelId: r.requestedModelId || undefined,
+    generationId: r.generationId || undefined,
     operation: r.operation,
     userId: r.userId || undefined,
     ticketId: r.ticketId?.toString() || undefined,

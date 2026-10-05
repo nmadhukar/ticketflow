@@ -1,5 +1,5 @@
 /**
- * Unit tests for AWS Bedrock cost monitoring.
+ * Unit tests for AI cost monitoring.
  *
  * Usage and limits live in the database behind `storage`, so storage is mocked
  * here and each test states exactly which rows the module would read.
@@ -12,15 +12,20 @@ jest.mock("../storage", () => ({
     getAIUsage: jest.fn(),
     recordAIUsage: jest.fn(),
     deleteAIUsage: jest.fn(),
-    getBedrockSettings: jest.fn(),
-    updateBedrockSettings: jest.fn(),
+    getAISettings: jest.fn(),
+    updateAISettings: jest.fn(),
   },
+}));
+jest.mock("../storage/db", () => ({ db: {} }));
+jest.mock("../services/ai/openRouterPricing", () => ({
+  estimateCostUsd: (input: number, output: number, price: { promptUsdPerToken: number; completionUsdPerToken: number }) => input * price.promptUsdPerToken + output * price.completionUsdPerToken,
+  createOpenRouterPricing: () => ({ getModelPrice: async () => ({ promptUsdPerToken: 0.000001, completionUsdPerToken: 0.000002 }) }),
 }));
 
 import { storage } from "../storage";
 import {
-  estimateCost,
   estimateTokens,
+  estimatePromptTokensForBudget,
   recordUsage,
   shouldBlockRequest,
   getDailyUsage,
@@ -53,28 +58,9 @@ describe("Cost Monitoring", () => {
   beforeEach(() => {
     jest.resetAllMocks();
     mocked.getAIUsage.mockResolvedValue([]);
-    mocked.getBedrockSettings.mockResolvedValue(undefined);
+    mocked.getAISettings.mockResolvedValue(undefined);
     mocked.recordAIUsage.mockResolvedValue(undefined);
     mocked.deleteAIUsage.mockResolvedValue(undefined);
-  });
-
-  describe("estimateCost", () => {
-    it.each([
-      [HAIKU, 0.000875], // 1000/1M * 0.25 + 500/1M * 1.25
-      ["anthropic.claude-3-sonnet-20240229-v1:0", 0.0105],
-      ["anthropic.claude-3-opus-20240229-v1:0", 0.0525],
-    ])("prices %s from the pricing table", (modelId, expected) => {
-      expect(estimateCost(modelId, 1000, 500)).toBeCloseTo(expected, 6);
-    });
-
-    it("falls back to Titan Express pricing for an unknown model", () => {
-      // 1000/1M * 0.8 + 500/1M * 3.2
-      expect(estimateCost("unknown-model", 1000, 500)).toBeCloseTo(0.0024, 6);
-    });
-
-    it("costs nothing for zero tokens", () => {
-      expect(estimateCost(HAIKU, 0, 0)).toBe(0);
-    });
   });
 
   describe("estimateTokens", () => {
@@ -88,7 +74,7 @@ describe("Cost Monitoring", () => {
 
   describe("recordUsage", () => {
     it("stores the usage with its estimated cost", async () => {
-      await recordUsage(HAIKU, 1000, 500, "op", "user-1", "42");
+      await recordUsage({ modelId: HAIKU, inputTokens: 1000, outputTokens: 500, estimatedCost: 0.000875, operation: "op", userId: "user-1", ticketId: "42", generationId: "gen-123", requestedModelId: "requested/model" });
 
       expect(mocked.recordAIUsage).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -98,6 +84,8 @@ describe("Cost Monitoring", () => {
           operation: "op",
           userId: "user-1",
           ticketId: 42,
+          generationId: "gen-123",
+          requestedModelId: "requested/model",
         })
       );
       const saved = mocked.recordAIUsage.mock.calls[0][0] as any;
@@ -105,15 +93,15 @@ describe("Cost Monitoring", () => {
     });
 
     it("stores a null user for system calls so the foreign key holds", async () => {
-      await recordUsage(HAIKU, 10, 10, "op", "system");
+      await recordUsage({ modelId: HAIKU, inputTokens: 10, outputTokens: 10, estimatedCost: 0.00003, operation: "op", userId: "system" });
       expect(mocked.recordAIUsage).toHaveBeenCalledWith(
         expect.objectContaining({ userId: null, ticketId: null })
       );
     });
 
-    it("does not throw when storage fails", async () => {
+    it("reports storage failure so usage cannot silently disappear", async () => {
       mocked.recordAIUsage.mockRejectedValue(new Error("db down"));
-      await expect(recordUsage(HAIKU, 10, 10, "op")).resolves.toBeUndefined();
+      await expect(recordUsage({ modelId: HAIKU, inputTokens: 10, outputTokens: 10, estimatedCost: 0.00003, operation: "op" })).rejects.toThrow("db down");
     });
   });
 
@@ -127,7 +115,7 @@ describe("Cost Monitoring", () => {
     });
 
     it("reads the limits from the stored settings", async () => {
-      mocked.getBedrockSettings.mockResolvedValue({
+      mocked.getAISettings.mockResolvedValue({
         dailyLimitUsd: "5.00",
         monthlyLimitUsd: "20.00",
         maxTokensPerRequest: 1000,
@@ -140,21 +128,34 @@ describe("Cost Monitoring", () => {
     });
 
     it("writes the limits back as strings and ints", async () => {
-      mocked.getBedrockSettings.mockResolvedValue({ id: 1 });
+      mocked.getAISettings.mockResolvedValue({ id: 1 });
       await saveCostLimits(
         { dailyLimitUSD: 7, monthlyLimitUSD: 30, maxTokensPerRequest: 500 },
         "admin-1"
       );
-      expect(mocked.updateBedrockSettings).toHaveBeenCalledWith(
-        { dailyLimitUsd: "7", monthlyLimitUsd: "30", maxTokensPerRequest: 500 },
+      expect(mocked.updateAISettings).toHaveBeenCalledWith(
+        expect.objectContaining({ dailyLimitUsd: "7", monthlyLimitUsd: "30", maxTokensPerRequest: 500 }),
         "admin-1"
       );
     });
+
+    it("reports a failed limit save to the caller", async () => {
+      mocked.updateAISettings.mockRejectedValueOnce(new Error("database unavailable"));
+      await expect(saveCostLimits(
+        { dailyLimitUSD: 7, monthlyLimitUSD: 30, maxTokensPerRequest: 500 },
+        "admin-1"
+      )).rejects.toThrow("database unavailable");
+    });
+  });
+
+  it("estimates preflight prompt tokens using UTF-8 bytes and chat framing", () => {
+    expect(estimatePromptTokensForBudget("abc")).toBe(18);
+    expect(estimatePromptTokensForBudget("😀")).toBe(18);
   });
 
   describe("shouldBlockRequest", () => {
     beforeEach(() => {
-      mocked.getBedrockSettings.mockResolvedValue({
+      mocked.getAISettings.mockResolvedValue({
         dailyLimitUsd: "5.00",
         monthlyLimitUsd: "50.00",
         maxTokensPerRequest: 1000,
@@ -200,6 +201,8 @@ describe("Cost Monitoring", () => {
         totalInputTokens: 0,
         totalOutputTokens: 0,
         totalCost: 0,
+        totalEstimatedCost: 0,
+        totalVerifiedCost: 0,
         requestCount: 0,
         operations: {},
       });
@@ -238,8 +241,8 @@ describe("Cost Monitoring", () => {
       const usage = await getMonthlyUsage(2024, 2);
       expect(usage.date).toBe("2024-02");
       const { startDate, endDate } = mocked.getAIUsage.mock.calls[0][0] as any;
-      expect(startDate.getMonth()).toBe(1);
-      expect(endDate.getDate()).toBe(29); // 2024 is a leap year
+      expect(startDate.getUTCMonth()).toBe(1);
+      expect(endDate.getUTCDate()).toBe(29); // 2024 is a leap year
     });
   });
 

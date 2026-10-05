@@ -156,10 +156,10 @@ export default function Dashboard() {
       </section>
       <details className="rounded-lg border bg-card p-5" onToggle={(event) => setShowInfrastructure(event.currentTarget.open)}>
         <summary className="cursor-pointer font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Infrastructure usage</summary>
-        <p className="mt-1 text-sm text-muted-foreground">Bedrock and S3 usage for administrators.</p>
+        <p className="mt-1 text-sm text-muted-foreground">AI model and S3 usage for administrators.</p>
         {showInfrastructure && <div className="mt-6 space-y-6">
         <div className="space-y-4">
-          <h3 className="text-base font-semibold">Bedrock usage</h3>
+          <h3 className="text-base font-semibold">AI model usage</h3>
           <BedrockCostMonitoring />
         </div>
         <div className="space-y-4">

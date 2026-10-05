@@ -29,7 +29,7 @@ export function createOpenRouterPricing(options: {
   fetchImpl?: typeof fetch;
 } = {}) {
   const getApiKey = options.getApiKey ?? readOpenRouterApiKey;
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl: typeof fetch = options.fetchImpl ?? ((...args) => globalThis.fetch(...args));
   let cache = new Map<string, ModelPrice>();
   let expiresAt = 0;
 

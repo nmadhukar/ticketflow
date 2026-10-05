@@ -1,8 +1,8 @@
 /**
- * AWS Bedrock Cost Monitoring Component
+ * OpenRouter AI cost monitoring component.
  *
  * This component provides real-time cost monitoring, usage tracking, and request blocking
- * notifications for AWS Bedrock usage to prevent unexpected charges on free-tier accounts.
+ * notifications for model usage and spending limits.
  */
 
 import React from "react";
@@ -61,6 +61,8 @@ interface UsageRecord {
   inputTokens: number;
   outputTokens: number;
   estimatedCost: number;
+  verifiedCostUsd?: number;
+  billingStatus?: "estimated" | "verified";
   operation: string;
   userId?: string;
   ticketId?: string;
@@ -145,7 +147,7 @@ export function BedrockCostMonitoring() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `bedrock-usage-${data.dateRange.startDate || "all"}-${
+      a.download = `ai-usage-${data.dateRange.startDate || "all"}-${
         data.dateRange.endDate || "data"
       }.csv`;
       document.body.appendChild(a);
@@ -224,7 +226,9 @@ export function BedrockCostMonitoring() {
       "Model",
       "Input Tokens",
       "Output Tokens",
-      "Cost",
+      "Estimated Cost",
+      "Verified Cost",
+      "Billing Status",
       "Operation",
       "User ID",
       "Ticket ID",
@@ -235,6 +239,8 @@ export function BedrockCostMonitoring() {
       record.inputTokens,
       record.outputTokens,
       record.estimatedCost.toFixed(6),
+      record.verifiedCostUsd?.toFixed(6) || "",
+      record.billingStatus || "estimated",
       record.operation,
       record.userId || "",
       record.ticketId || "",
@@ -244,6 +250,7 @@ export function BedrockCostMonitoring() {
   };
 
   const getCostPercentage = (current: number, limit: number) => {
+    if (limit <= 0) return current > 0 ? 100 : 0;
     return Math.min((current / limit) * 100, 100);
   };
 
@@ -340,7 +347,7 @@ export function BedrockCostMonitoring() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <h5 className="text-2xl font-bold mb-2">
+            <h5 className="mb-2 text-2xl font-bold tabular-nums">
               ${dailyUsage.totalCost.toFixed(4)}
             </h5>
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -385,7 +392,7 @@ export function BedrockCostMonitoring() {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <h5 className="text-2xl font-bold mb-2">
+            <h5 className="mb-2 text-2xl font-bold tabular-nums">
               ${monthlyUsage.totalCost.toFixed(4)}
             </h5>
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -489,7 +496,7 @@ export function BedrockCostMonitoring() {
           </CardTitle>
           <CardDescription>
             {t("bedrock:recent.desc", {
-              defaultValue: "Last 10 Bedrock API calls with cost information.",
+              defaultValue: "Recent AI requests. Pending charges are estimates until billing is verified.",
             })}
           </CardDescription>
         </CardHeader>
@@ -517,22 +524,24 @@ export function BedrockCostMonitoring() {
               </TableRow>
             </TableHeader>
             <TableBody>
+              {recentUsage.length === 0 && <TableRow><TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">No AI usage recorded yet.</TableCell></TableRow>}
               {recentUsage.map((record: UsageRecord, index: number) => (
-                <TableRow key={index}>
+                <TableRow key={`${record.timestamp}-${index}`}>
                   <TableCell className="text-sm">
                     {new Date(record.timestamp).toLocaleString()}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline">{record.operation}</Badge>
                   </TableCell>
-                  <TableCell className="text-sm font-mono">
-                    {record.modelId.split("-").slice(0, 3).join("-")}
+                  <TableCell className="max-w-48 truncate text-sm font-mono" title={record.modelId}>
+                    {record.modelId}
                   </TableCell>
-                  <TableCell className="text-sm">
+                  <TableCell className="text-sm tabular-nums">
                     {record.inputTokens + record.outputTokens}
                   </TableCell>
-                  <TableCell className="text-sm font-mono">
-                    ${record.estimatedCost.toFixed(4)}
+                  <TableCell className="space-y-1 text-sm font-mono tabular-nums">
+                    <span>${(record.billingStatus === "verified" && record.verifiedCostUsd !== undefined ? record.verifiedCostUsd : record.estimatedCost).toFixed(4)}</span>
+                    <span className="block text-xs font-sans text-muted-foreground">{record.billingStatus === "verified" && record.verifiedCostUsd !== undefined ? "Verified" : "Estimated"}</span>
                   </TableCell>
                 </TableRow>
               ))}

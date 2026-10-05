@@ -9,16 +9,23 @@ import { eq, and, ilike, sql } from "drizzle-orm";
 import type {
   Task,
   InsertKnowledgeArticle,
-  KnowledgeArticle,
 } from "@shared/schema";
 import { buildCreateKnowledgeArticlePrompt } from "./prompts";
 import { containsPattern } from "../../utils/like";
+import { z } from "zod";
 import {
-  getBedrockClient,
   runKnowledgeArticleGenerationPrompt,
 } from "./bedrockIntegration";
 import { extractJSON } from "./jsonUtils";
 import { describeAIError } from "./aiErrors";
+
+const generatedArticleSchema = z.object({
+  title: z.string().trim().min(1).max(255),
+  summary: z.string().trim().min(1),
+  content: z.string().trim().min(1),
+  prerequisites: z.array(z.string()).optional(),
+  variations: z.array(z.string()).optional(),
+});
 
 export class KnowledgeBaseService {
   async learnFromResolvedTicket(
@@ -186,9 +193,7 @@ export class KnowledgeBaseService {
     resolution: any,
     requireApproval: boolean = true
   ): Promise<void> {
-    const { bedrockClient, bedrockModelId: modelId } = await getBedrockClient();
-
-    if (!bedrockClient || !modelId) {
+    if (!process.env.OPENROUTER_API_KEY) {
       await this.saveKnowledgeArticle(
         ticket,
         resolution,
@@ -206,11 +211,10 @@ export class KnowledgeBaseService {
       // Extract JSON from response (handles markdown code blocks and explanatory text)
       const cleanedResponse = extractJSON(result.response);
       if (!cleanedResponse || cleanedResponse.trim().length === 0) {
-        console.error("Empty response after JSON extraction");
-        return;
+        throw new Error("Empty response after JSON extraction");
       }
 
-      const aiArticle = JSON.parse(cleanedResponse) as KnowledgeArticle;
+      const aiArticle = generatedArticleSchema.parse(JSON.parse(cleanedResponse));
 
       // Save the enhanced article
       await this.saveKnowledgeArticle(

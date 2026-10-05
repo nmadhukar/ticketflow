@@ -10,7 +10,7 @@ import { autoResponseCommentBody } from "./autoResponseComment";
  * create, so every error is logged (ticket id, error type and status only) and swallowed.
  *
  * Settings are read now, not at boot, so an admin toggle applies to the next
- * ticket. With auto-response off, or Bedrock not configured, no Bedrock call is made.
+ * ticket. With auto-response off, or OpenRouter not configured, no model call is made.
  *
  * There is ONE decision: aiAutoResponseService.analyzeTicket returns
  * `shouldAutoRespond` (calculateConfidence, from the admin's enabled flag and
@@ -26,12 +26,7 @@ import { autoResponseCommentBody } from "./autoResponseComment";
 export async function runCreateTimeAutoResponse(task: Task): Promise<void> {
   try {
     const settings = await getAISettings();
-    if (!settings.autoResponseEnabled) return;
-
-    const bedrock = await storage.getBedrockSettings();
-    const configured =
-      !!bedrock?.bedrockAccessKeyId && !!bedrock?.bedrockSecretAccessKey && !!bedrock?.bedrockRegion;
-    if (!configured) return;
+    if (!settings.autoResponseEnabled || !settings.isActive || !process.env.OPENROUTER_API_KEY) return;
 
     const { aiAutoResponseService } = await import("./aiAutoResponse");
     const analysis = await aiAutoResponseService.analyzeTicket(task);

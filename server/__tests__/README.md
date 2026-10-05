@@ -1,59 +1,31 @@
 # Server tests
 
-Three Jest projects (see `jest.config.mjs`): `unit` (no database), `integration` (a real
-PostgreSQL, run in band) and `client`. Nothing here calls AWS: Bedrock is faked at the SDK boundary.
-
-## Layout
-
-```
-server/__tests__/
-├── unit/                 # Pure logic, no database (run with the DB variables unset)
-├── integration/          # Real Express app + real PostgreSQL
-│   ├── helpers/          # testApp, testDb, fixtures, mcpClient, secrets hooks
-│   ├── mcp/              # MCP tool tests (over the real /api/mcp endpoint)
-│   └── ai.routes.test.ts # AI routes, auto-response, analytics, log-redaction
-├── mocks/
-│   └── aws-bedrock.mock.ts   # Bedrock fake (see below)
-├── fixtures/ses/         # Recorded SNS and SES payloads for inbound email
-├── utils/                # snsTestSigner.ts
-└── setup.ts
-```
+Jest runs unit tests without a database, integration tests against a dedicated PostgreSQL test database, and client tests. Model calls in integration tests are faked at the OpenRouter HTTP boundary; the real model client, pricing, budget, and workflow code still run.
 
 ## Running
 
 ```bash
-npm run test:unit                       # needs no database
-export TEST_DATABASE_URL=postgres://test:test@localhost:55433/ticketflow_test
-npm run test:db:push                    # create the schema in the test database
-npm run test:integration                # or: npx jest --runInBand
-npm run check                           # tsc for app, tests and e2e
+npm run test:unit
+npm run test:db:up
+npm run test:db:push
+npm run test:integration
+npm run check
 ```
 
-Never point `TEST_DATABASE_URL` at a database you care about: the integration helpers truncate tables.
+`TEST_DATABASE_URL` must name a disposable database containing `test`. Integration helpers truncate its tables. Never aim them at a database you care about.
 
-## AWS Bedrock mock
+## OpenRouter HTTP fake
 
-`mocks/aws-bedrock.mock.ts` fakes AWS at the SDK boundary (`BedrockRuntimeClient.prototype.send`),
-so the real `bedrockIntegration`, cost monitoring and `calculateConfidence` run. It re-implements
-no production rule:
+`mocks/openRouter.mock.ts` answers model metadata and chat completions. It does not duplicate production parsing or cost rules:
 
 ```typescript
-import { bedrockMock, MOCK_MODEL_ID } from './mocks/aws-bedrock.mock';
+import { aiModelMock, MOCK_MODEL_ID } from "../mocks/openRouter.mock";
 
-beforeEach(() => bedrockMock.reset());               // after any jest.restoreAllMocks()
-bedrockMock.handler = (prompt) => '{"response":"..."}'; // or return an Error to make the call throw
-expect(bedrockMock.totalCalls()).toBe(0);            // prompts seen: bedrockMock.prompts / seen()
+beforeEach(() => aiModelMock.reset());
+aiModelMock.handler = (prompt) => '{"response":"..."}';
+expect(aiModelMock.totalCalls()).toBe(1);
 ```
 
-Store `bedrockModelId: MOCK_MODEL_ID` in the Bedrock settings so the Claude reply format is used.
-See `integration/ai.routes.test.ts`.
+Store `modelId: MOCK_MODEL_ID` in `ai_settings` and enable the provider for tests that call a model. Restore `OPENROUTER_API_KEY` and `jest` spies after the suite. Live provider smoke checks run separately from Jest and use a fixed harmless prompt, never ticket content.
 
-## Conventions
-
-- Each integration test creates its own users and tickets through `helpers/fixtures.ts`; none may
-  depend on the order of another test or on rows an earlier test left behind.
-- Assert status AND error code (`error` field) for failures.
-- Error text from a failing call must never appear in a log line; the log tests plant a marker
-  string and assert it is absent.
-- `bedrock-api.test.ts` is the one suite that can talk to real AWS, and only with
-  `RUN_INTEGRATION_TESTS=true` and real credentials. It is skipped otherwise.
+Integration tests should create their own users and tickets with `helpers/fixtures.ts`; no test may rely on rows left by another. Assert both status and error code for failures. Logs must not contain prompt, provider response, or credential text.
