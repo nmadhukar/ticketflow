@@ -78,7 +78,7 @@ class S3Service {
         describeError(error)
       );
       throw new Error(
-        "AWS credentials not found in bedrock_settings table. Please configure access key, secret, and region in AI Settings."
+        "AWS credentials not found in bedrock_settings table. Please configure access key, secret, and region in Storage Settings."
       );
     }
 
@@ -88,13 +88,13 @@ class S3Service {
 
     if (!accessKeyId || !secretAccessKey) {
       throw new Error(
-        "AWS credentials not configured in bedrock_settings table. Please configure access key and secret in AI Settings."
+        "AWS credentials not configured in bedrock_settings table. Please configure access key and secret in Storage Settings."
       );
     }
 
     // Region: AWS_S3_REGION env variable first, then bedrockRegion, then default
     // S3 bucket region can be different from Bedrock region
-    const region = "us-east-2";
+    const region = process.env.AWS_S3_REGION || bedrockSettings?.bedrockRegion || "us-east-1";
 
     // Update cache
     this.settingsCache = {
