@@ -80,12 +80,18 @@ BEGIN
         daily_limit_usd, monthly_limit_usd, max_tokens_per_request, max_requests_per_minute,
         is_active, updated_by, updated_at, created_at
       )
-      SELECT 1, auto_response_enabled, confidence_threshold, max_response_length, response_timeout,
-        auto_learn_enabled, min_resolution_score, article_approval_required, complexity_threshold,
-        escalation_enabled, escalation_team_id, temperature, max_tokens, daily_limit_usd,
-        monthly_limit_usd, max_tokens_per_request, max_requests_per_minute, is_active, updated_by,
-        updated_at, created_at
-      FROM bedrock_settings WHERE is_active = true ORDER BY id LIMIT 1
+      -- A legacy table without its own foreign keys can hold an escalation team or an updated_by user
+      -- that no longer exists; copying it would violate ai_settings' foreign keys and abort the deploy.
+      -- Such a dangling reference is copied as NULL (teams and users exist: ai_settings needs them).
+      SELECT 1, b.auto_response_enabled, b.confidence_threshold, b.max_response_length, b.response_timeout,
+        b.auto_learn_enabled, b.min_resolution_score, b.article_approval_required, b.complexity_threshold,
+        b.escalation_enabled,
+        CASE WHEN EXISTS (SELECT 1 FROM teams t WHERE t.id = b.escalation_team_id) THEN b.escalation_team_id END,
+        b.temperature, b.max_tokens, b.daily_limit_usd,
+        b.monthly_limit_usd, b.max_tokens_per_request, b.max_requests_per_minute, b.is_active,
+        CASE WHEN EXISTS (SELECT 1 FROM users u WHERE u.id = b.updated_by) THEN b.updated_by END,
+        b.updated_at, b.created_at
+      FROM bedrock_settings b WHERE b.is_active = true ORDER BY b.id LIMIT 1
       ON CONFLICT (id) DO NOTHING;
     END IF;
   END IF;
