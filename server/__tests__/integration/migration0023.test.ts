@@ -162,6 +162,76 @@ describe("migration 0023 never aborts on a database that predates the AI tables"
   });
 });
 
+/**
+ * N2 (regression coverage for the dangling-reference branch added in 8f627db). This is a coverage
+ * test written AFTER the fix, against code that already behaves this way: it passed on its first
+ * run and was not red first. It guards the branch against being removed or loosened.
+ *
+ * A legacy bedrock_settings table without its own foreign keys can name an escalation team or an
+ * updated_by user that no longer exists. ai_settings has those foreign keys, so copying the ids
+ * as they stand would abort 0023, and with it the deploy for every database. A dangling id is
+ * copied as NULL; an id that still resolves is kept.
+ */
+describe("migration 0023 copies a legacy row whose references no longer exist", () => {
+  const MISSING_TEAM_ID = -4242;
+  const MISSING_USER_ID = "migration-0023-ghost-user";
+  const REAL_USER_ID = "migration-0023-real-user";
+
+  async function copiedReferences(refs: { team: "missing" | "valid"; user: "missing" | "valid" }) {
+    let copied: { escalation_team_id: number | null; updated_by: string | null; max_tokens: number; copies: number } | undefined;
+    let teamId = MISSING_TEAM_ID;
+    await inRolledBackTransaction(async (q) => {
+      await q("DROP TABLE ai_settings");
+      // The legacy table has no foreign keys: that is how a dangling reference got into it.
+      await q(`
+        DO $$
+        DECLARE fk text;
+        BEGIN
+          FOR fk IN SELECT conname FROM pg_constraint WHERE conrelid = 'bedrock_settings'::regclass AND contype = 'f' LOOP
+            EXECUTE format('ALTER TABLE bedrock_settings DROP CONSTRAINT %I', fk);
+          END LOOP;
+        END
+        $$
+      `);
+      await q("UPDATE bedrock_settings SET is_active = false");
+      await q(`INSERT INTO users (id, email, role, is_active, is_approved) VALUES ('${REAL_USER_ID}', 'migration-0023-real@example.test', 'agent', true, true)`);
+      await q("INSERT INTO departments (name) VALUES ('migration-0023-department')");
+      teamId = (await q("INSERT INTO teams (name, department_id) SELECT 'migration-0023-team', id FROM departments WHERE name = 'migration-0023-department' RETURNING id")).rows[0].id;
+      const team = refs.team === "valid" ? String(teamId) : String(MISSING_TEAM_ID);
+      const user = refs.user === "valid" ? REAL_USER_ID : MISSING_USER_ID;
+      expect((await q(`SELECT count(*)::int AS n FROM teams WHERE id = ${MISSING_TEAM_ID}`)).rows[0].n).toBe(0);
+      expect((await q(`SELECT count(*)::int AS n FROM users WHERE id = '${MISSING_USER_ID}'`)).rows[0].n).toBe(0);
+      await q(`INSERT INTO bedrock_settings (is_active, max_tokens, escalation_team_id, updated_by) VALUES (true, 1111, ${team}, '${user}')`);
+
+      // Applied twice: exit OK both times (no foreign-key violation), and the second changes nothing.
+      await expect(q(migrationSql())).resolves.toBeDefined();
+      await expect(q(migrationSql())).resolves.toBeDefined();
+      copied = (await q("SELECT escalation_team_id, updated_by, max_tokens, (SELECT count(*)::int FROM ai_settings) AS copies FROM ai_settings WHERE id = 1")).rows[0];
+    });
+    return { copied: copied!, teamId };
+  }
+
+  it("copies a team and a user that are both missing as NULL, and still copies the rest of the row", async () => {
+    const { copied } = await copiedReferences({ team: "missing", user: "missing" });
+    expect(copied).toEqual({ escalation_team_id: null, updated_by: null, max_tokens: 1111, copies: 1 });
+  });
+
+  it("keeps a team and a user that still exist", async () => {
+    const { copied, teamId } = await copiedReferences({ team: "valid", user: "valid" });
+    expect(copied).toEqual({ escalation_team_id: teamId, updated_by: REAL_USER_ID, max_tokens: 1111, copies: 1 });
+  });
+
+  it("nulls only the dangling one: a valid team with a missing user", async () => {
+    const { copied, teamId } = await copiedReferences({ team: "valid", user: "missing" });
+    expect(copied).toEqual({ escalation_team_id: teamId, updated_by: null, max_tokens: 1111, copies: 1 });
+  });
+
+  it("nulls only the dangling one: a missing team with a valid user", async () => {
+    const { copied } = await copiedReferences({ team: "missing", user: "valid" });
+    expect(copied).toEqual({ escalation_team_id: null, updated_by: REAL_USER_ID, max_tokens: 1111, copies: 1 });
+  });
+});
+
 describe("migration 0023 (provider-neutral AI settings)", () => {
   it("copies active business settings once while preserving legacy credentials and usage", async () => {
     expect(existsSync(migrationPath)).toBe(true);

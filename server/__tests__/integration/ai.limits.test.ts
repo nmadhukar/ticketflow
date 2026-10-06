@@ -8,8 +8,12 @@ import { storage } from "../../storage";
 import { db } from "../../storage/db";
 import { ensureAiSystemUser } from "../../utils/aiSystemUser";
 import { getAISettings } from "../../admin/aiSettings";
-import { saveCostLimits } from "../../services/ai/costMonitoring";
+import { estimatePromptTokensForBudget, saveCostLimits } from "../../services/ai/costMonitoring";
 import { analyzeTicket, generateAutoResponseForTicket } from "../../services/ai/aiTicketAnalysis";
+import { generateResponse } from "../../services/ai/bedrockIntegration";
+import { PROMPT_TEMPLATES } from "../../services/ai/prompts";
+import { DESCRIPTION_TRUNCATION_MARKER } from "../../services/ai/promptBudget";
+import type { Task } from "@shared/schema";
 
 const priorOpenRouterApiKey = process.env.OPENROUTER_API_KEY;
 
@@ -172,6 +176,77 @@ describe("AI cost limits and long tickets", () => {
         expect(prompt).not.toContain(END);
         expect(prompt).toContain("[description truncated]");
       }
+    });
+
+    // ------------------------------------------------------------------ N1
+    describe("N1: when the rest of the prompt already exceeds the budget, the model is not called", () => {
+      const ticket = (description: string) =>
+        ({ title: "Printerjam broken", description, category: "support", priority: "medium" }) as unknown as Task;
+      const bigArticles = (bytes: number) => [{ id: 1, title: "Printerjam guide", summary: "kb ".repeat(Math.ceil(bytes / 3)) }];
+      const knowledgeBase = (articles: { title: string; summary: string }[]) => articles.map((a) => `- ${a.title}: ${a.summary}`).join("\n");
+      const GENERATE_RESPONSE_OUTPUT = 800; // OPERATION_OUTPUT_CAP.generateResponse, under the default maxTokens of 2000
+      const sentWithoutText = () => aiModelMock.prompts.filter((p) => p.includes("helpful IT support assistant"));
+
+      it("the scenario is the one N1 describes: the prompt minus the description is over the budget but under the cap", () => {
+        const withoutDescription = estimatePromptTokensForBudget(
+          PROMPT_TEMPLATES.generateResponse(ticket(DESCRIPTION_TRUNCATION_MARKER), knowledgeBase(bigArticles(3500)))
+        );
+        expect(withoutDescription).toBeGreaterThan(CAP_TOKENS - GENERATE_RESPONSE_OUTPUT);
+        expect(withoutDescription).toBeLessThan(CAP_TOKENS);
+      });
+
+      it("generateResponse is refused like an over-cap request, with no model call and a log line of lengths only", async () => {
+        await activeWithDefaultCap();
+        await expect(generateResponse(ticket(longDescription), bigArticles(3500))).rejects.toMatchObject({
+          isBlocked: true,
+          message: "Request exceeds max tokens per request",
+        });
+        expect(aiModelMock.totalCalls()).toBe(0);
+
+        const lines = warnSpy.mock.calls.map((call: unknown[]) => call.map(String).join(" ")).filter((line) => /skipped|truncated/i.test(line));
+        expect(lines.length).toBeGreaterThanOrEqual(1);
+        for (const line of lines) {
+          expect(line).toMatch(/originalChars=\d+/);
+          expect(line).not.toContain(START);
+          expect(line).not.toContain("printerjam");
+        }
+      });
+
+      it("a short description is refused the same way: the model never sees a prompt without the ticket text", async () => {
+        await activeWithDefaultCap();
+        await expect(generateResponse(ticket(`${START} printer is jammed ${END}`), bigArticles(3500))).rejects.toMatchObject({ isBlocked: true });
+        expect(aiModelMock.totalCalls()).toBe(0);
+      });
+
+      it("the same long description with a normal knowledge base still gets the truncated call", async () => {
+        await activeWithDefaultCap();
+        const result = await generateResponse(ticket(longDescription), bigArticles(200));
+        expect(result.response).toBe("Try restarting the service.");
+        const prompts = sentWithoutText();
+        expect(prompts).toHaveLength(1);
+        expect(prompts[0]).toContain(START);
+        expect(prompts[0]).toContain("[description truncated]");
+        expect(prompts[0]).not.toContain(END);
+        expect(promptWithinCap(prompts[0])).toBe(true);
+      });
+
+      it("ticket creation still succeeds and no auto-response is written without the ticket text", async () => {
+        await activeWithDefaultCap();
+        await db.insert(knowledgeArticles).values({
+          title: "Printerjam fix",
+          content: "How to clear a printerjam",
+          summary: "printerjam ".repeat(320),
+          isPublished: true,
+          status: "published",
+        });
+        const customerA = await loginAs(ctx.app, await createUser({ role: "customer" }));
+        const res = await createTicketAs(customerA, { title: "Printerjam broken", description: longDescription });
+        expect(res.status).toBe(201);
+        // Whatever reached the model carried the start of the ticket text, never just the marker.
+        for (const prompt of aiModelMock.prompts.filter((p) => p.includes("helpful IT support assistant"))) {
+          expect(prompt).toContain(START);
+        }
+      });
     });
 
     it("the cap stays a ceiling: when even the prompt without a description cannot fit, the call is still blocked", async () => {
