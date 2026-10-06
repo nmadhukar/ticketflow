@@ -2165,6 +2165,8 @@ export class DatabaseStorage implements IStorage {
         or(
           like(sql`LOWER(${helpDocuments.title})`, searchTerm),
           like(sql`LOWER(${helpDocuments.content})`, searchTerm),
+          // R90: the uploaded file's text.
+          like(sql`LOWER(${helpDocuments.extractedText})`, searchTerm),
           like(sql`LOWER(${helpDocuments.category})`, searchTerm)
         )
       )

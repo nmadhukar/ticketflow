@@ -481,12 +481,75 @@ All endpoints return consistent error format:
 `POST /api/mcp` is a stateless Model Context Protocol server for agents holding an API key with
 the `mcp:tickets` permission. The full contract (errors, argument rules, every tool's arguments
 and result) is section 15 of `API_ENDPOINTS_REFERENCE.md`. Code: `server/mcp/` (`tools.ts` for
-tickets, `appTools.ts` for the rest, `args.ts` for id and paging parsing).
+tickets, `appTools.ts` for the rest of the app, `documentTools.ts` for documents, `args.ts` for id
+and paging parsing).
 
-Tools: `create_ticket`, `get_ticket`, `list_tickets`, `update_ticket` (also assigns), `close_ticket`,
+Tools (31): `create_ticket`, `get_ticket`, `list_tickets`, `update_ticket` (also assigns), `close_ticket`,
 `reopen_ticket`, `delete_ticket`, `add_comment`, `get_ticket_history`, `whoami`, `list_users`,
 `list_teams`, `get_team`, `list_departments`, `search_knowledge`, `get_knowledge_article`,
-`get_stats`, `list_activity`, `list_notifications`, `mark_notifications_read`.
+`get_stats`, `list_activity`, `list_notifications`, `mark_notifications_read`, and the document
+tools (task MCP4): `search_documents`, `get_document`, `list_guideline_categories`,
+`create_help_document`, `update_help_document`, `create_policy`, `update_policy`,
+`create_guideline`, `update_guideline`, `create_knowledge_article`, `update_knowledge_article`.
+
+Documents on MCP (help documents, company policies, guidelines = user guides, knowledge articles):
+the rules live in `server/services/documents/` (`documentLibrary.ts` reads and visibility,
+`documentWrites.ts` writes, `extractText.ts` file text, `backfillText.ts` the startup backfill),
+and the REST routes use the same visibility predicates.
+
+- **Uploads that become text.** `.docx` (its `word/document.xml`, read by our own code), `.pdf`
+  (unpdf), `.txt` and `.md` (UTF-8). The text goes in `extracted_text` (migration 0030, capped at
+  1,000,000 characters) on REST and MCP create and update. `extracted_text` NULL means "never
+  tried"; `''` means "tried, nothing extractable" (an unsupported type, an empty document, or a
+  file whose parse failed or hit a limit; the error type only is logged), and is written BEFORE a
+  parse starts. When no parse began at all (the extractor was busy, or the call ran out of time
+  while queued), the row goes back to NULL so it is retried (review N9). MCP takes a file as `filename` plus `fileBase64`, at most 36 MB at the defaults: the
+  lower of `MAX_FILE_UPLOAD_SIZE_MB` (the REST limit) and what base64 fits in `MAX_REQUEST_SIZE_MB`
+  (4/3 inflation, 2 MB of headroom); the tool descriptions state the number.
+- **Extraction runs in a separate, memory-limited process (reviews I1, N1).** `.docx` and `.pdf`
+  are parsed by `server/services/documents/extractChild.mjs` (built to
+  `dist/documentExtractChild.mjs` by `npm run build`, found next to `dist/index.js`), forked once
+  per file, at most two at once (16 more may wait; the 20 s limit counts the wait). What bounds it:
+  - RSS: the server polls the child's `/proc/<pid>/status` every 50 ms (Linux) and SIGKILLs it above
+    `DOCUMENT_EXTRACT_MAX_MB` (default 384, 96-4096: below 96 even a small PDF fails, as loading
+    PDF.js alone passes 64); a watchdog thread inside the child applies the
+    same limit where `/proc` is absent. A V8 heap limit alone does not do this: inflated data lives
+    in ArrayBuffers, outside the heap.
+  - the kernel: the child sets its own `oom_score_adj` to 1000 (Linux), so if the container still
+    runs out of memory the OOM killer picks the child, not the server. When that happens Docker
+    (and Coolify) report the container `OOMKilled=true` although the server never stopped: check
+    `/health` and the log line `Document text extraction failed [extractor killed SIGKILL]` before
+    treating it as a crash or rolling back;
+  - heap `--max-old-space-size` 256 MB; 20 s wall clock, then SIGKILL from the server; the child's
+    watchdog thread also kills it 1 s after that, so it stops even if the server died first (N8);
+  - inflation: a `.docx` is never handed to a zip library. `word/document.xml` is located through
+    the zip directory and inflated with zlib's `maxOutputLength` against a 50 MB budget, so real
+    inflation is bounded whatever the headers declare; its text is read with a linear scan (runs,
+    tabs, breaks, a blank line per paragraph; no pattern can cross a `<`, so an unterminated tag
+    cannot make it quadratic, review N7). A `.docx` whose directory already declares more than
+    50 MB (or more than 10 MB at a ratio above 100) is refused without a child. A `.pdf` over 500
+    pages is refused; for PDF the RSS limit is the bound.
+  - PDF.js runs with `verbosity: 0` and `isEvalSupported: false`; the child's console, stdout and
+    stderr are discarded, so no text from a file reaches the log; the child gets no server
+    environment variables.
+  A child crash, OOM kill, watchdog kill or timeout gives null and logs one line by type; the
+  server process is unaffected. Two concurrent extractions can use about 2 x 384 MB on top of the
+  server: size the container for it, or lower `DOCUMENT_EXTRACT_MAX_MB`.
+- **Backfill.** Rows with NULL `extracted_text` and a file get their text once, one row at a time,
+  from `startDocumentTextBackfill`, started by `server/index.ts` after "serving on port" and not
+  awaited. Each row is first claimed (`''` where it is still NULL, in its own statement) and only
+  then parsed, so a parse that dies (or is killed with anything else) leaves it tried: the next
+  boot skips it, there is no crash loop. Uploads do the same: the row is stored with `''` and the
+  text replaces it when it arrives. A row whose parse never began is handed back to NULL and
+  counted `deferred` (one extra log line); the next start retries it. If the extractor file is
+  missing the backfill logs one line and claims nothing. Known residual (review N12): the text is
+  written by row id, so two overlapping file replacements of one document can finish out of order
+  and leave the newer file with the older file's text (admin-only, rare).
+- **Help documents have no publish flag**: every signed-in user reads every one, as `/api/help`.
+  A help document or policy created on MCP without a file stores its text in `content`, an empty
+  `file_data` and the file name `<title>.txt` (a text-only policy downloads as its content).
+- **Policy downloads** send `Content-Disposition` with an ASCII `filename` and an RFC 5987
+  `filename*` (`server/http/contentDisposition.ts`), so any file name downloads.
 
 Rulings:
 
@@ -500,6 +563,34 @@ Rulings:
   providers, API keys, Teams settings, invitations.
 - **R88, notifications are pulled**: `list_notifications` (`unreadOnly`, `since`, `limit`) and
   `mark_notifications_read` (own notifications only).
+- **R89, content writes are allowed on MCP** (owner decision 2026-10-05): create, update and
+  publish or unpublish help documents, policies (`isActive`), guidelines (`isPublished`) and
+  knowledge articles (`isPublished`, which moves `status` with it as the publish route does). Each
+  write mirrors its REST admin route: admin only (stored role `admin`, else FORBIDDEN "Admin access
+  required"), the same validation and storage call. Deleting stays UI-only. R87 holds for
+  everything else.
+- **R90, uploads become searchable text** (`extracted_text`, migration 0030, see above).
+- **R91, one search, REST visibility.** `search_documents` (`query` 1-200, optional `type` one of
+  `help`, `policy`, `guideline`, `knowledge`, `limit` 1-50, default 10) splits the query into
+  keywords (lower-cased letters and digits; English stopwords and one-character words dropped, but
+  "it", "us", "am" and "no" are kept; at most 12; when none is left, as for "AT&T", the trimmed
+  query is one phrase term if it has 2+ characters; a query with neither, such as "" or "x", is VALIDATION) and returns every document containing ANY keyword
+  (case-insensitive ILIKE, escaped and bound) in the title, description or summary, content or
+  `extracted_text`: `{results: [{type, id, title, category, snippet, published, matchedTerms}],
+  returned, terms}`, the snippet about 300 characters around the earliest keyword. Ranked by the
+  number of keywords matched, then keywords in the title, then newest (NULL dates last). Each
+  source shows exactly what its REST read route shows the caller: help, everyone;
+  inactive policies, admins only; draft guidelines, staff only; unpublished knowledge, admins
+  only. `get_document` (`type`, `id`) returns the metadata and the readable text (`text`, capped at
+  200,000 characters, `truncated`), never `file_data`; a hidden row is NOT_FOUND, as REST's 404.
+- **R92, server instructions.** `initialize` carries `instructions`: search the documents (then
+  `get_document`) before answering a how-to, setup or policy question, with the question's key
+  words (e.g. "DoseSpot clinic key"), trying other words or synonyms before concluding nothing
+  exists; quote the title used, and say plainly when nothing relevant is found (`MCP_INSTRUCTIONS`
+  in `server/mcp/server.ts`).
+- **R94, text-only policies on MCP.** `create_policy` accepts a policy from text alone, although
+  `POST /api/admin/company-policies` requires a file (an agent cannot easily attach one);
+  `update_policy` may edit `content`. Optional MCP arguments also accept `null`, meaning absent.
 
 Example client configuration (Streamable HTTP; the key comes from the environment):
 

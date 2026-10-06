@@ -51,3 +51,5 @@ test-results/
 playwright-report/
 # bootGuard wiring test scratch bundles (server/__tests__/unit/sanitizeHtml.test.ts)
 .tmp-bootguard-*
+# document extractor build test scratch bundles (server/__tests__/unit/extractChild.build.test.ts)
+.tmp-extract-child-*
