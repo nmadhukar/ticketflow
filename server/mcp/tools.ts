@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { User } from "@shared/schema";
+import { TICKET_CATEGORIES } from "@shared/constants";
 import {
   addComment,
   closeTicket,
@@ -69,7 +70,16 @@ const ticketFields = {
   actualHours: z.number().nullable().describe("Staff only: actual hours").optional(),
 };
 
-const create = z.object(ticketFields).passthrough();
+// title and category are required to create (createTicketSchema), so tools/list must say so: a model
+// that sees them as optional sends a title alone. Plain strings, so a bad value still reaches the
+// handler and comes back as a coded VALIDATION error.
+const create = z
+  .object({
+    ...ticketFields,
+    title: z.string().describe("Short summary (1-255 characters)"),
+    category: z.string().describe(`Ticket category, one of: ${TICKET_CATEGORIES.join(", ")}`),
+  })
+  .passthrough();
 const update = z.object({ id, ...ticketFields, status: z.string().describe("open, in_progress, on_hold, resolved or closed").optional() }).passthrough();
 const byId = z.object({ id });
 const listArgs = z

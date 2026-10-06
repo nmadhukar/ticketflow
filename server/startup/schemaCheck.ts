@@ -48,6 +48,19 @@ export const REQUIRED_TABLES: RequiredTable[] = [
   { table: "api_keys", columns: ["key_hash", "is_active"] },
   // 0021 AI analytics: the time a draft was applied.
   { table: "ticket_auto_responses", columns: ["applied_at"] },
+  // 0030 document text (R90): written on upload, read by search and the MCP document tools.
+  {
+    table: "help_documents",
+    columns: [
+      "extracted_text",
+    ],
+  },
+  {
+    table: "company_policies",
+    columns: [
+      "extracted_text",
+    ],
+  },
 ];
 
 /** 0014: unique partial index over hashed keys. */

@@ -17,6 +17,9 @@ jest.mock("../../services/tickets/ticketService", () => ({
 // The app tools (MCP2) read through storage and workspaceReads, which reach the database too.
 jest.mock("../../storage", () => ({ storage: {} }));
 jest.mock("../../services/workspaceReads", () => ({}));
+// The document tools (MCP4) reach the database through these.
+jest.mock("../../services/documents/documentLibrary", () => ({}));
+jest.mock("../../services/documents/documentWrites", () => ({}));
 
 import {
   createGeneralRateLimit,
@@ -120,7 +123,7 @@ describe("M4: /api/mcp has its own limiter, keyed by API key", () => {
     expect(limited.body).toEqual({ error: "too_many_requests", message: expect.stringMatching(/API key/) });
     const other = await listTools(app, 2);
     expect(other.status).toBe(200);
-    expect(other.body.result.tools.length).toBe(20); // 8 ticket tools + 12 app tools (MCP2)
+    expect(other.body.result.tools.length).toBe(31); // 8 ticket tools + 12 app tools (MCP2) + 11 document tools (MCP4)
   });
 
   it("the default MCP limit is the generous 600 per 15 minutes", async () => {

@@ -17,8 +17,13 @@ jest.mock("../../../services/tickets/ticketService", () => ({
 // The app tools (MCP2) read through storage and workspaceReads, which reach the database too.
 jest.mock("../../../storage", () => ({ storage: {} }));
 jest.mock("../../../services/workspaceReads", () => ({}));
+// The document tools (MCP4) read and write through these, which reach the database too.
+jest.mock("../../../services/documents/documentLibrary", () => ({}));
+jest.mock("../../../services/documents/documentWrites", () => ({}));
 
-import { createMcpServer } from "../../../mcp/server";
+import { TICKET_CATEGORIES } from "@shared/constants";
+import { MCP_INSTRUCTIONS, createMcpServer } from "../../../mcp/server";
+import { mcpUploadLimitBytes } from "../../../services/documents/types";
 import { TicketError } from "../../../services/tickets/ticketError";
 import * as service from "../../../services/tickets/ticketService";
 
@@ -33,7 +38,7 @@ async function connect() {
 }
 
 describe("MCP tools/list", () => {
-  it("lists exactly the eight ticket tools and the twelve app tools (MCP2), each with a description and an object input schema", async () => {
+  it("lists exactly the eight ticket tools, the twelve app tools (MCP2) and the eleven document tools (MCP4), each with a description and an object input schema", async () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
@@ -58,13 +63,123 @@ describe("MCP tools/list", () => {
         "mark_notifications_read",
         "list_activity",
         "get_ticket_history",
+        "search_documents",
+        "get_document",
+        "list_guideline_categories",
+        "create_help_document",
+        "update_help_document",
+        "create_policy",
+        "update_policy",
+        "create_guideline",
+        "update_guideline",
+        "create_knowledge_article",
+        "update_knowledge_article",
       ].sort()
     );
+    expect(tools).toHaveLength(31);
     for (const t of tools) {
       expect(typeof t.description).toBe("string");
       expect((t.description ?? "").length).toBeGreaterThan(10);
       expect(t.inputSchema.type).toBe("object");
     }
+  });
+
+  it("create_ticket advertises title and category as required, and names every allowed category", async () => {
+    // Found by a DeepSeek Harness agent on 2026-10-04: with both listed as optional the model sent a
+    // title alone and every create failed with VALIDATION "category: Required".
+    const { client } = await connect();
+    const { tools } = await client.listTools();
+    const schema = tools.find((t) => t.name === "create_ticket")!.inputSchema as {
+      required?: string[];
+      properties: Record<string, { type?: unknown; description?: string }>;
+    };
+    expect(schema.required ?? []).toEqual(expect.arrayContaining(["title", "category"]));
+    expect(schema.properties.title.type).toBe("string");
+    expect(schema.properties.category.type).toBe("string");
+    for (const c of TICKET_CATEGORIES) expect(schema.properties.category.description).toContain(c);
+  });
+
+  it("MCP4: every document tool advertises its required fields as required and typed, with the allowed values in the descriptions", async () => {
+    const { client } = await connect();
+    const { tools } = await client.listTools();
+    type Prop = { type?: unknown; anyOf?: Array<{ type?: string }>; description?: string };
+    const schemaOf = (name: string) =>
+      tools.find((t) => t.name === name)!.inputSchema as { required?: string[]; properties: Record<string, Prop> };
+    const typesOf = (p: Prop) => (p.type !== undefined ? [p.type].flat() : (p.anyOf ?? []).map((a) => a.type));
+    const REQUIRED: Record<string, string[]> = {
+      search_documents: ["query"],
+      get_document: ["type", "id"],
+      create_help_document: ["title", "category", "content"],
+      update_help_document: ["id"],
+      create_policy: ["title"],
+      update_policy: ["id"],
+      create_guideline: ["title", "category", "content"],
+      update_guideline: ["id"],
+      create_knowledge_article: ["title", "content"],
+      update_knowledge_article: ["id"],
+    };
+    for (const [name, required] of Object.entries(REQUIRED)) {
+      const schema = schemaOf(name);
+      // Exactly these are required: an optional field advertised as required would be as wrong as the reverse.
+      expect([name, [...(schema.required ?? [])].sort()]).toEqual([name, [...required].sort()]);
+      for (const field of required) {
+        const types = typesOf(schema.properties[field]);
+        expect([name, field, types.length > 0]).toEqual([name, field, true]);
+        if (field === "id") expect([name, types]).toEqual([name, expect.arrayContaining(["number", "string"])]);
+        else expect([name, field, types]).toEqual([name, field, ["string"]]);
+      }
+    }
+    for (const name of ["search_documents", "get_document"]) {
+      expect(schemaOf(name).properties.type.description).toEqual(expect.stringContaining("help, policy, guideline, knowledge"));
+    }
+    for (const name of ["create_guideline", "update_guideline"]) {
+      expect(schemaOf(name).properties.type.description).toEqual(expect.stringContaining("html, scribehow, video"));
+    }
+    // Optional fields also accept null, which counts as absent (review M4).
+    for (const name of ["create_policy", "update_policy"]) expect(typesOf(schemaOf(name).properties.isActive)).toEqual(["boolean", "null"]);
+    for (const name of ["create_guideline", "update_guideline", "create_knowledge_article", "update_knowledge_article"]) {
+      expect(typesOf(schemaOf(name).properties.isPublished)).toEqual(["boolean", "null"]);
+    }
+    for (const name of ["create_help_document", "update_help_document", "create_policy", "update_policy"]) {
+      expect(schemaOf(name).properties.filename.description).toMatch(/\.docx, \.pdf, \.txt or \.md/);
+      expect(typesOf(schemaOf(name).properties.fileBase64)).toEqual(["string", "null"]);
+      // Review M6: the real limit, after base64 inflation under the 50 MB request limit.
+      expect(schemaOf(name).properties.fileBase64.description).toContain("36 MB");
+    }
+    for (const [name, field] of [
+      ["search_documents", "type"],
+      ["create_help_document", "tags"],
+      ["create_knowledge_article", "summary"],
+      ["update_guideline", "videoUrl"],
+    ]) {
+      expect([name, field, typesOf(schemaOf(name).properties[field])]).toEqual([name, field, expect.arrayContaining(["null"])]);
+    }
+    // Review I2: the query is key words, matched separately.
+    expect(schemaOf("search_documents").properties.query.description).toMatch(/key ?words/i);
+    expect(schemaOf("search_documents").properties.query.description).toContain("DoseSpot clinic key");
+    // R94: a text-only policy is allowed on MCP, and the description says so.
+    expect(tools.find((t) => t.name === "create_policy")!.description).toMatch(/R94/);
+  });
+
+  it("R92: initialize carries the server instructions: search the documents first, quote the title, say when nothing is found", async () => {
+    const { client } = await connect();
+    const instructions = client.getInstructions();
+    expect(instructions).toBe(MCP_INSTRUCTIONS);
+    expect(instructions).toMatch(/help documents, company policies, guidelines and knowledge articles/);
+    expect(instructions).toMatch(/search_documents.*get_document/);
+    expect(instructions).toMatch(/title/);
+    expect(instructions).toMatch(/nothing relevant is found/i);
+    // Review I2: search with key words, and try other words before concluding nothing exists.
+    expect(instructions).toContain("DoseSpot clinic key");
+    expect(instructions).toMatch(/other words or synonyms/);
+  });
+
+  it("review M6: the MCP file limit is the REST upload limit, or what base64 fits in the request limit, whichever is lower", () => {
+    const mb = 1024 * 1024;
+    expect(mcpUploadLimitBytes({})).toBe(36 * mb);
+    expect(mcpUploadLimitBytes({ MAX_FILE_UPLOAD_SIZE_MB: "10" })).toBe(10 * mb);
+    expect(mcpUploadLimitBytes({ MAX_REQUEST_SIZE_MB: "100" })).toBe(50 * mb);
+    expect(mcpUploadLimitBytes({ MAX_REQUEST_SIZE_MB: "abc", MAX_FILE_UPLOAD_SIZE_MB: "x" })).toBe(36 * mb);
   });
 
   it("I2: every by-id tool advertises `id` as required, with a type, so a client or model cannot leave it out", async () => {
