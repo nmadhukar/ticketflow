@@ -82,7 +82,8 @@ const NON_WORD = new RegExp("[^\\p{L}\\p{N}]+", "u");
  * punctuation, LIKE wildcards included, separates words), without stopwords and one-character
  * words, each once, at most SEARCH_MAX_TERMS. "How do I set the DoseSpot clinic key?" gives set,
  * dosespot, clinic, key. When that leaves nothing ("AT&T", "C++", "how do I"), the whole trimmed,
- * lower-cased query is the one term, matched as a phrase; only an empty query has no term.
+ * lower-cased query is the one term, matched as a phrase, if it has at least 2 characters (review
+ * N11: "x" alone would match nearly every document); otherwise there is no term.
  */
 export function searchTerms(query: string): string[] {
   const terms: string[] = [];
@@ -93,7 +94,7 @@ export function searchTerms(query: string): string[] {
   }
   if (terms.length > 0) return terms;
   const phrase = query.trim().toLowerCase();
-  return phrase ? [phrase] : [];
+  return phrase.length >= 2 ? [phrase] : [];
 }
 
 export interface SearchHit {

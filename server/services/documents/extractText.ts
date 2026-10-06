@@ -21,18 +21,23 @@ import { describeError } from "../../http/errors";
  *   child enforces the same limit from inside (the fallback where /proc is absent);
  * - the kernel: on Linux the child sets its oom_score_adj to 1000, so an OOM kill takes it, not the server;
  * - heap: --max-old-space-size (EXTRACT_CHILD_HEAP_MB, at most 256);
- * - time: EXTRACT_TIMEOUT_MS (20 s) from the call, queue wait included, then SIGKILL;
+ * - time: EXTRACT_TIMEOUT_MS (20 s) from the call, queue wait included, then SIGKILL; the child
+ *   also kills itself 1 s after that, so it stops even if the server died first (review N8);
  * - inflation: a .docx's word/document.xml is inflated with zlib's maxOutputLength against
  *   DOCX_INFLATE_BUDGET_BYTES, whatever its zip headers declare (and a .docx whose directory
  *   already declares too much is refused here without starting a child); a .pdf over
  *   PDF_MAX_PAGES pages is refused;
  * - concurrency: at most MAX_CONCURRENT_EXTRACTIONS children, MAX_QUEUED_EXTRACTIONS waiting.
- * A crash, an OOM kill, a watchdog kill or a timeout all give null; the server carries on.
+ * A crash, an OOM kill, a watchdog kill or a timeout all give null; the server carries on. When
+ * no parse began at all (busy, queued past the time limit), extractDocumentOutcome says `retry`.
  */
 
 export const EXTRACTED_TEXT_MAX_CHARS = 1_000_000;
 export const EXTRACT_TIMEOUT_MS = 20_000;
 export const EXTRACT_DEFAULT_MAX_RSS_MB = 384;
+export const EXTRACT_MIN_RSS_MB = 96;
+/** The child's own deadline runs this long after the parent's (review N8). */
+const CHILD_DEADLINE_MARGIN_MS = 1_000;
 export const EXTRACT_CHILD_HEAP_MB = 256;
 export const DOCX_INFLATE_BUDGET_BYTES = 50 * 1024 * 1024;
 export const DOCX_MAX_UNCOMPRESSED_BYTES = DOCX_INFLATE_BUDGET_BYTES;
@@ -129,11 +134,14 @@ function docxRefusal(buf: Buffer): string | null {
 
 // ---------------------------------------------------------------- the extractor process
 
-/** The extractor's RSS limit in MB: DOCUMENT_EXTRACT_MAX_MB (64-4096) or the default. */
+/**
+ * The extractor's RSS limit in MB: DOCUMENT_EXTRACT_MAX_MB (96-4096) or the default. Review N10:
+ * at 64 even a small PDF fails (loading PDF.js alone passes it), so 96 is the floor.
+ */
 export function extractMemoryLimitMb(env: Record<string, string | undefined> = process.env): number {
   const raw = env.DOCUMENT_EXTRACT_MAX_MB?.trim() ?? "";
   const n = Number(raw);
-  return /^[0-9]+$/.test(raw) && n >= 64 && n <= 4096 ? n : EXTRACT_DEFAULT_MAX_RSS_MB;
+  return /^[0-9]+$/.test(raw) && n >= EXTRACT_MIN_RSS_MB && n <= 4096 ? n : EXTRACT_DEFAULT_MAX_RSS_MB;
 }
 
 /**
@@ -287,19 +295,36 @@ function runChild(file: string, type: "docx" | "pdf", buffer: Buffer, opts: Extr
       maxPdfPages: opts.maxPdfPages ?? PDF_MAX_PAGES,
       docxBudget: DOCX_INFLATE_BUDGET_BYTES,
       rssLimitMb,
+      // Review N8: the child's own deadline, a little after ours, in case this process dies first.
+      deadlineMs: Math.max(1, timeLeftMs) + CHILD_DEADLINE_MARGIN_MS,
     });
   });
 }
 
-async function parseInChild(type: "docx" | "pdf", buffer: Buffer, opts: ExtractOptions): Promise<string | null> {
+/**
+ * The result of one extraction. `retry` is true when no parse began (review N9): the extractor
+ * was busy (the queue was full), the call ran out of time while still queued, or the extractor
+ * file is missing. Such a document was never tried, so the caller stores NULL ("never tried")
+ * and a later attempt or the next start retries it. A parse that began and then failed, was
+ * killed or timed out is `retry: false`: its file is the likely cause, so it is not retried.
+ */
+export interface ExtractOutcome {
+  text: string | null;
+  retry: boolean;
+}
+
+const notStarted = (type: string): ExtractOutcome => ({ text: failed(type), retry: true });
+const settledWith = (text: string | null): ExtractOutcome => ({ text, retry: false });
+
+async function parseInChild(type: "docx" | "pdf", buffer: Buffer, opts: ExtractOptions): Promise<ExtractOutcome> {
   const file = extractChildFile();
-  if (!file) return failed("extractor missing");
+  if (!file) return notStarted("extractor missing");
   const deadline = Date.now() + (opts.timeoutMs ?? EXTRACT_TIMEOUT_MS);
   const slot = await slots.acquire(deadline - Date.now());
-  if (slot === "full") return failed("busy");
-  if (slot === "timeout") return failed("timeout");
+  if (slot === "full") return notStarted("busy");
+  if (slot === "timeout") return notStarted("timeout");
   try {
-    return await runChild(file, type, buffer, opts, deadline - Date.now());
+    return settledWith(await runChild(file, type, buffer, opts, deadline - Date.now()));
   } finally {
     slots.release();
   }
@@ -312,24 +337,29 @@ export interface DocumentFile {
   data: string | Buffer | null | undefined;
 }
 
-/** The document's text (at most EXTRACTED_TEXT_MAX_CHARS), or null when unsupported, empty or unreadable. */
-export async function extractDocumentText(file: DocumentFile, opts: ExtractOptions = {}): Promise<string | null> {
+/** The document's text (or null) and whether the extraction should be retried later (see ExtractOutcome). */
+export async function extractDocumentOutcome(file: DocumentFile, opts: ExtractOptions = {}): Promise<ExtractOutcome> {
   const type = extractableType(file.filename, file.mimeType);
-  if (!type || !file.data || file.data.length === 0) return null;
+  if (!type || !file.data || file.data.length === 0) return settledWith(null);
   try {
     const buffer = typeof file.data === "string" ? decodeFileData(file.data) : file.data;
-    if (buffer.length === 0) return null;
+    if (buffer.length === 0) return settledWith(null);
     if (type === "txt" || type === "md") {
       // A UTF-8 byte order mark is not text.
       const utf8 = buffer.toString("utf8");
-      return tidy(utf8.charCodeAt(0) === 0xfeff ? utf8.slice(1) : utf8);
+      return settledWith(tidy(utf8.charCodeAt(0) === 0xfeff ? utf8.slice(1) : utf8));
     }
     if (type === "docx") {
       const refusal = docxRefusal(buffer);
-      if (refusal) return failed(refusal);
+      if (refusal) return settledWith(failed(refusal));
     }
     return await parseInChild(type, buffer, opts);
   } catch (error) {
-    return failed(describeError(error));
+    return settledWith(failed(describeError(error)));
   }
+}
+
+/** The document's text (at most EXTRACTED_TEXT_MAX_CHARS), or null when unsupported, empty or unreadable. */
+export async function extractDocumentText(file: DocumentFile, opts: ExtractOptions = {}): Promise<string | null> {
+  return (await extractDocumentOutcome(file, opts)).text;
 }

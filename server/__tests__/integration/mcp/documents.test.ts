@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { companyPolicies, helpDocuments, knowledgeArticles, userGuideCategories, userGuides, type User } from "@shared/schema";
 import { db } from "../../../storage/db";
 import { backfillDocumentText, startDocumentTextBackfill } from "../../../services/documents/backfillText";
+import { fillHelpDocumentText } from "../../../services/documents/documentText";
 import { MCP_INSTRUCTIONS } from "../../../mcp/server";
 import { createTestApp } from "../helpers/testApp";
 import { resetDb } from "../helpers/testDb";
@@ -492,9 +493,9 @@ describe("search_documents across the four sources", () => {
     expect(long.data.details.fieldErrors.query).toBeDefined();
     const blank = await call("agent", "search_documents", { query: "   " });
     expect(blank.data.details.fieldErrors.query).toBeDefined();
-    const badType = await call("agent", "search_documents", { query: "x", type: "faq" });
+    const badType = await call("agent", "search_documents", { query: "xy", type: "faq" });
     expect(badType.data.details.fieldErrors.type).toEqual(["Must be one of: help, policy, guideline, knowledge"]);
-    const badLimit = await call("agent", "search_documents", { query: "x", limit: 500 });
+    const badLimit = await call("agent", "search_documents", { query: "xy", limit: 500 });
     expect(badLimit.data.details.fieldErrors.limit).toBeDefined();
     const missing = await call("agent", "search_documents", {});
     expect(missing.isError).toBe(true);
@@ -567,7 +568,7 @@ describe("startup backfill (R90)", () => {
 
     const lines: string[] = [];
     const counts = await backfillDocumentText((l) => lines.push(l));
-    expect(counts).toEqual({ help: { filled: 1, unsupported: 1, failed: 0 }, policies: { filled: 1, unsupported: 0, failed: 0 } });
+    expect(counts).toEqual({ help: { filled: 1, unsupported: 1, failed: 0, deferred: 0 }, policies: { filled: 1, unsupported: 0, failed: 0, deferred: 0 } });
     expect(lines).toEqual([
       "Document text backfill: help documents 1 filled, 1 unsupported, 0 unreadable; policies 1 filled, 0 unsupported, 0 unreadable",
     ]);
@@ -586,7 +587,7 @@ describe("startup backfill (R90)", () => {
 
     // A second run finds nothing left to do: every row was tried once.
     const again = await backfillDocumentText(() => undefined);
-    expect(again).toEqual({ help: { filled: 0, unsupported: 0, failed: 0 }, policies: { filled: 0, unsupported: 0, failed: 0 } });
+    expect(again).toEqual({ help: { filled: 0, unsupported: 0, failed: 0, deferred: 0 }, policies: { filled: 0, unsupported: 0, failed: 0, deferred: 0 } });
   });
 
   it("review N1: hostile files (a 1 GB lying docx, a 1 GB pdf bomb, a zip bomb, a corrupt pdf) are tried once, in the bounded extractor, and skipped by the next start", async () => {
@@ -611,7 +612,7 @@ describe("startup backfill (R90)", () => {
       const rssBefore = process.memoryUsage.rss();
       const counts = await backfillDocumentText(() => undefined);
       expect((process.memoryUsage.rss() - rssBefore) / 1024 / 1024).toBeLessThan(200);
-      expect(counts).toEqual({ help: { filled: 1, unsupported: 0, failed: 2 }, policies: { filled: 0, unsupported: 0, failed: 2 } });
+      expect(counts).toEqual({ help: { filled: 1, unsupported: 0, failed: 2, deferred: 0 }, policies: { filled: 0, unsupported: 0, failed: 2, deferred: 0 } });
       const rows = await db.select().from(helpDocuments);
       for (const r of [bombRow, liarRow]) expect([r.title, rows.find((x) => x.id === r.id)!.extractedText]).toEqual([r.title, ""]);
       expect(rows.find((r) => r.id === good.id)!.extractedText).toBe("plain survivor text");
@@ -625,8 +626,8 @@ describe("startup backfill (R90)", () => {
       // The next start reads none of them again.
       errors.mockClear();
       expect(await backfillDocumentText(() => undefined)).toEqual({
-        help: { filled: 0, unsupported: 0, failed: 0 },
-        policies: { filled: 0, unsupported: 0, failed: 0 },
+        help: { filled: 0, unsupported: 0, failed: 0, deferred: 0 },
+        policies: { filled: 0, unsupported: 0, failed: 0, deferred: 0 },
       });
       expect(errors).not.toHaveBeenCalled();
     } finally {
@@ -651,10 +652,10 @@ describe("startup backfill (R90)", () => {
     const [after] = await db.select().from(helpDocuments).where(eq(helpDocuments.id, row.id));
     expect(after.extractedText).toBe("");
     // The next start does not touch it.
-    const extract = jest.fn(async () => "never");
+    const extract = jest.fn(async () => ({ text: "never", retry: false }));
     expect(await backfillDocumentText(() => undefined, { extract })).toEqual({
-      help: { filled: 0, unsupported: 0, failed: 0 },
-      policies: { filled: 0, unsupported: 0, failed: 0 },
+      help: { filled: 0, unsupported: 0, failed: 0, deferred: 0 },
+      policies: { filled: 0, unsupported: 0, failed: 0, deferred: 0 },
     });
     expect(extract).not.toHaveBeenCalled();
   });
@@ -676,6 +677,48 @@ describe("startup backfill (R90)", () => {
       expect(done.data).toMatchObject({ title: "Upload in flight", hasFile: true, hasFileText: false });
       const [r] = await db.select().from(helpDocuments).where(eq(helpDocuments.title, "Upload in flight"));
       expect(r.extractedText).toBe("");
+    } finally {
+      errors.mockRestore();
+    }
+  }, 120000);
+
+  it("review N9: in the backfill, a row whose parse never began (extractor busy) goes back to NULL and is filled by the next run; a failed parse stays ''", async () => {
+    const insert = async (title: string) =>
+      (await db.insert(helpDocuments).values({ title, filename: `${title}.docx`, content: "x", fileData: b64(await makeDocx([title])) }).returning())[0];
+    const busy = await insert("busyrow");
+    const broken = await insert("brokenrow");
+    const lines: string[] = [];
+    const first = await backfillDocumentText((l) => lines.push(l), {
+      extract: async (file) => (file.filename === "busyrow.docx" ? { text: null, retry: true } : { text: null, retry: false }),
+    });
+    expect(first).toEqual({ help: { filled: 0, unsupported: 0, failed: 1, deferred: 1 }, policies: { filled: 0, unsupported: 0, failed: 0, deferred: 0 } });
+    expect(lines).toContain("Document text backfill: 1 row(s) deferred (the extractor was busy); the next start retries them");
+    const rows = await db.select().from(helpDocuments);
+    expect(rows.find((r) => r.id === busy.id)!.extractedText).toBeNull();
+    expect(rows.find((r) => r.id === broken.id)!.extractedText).toBe("");
+    // The next run (real extraction) fills the deferred row only.
+    const second = await backfillDocumentText(() => undefined);
+    expect(second).toEqual({ help: { filled: 1, unsupported: 0, failed: 0, deferred: 0 }, policies: { filled: 0, unsupported: 0, failed: 0, deferred: 0 } });
+    const [filled] = await db.select().from(helpDocuments).where(eq(helpDocuments.id, busy.id));
+    expect(filled.extractedText).toBe("busyrow");
+  });
+
+  it("review N9: an upload that timed out in the extractor queue is stored NULL (retried later); one whose parse was killed stays ''", async () => {
+    const errors = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const bomb = await inflatingPdf(1024 * 1024 * 1024 + 1);
+      const insert = async (title: string) =>
+        (await db.insert(helpDocuments).values({ title, filename: "x", content: "x", fileData: "", extractedText: "" }).returning())[0];
+      const [b1, b2, queued] = [await insert("bomb1"), await insert("bomb2"), await insert("queued")];
+      // Two bomb parses hold both extractor slots; the third upload waits in the queue past its time limit.
+      const holders = [fillHelpDocumentText(b1.id, { filename: "b1.pdf", data: bomb }), fillHelpDocumentText(b2.id, { filename: "b2.pdf", data: bomb })];
+      const text = await fillHelpDocumentText(queued.id, { filename: "q.docx", data: await makeDocx(["queued text"]) }, { timeoutMs: 200 });
+      expect(text).toBeNull();
+      await Promise.all(holders);
+      const rows = await db.select().from(helpDocuments);
+      expect(rows.find((r) => r.id === queued.id)!.extractedText).toBeNull();
+      expect(rows.find((r) => r.id === b1.id)!.extractedText).toBe("");
+      expect(rows.find((r) => r.id === b2.id)!.extractedText).toBe("");
     } finally {
       errors.mockRestore();
     }
@@ -744,8 +787,9 @@ describe("review I2: keyword search", () => {
     expect(res.data.terms).toEqual(["at&t"]);
     expect(res.data.results.map((r: { id: number }) => r.id)).toEqual([att.data.id]);
     expect(res.data.results[0].snippet).toContain("AT&T");
-    // Only an empty or blank query is refused.
-    for (const query of ["", "   "]) {
+    // Review N11: a keyword or phrase needs 2+ characters, so "x" (or a lone "&") is refused rather
+    // than matching every title that contains an x; so are an empty and a blank query.
+    for (const query of ["", "   ", "x", " & "]) {
       const blank = await call("customer", "search_documents", { query });
       expect([query, blank.isError, blank.data.code]).toEqual([query, true, "VALIDATION"]);
     }

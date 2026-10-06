@@ -71,9 +71,14 @@ function present(args: Record<string, unknown>): Record<string, unknown> {
 }
 
 const searchInput = z.object({
-  // Reviews I2 and N4: the query is split into keywords; one with none ("AT&T") is searched as a
-  // phrase, so only an empty or whitespace-only query is refused.
-  query: z.string().trim().min(1, "Required: the key words to find, e.g. \"DoseSpot clinic key\"").max(200),
+  // Reviews I2, N4 and N11: the query is split into keywords; one with none ("AT&T") is searched as
+  // a phrase. A query with neither a keyword nor a phrase of 2+ characters ("", "x") is refused.
+  query: z
+    .string()
+    .trim()
+    .min(1, "Required: the key words to find, e.g. \"DoseSpot clinic key\"")
+    .max(200)
+    .refine((q) => searchTerms(q).length > 0, { message: "Use at least one word of 2 or more characters, e.g. \"DoseSpot clinic key\"" }),
   type: z.enum(DOCUMENT_TYPES, { errorMap: () => ({ message: `Must be one of: ${TYPE_LIST}` }) }).optional(),
   limit: z.number().int().min(1).max(SEARCH_MAX_LIMIT).default(10),
 });

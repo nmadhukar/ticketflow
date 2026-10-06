@@ -14,6 +14,7 @@ import {
   decodeFileData,
   documentExtractionAvailable,
   extractChildCandidates,
+  extractDocumentOutcome,
   extractDocumentText,
   extractMemoryLimitMb,
   inspectZip,
@@ -173,10 +174,50 @@ describe("bounded extraction (reviews I1 and N1): a hostile file can never take 
   it("DOCUMENT_EXTRACT_MAX_MB sets the extractor's RSS limit; a bad value keeps the default", () => {
     expect(extractMemoryLimitMb({})).toBe(384);
     expect(extractMemoryLimitMb({ DOCUMENT_EXTRACT_MAX_MB: "512" })).toBe(512);
-    for (const bad of ["", "abc", "0", "-5", "1.5", "32", "99999"]) {
+    // Review N10: below 96 MB even a small PDF fails (loading PDF.js alone passes 64 MB), so 96 is the floor.
+    expect(extractMemoryLimitMb({ DOCUMENT_EXTRACT_MAX_MB: "96" })).toBe(96);
+    for (const bad of ["", "abc", "0", "-5", "1.5", "32", "64", "95", "99999"]) {
       expect([bad, extractMemoryLimitMb({ DOCUMENT_EXTRACT_MAX_MB: bad })]).toEqual([bad, 384]);
     }
   });
+
+  it("review N10: at the 96 MB floor a real PDF and a real docx still extract", async () => {
+    expect(await extractDocumentText({ filename: "a.pdf", data: makePdf("floor pdf") }, { maxRssMb: 96 })).toBe("floor pdf");
+    expect(await extractDocumentText({ filename: "a.docx", data: await makeDocx(["floor docx"]) }, { maxRssMb: 96 })).toBe("floor docx");
+  });
+
+  it("review N7: unterminated <w:t and <w:br tags (2 MB of them in a 4 KB docx) are scanned in linear time", async () => {
+    for (const tag of ["<w:t ", "<w:br "]) {
+      const xml = '<?xml version="1.0"?><w:document xmlns:w="w"><w:body><w:p><w:r>' + tag.repeat(Math.ceil(2_000_000 / tag.length)) + "</w:r></w:p></w:body></w:document>";
+      const docx = await makeDocx([], { documentXml: xml });
+      expect(docx.length).toBeLessThan(10_000);
+      const started = Date.now();
+      const text = await extractDocumentText({ filename: "redos.docx", data: docx });
+      const ms = Date.now() - started;
+      expect([tag, text === null || text === "", ms < 1000]).toEqual([tag, true, true]);
+    }
+    expect(logLines()).toEqual([]);
+  });
+
+  it("review N9: a call that never got to parse (it timed out in the queue) says retry; a parse that started and failed does not", async () => {
+    const bomb = await inflatingPdf(GB + 1);
+    // Two bombs hold both slots for about a second each.
+    const holders = [extractDocumentOutcome({ filename: "b1.pdf", data: bomb }), extractDocumentOutcome({ filename: "b2.pdf", data: bomb })];
+    expect(activeExtractions()).toBe(2);
+    const queued = await extractDocumentOutcome({ filename: "real.docx", data: await makeDocx(["waits"]) }, { timeoutMs: 200 });
+    expect(queued).toEqual({ text: null, retry: true });
+    const [h1, h2] = await Promise.all(holders);
+    // The bombs were parsed and killed: tried, no retry.
+    expect([h1, h2]).toEqual([
+      { text: null, retry: false },
+      { text: null, retry: false },
+    ]);
+    // Definitive answers are not retried either.
+    expect(await extractDocumentOutcome({ filename: "a.docx", data: Buffer.from("not a zip") })).toEqual({ text: null, retry: false });
+    expect(await extractDocumentOutcome({ filename: "a.png", data: Buffer.from("x") })).toEqual({ text: null, retry: false });
+    expect(await extractDocumentOutcome({ filename: "a.pdf", data: makePdf("ok") })).toEqual({ text: "ok", retry: false });
+    expect(logLines()).toContain("Document text extraction failed [timeout]");
+  }, 120000);
 
   it("reads word/document.xml itself: paragraphs, tabs, breaks and entities, without deleted text", async () => {
     const xml =

@@ -4,7 +4,8 @@
 // - on Linux it raises its own oom_score_adj to 1000, so a kernel or cgroup OOM kill picks it,
 //   never the server;
 // - the parent kills it above an RSS limit (polling /proc on Linux) and after a timeout, and a
-//   watchdog thread in here does the same from inside (the fallback where /proc is absent).
+//   watchdog thread in here does the same from inside: the RSS limit (the fallback where /proc is
+//   absent) and its own deadline (so it stops even if the parent is gone, review N8).
 // ArrayBuffers (inflated data) are outside the V8 heap limit, which is why the RSS checks exist.
 // A .docx is not handed to a zip library at all: word/document.xml is located and inflated here
 // with zlib's maxOutputLength against a fixed budget, so real inflation is bounded whatever the
@@ -14,7 +15,7 @@
 // Plain JavaScript, no build step in development or under Jest; `npm run build` bundles it to
 // dist/documentExtractChild.mjs next to dist/index.js.
 //
-// In (IPC message): { type: "docx" | "pdf", bytes, maxChars, maxPdfPages, docxBudget, rssLimitMb }
+// In (IPC message): { type: "docx" | "pdf", bytes, maxChars, maxPdfPages, docxBudget, rssLimitMb, deadlineMs }
 // Out (IPC message): { ok: true, text } or { ok: false, error: "<error type>" }, then exit.
 import { writeFileSync } from "node:fs";
 import { inflateRawSync } from "node:zlib";
@@ -109,7 +110,9 @@ const decodeXml = (s) =>
 function documentXmlText(xml, maxChars) {
   const out = [];
   let length = 0;
-  const token = /<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>|<w:tab\s*\/>|<w:(?:br|cr)\b[^>]*\/>|<\/w:p>/g;
+  // Review N7: no class here may cross a "<". With [^>]* an unterminated tag ("<w:t <w:t ...")
+  // made every match attempt run to the end of the text: quadratic. [^<>]* stops at the next tag.
+  const token = /<w:t(?:\s[^<>]*)?>([^<]*)<\/w:t>|<w:tab\s*\/>|<w:(?:br|cr)\b[^<>]*\/>|<\/w:p>/g;
   let m;
   while ((m = token.exec(xml)) !== null && length < maxChars) {
     const piece =
@@ -140,27 +143,33 @@ async function pdfText(bytes, maxPdfPages) {
 
 // ------------------------------------------------------------------ watchdog and protocol
 
-/** Kills this process from a second thread once its RSS passes the limit, even while the main thread is busy in zlib. */
-function startWatchdog(limitMb) {
+/**
+ * A second thread that kills this process, even while the main thread is busy in zlib or a regex:
+ * once its RSS passes `limitMb` (when > 0), and once `deadlineMs` has passed (review N8: the
+ * parent's 20 s timer dies with the parent, so an orphaned extractor must stop by itself).
+ */
+function startWatchdog(limitMb, deadlineMs) {
   const code = `
     const { workerData } = require("node:worker_threads");
-    const limit = workerData * 1024 * 1024;
-    const check = () => { if (process.memoryUsage.rss() > limit) process.kill(process.pid, "SIGKILL"); };
+    const limit = workerData.limitMb * 1024 * 1024;
+    const check = () => { if (limit > 0 && process.memoryUsage.rss() > limit) process.kill(process.pid, "SIGKILL"); };
     check();
     setInterval(check, 50);
+    if (workerData.deadlineMs > 0) setTimeout(() => process.kill(process.pid, "SIGKILL"), workerData.deadlineMs);
   `;
-  const watchdog = new Worker(code, { eval: true, workerData: limitMb });
+  const watchdog = new Worker(code, { eval: true, workerData: { limitMb, deadlineMs } });
   watchdog.unref();
 }
+
+// A parent that goes away while nothing is being parsed: leave at once.
+process.on("disconnect", () => process.exit(0));
 
 process.once("message", async (job) => {
   let reply;
   try {
-    if (job.rssLimitMb > 0) {
-      // Already over the limit (a limit set below what Node itself needs): stop before parsing anything.
-      if (process.memoryUsage.rss() > job.rssLimitMb * 1024 * 1024) process.kill(process.pid, "SIGKILL");
-      startWatchdog(job.rssLimitMb);
-    }
+    // Already over the limit (a limit set below what Node itself needs): stop before parsing anything.
+    if (job.rssLimitMb > 0 && process.memoryUsage.rss() > job.rssLimitMb * 1024 * 1024) process.kill(process.pid, "SIGKILL");
+    startWatchdog(job.rssLimitMb > 0 ? job.rssLimitMb : 0, job.deadlineMs > 0 ? job.deadlineMs : 0);
     const raw = job.type === "docx" ? docxText(job.bytes, job.docxBudget, job.maxChars) : await pdfText(job.bytes, job.maxPdfPages);
     reply = { ok: true, text: tidy(raw, job.maxChars) };
   } catch (error) {

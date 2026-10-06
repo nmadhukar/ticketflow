@@ -2,8 +2,14 @@ import { and, eq, isNull, ne } from "drizzle-orm";
 import { companyPolicies, helpDocuments } from "@shared/schema";
 import { db } from "../../storage/db";
 import { describeError } from "../../http/errors";
-import { documentExtractionAvailable, extractDocumentText, isExtractable, type DocumentFile } from "./extractText";
-import { claimHelpDocumentText, claimPolicyText, storeText } from "./documentText";
+import {
+  documentExtractionAvailable,
+  extractDocumentOutcome,
+  isExtractable,
+  type DocumentFile,
+  type ExtractOutcome,
+} from "./extractText";
+import { claimHelpDocumentText, claimPolicyText, settleText } from "./documentText";
 
 /**
  * R90 backfill: documents uploaded before extraction existed get their text after the server
@@ -15,16 +21,19 @@ import { claimHelpDocumentText, claimPolicyText, storeText } from "./documentTex
  * process; and each row is CLAIMED ('' where extracted_text is still NULL, documentText.ts)
  * before its file is read, so a row whose parse is killed, or kills anything, is never tried
  * again: no crash loop. Rows are processed one at a time; the text is written over the claim when
- * it arrives. The log carries counts and error types only.
+ * it arrives. A row whose parse never began (the extractor was busy with uploads) is handed back
+ * to NULL and counted `deferred` (review N9): the next start retries it. The log carries counts
+ * and error types only.
  */
 
 export interface BackfillCounts {
   filled: number;
   unsupported: number;
   failed: number;
+  deferred: number;
 }
 
-const empty = (): BackfillCounts => ({ filled: 0, unsupported: 0, failed: 0 });
+const empty = (): BackfillCounts => ({ filled: 0, unsupported: 0, failed: 0, deferred: 0 });
 
 interface Source {
   kind: "help" | "policy";
@@ -58,7 +67,7 @@ const policySource: Source = {
       ?.fileData,
 };
 
-type Extract = (file: DocumentFile) => Promise<string | null>;
+type Extract = (file: DocumentFile) => Promise<ExtractOutcome>;
 
 async function backfill(source: Source, extract: Extract): Promise<BackfillCounts> {
   const counts = empty();
@@ -70,10 +79,13 @@ async function backfill(source: Source, extract: Extract): Promise<BackfillCount
       continue;
     }
     const data = await source.fileData(row.id);
-    const text = data ? await extract({ filename: row.filename, mimeType: row.mimeType, data }) : null;
-    if (text) await storeText(source.kind, row.id, text);
-    if (text === null) counts.failed++;
-    else counts.filled++;
+    const outcome: ExtractOutcome = data
+      ? await extract({ filename: row.filename, mimeType: row.mimeType, data })
+      : { text: null, retry: false };
+    await settleText(source.kind, row.id, outcome);
+    if (outcome.text !== null) counts.filled++;
+    else if (outcome.retry) counts.deferred++;
+    else counts.failed++;
   }
   return counts;
 }
@@ -91,13 +103,17 @@ export async function backfillDocumentText(
     log("Document text backfill skipped: the extractor file was not found");
     return null;
   }
-  const extract = opts.extract ?? ((file: DocumentFile) => extractDocumentText(file));
+  const extract = opts.extract ?? ((file: DocumentFile) => extractDocumentOutcome(file));
   const help = await backfill(helpSource, extract);
   const policies = await backfill(policySource, extract);
   log(
     `Document text backfill: help documents ${help.filled} filled, ${help.unsupported} unsupported, ${help.failed} unreadable; ` +
       `policies ${policies.filled} filled, ${policies.unsupported} unsupported, ${policies.failed} unreadable`
   );
+  const deferred = help.deferred + policies.deferred;
+  if (deferred > 0) {
+    log(`Document text backfill: ${deferred} row(s) deferred (the extractor was busy); the next start retries them`);
+  }
   return { help, policies };
 }
 

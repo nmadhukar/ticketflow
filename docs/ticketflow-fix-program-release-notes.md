@@ -1006,13 +1006,20 @@ or guidelines. Task MCP4 adds document search, reading and writing on MCP (rulin
   worker thread's heap limit does not count inflated ArrayBuffers, and a 1 MB file OOM-killed a
   1 GiB container). `npm run build` now also writes `dist/documentExtractChild.mjs`, which the
   server forks from next to `dist/index.js`, one process per `.docx`/`.pdf`, at most two at once.
-  The child is SIGKILLed above `DOCUMENT_EXTRACT_MAX_MB` of RSS (new, optional, default 384;
-  polled from `/proc` every 50 ms, plus a watchdog inside the child) or after 20 s; it sets its own
+  The child is SIGKILLed above `DOCUMENT_EXTRACT_MAX_MB` of RSS (new, optional, default 384,
+  allowed 96-4096; polled from `/proc` every 50 ms, plus a watchdog inside the child) or after
+  20 s, and its watchdog also ends it 1 s after that even if the server is gone; it sets its own
   `oom_score_adj` to 1000 so the kernel's OOM killer takes it rather than the server; a `.docx`'s
-  `word/document.xml` is inflated against a 50 MB budget whatever its headers claim; a `.pdf` over
-  500 pages is refused. A kill, crash or timeout gives no text and the server keeps serving.
-  Nothing a parser prints reaches the log. Budget the container for the server plus two
-  extractors (about 2 x 384 MB), or lower `DOCUMENT_EXTRACT_MAX_MB`.
+  `word/document.xml` is inflated against a 50 MB budget whatever its headers claim and scanned in
+  linear time; a `.pdf` over 500 pages is refused. A kill, crash or timeout gives no text and the
+  server keeps serving. Nothing a parser prints reaches the log. Budget the container for the
+  server plus two extractors (about 2 x 384 MB), or lower `DOCUMENT_EXTRACT_MAX_MB` (not below 96:
+  under that even a small PDF fails).
+- **`OOMKilled=true` does not mean the server died.** When the kernel's OOM killer takes an
+  extractor (only possible if the container limit is below the server plus two extractors),
+  Docker and Coolify report the container `OOMKilled=true` although the server never stopped.
+  Check `/health` and the log line `Document text extraction failed [extractor killed SIGKILL]`
+  before treating it as a crash or rolling back.
 - **Extraction on write.** REST `POST`/`PUT /api/admin/help` and `POST`/`PUT
   /api/admin/company-policies` and the MCP write tools fill `extracted_text` through one helper;
   `extracted_text` in a request body is ignored. `GET /api/help/search` now also matches the file
@@ -1021,7 +1028,8 @@ or guidelines. Task MCP4 adds document search, reading and writing on MCP (rulin
   server is listening (after `serving on port`), one row at a time, not awaited. Each row is
   claimed first (`''`, in its own statement) and parsed only then, so a file whose parse is killed
   is never parsed again at the next boot: no crash loop. Uploads store `''` with the file too, and
-  the text replaces it when it arrives. One log line: `Document text backfill: help documents N
+  the text replaces it when it arrives. A row whose parse never began (the extractor was busy, or
+  the call timed out while queued) goes back to NULL and is retried later. One log line: `Document text backfill: help documents N
   filled, N unsupported, N unreadable; policies ...`. The local DoseSpot `.docx` (2 MB) extracts in
   well under a second. Proven with the production image in a 1 GiB container (MCP uploads of a
   1 MB `.docx` and `.pdf` that each inflate past 1 GB, and three boots with such a row): the server
@@ -1029,7 +1037,7 @@ or guidelines. Task MCP4 adds document search, reading and writing on MCP (rulin
 - **Search by keywords** (fix round 1, review I2): `search_documents` matches the query's key
   words separately (any of them), so "How do I set the DoseSpot clinic key?" finds the document;
   results matching more words come first. "IT", "US", "AM" and "NO" count as words; a query with
-  no word left ("AT&T") is searched as one phrase.
+  no word left ("AT&T") is searched as one phrase; a one-character query is refused.
 - **Policy downloads** answer any file name (an ASCII `filename` plus an RFC 5987 `filename*`);
   a name outside Latin-1 used to answer 500.
 - **R94:** MCP may create a policy from text alone (REST requires a file).
@@ -1047,8 +1055,9 @@ or guidelines. Task MCP4 adds document search, reading and writing on MCP (rulin
    then the backfill line. For the local stack the DoseSpot document should count as `1 filled`.
    A line `Document text backfill skipped: the extractor file was not found` means the image
    lacks `dist/documentExtractChild.mjs` (an old build command): rebuild.
-   Optionally set `DOCUMENT_EXTRACT_MAX_MB` (the extractor's RSS limit, default 384) in Coolify;
-   it is passed through by docker-compose.
+   Optionally set `DOCUMENT_EXTRACT_MAX_MB` (the extractor's RSS limit, default 384, minimum 96)
+   in Coolify; it is passed through by docker-compose. If Coolify shows the container
+   `OOMKilled=true`, check `/health` first: a killed extractor sets that flag too.
 2. Ask an agent connected over MCP a DoseSpot setup question and check that it calls
    `search_documents`, cites "Dosespot Configuration Document" and answers from it (an MCP tool
    change is verified by asking the agent, not by a connection test).

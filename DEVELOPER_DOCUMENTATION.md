@@ -501,8 +501,9 @@ and the REST routes use the same visibility predicates.
   (unpdf), `.txt` and `.md` (UTF-8). The text goes in `extracted_text` (migration 0030, capped at
   1,000,000 characters) on REST and MCP create and update. `extracted_text` NULL means "never
   tried"; `''` means "tried, nothing extractable" (an unsupported type, an empty document, or a
-  file that failed or hit a limit; the error type only is logged), and is written BEFORE a parse
-  starts. MCP takes a file as `filename` plus `fileBase64`, at most 36 MB at the defaults: the
+  file whose parse failed or hit a limit; the error type only is logged), and is written BEFORE a
+  parse starts. When no parse began at all (the extractor was busy, or the call ran out of time
+  while queued), the row goes back to NULL so it is retried (review N9). MCP takes a file as `filename` plus `fileBase64`, at most 36 MB at the defaults: the
   lower of `MAX_FILE_UPLOAD_SIZE_MB` (the REST limit) and what base64 fits in `MAX_REQUEST_SIZE_MB`
   (4/3 inflation, 2 MB of headroom); the tool descriptions state the number.
 - **Extraction runs in a separate, memory-limited process (reviews I1, N1).** `.docx` and `.pdf`
@@ -510,16 +511,22 @@ and the REST routes use the same visibility predicates.
   `dist/documentExtractChild.mjs` by `npm run build`, found next to `dist/index.js`), forked once
   per file, at most two at once (16 more may wait; the 20 s limit counts the wait). What bounds it:
   - RSS: the server polls the child's `/proc/<pid>/status` every 50 ms (Linux) and SIGKILLs it above
-    `DOCUMENT_EXTRACT_MAX_MB` (default 384, 64-4096); a watchdog thread inside the child applies the
+    `DOCUMENT_EXTRACT_MAX_MB` (default 384, 96-4096: below 96 even a small PDF fails, as loading
+    PDF.js alone passes 64); a watchdog thread inside the child applies the
     same limit where `/proc` is absent. A V8 heap limit alone does not do this: inflated data lives
     in ArrayBuffers, outside the heap.
   - the kernel: the child sets its own `oom_score_adj` to 1000 (Linux), so if the container still
-    runs out of memory the OOM killer picks the child, not the server;
-  - heap `--max-old-space-size` 256 MB; 20 s wall clock, then SIGKILL;
+    runs out of memory the OOM killer picks the child, not the server. When that happens Docker
+    (and Coolify) report the container `OOMKilled=true` although the server never stopped: check
+    `/health` and the log line `Document text extraction failed [extractor killed SIGKILL]` before
+    treating it as a crash or rolling back;
+  - heap `--max-old-space-size` 256 MB; 20 s wall clock, then SIGKILL from the server; the child's
+    watchdog thread also kills it 1 s after that, so it stops even if the server died first (N8);
   - inflation: a `.docx` is never handed to a zip library. `word/document.xml` is located through
     the zip directory and inflated with zlib's `maxOutputLength` against a 50 MB budget, so real
     inflation is bounded whatever the headers declare; its text is read with a linear scan (runs,
-    tabs, breaks, a blank line per paragraph). A `.docx` whose directory already declares more than
+    tabs, breaks, a blank line per paragraph; no pattern can cross a `<`, so an unterminated tag
+    cannot make it quadratic, review N7). A `.docx` whose directory already declares more than
     50 MB (or more than 10 MB at a ratio above 100) is refused without a child. A `.pdf` over 500
     pages is refused; for PDF the RSS limit is the bound.
   - PDF.js runs with `verbosity: 0` and `isEvalSupported: false`; the child's console, stdout and
@@ -533,8 +540,11 @@ and the REST routes use the same visibility predicates.
   awaited. Each row is first claimed (`''` where it is still NULL, in its own statement) and only
   then parsed, so a parse that dies (or is killed with anything else) leaves it tried: the next
   boot skips it, there is no crash loop. Uploads do the same: the row is stored with `''` and the
-  text replaces it when it arrives. If the extractor file is missing the backfill logs one line
-  and claims nothing.
+  text replaces it when it arrives. A row whose parse never began is handed back to NULL and
+  counted `deferred` (one extra log line); the next start retries it. If the extractor file is
+  missing the backfill logs one line and claims nothing. Known residual (review N12): the text is
+  written by row id, so two overlapping file replacements of one document can finish out of order
+  and leave the newer file with the older file's text (admin-only, rare).
 - **Help documents have no publish flag**: every signed-in user reads every one, as `/api/help`.
   A help document or policy created on MCP without a file stores its text in `content`, an empty
   `file_data` and the file name `<title>.txt` (a text-only policy downloads as its content).
@@ -564,7 +574,7 @@ Rulings:
   `help`, `policy`, `guideline`, `knowledge`, `limit` 1-50, default 10) splits the query into
   keywords (lower-cased letters and digits; English stopwords and one-character words dropped, but
   "it", "us", "am" and "no" are kept; at most 12; when none is left, as for "AT&T", the trimmed
-  query is one phrase term; only an empty or blank query is VALIDATION) and returns every document containing ANY keyword
+  query is one phrase term if it has 2+ characters; a query with neither, such as "" or "x", is VALIDATION) and returns every document containing ANY keyword
   (case-insensitive ILIKE, escaped and bound) in the title, description or summary, content or
   `extracted_text`: `{results: [{type, id, title, category, snippet, published, matchedTerms}],
   returned, terms}`, the snippet about 300 characters around the earliest keyword. Ranked by the
