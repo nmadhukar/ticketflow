@@ -47,11 +47,122 @@ async function withStorageFixture(run: (legacyId: number, userId: string) => Pro
   }
 }
 
-describe("migration 0023 (provider-neutral AI settings)", () => {
-  afterAll(async () => {
-    await pool.end();
+/**
+ * 0023 runs against every database the deploy touches, in turn, before drizzle-kit push, and must
+ * never abort it. A database that has `users` but predates the AI tables used to fail with 42P01
+ * ("relation bedrock_settings does not exist") and the container then did not start. Each case
+ * runs in a transaction that is rolled back, so the shared test database is untouched.
+ */
+async function inRolledBackTransaction(run: (q: (sql: string) => Promise<{ rows: any[] }>) => Promise<void>) {
+  const client = await pool.connect();
+  const notices: string[] = [];
+  (client as unknown as { on(e: "notice", f: (n: { message: string }) => void): void }).on("notice", (n) => notices.push(n.message));
+  try {
+    await client.query("BEGIN");
+    await run((sql) => client.query(sql));
+    return notices;
+  } finally {
+    await client.query("ROLLBACK");
+    client.release();
+  }
+}
+
+// One pool, ended once, after every describe block in this file has run.
+afterAll(async () => {
+  await pool.end();
+});
+
+describe("migration 0023 never aborts on a database that predates the AI tables", () => {
+  it("applies twice on a database that has users and teams but no bedrock_settings and no ai_usage", async () => {
+    const testUrl = new URL(process.env.DATABASE_URL!);
+    const scratchName = `${testUrl.pathname.slice(1)}_ai0023old`;
+    expect(scratchName).toMatch(/test/);
+    const adminUrl = new URL(testUrl.toString());
+    adminUrl.pathname = "/postgres";
+    const scratchUrl = new URL(testUrl.toString());
+    scratchUrl.pathname = `/${scratchName}`;
+    const admin = new pg.Client({ connectionString: adminUrl.toString() });
+    await admin.connect();
+    let scratch: pg.Client | undefined;
+    try {
+      await admin.query(`DROP DATABASE IF EXISTS "${scratchName}" WITH (FORCE)`);
+      await admin.query(`CREATE DATABASE "${scratchName}"`);
+      scratch = new pg.Client({ connectionString: scratchUrl.toString() });
+      await scratch.connect();
+      const notices: string[] = [];
+      scratch.on("notice", (n) => notices.push(String(n.message)));
+      await scratch.query("CREATE TABLE users (id varchar PRIMARY KEY)");
+      await scratch.query("CREATE TABLE teams (id serial PRIMARY KEY)");
+
+      await expect(scratch.query(migrationSql())).resolves.toBeDefined();
+      await expect(scratch.query(migrationSql())).resolves.toBeDefined();
+
+      // push has nothing to ask about: ai_settings exists (empty, so AI reads as inactive) and the
+      // tables that were never there are still not there.
+      const table = await scratch.query(
+        "SELECT to_regclass('ai_settings') IS NOT NULL AS ai, to_regclass('bedrock_settings') IS NOT NULL AS legacy, to_regclass('ai_usage') IS NOT NULL AS usage"
+      );
+      expect(table.rows[0]).toEqual({ ai: true, legacy: false, usage: false });
+      expect((await scratch.query("SELECT count(*)::int AS n FROM ai_settings")).rows[0].n).toBe(0);
+      expect(notices.join("\n")).toMatch(/0023.*bedrock_settings.*(absent|skipp)/i);
+      expect(notices.join("\n")).toMatch(/0023.*ai_usage.*(absent|skipp)/i);
+    } finally {
+      await scratch?.end();
+      await admin.query(`DROP DATABASE IF EXISTS "${scratchName}" WITH (FORCE)`);
+      await admin.end();
+    }
+  }, 60000);
+
+  it("skips the copy with a NOTICE when bedrock_settings is absent, and a second run changes nothing", async () => {
+    const notices = await inRolledBackTransaction(async (q) => {
+      await q("DROP TABLE ai_settings");
+      await q("ALTER TABLE bedrock_settings RENAME TO bedrock_settings_gone");
+      await expect(q(migrationSql())).resolves.toBeDefined();
+      await expect(q(migrationSql())).resolves.toBeDefined();
+      expect((await q("SELECT count(*)::int AS n FROM ai_settings")).rows[0].n).toBe(0);
+    });
+    expect(notices.join("\n")).toMatch(/0023.*bedrock_settings.*(absent|skipp)/i);
   });
 
+  it("skips the copy with a NOTICE when bedrock_settings predates the AI columns", async () => {
+    const notices = await inRolledBackTransaction(async (q) => {
+      await q("DROP TABLE ai_settings");
+      await q("UPDATE bedrock_settings SET is_active = false");
+      await q("INSERT INTO bedrock_settings (is_active) VALUES (true)");
+      await q("ALTER TABLE bedrock_settings DROP COLUMN max_requests_per_minute");
+      await expect(q(migrationSql())).resolves.toBeDefined();
+      await expect(q(migrationSql())).resolves.toBeDefined();
+      expect((await q("SELECT count(*)::int AS n FROM ai_settings")).rows[0].n).toBe(0);
+    });
+    expect(notices.join("\n")).toMatch(/0023.*bedrock_settings.*(column|skipp)/i);
+  });
+
+  it("skips ai_usage with a NOTICE when it is absent, and still copies the settings", async () => {
+    const notices = await inRolledBackTransaction(async (q) => {
+      await q("DROP TABLE ai_settings");
+      await q("UPDATE bedrock_settings SET is_active = false");
+      await q("INSERT INTO bedrock_settings (is_active, max_tokens) VALUES (true, 1234)");
+      await q("ALTER TABLE ai_usage RENAME TO ai_usage_gone");
+      await expect(q(migrationSql())).resolves.toBeDefined();
+      await expect(q(migrationSql())).resolves.toBeDefined();
+      expect((await q("SELECT max_tokens FROM ai_settings WHERE id = 1")).rows[0].max_tokens).toBe(1234);
+    });
+    expect(notices.join("\n")).toMatch(/0023.*ai_usage.*(absent|skipp)/i);
+  });
+
+  it("skips creating ai_settings with a NOTICE when teams is absent", async () => {
+    const notices = await inRolledBackTransaction(async (q) => {
+      await q("DROP TABLE ai_settings");
+      await q("ALTER TABLE teams RENAME TO teams_gone");
+      await expect(q(migrationSql())).resolves.toBeDefined();
+      const exists = await q("SELECT to_regclass('ai_settings') IS NOT NULL AS present");
+      expect(exists.rows[0].present).toBe(false);
+    });
+    expect(notices.join("\n")).toMatch(/0023.*ai_settings.*(teams|skipp)/i);
+  });
+});
+
+describe("migration 0023 (provider-neutral AI settings)", () => {
   it("copies active business settings once while preserving legacy credentials and usage", async () => {
     expect(existsSync(migrationPath)).toBe(true);
     const sql = readFileSync(migrationPath, "utf8");

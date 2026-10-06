@@ -3281,6 +3281,16 @@ paths:
                   error:
                     type: string
                     const: ai_connection_failed
+                  message:
+                    type: string
+                  details:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                    required:
+                      - code
+                    additionalProperties: false
                   code:
                     type: string
                     enum:
@@ -3289,6 +3299,7 @@ paths:
                       - credits
                       - timeout
                       - rate_limit
+                      - quota_exceeded
                       - provider_failure
                       - invalid_output
                       - empty_output
@@ -3296,6 +3307,7 @@ paths:
                 required:
                   - success
                   - error
+                  - message
                   - code
                 additionalProperties: false
         "401":
@@ -3647,6 +3659,16 @@ paths:
                   error:
                     type: string
                     const: ai_connection_failed
+                  message:
+                    type: string
+                  details:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                    required:
+                      - code
+                    additionalProperties: false
                   code:
                     type: string
                     enum:
@@ -3655,6 +3677,7 @@ paths:
                       - credits
                       - timeout
                       - rate_limit
+                      - quota_exceeded
                       - provider_failure
                       - invalid_output
                       - empty_output
@@ -3662,6 +3685,7 @@ paths:
                 required:
                   - success
                   - error
+                  - message
                   - code
                 additionalProperties: false
         "401":

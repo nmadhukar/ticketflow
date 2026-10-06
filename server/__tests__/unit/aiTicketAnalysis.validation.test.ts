@@ -7,7 +7,12 @@ const runAutoResponseForTicketPrompt = jest.fn<(...args: unknown[]) => Promise<u
 jest.mock("../../storage", () => ({ storage: { saveTicketAnalysis } }));
 jest.mock("../../security", () => ({ logSecurityEvent: jest.fn() }));
 jest.mock("../../admin/aiSettings", () => ({ getAISettings: jest.fn(async () => ({ responseTimeout: 30 })) }));
-jest.mock("../../services/ai/bedrockIntegration", () => ({ runTicketAnalysisPrompt, runAutoResponseForTicketPrompt }));
+// buildPromptWithinBudget cuts a long description to the token cap (M3); with no cap in play it is the plain builder.
+jest.mock("../../services/ai/bedrockIntegration", () => ({
+  runTicketAnalysisPrompt,
+  runAutoResponseForTicketPrompt,
+  buildPromptWithinBudget: async (_operation: string, description: string | null | undefined, build: (d: string | null | undefined) => string) => build(description),
+}));
 
 import { analyzeTicket, generateAutoResponseForTicket } from "../../services/ai/aiTicketAnalysis";
 import type { TicketAnalysis } from "../../services/ai/aiTicketAnalysis";

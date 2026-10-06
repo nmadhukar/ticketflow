@@ -1935,7 +1935,11 @@ export class DatabaseStorage implements IStorage {
     };
     return db.transaction(async (tx) => {
       const [row] = await tx.insert(aiSettings)
-        .values({ id: 1, modelId: patch.modelId, ...businessFields, isActive: patch.isActive, updatedBy })
+        // A row created by a patch that does not mention isActive (a cost-limits save) must not
+        // turn AI on: the column default is true, and with OPENROUTER_API_KEY set that starts paid
+        // calls and customer-visible auto-responses. AI is enabled only by an explicit isActive:
+        // true. The update branch below still leaves isActive alone when the patch omits it.
+        .values({ id: 1, modelId: patch.modelId, ...businessFields, isActive: patch.isActive ?? false, updatedBy })
         .onConflictDoUpdate({
           target: aiSettings.id,
           set: { modelId: patch.modelId, ...businessFields, isActive: patch.isActive, updatedBy, updatedAt: new Date() },

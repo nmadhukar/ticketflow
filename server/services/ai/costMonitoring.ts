@@ -7,6 +7,7 @@
 import { storage } from "../../storage";
 import { AiModelError, describeAIError } from "./aiErrors";
 import { createOpenRouterPricing, estimateCostUsd, type ModelPrice } from "./openRouterPricing";
+import { estimatePromptTokensForBudget } from "./promptBudget";
 import type { AISettings } from "@shared/interfaces";
 import { db } from "../../storage/db";
 import { aiUsage } from "@shared/schema";
@@ -156,10 +157,8 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-/** Conservatively estimate multilingual prompt tokens for budget preflight. */
-export function estimatePromptTokensForBudget(text: string): number {
-  return Math.ceil(Buffer.byteLength(text, "utf8") / 2) + 16;
-}
+// The estimate lives in promptBudget.ts, which also cuts a long description to fit it (M3).
+export { estimatePromptTokensForBudget };
 
 /**
  * Postgres 23503 on the ticket_id foreign key only (the driver error arrives bare or

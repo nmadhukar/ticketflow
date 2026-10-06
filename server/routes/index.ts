@@ -1589,8 +1589,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return fail(res, 403, "Admin access required");
         }
 
+        // Error contract { error, message, details? } (I3). The reason code goes in details;
+        // it is also kept at the top level because the admin page and the OpenAPI document read it there.
+        const connectionFailed = (code: string) => ({
+          success: false,
+          error: "ai_connection_failed",
+          message: "OpenRouter connection failed",
+          details: { code },
+          code,
+        });
         if (!isOpenRouterConfigured()) {
-          return res.status(503).json({ success: false, error: "ai_connection_failed", code: "not_configured" });
+          return res.status(503).json(connectionFailed("not_configured"));
         }
         const result = await bedrockIntegration.testConnection();
         if (result.success) {
@@ -1600,7 +1609,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const allowedCodes = ["not_configured", "auth", "credits", "timeout", "rate_limit", "quota_exceeded", "provider_failure", "invalid_output", "empty_output", "price_unavailable"];
         const code = typeof reportedCode === "string" && allowedCodes.includes(reportedCode) ? reportedCode : "provider_failure";
         return res.status(code === "rate_limit" || code === "quota_exceeded" ? 429 : code === "not_configured" ? 503 : 400)
-          .json({ success: false, error: "ai_connection_failed", code });
+          .json(connectionFailed(code));
       } catch (error: any) {
         logRouteError("Error testing OpenRouter connection", error);
         fail(res, 500, "Failed to test OpenRouter connection");

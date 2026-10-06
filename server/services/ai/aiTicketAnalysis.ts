@@ -14,6 +14,7 @@ import { storage } from "../../storage";
 import { logSecurityEvent } from "../../security";
 import { buildAutoResponsePrompt, buildTicketAnalysisPrompt } from "./prompts";
 import {
+  buildPromptWithinBudget,
   runTicketAnalysisPrompt,
   runAutoResponseForTicketPrompt,
 } from "./bedrockIntegration";
@@ -94,7 +95,10 @@ export const analyzeTicket = async (ticketData: {
   reporterId: string;
 }): Promise<TicketAnalysis | null> => {
   try {
-    const prompt = buildTicketAnalysisPrompt(ticketData);
+    // M3: a long description is cut to fit the token cap instead of getting the call blocked.
+    const prompt = await buildPromptWithinBudget("ticketAnalysis", ticketData.description, (description) =>
+      buildTicketAnalysisPrompt({ ...ticketData, description: description ?? "" })
+    );
 
     const result = await runTicketAnalysisPrompt(prompt);
 
@@ -159,14 +163,16 @@ export const generateAutoResponseForTicket = async (
         ? knowledgeBaseContext.join("\n---\n")
         : "";
 
-    const prompt = buildAutoResponsePrompt({
-      title: ticketData.title,
-      description: ticketData.description,
-      category: ticketData.category,
-      priority: ticketData.priority,
-      analysis,
-      knowledgeContext,
-    });
+    const prompt = await buildPromptWithinBudget("autoResponse", ticketData.description, (description) =>
+      buildAutoResponsePrompt({
+        title: ticketData.title,
+        description: description ?? "",
+        category: ticketData.category,
+        priority: ticketData.priority,
+        analysis,
+        knowledgeContext,
+      })
+    );
 
     const result = await runAutoResponseForTicketPrompt(prompt);
 

@@ -7,6 +7,50 @@ import { extractJSON } from "./jsonUtils";
 import { AiModelError, describeAIError } from "./aiErrors";
 import { createOpenRouterClient } from "./openRouterClient";
 import { createOpenRouterPricing } from "./openRouterPricing";
+import { fitDescriptionToBudget } from "./promptBudget";
+import type { AISettings } from "@shared/interfaces";
+
+/** The most output each prompt that carries a ticket description asks for (before settings.maxTokens). */
+const OPERATION_OUTPUT_CAP = {
+  analyzeTicket: 500,
+  generateResponse: 800,
+  updateKnowledgeBase: 600,
+  ticketAnalysis: 1000,
+  autoResponse: 1500,
+} as const;
+type DescriptionOperation = keyof typeof OPERATION_OUTPUT_CAP;
+
+/**
+ * M3: the prompt for a ticket, with its description cut to fit settings.maxTokensPerRequest while
+ * leaving the operation's full output allowance. A long (emailed) description used to push the
+ * prompt over the cap and the call was blocked, so the ticket got no AI at all. Only the description
+ * is cut; the cap is unchanged.
+ */
+function promptWithinBudget(
+  settings: AISettings,
+  operation: DescriptionOperation,
+  description: string | null | undefined,
+  buildPrompt: (description: string | null | undefined) => string
+): string {
+  return buildPrompt(
+    fitDescriptionToBudget({
+      description,
+      buildPrompt,
+      maxTokensPerRequest: settings.maxTokensPerRequest,
+      maxOutputTokens: Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP[operation]),
+      operation,
+    })
+  );
+}
+
+/** promptWithinBudget for callers that have not loaded the settings (aiTicketAnalysis). */
+export async function buildPromptWithinBudget(
+  operation: DescriptionOperation,
+  description: string | null | undefined,
+  buildPrompt: (description: string | null | undefined) => string
+): Promise<string> {
+  return promptWithinBudget(await getAISettings(), operation, description, buildPrompt);
+}
 
 const pricing = createOpenRouterPricing();
 const modelClient = createOpenRouterClient({ getModelId: async () => (await getAISettings()).modelId, getModelPrice: pricing.getModelPrice });
@@ -68,9 +112,11 @@ export async function analyzeTicket(
   costEstimate?: CostEstimate;
 }> {
   try {
-    const prompt = PROMPT_TEMPLATES.analyzeTicket(ticket);
     const settings = await getAISettings();
-    const cap = Math.min(settings.maxTokens, 500);
+    const prompt = promptWithinBudget(settings, "analyzeTicket", ticket.description, (description) =>
+      PROMPT_TEMPLATES.analyzeTicket({ ...ticket, description: description ?? null })
+    );
+    const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.analyzeTicket);
     const temperature = settings.temperature;
     const result = await invokeBedrockModel(
       prompt,
@@ -238,9 +284,11 @@ export async function generateResponse(
       .map((article) => `- ${article.title}: ${article.summary}`)
       .join("\n");
 
-    const prompt = PROMPT_TEMPLATES.generateResponse(ticket, knowledgeBase);
     const settings = await getAISettings();
-    const cap = Math.min(settings.maxTokens, 800);
+    const prompt = promptWithinBudget(settings, "generateResponse", ticket.description, (description) =>
+      PROMPT_TEMPLATES.generateResponse({ ...ticket, description: description ?? null }, knowledgeBase)
+    );
+    const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.generateResponse);
     const temperature = settings.temperature;
     const result = await invokeBedrockModel(
       prompt,
@@ -359,9 +407,11 @@ export async function updateKnowledgeBase(
   costEstimate?: CostEstimate;
 }> {
   try {
-    const prompt = PROMPT_TEMPLATES.extractKnowledge(ticket, resolution);
     const settings = await getAISettings();
-    const cap = Math.min(settings.maxTokens, 600);
+    const prompt = promptWithinBudget(settings, "updateKnowledgeBase", ticket.description, (description) =>
+      PROMPT_TEMPLATES.extractKnowledge({ ...ticket, description: description ?? null }, resolution)
+    );
+    const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.updateKnowledgeBase);
     const temperature = settings.temperature;
 
     const result = await invokeBedrockModel(
@@ -581,14 +631,14 @@ export async function exportUsageData(startDate?: string, endDate?: string) {
 
 export async function runTicketAnalysisPrompt(prompt: string) {
   const settings = await getAISettings();
-  const cap = Math.min(settings.maxTokens, 1000);
+  const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.ticketAnalysis);
   const temperature = settings.temperature;
   return invokeBedrockModel(prompt, "ticketAnalysis", cap, temperature);
 }
 
 export async function runAutoResponseForTicketPrompt(prompt: string) {
   const settings = await getAISettings();
-  const cap = Math.min(settings.maxTokens, 1500);
+  const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.autoResponse);
   const temperature = settings.temperature;
   return invokeBedrockModel(prompt, "autoResponse", cap, temperature);
 }

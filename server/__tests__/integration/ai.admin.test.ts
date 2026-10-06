@@ -343,13 +343,30 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
       const unconfirmed = await admin.post("/api/admin/ai-settings/test");
       expect(unconfirmed.status).toBe(400);
       expect(unconfirmed.body.error).toBe("ai_connection_failed");
+      // The error contract is { error, message, details? } (I3): a client branches on error, then shows message.
+      expect(typeof unconfirmed.body.message).toBe("string");
+      expect(unconfirmed.body.message).not.toBe("");
+      expect(unconfirmed.body.details).toEqual({ code: "provider_failure" });
       expect(unconfirmed.body.code).toBe("provider_failure");
 
       aiModelMock.handler = () => Object.assign(new Error("denied"), { name: "AccessDeniedException" });
       const upstream = await admin.post("/api/admin/ai-settings/test");
       expect(upstream.status).toBe(400);
       expect(upstream.body.error).toBe("ai_connection_failed");
+      expect(typeof upstream.body.message).toBe("string");
       expect(JSON.stringify(upstream.body)).not.toContain("fake-secret-for-tests");
+    });
+
+    it("test connection: a rate-limited provider is 429 and follows the error contract", async () => {
+      await configureBedrock();
+      aiModelMock.handler = () => Object.assign(new Error("slow down"), { $metadata: { httpStatusCode: 429 } });
+      const admin = await adminAgent();
+      const res = await admin.post("/api/ai/test-connection");
+      expect(res.status).toBe(429);
+      expect(res.body.error).toBe("ai_connection_failed");
+      expect(typeof res.body.message).toBe("string");
+      expect(res.body.details).toEqual({ code: "rate_limit" });
+      expect(res.body.code).toBe("rate_limit");
     });
 
     it("test connection: with no active provider settings it is 503, and OpenRouter is never called", async () => {
@@ -357,7 +374,21 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
       const res = await admin.post("/api/admin/ai-settings/test");
       expect(res.status).toBe(503);
       expect(res.body.error).toBe("ai_connection_failed");
+      expect(typeof res.body.message).toBe("string");
+      expect(res.body.details).toEqual({ code: "not_configured" });
       expect(res.body.code).toBe("not_configured");
+      expect(aiModelMock.totalCalls()).toBe(0);
+    });
+
+    it("test connection: a missing OpenRouter key is 503 with the same contract, and nothing is called", async () => {
+      await configureBedrock();
+      delete process.env.OPENROUTER_API_KEY;
+      const admin = await adminAgent();
+      const res = await admin.post("/api/ai/test-connection");
+      expect(res.status).toBe(503);
+      expect(res.body.error).toBe("ai_connection_failed");
+      expect(typeof res.body.message).toBe("string");
+      expect(res.body.details).toEqual({ code: "not_configured" });
       expect(aiModelMock.totalCalls()).toBe(0);
     });
   });
