@@ -12,6 +12,8 @@ export default tseslint.config(
       ".superpowers/**",
       "playwright-report/**",
       "test-results/**",
+      // Scratch folders tests create and remove; one left by a killed run must not fail lint.
+      ".tmp-*/**",
     ],
   },
   js.configs.recommended,
