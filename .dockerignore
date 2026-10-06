@@ -46,6 +46,8 @@ jest.config.*
 jest.setup.*
 coverage/
 .nyc_output
+test-results/
+playwright-report/
 
 # IDE and editor files
 .vscode/

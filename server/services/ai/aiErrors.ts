@@ -1,5 +1,37 @@
 import type { Response } from "express";
 
+export type AiModelErrorCode =
+  | "not_configured"
+  | "auth"
+  | "credits"
+  | "timeout"
+  | "rate_limit"
+  | "provider_failure"
+  | "invalid_output"
+  | "empty_output"
+  | "price_unavailable";
+
+/** Provider text is intentionally absent: it can include prompts or credentials. */
+export class AiModelError extends Error {
+  readonly code: AiModelErrorCode;
+  readonly status?: number;
+
+  constructor(code: AiModelErrorCode, status?: number) {
+    super(`AI model error: code=${code}${status === undefined ? "" : ` status=${status}`}`);
+    this.name = "AiModelError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export function mapOpenRouterStatus(status: number): AiModelError {
+  if (status === 401 || status === 403) return new AiModelError("auth", status);
+  if (status === 402) return new AiModelError("credits", status);
+  if (status === 408 || status === 524) return new AiModelError("timeout", status);
+  if (status === 429) return new AiModelError("rate_limit", status);
+  return new AiModelError("provider_failure", status);
+}
+
 /**
  * What may be logged about a failed AI call: the error's type and the HTTP
  * status / code the SDK reports. Never the message (it can echo the prompt),
@@ -12,10 +44,11 @@ export function describeAIError(error: unknown): string {
     code?: unknown;
     isBlocked?: unknown;
     $metadata?: { httpStatusCode?: unknown };
+    status?: unknown;
     $fault?: unknown;
   };
   const parts = [typeof e.name === "string" && e.name ? e.name : "Error"];
-  const status = e.$metadata?.httpStatusCode;
+  const status = e.status ?? e.$metadata?.httpStatusCode;
   if (typeof status === "number") parts.push(`status=${status}`);
   if (typeof e.code === "string" && /^[A-Za-z0-9_.-]{1,64}$/.test(e.code)) parts.push(`code=${e.code}`);
   if (e.isBlocked) parts.push("blocked_by_cost_limit");

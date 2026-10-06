@@ -61,6 +61,29 @@ export const REQUIRED_TABLES: RequiredTable[] = [
       "extracted_text",
     ],
   },
+  // 0023 provider-neutral AI settings. Without this table getAISettings catches the error and
+  // answers isActive:false, so every AI feature switches off silently.
+  {
+    table: "ai_settings",
+    columns: [
+      "model_id",
+      "is_active",
+      "daily_limit_usd",
+      "monthly_limit_usd",
+      "max_tokens_per_request",
+    ],
+  },
+  // 0023 OpenRouter usage accounting: without these columns every model call fails after the
+  // spend, at recordUsage or getDailyUsage.
+  {
+    table: "ai_usage",
+    columns: [
+      "requested_model_id",
+      "generation_id",
+      "verified_cost_usd",
+      "billing_status",
+    ],
+  },
 ];
 
 /** 0014: unique partial index over hashed keys. */

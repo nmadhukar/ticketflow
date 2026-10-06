@@ -9,7 +9,7 @@ import {
   ticketAutoResponses,
   users,
 } from "@shared/schema";
-import { bedrockMock, MOCK_MODEL_ID } from "../mocks/aws-bedrock.mock";
+import { aiModelMock, MOCK_MODEL_ID } from "../mocks/openRouter.mock";
 import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
 import { createTeam, createTicketAs, createUser, loginAs } from "./helpers/fixtures";
@@ -20,8 +20,9 @@ import { isTicketForeignKeyViolation, recordUsage } from "../../services/ai/cost
 import { aiAutoResponseService } from "../../services/ai/aiAutoResponse";
 import * as realtime from "../../realtime/ws";
 
-const KEY_ID = "AKIAFAKEFAKEFAKE"; // the 16-character key id configured below
+const KEY_ID = "AKIAFAKEFAKEFAKE";
 const SECRET = "fake-secret-for-tests";
+const priorOpenRouterApiKey = process.env.OPENROUTER_API_KEY;
 
 describe("AI routes honour settings, access and authorship", () => {
   let ctx: Awaited<ReturnType<typeof createTestApp>>;
@@ -32,11 +33,13 @@ describe("AI routes honour settings, access and authorship", () => {
   });
   afterAll(async () => {
     await ctx.close();
+    if (priorOpenRouterApiKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = priorOpenRouterApiKey;
   });
   beforeEach(async () => {
     await resetDb();
     await ensureAiSystemUser();
-    bedrockMock.reset();
+    aiModelMock.reset();
     errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
   });
   afterEach(() => {
@@ -50,19 +53,14 @@ describe("AI routes honour settings, access and authorship", () => {
     maxTokensPerRequest?: number;
   }) {
     const admin = await createUser({ role: "admin" });
-    await storage.updateBedrockSettings(
-      {
-        bedrockAccessKeyId: KEY_ID,
-        bedrockSecretAccessKey: SECRET,
-        bedrockRegion: "us-east-1",
-        bedrockModelId: MOCK_MODEL_ID,
-        autoResponseEnabled: settings.enabled ?? true,
-        confidenceThreshold: settings.threshold ?? "0.7",
-        maxResponseLength: settings.maxResponseLength ?? 1000,
-        maxTokensPerRequest: settings.maxTokensPerRequest ?? 3000,
-      } as any,
-      admin.id
-    );
+    await storage.updateAISettings({
+      modelId: MOCK_MODEL_ID,
+      isActive: true,
+      autoResponseEnabled: settings.enabled ?? true,
+      confidenceThreshold: settings.threshold ?? "0.7",
+      maxResponseLength: settings.maxResponseLength ?? 1000,
+      maxTokensPerRequest: settings.maxTokensPerRequest ?? 3000,
+    }, admin.id);
     return admin;
   }
 
@@ -95,7 +93,7 @@ describe("AI routes honour settings, access and authorship", () => {
       await setSettings({ enabled: false });
       await seedMatchingArticle();
       const { id } = await customerTicket();
-      expect(bedrockMock.totalCalls()).toBe(0);
+      expect(aiModelMock.totalCalls()).toBe(0);
       expect(await commentsOf(id)).toHaveLength(0);
     });
 
@@ -113,7 +111,7 @@ describe("AI routes honour settings, access and authorship", () => {
       await setSettings({ threshold: "0.90" });
       await seedMatchingArticle();
       const { id } = await customerTicket();
-      expect(bedrockMock.totalCalls()).toBeGreaterThan(0);
+      expect(aiModelMock.totalCalls()).toBeGreaterThan(0);
       expect(await commentsOf(id)).toHaveLength(0);
       const rows = await rowsOf(id);
       expect(rows).toHaveLength(1);
@@ -146,8 +144,8 @@ describe("AI routes honour settings, access and authorship", () => {
     it("the posted comment is cut to maxResponseLength", async () => {
       await setSettings({ maxResponseLength: 100 });
       await seedMatchingArticle();
-      const base = bedrockMock.handler;
-      bedrockMock.handler = (p) =>
+      const base = aiModelMock.handler;
+      aiModelMock.handler = (p) =>
         p.includes("helpful IT support assistant")
           ? JSON.stringify({ response: "x".repeat(400), confidence: 0.9, knowledgeBaseArticles: [] })
           : base(p);
@@ -156,18 +154,19 @@ describe("AI routes honour settings, access and authorship", () => {
       expect(c.content.split("): ")[1]).toHaveLength(100);
     });
 
-    it("Bedrock throwing: ticket still 201, only the error type, status and ticket id are logged", async () => {
+    it("OpenRouter rate limiting: ticket still 201, only the error type, status and ticket id are logged", async () => {
       await setSettings({});
       await seedMatchingArticle();
       const err: any = new Error(`PROMPT-TEXT-SECRET ${KEY_ID} ${SECRET}`);
       err.name = "ThrottlingException";
       err.$metadata = { httpStatusCode: 429 };
-      bedrockMock.handler = () => err;
+      aiModelMock.handler = () => err;
       const { id } = await customerTicket();
       expect(id).toBeGreaterThan(0);
       expect(errorSpy).toHaveBeenCalled();
       const out = logged();
-      expect(out).toContain("ThrottlingException");
+      expect(out).toContain("AiModelError");
+      expect(out).toContain("code=rate_limit");
       expect(out).toContain("status=429");
       expect(out).not.toContain("PROMPT-TEXT-SECRET");
       expect(out).not.toContain(KEY_ID);
@@ -223,7 +222,7 @@ describe("AI routes honour settings, access and authorship", () => {
       // 1) valid-looking JSON start that does not parse (a SyntaxError message quotes the text)
       // 2) plain text with no JSON at all
       for (const bad of [`{"response": ${MARK} broken`, `${MARK} plain words, no json`, `[${MARK}`]) {
-        bedrockMock.handler = () => bad;
+        aiModelMock.handler = () => bad;
         const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
         const { id } = await customerTicket();
         await adminA.post("/api/ai/analyze-ticket").send({ ticketId: id });
@@ -254,7 +253,7 @@ describe("AI routes honour settings, access and authorship", () => {
           const bad = await call(adminA, { ticketId });
           expect([JSON.stringify(ticketId), bad.status]).toEqual([JSON.stringify(ticketId), 400]);
         }
-        expect(bedrockMock.totalCalls()).toBe(0);
+        expect(aiModelMock.totalCalls()).toBe(0);
       });
 
       it("404 for a missing ticket, 403 for a ticket outside the agent's scope, 403 for a customer", async () => {
@@ -262,7 +261,7 @@ describe("AI routes honour settings, access and authorship", () => {
         const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
         const { id, customerA } = await customerTicket();
         const agentA = await loginAs(ctx.app, await createUser({ role: "agent" }));
-        bedrockMock.reset(); // creating the ticket ran the auto-response; count only what the gate lets through
+        aiModelMock.reset(); // creating the ticket ran the auto-response; count only what the gate lets through
 
         const missing = await call(adminA, { ticketId: 999999 });
         expect(missing.status).toBe(404);
@@ -276,14 +275,14 @@ describe("AI routes honour settings, access and authorship", () => {
         const own = await call(customerA, { ticketId: id });
         expect(own.status).toBe(403);
         expect(own.body.error).toBe("forbidden");
-        expect(bedrockMock.totalCalls()).toBe(0);
+        expect(aiModelMock.totalCalls()).toBe(0);
       });
 
       it("admin gets 200, and the model sees the stored ticket, never client-sent text", async () => {
         await setSettings({});
         const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
         const { id } = await customerTicket({ title: "Stored title Alpha", description: "Stored body Beta" });
-        bedrockMock.reset();
+        aiModelMock.reset();
         const res = await call(adminA, {
           ticketId: id,
           title: "CLIENT-SENT-EVIL",
@@ -291,8 +290,8 @@ describe("AI routes honour settings, access and authorship", () => {
           analysis: { complexity: "low" },
         });
         expect(res.status).toBe(200);
-        expect(bedrockMock.seen()).toContain("Stored title Alpha");
-        expect(bedrockMock.seen()).not.toContain("CLIENT-SENT-EVIL");
+        expect(aiModelMock.seen()).toContain("Stored title Alpha");
+        expect(aiModelMock.seen()).not.toContain("CLIENT-SENT-EVIL");
       });
 
       it("a cost-limit block is 429 quota_exceeded in the error contract", async () => {
@@ -300,7 +299,7 @@ describe("AI routes honour settings, access and authorship", () => {
         const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
         const { id } = await customerTicket();
         await setSettings({ maxTokensPerRequest: 1 });
-        bedrockMock.reset();
+        aiModelMock.reset();
         const res = await call(adminA, { ticketId: id });
         expect(res.status).toBe(429);
         expect(res.body.error).toBe("quota_exceeded");
@@ -315,7 +314,7 @@ describe("AI routes honour settings, access and authorship", () => {
       await setSettings({});
       const agentA = await loginAs(ctx.app, await createUser({ role: "agent" }));
       const created = await createTicketAs(agentA);
-      bedrockMock.reset();
+      aiModelMock.reset();
       expect((await agentA.post("/api/ai/analyze-ticket").send({ ticketId: created.body.id })).status).toBe(200);
       expect((await agentA.post("/api/ai/analyze-ticket").send({ ticketId: String(created.body.id) })).status).toBe(200);
     });
@@ -334,14 +333,14 @@ describe("AI routes honour settings, access and authorship", () => {
     it("403 on an inaccessible ticket and for the ticket's own customer; 200 for admin", async () => {
       await setSettings({});
       const { id, customerA } = await customerTicket();
-      bedrockMock.reset();
+      aiModelMock.reset();
       const agentA = await loginAs(ctx.app, await createUser({ role: "agent" }));
       const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
       expect((await agentA.post(`/api/tasks/${id}/auto-response/generate`)).status).toBe(403);
       const own = await customerA.post(`/api/tasks/${id}/auto-response/generate`);
       expect(own.status).toBe(403);
       expect(own.body.error).toBe("forbidden");
-      expect(bedrockMock.totalCalls()).toBe(0);
+      expect(aiModelMock.totalCalls()).toBe(0);
       expect((await adminA.post(`/api/tasks/${id}/auto-response/generate`)).status).toBe(200);
     });
 
@@ -364,7 +363,7 @@ describe("AI routes honour settings, access and authorship", () => {
       await setSettings({});
       const { id } = await customerTicket();
       await setSettings({ maxTokensPerRequest: 1 });
-      bedrockMock.reset();
+      aiModelMock.reset();
       const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
       const res = await adminA.post(`/api/tasks/${id}/auto-response/generate`);
       expect(res.status).toBe(429);
@@ -490,7 +489,7 @@ describe("AI routes honour settings, access and authorship", () => {
       const denied = await search(customerA, "?query=printer");
       expect(denied.status).toBe(403);
       expect(denied.body.error).toBe("forbidden");
-      expect(bedrockMock.totalCalls()).toBe(0);
+      expect(aiModelMock.totalCalls()).toBe(0);
       expect((await search(agentA, "?query=printer")).status).toBe(200);
     });
 
@@ -502,7 +501,7 @@ describe("AI routes honour settings, access and authorship", () => {
         expect([qs.slice(0, 40), res.status, res.body.error]).toEqual([qs.slice(0, 40), 400, "validation_failed"]);
       }
       expect((await search(agentA, `?query=${"a".repeat(500)}`)).status).toBe(200);
-      expect(bedrockMock.totalCalls()).toBe(0); // the 400s never reached the model
+      expect(aiModelMock.totalCalls()).toBe(0); // the 400s never reached the model
     });
 
     it("a cost-limit block is 429 quota_exceeded, and only the error type is logged", async () => {
@@ -667,7 +666,7 @@ describe("AI routes honour settings, access and authorship", () => {
   describe("cost rows survive a deleted ticket", () => {
     it("recordUsage with a ticket id that no longer exists stores the row with ticket_id NULL", async () => {
       const spy = jest.spyOn(console, "log").mockImplementation(() => undefined);
-      await recordUsage("mock-model", 10, 20, "analyzeTicket", undefined, "987654");
+      await recordUsage({ modelId: "mock-model", inputTokens: 10, outputTokens: 20, estimatedCost: 0.001, operation: "analyzeTicket", ticketId: "987654" });
       spy.mockRestore();
       const rows = await db.select().from(aiUsage);
       expect(rows).toHaveLength(1);
@@ -680,7 +679,7 @@ describe("AI routes honour settings, access and authorship", () => {
       const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
       const t = await createTicketAs(adminA);
       jest.spyOn(console, "log").mockImplementation(() => undefined);
-      await recordUsage("mock-model", 10, 20, "analyzeTicket", undefined, String(t.body.id));
+      await recordUsage({ modelId: "mock-model", inputTokens: 10, outputTokens: 20, estimatedCost: 0.001, operation: "analyzeTicket", ticketId: String(t.body.id) });
       const rows = await db.select().from(aiUsage);
       expect(rows[0].ticketId).toBe(t.body.id);
     });
@@ -689,7 +688,7 @@ describe("AI routes honour settings, access and authorship", () => {
       const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
       const t = await createTicketAs(adminA);
       jest.spyOn(console, "log").mockImplementation(() => undefined);
-      await recordUsage("mock-model", 10, 20, "analyzeTicket", "no-such-user-id", String(t.body.id));
+      await expect(recordUsage({ modelId: "mock-model", inputTokens: 10, outputTokens: 20, estimatedCost: 0.001, operation: "analyzeTicket", userId: "no-such-user-id", ticketId: String(t.body.id) })).rejects.toMatchObject({ code: "23503" });
       expect(await db.select().from(aiUsage)).toHaveLength(0);
       expect(logged()).toContain("Error recording usage");
     });
@@ -724,8 +723,8 @@ describe("AI routes honour settings, access and authorship", () => {
     it("the stored row, the create-time comment and an applied draft are all cut to maxResponseLength", async () => {
       await setSettings({ maxResponseLength: 100 });
       await seedMatchingArticle();
-      const base = bedrockMock.handler;
-      bedrockMock.handler = (p) =>
+      const base = aiModelMock.handler;
+      aiModelMock.handler = (p) =>
         p.includes("helpful IT support assistant")
           ? JSON.stringify({ response: "y".repeat(400), confidence: 0.9, knowledgeBaseArticles: [] })
           : base(p);
@@ -801,7 +800,7 @@ describe("AI routes honour settings, access and authorship", () => {
       const spies = (["error", "warn", "log", "info", "debug"] as const).map((m) =>
         jest.spyOn(console, m).mockImplementation(() => undefined)
       );
-      bedrockMock.handler = (p) => {
+      aiModelMock.handler = (p) => {
         if (p.includes("expert knowledge management AI"))
           return JSON.stringify([
             {
@@ -844,7 +843,7 @@ describe("AI routes honour settings, access and authorship", () => {
       // chat: the model errors with a message carrying the marker
       const chat = await adminA.post("/api/chat").send({ sessionId: "s-marker", message: "how do I reset my password?" });
       expect([200, 500]).toContain(chat.status);
-      expect(bedrockMock.prompts.length).toBeGreaterThan(0);
+      expect(aiModelMock.prompts.length).toBeGreaterThan(0);
 
       const everything = JSON.stringify(
         spies.flatMap((s) => s.mock.calls.map((c: unknown[]) => c.map((a) => (typeof a === "string" ? a : JSON.stringify(a)))))

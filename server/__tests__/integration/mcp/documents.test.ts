@@ -4,6 +4,7 @@ import { companyPolicies, helpDocuments, knowledgeArticles, userGuideCategories,
 import { db } from "../../../storage/db";
 import { backfillDocumentText, startDocumentTextBackfill } from "../../../services/documents/backfillText";
 import { fillHelpDocumentText } from "../../../services/documents/documentText";
+import { activeExtractions } from "../../../services/documents/extractText";
 import { MCP_INSTRUCTIONS } from "../../../mcp/server";
 import { createTestApp } from "../helpers/testApp";
 import { resetDb } from "../helpers/testDb";
@@ -712,6 +713,12 @@ describe("startup backfill (R90)", () => {
       const [b1, b2, queued] = [await insert("bomb1"), await insert("bomb2"), await insert("queued")];
       // Two bomb parses hold both extractor slots; the third upload waits in the queue past its time limit.
       const holders = [fillHelpDocumentText(b1.id, { filename: "b1.pdf", data: bomb }), fillHelpDocumentText(b2.id, { filename: "b2.pdf", data: bomb })];
+      // Wait until both bombs hold their slots: otherwise, under load, the queued upload could take a
+      // slot first (each fill awaits its DB claim before asking for one) and parse in time.
+      for (const until = Date.now() + 10_000; activeExtractions() < 2 && Date.now() < until; ) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      expect(activeExtractions()).toBe(2);
       const text = await fillHelpDocumentText(queued.id, { filename: "q.docx", data: await makeDocx(["queued text"]) }, { timeoutMs: 200 });
       expect(text).toBeNull();
       await Promise.all(holders);

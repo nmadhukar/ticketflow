@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import type { Express } from "express";
+import { parse as parseYaml } from "yaml";
 import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
 import { createUser, loginAs } from "./helpers/fixtures";
@@ -15,6 +16,10 @@ import { createUser, loginAs } from "./helpers/fixtures";
 const ROOT = path.resolve(__dirname, "../../..");
 const collection = JSON.parse(fs.readFileSync(path.join(ROOT, "TicketFlow_API_Collection.postman_collection.json"), "utf8"));
 const reference = fs.readFileSync(path.join(ROOT, "API_ENDPOINTS_REFERENCE.md"), "utf8");
+const openApi = parseYaml(fs.readFileSync(path.join(ROOT, "docs/openapi/ticketflow.yaml"), "utf8"));
+const routeManifest = JSON.parse(fs.readFileSync(path.join(ROOT, "docs/openapi/route-manifest.json"), "utf8")) as {
+  inScope: Array<{ method: string; path: string }>;
+};
 
 type PostmanItem = { name: string; item?: PostmanItem[]; request?: { method: string; url: { raw: string }; body?: { raw?: string } } };
 function flatten(items: PostmanItem[], out: PostmanItem[] = []): PostmanItem[] {
@@ -81,6 +86,25 @@ describe("documented contract vs the running API (P3)", () => {
   });
 
   describe("every documented route exists", () => {
+    it("OpenAPI paths match the scoped route manifest and registered methods", () => {
+      const routes = registeredRoutes(ctx.app);
+      const manifestEntries = routeManifest.inScope.map(({ method, path: routePath }) =>
+        `${method.toUpperCase()} ${routePath.replace(/:([^/]+)/g, "{$1}")}`
+      ).sort();
+      const documentEntries = Object.entries(openApi.paths as Record<string, Record<string, unknown>>)
+        .flatMap(([routePath, operations]) => Object.keys(operations)
+          .filter((method) => /^(get|post|put|patch|delete)$/i.test(method))
+          .map((method) => `${method.toUpperCase()} ${routePath}`))
+        .sort();
+      expect(documentEntries).toEqual(manifestEntries);
+      expect(manifestEntries).toContain("POST /api/mcp");
+      expect(manifestEntries).toContain("POST /api/ai/test-connection");
+      const missing = routeManifest.inScope.filter(({ method, path: routePath }) =>
+        !isRegistered(routes, method.toUpperCase(), documentedSegments(routePath))
+      );
+      expect(missing).toEqual([]);
+    });
+
     it("every request in the Postman collection is a registered method + path", () => {
       const routes = registeredRoutes(ctx.app);
       expect(routes.length).toBeGreaterThan(100);

@@ -12,7 +12,13 @@ export interface AISettings {
   escalationEnabled: boolean;
   escalationTeamId?: number;
 
-  bedrockModel: string;
+  modelId: string;
+  isActive: boolean;
+  dailyLimitUsd: number;
+  monthlyLimitUsd: number;
+  maxTokensPerRequest: number;
+  openRouterKeyConfigured: boolean;
+  bedrockModel?: string;
   temperature: number; // 0..1
   maxTokens: number;
 }

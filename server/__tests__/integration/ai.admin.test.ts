@@ -2,6 +2,7 @@ import request from "supertest";
 import { eq } from "drizzle-orm";
 import {
   aiChatMessages,
+  aiSettings,
   bedrockSettings,
   faqCache,
   helpDocuments,
@@ -9,7 +10,7 @@ import {
   learningQueue,
   tasks,
 } from "@shared/schema";
-import { bedrockMock, MOCK_MODEL_ID } from "../mocks/aws-bedrock.mock";
+import { aiModelMock, MOCK_MODEL_ID } from "../mocks/openRouter.mock";
 import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
 import { createTeam, createTicketAs, createUser, loginAs } from "./helpers/fixtures";
@@ -20,23 +21,26 @@ import { ensureAiSystemUser } from "../../utils/aiSystemUser";
 type Agent = ReturnType<typeof request.agent>;
 
 /**
- * The admin and chat side of the AI features, with Bedrock faked at the SDK boundary:
+ * The admin and chat side of the AI features, with OpenRouter faked at the HTTP boundary:
  * I5 chat, I6 admin AI settings and the connection test, I8 (superseded: the manual
  * retrieval path that replaces Knowledge Base sync), I9 learning from resolved tickets,
  * S5 the FAQ cache.
  */
 describe("AI chat, admin settings, learning and the FAQ cache", () => {
+  const priorOpenRouterApiKey = process.env.OPENROUTER_API_KEY;
   let ctx: Awaited<ReturnType<typeof createTestApp>>;
   beforeAll(async () => {
     ctx = await createTestApp();
   });
   afterAll(async () => {
     await ctx.close();
+    if (priorOpenRouterApiKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = priorOpenRouterApiKey;
   });
   beforeEach(async () => {
     await resetDb();
     await ensureAiSystemUser();
-    bedrockMock.reset();
+    aiModelMock.reset();
     // Routes log failures by type; keep the run output readable.
     jest.spyOn(console, "error").mockImplementation(() => undefined);
     jest.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -62,6 +66,8 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
       } as any,
       admin.id
     );
+    await storage.updateAISettings({ modelId: MOCK_MODEL_ID, isActive: true, autoResponseEnabled: true,
+      confidenceThreshold: "0.7", maxResponseLength: 1000, maxTokensPerRequest: 3000, ...extra } as any, admin.id);
     return admin;
   }
   const adminAgent = async () => loginAs(ctx.app, await createUser({ role: "admin" }));
@@ -70,8 +76,8 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
   const CHAT_ANSWER =
     "To reset your password open the sign-in page, choose Forgot password and follow the link in the email.";
   function answerChatWith(text: string) {
-    const base = bedrockMock.handler;
-    bedrockMock.handler = (p) => (p.includes("helpful assistant for TicketFlow") ? text : base(p));
+    const base = aiModelMock.handler;
+    aiModelMock.handler = (p) => (p.includes("helpful assistant for TicketFlow") ? text : base(p));
   }
 
   // ---------------------------------------------------------------- I5
@@ -91,7 +97,7 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
       expect(res.body.message.role).toBe("assistant");
       expect(res.body.message.sessionId).toBe("sess-1");
       expect(res.body.message.content).toContain("Password reset guide");
-      expect(bedrockMock.totalCalls()).toBe(0);
+      expect(aiModelMock.totalCalls()).toBe(0);
 
       const history = await agent.get("/api/chat/sess-1");
       expect(history.status).toBe(200);
@@ -118,7 +124,7 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
       expect(res.status).toBe(200);
       expect(res.body.message.content).toBe(CHAT_ANSWER);
       expect(res.body.usageData.totalTokens).toBe(30); // the mock reports 10 in + 20 out
-      expect(bedrockMock.seen()).toContain("How do I reset my password?");
+      expect(aiModelMock.seen()).toContain("How do I reset my password?");
 
       const saved = await agent.get("/api/chat/sess-2");
       expect(saved.body.map((m: any) => m.role)).toEqual(["user", "assistant"]);
@@ -133,7 +139,7 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
         isPublished: true,
         status: "published",
       });
-      bedrockMock.handler = () => new Error("throttled");
+      aiModelMock.handler = () => new Error("throttled");
       const agent = await asRole("agent");
 
       const res = await agent.post("/api/chat").send({ sessionId: "sess-3", message: "printer jam" });
@@ -174,13 +180,13 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
 
       const first = await agent.post("/api/chat").send({ sessionId: "c1", message: question });
       expect(first.body.fromCache).toBeUndefined();
-      expect(bedrockMock.totalCalls()).toBe(1);
+      expect(aiModelMock.totalCalls()).toBe(1);
 
       const second = await agent.post("/api/chat").send({ sessionId: "c2", message: question });
       expect(second.status).toBe(200);
       expect(second.body.fromCache).toBe(true);
       expect(second.body.message.content).toBe(CHAT_ANSWER);
-      expect(bedrockMock.totalCalls()).toBe(1); // the model was not asked again
+      expect(aiModelMock.totalCalls()).toBe(1); // the model was not asked again
 
       const admin = await adminAgent();
       const listed = await admin.get("/api/faq-cache");
@@ -196,7 +202,7 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
 
       // After clearing, the same question goes to the model again.
       await agent.post("/api/chat").send({ sessionId: "c3", message: question }).expect(200);
-      expect(bedrockMock.totalCalls()).toBe(2);
+      expect(aiModelMock.totalCalls()).toBe(2);
     });
 
     it("the list honours ?limit and orders by hits", async () => {
@@ -259,7 +265,7 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
       // The refused PUT changed nothing.
       const [row] = await db.select().from(bedrockSettings);
       expect(Number(row.confidenceThreshold)).toBe(0.7);
-      expect(bedrockMock.totalCalls()).toBe(0);
+      expect(aiModelMock.totalCalls()).toBe(0);
     });
 
     it("an admin reads the defaults, updates the threshold and the auto-response switch, and reads them back", async () => {
@@ -280,7 +286,7 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
       // Other settings are kept.
       expect(again.body.maxResponseLength).toBe(initial.body.maxResponseLength);
 
-      const [row] = await db.select().from(bedrockSettings);
+      const [row] = await db.select().from(aiSettings);
       expect(Number(row.confidenceThreshold)).toBe(0.55);
       expect(row.autoResponseEnabled).toBe(false);
     });
@@ -311,47 +317,79 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
       await db.insert(knowledgeArticles).values({ title: "Printerjam fix", content: "How to clear a printerjam", isPublished: true, status: "published" });
       const admin = await adminAgent();
       await admin.put("/api/admin/ai-settings").send({ autoResponseEnabled: false }).expect(200);
-      bedrockMock.reset();
+      aiModelMock.reset();
 
       const customerA = await asRole("customer");
       expect((await createTicketAs(customerA, { title: "Printerjam broken" })).status).toBe(201);
-      expect(bedrockMock.totalCalls()).toBe(0);
+      expect(aiModelMock.totalCalls()).toBe(0);
     });
 
     it("test connection: connected is 200 {success:true}", async () => {
       await configureBedrock();
-      const base = bedrockMock.handler;
-      bedrockMock.handler = (p) => (p.includes("this is a test") ? "Connection successful" : base(p));
+      const base = aiModelMock.handler;
+      aiModelMock.handler = (p) => (p.includes("this is a test") ? "Connection successful" : base(p));
       const admin = await adminAgent();
       const res = await admin.post("/api/admin/ai-settings/test");
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ success: true });
-      expect(bedrockMock.totalCalls()).toBe(1);
+      expect(aiModelMock.totalCalls()).toBe(1);
     });
 
     it("test connection: a model that does not confirm, or an upstream error, is a clear 400 (it used to say success)", async () => {
       await configureBedrock();
       const admin = await adminAgent();
 
-      bedrockMock.handler = () => "I cannot do that";
+      aiModelMock.handler = () => "I cannot do that";
       const unconfirmed = await admin.post("/api/admin/ai-settings/test");
       expect(unconfirmed.status).toBe(400);
-      expect(unconfirmed.body.error).toBe("bedrock_test_failed");
+      expect(unconfirmed.body.error).toBe("ai_connection_failed");
+      // The error contract is { error, message, details? } (I3): a client branches on error, then shows message.
       expect(typeof unconfirmed.body.message).toBe("string");
+      expect(unconfirmed.body.message).not.toBe("");
+      expect(unconfirmed.body.details).toEqual({ code: "provider_failure" });
+      expect(unconfirmed.body.code).toBe("provider_failure");
 
-      bedrockMock.handler = () => Object.assign(new Error("denied"), { name: "AccessDeniedException" });
+      aiModelMock.handler = () => Object.assign(new Error("denied"), { name: "AccessDeniedException" });
       const upstream = await admin.post("/api/admin/ai-settings/test");
       expect(upstream.status).toBe(400);
-      expect(upstream.body.error).toBe("bedrock_test_failed");
+      expect(upstream.body.error).toBe("ai_connection_failed");
+      expect(typeof upstream.body.message).toBe("string");
       expect(JSON.stringify(upstream.body)).not.toContain("fake-secret-for-tests");
     });
 
-    it("test connection: with no credentials stored it is 400, and Bedrock is never called", async () => {
+    it("test connection: a rate-limited provider is 429 and follows the error contract", async () => {
+      await configureBedrock();
+      aiModelMock.handler = () => Object.assign(new Error("slow down"), { $metadata: { httpStatusCode: 429 } });
+      const admin = await adminAgent();
+      const res = await admin.post("/api/ai/test-connection");
+      expect(res.status).toBe(429);
+      expect(res.body.error).toBe("ai_connection_failed");
+      expect(typeof res.body.message).toBe("string");
+      expect(res.body.details).toEqual({ code: "rate_limit" });
+      expect(res.body.code).toBe("rate_limit");
+    });
+
+    it("test connection: with no active provider settings it is 503, and OpenRouter is never called", async () => {
       const admin = await adminAgent();
       const res = await admin.post("/api/admin/ai-settings/test");
-      expect(res.status).toBe(400);
-      expect(res.body.error).toBe("bedrock_test_failed");
-      expect(bedrockMock.totalCalls()).toBe(0);
+      expect(res.status).toBe(503);
+      expect(res.body.error).toBe("ai_connection_failed");
+      expect(typeof res.body.message).toBe("string");
+      expect(res.body.details).toEqual({ code: "not_configured" });
+      expect(res.body.code).toBe("not_configured");
+      expect(aiModelMock.totalCalls()).toBe(0);
+    });
+
+    it("test connection: a missing OpenRouter key is 503 with the same contract, and nothing is called", async () => {
+      await configureBedrock();
+      delete process.env.OPENROUTER_API_KEY;
+      const admin = await adminAgent();
+      const res = await admin.post("/api/ai/test-connection");
+      expect(res.status).toBe(503);
+      expect(res.body.error).toBe("ai_connection_failed");
+      expect(typeof res.body.message).toBe("string");
+      expect(res.body.details).toEqual({ code: "not_configured" });
+      expect(aiModelMock.totalCalls()).toBe(0);
     });
   });
 
@@ -380,13 +418,13 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
       expect(res.status).toBe(200);
       expect(res.body.map((r: any) => r.article.title)).toEqual(["Printer jam fix"]);
       expect(res.body[0].relevanceScore).toBe(50);
-      expect(bedrockMock.totalCalls()).toBe(0);
+      expect(aiModelMock.totalCalls()).toBe(0);
     });
 
     it("search falls back to manual retrieval when the model is down", async () => {
       await configureBedrock();
       await db.insert(knowledgeArticles).values({ title: "Printer jam fix", content: "Open the rear tray", isPublished: true, status: "published" });
-      bedrockMock.handler = () => new Error("model down");
+      aiModelMock.handler = () => new Error("model down");
       const agent = await asRole("agent");
       const res = await agent.get("/api/ai/knowledge-search?query=printer");
       expect(res.status).toBe(200);
@@ -404,8 +442,8 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
       variations: ["slow login"],
     };
     function modelWritesArticles() {
-      const base = bedrockMock.handler;
-      bedrockMock.handler = (p) => (p.includes("Create a knowledge base article from this resolved ticket") ? JSON.stringify(ARTICLE) : base(p));
+      const base = aiModelMock.handler;
+      aiModelMock.handler = (p) => (p.includes("Create a knowledge base article from this resolved ticket") ? JSON.stringify(ARTICLE) : base(p));
     }
 
     /** A ticket with a resolution comment the learner can use (two comments, one long one saying "fixed"). */
@@ -428,7 +466,7 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
       const admin = await adminAgent();
       await admin.put("/api/admin/ai-settings").send({ autoLearnEnabled: true, minResolutionScore: 0, articleApprovalRequired: true }).expect(200);
       const id = await ticketWithResolution(admin);
-      bedrockMock.reset();
+      aiModelMock.reset();
       modelWritesArticles();
 
       const res = await admin.patch(`/api/tasks/${id}`).send({ status: "resolved" });
@@ -439,7 +477,7 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
       expect(learned).toHaveLength(1);
       expect(learned[0].title).toBe(ARTICLE.title);
       expect(learned[0].isPublished).toBe(false); // approval required: not visible to readers yet
-      expect(bedrockMock.seen()).toContain("Database timeout");
+      expect(aiModelMock.seen()).toContain("Database timeout");
     });
 
     it("with approval off the learned article is published", async () => {
@@ -459,11 +497,11 @@ describe("AI chat, admin settings, learning and the FAQ cache", () => {
       const admin = await adminAgent();
       await admin.put("/api/admin/ai-settings").send({ autoLearnEnabled: false }).expect(200);
       const id = await ticketWithResolution(admin);
-      bedrockMock.reset();
+      aiModelMock.reset();
       modelWritesArticles();
       await admin.patch(`/api/tasks/${id}`).send({ status: "resolved" }).expect(200);
       expect(await articlesFor(id)).toHaveLength(0);
-      expect(bedrockMock.totalCalls()).toBe(0);
+      expect(aiModelMock.totalCalls()).toBe(0);
     });
 
     it("a ticket without a usable resolution learns nothing; the update still succeeds", async () => {

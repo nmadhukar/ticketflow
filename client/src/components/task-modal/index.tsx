@@ -106,7 +106,7 @@ const getPriorityIcon = (priority: string) => {
     case "low":
       return <CheckCircle className="h-4 w-4 text-green-500" />;
     default:
-      return <CircleDot className="h-4 w-4 text-slate-400" />;
+      return <CircleDot className="h-4 w-4 text-muted-foreground" />;
   }
 };
 
@@ -125,24 +125,24 @@ const getCategoryIcon = (category: string) => {
     case "request":
       return <FileText className="h-4 w-4 text-teal-500" />;
     default:
-      return <Tag className="h-4 w-4 text-slate-400" />;
+      return <Tag className="h-4 w-4 text-muted-foreground" />;
   }
 };
 
 const getStatusColor = (status: string) => {
   switch (status) {
     case "open":
-      return "bg-blue-100 text-blue-800 border-blue-200";
+      return "bg-primary/10 text-blue-800 border-blue-200";
     case "in_progress":
       return "bg-yellow-100 text-yellow-800 border-yellow-200";
     case "resolved":
       return "bg-green-100 text-green-800 border-green-200";
     case "closed":
-      return "bg-slate-100 text-slate-800 border-slate-200";
+      return "bg-muted text-foreground border-border";
     case "on_hold":
       return "bg-orange-100 text-orange-800 border-orange-200";
     default:
-      return "bg-slate-100 text-slate-800 border-slate-200";
+      return "bg-muted text-foreground border-border";
   }
 };
 
@@ -266,6 +266,8 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     teamId: "",
   });
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [initializedFor, setInitializedFor] = useState<string | null>(null);
+  const formKey = task?.id ? `ticket-${task.id}` : "create";
 
   // Load meta for create/edit (role-scoped values and permissions)
   const metaUrl = task?.id
@@ -284,12 +286,17 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   const meta: any = metaQuery.data;
 
   // Always load the freshest task details when editing to ensure full payload
-  const { data: taskDetails } = useQuery<any>({
+  const taskDetailsQuery = useQuery<any>({
     queryKey: [task?.id ? `/api/tasks/${task.id}` : undefined],
     enabled: !!task?.id && isOpen,
     staleTime: 0,
     retry: false,
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/tasks/${task.id}`);
+      return res.json();
+    },
   });
+  const taskDetails = taskDetailsQuery.data;
 
   // Optional: debug in development
 
@@ -303,43 +310,25 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   const permissions = meta?.permissions || {};
   const isCustomer = (user as any)?.role === "customer";
 
-  // Admin fallback: ensure admins are never blocked by missing/lagging meta
-  const effectivePermissions = (() => {
-    if ((user as any)?.role === "admin") {
-      return {
-        ...permissions,
-        allowedFields: [
-          "title",
-          "description",
-          "category",
-          "priority",
-          "status",
-          "notes",
-          "assigneeId",
-          "assigneeType",
-          "assigneeTeamId",
-          "dueDate",
-        ],
-        allowedAssigneeTypes: ["user", "team"],
-      } as any;
-    }
-    return permissions as any;
-  })();
+  const effectivePermissions = permissions;
+  const metadataValid = Array.isArray(meta?.categories) &&
+    Array.isArray(meta?.priorities) && Array.isArray(permissions.allowedFields);
+  const dataReady = metaQuery.isSuccess && metadataValid &&
+    (!task?.id || (taskDetailsQuery.isSuccess && !!taskDetails));
+  const formReady = dataReady && initializedFor === formKey;
+  const formLoadError = metaQuery.isError || (metaQuery.isSuccess && !metadataValid) ||
+    (!!task?.id && (taskDetailsQuery.isError || (taskDetailsQuery.isSuccess && !taskDetails)));
 
   const canEditField = (field: string) => {
-    // Admins always allowed
-    if ((user as any)?.role === "admin") return true;
-    // On create, allow all fields and rely on server-side validation
-    if (!task) return true;
-    const allowed: string[] | undefined = effectivePermissions?.allowedFields;
-    if (!Array.isArray(allowed)) return true; // fail-open for UX; server still enforces
+    if (!formReady) return false;
+    const allowed: string[] = task
+      ? effectivePermissions.allowedFields
+      : fallbackAllowedByRoleCreate[user?.role || ""] || [];
     return allowed.includes(field);
   };
 
   const canEditAnything = (() => {
-    if (!task) return true; // creating is always editable (server validates)
-    if ((user as any)?.role === "admin") return true;
-    if (!Array.isArray(permissions?.allowedFields)) return true;
+    if (!formReady) return false;
     return editableKeys.some((k) => canEditField(k));
   })();
 
@@ -351,8 +340,8 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         "departmentId",
         "teamId",
         "dueDate",
-      ].some((k) => canEditField(k)) || (user as any)?.role === "admin"
-    : true;
+      ].some((k) => canEditField(k))
+    : formReady;
 
   // Prefer freshest task details for displaying read-only values
   const displayTask: TaskMinimal | undefined = (taskDetails || task) as any;
@@ -361,6 +350,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
   useEffect(() => {
     // Clear form when modal closes
     if (!isOpen) {
+      setInitializedFor(null);
+      setSelectedFiles([]);
+      setAssignmentMode(isCustomer ? "team" : "user");
       setFormData({
         title: "",
         description: "",
@@ -375,7 +367,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         departmentId: "",
         teamId: "",
       });
-    } else {
+    } else if (dataReady && initializedFor !== formKey) {
       // Only process when modal is open and we have task data
       const current = (taskDetails || task) as TaskMinimal | undefined;
 
@@ -430,8 +422,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
         };
         setFormData(dataToSet);
       }
+      setInitializedFor(formKey);
     }
-  }, [taskDetails?.id, task?.id, isOpen, metaQuery.isFetched]);
+  }, [taskDetails, task, isOpen, dataReady, initializedFor, formKey, teams, isCustomer]);
 
   const createTaskMutation = useMutation({
     mutationFn: async (taskData: any) => {
@@ -647,6 +640,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formReady || !canEditAnything || createTaskMutation.isPending || updateTaskMutation.isPending) return;
 
     if (!formData.title.trim()) {
       toast({
@@ -820,8 +814,8 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
     const roleKey = (user?.role || "").toString();
     const allowedFieldsForEdit = Array.isArray(permissions?.allowedFields)
       ? (permissions?.allowedFields as string[])
-      : fallbackAllowedByRoleEdit[roleKey];
-    const allowedFieldsForCreate = fallbackAllowedByRoleCreate[roleKey];
+      : [];
+    const allowedFieldsForCreate = fallbackAllowedByRoleCreate[roleKey] || [];
 
     // Prune payload according to context (create vs edit)
     const pruneToAllowed = (payload: any, allowed: string[]) => {
@@ -910,28 +904,28 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl h-[90vh] overflow-hidden p-0 flex flex-col">
+      <DialogContent className="max-w-4xl max-h-[90dvh] h-[90dvh] overflow-hidden p-0 flex flex-col">
         <div className="flex flex-col h-full">
           {/* Header */}
-          <div className="border-b bg-slate-50 px-6 py-4">
+          <div className="border-b bg-muted/40 px-4 pr-12 py-4 sm:px-6 sm:pr-12">
             <DialogHeader>
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-100 rounded-lg">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="p-2 bg-primary/10 rounded-lg">
                   {task ? (
-                    <FileText className="h-5 w-5 text-blue-600" />
+                    <FileText className="h-5 w-5 text-primary" />
                   ) : (
-                    <Plus className="h-5 w-5 text-blue-600" />
+                    <Plus className="h-5 w-5 text-primary" />
                   )}
                 </div>
                 <div className="flex-1">
-                  <DialogTitle className="text-xl font-semibold text-slate-900">
+                  <DialogTitle className="text-xl font-semibold text-foreground">
                     {task
                       ? t("tickets:modal.editTitle", {
                           ticketNumber: task.ticketNumber || "",
                         })
                       : t("tickets:modal.createTitle")}
                   </DialogTitle>
-                  <DialogDescription className="text-slate-600 mt-1">
+                  <DialogDescription asChild className="text-muted-foreground mt-1"><div>
                     {task ? (
                       <div className="space-y-1">
                         <span>{t("tickets:modal.editDesc")}</span>
@@ -980,7 +974,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                         })}
                       </span>
                     )}
-                  </DialogDescription>
+                  </div></DialogDescription>
                 </div>
                 {task && (
                   <Badge className={`${getStatusColor(task.status)} border`}>
@@ -992,13 +986,13 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
           </div>
 
           {/* Content */}
-          <div className="flex-1 overflow-hidden">
+          <div className="min-h-0 flex-1 overflow-hidden">
             <Tabs defaultValue="details" className="h-full flex flex-col">
               <div className="border-b px-6">
                 <TabsList className="bg-transparent h-12 p-0 w-full justify-start">
                   <TabsTrigger
                     value="details"
-                    className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
+                    className="data-[state=active]:bg-background data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-primary rounded-none px-4 py-2"
                   >
                     <FileText className="h-4 w-4 mr-2" />
                     {t("tickets:modal.tabs.details")}
@@ -1006,7 +1000,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                   {!task && (
                     <TabsTrigger
                       value="attachments"
-                      className="data-[state=active]:bg-white data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-blue-500 rounded-none px-4 py-2"
+                      className="data-[state=active]:bg-background data-[state=active]:shadow-sm border-b-2 border-transparent data-[state=active]:border-primary rounded-none px-4 py-2"
                     >
                       <Paperclip className="h-4 w-4 mr-2" />
                       {t("tickets:modal.tabs.attachments")}
@@ -1015,14 +1009,26 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                 </TabsList>
               </div>
 
-              <div className="flex-1 overflow-y-auto">
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                {formLoadError ? (
+                  <div role="alert" className="mx-4 mt-4 rounded-lg border border-destructive/30 p-4 text-sm">
+                    <p>Could not load ticket options or permissions. Your draft is preserved.</p>
+                    <Button type="button" variant="outline" className="mt-3" onClick={() => {
+                      void metaQuery.refetch();
+                      if (task?.id) void taskDetailsQuery.refetch();
+                    }}>Retry ticket form</Button>
+                  </div>
+                ) : !formReady ? (
+                  <p role="status" className="px-6 py-4 text-sm text-muted-foreground">Loading ticket options and permissions…</p>
+                ) : null}
                 <TabsContent value="details" className="mt-0 h-full">
-                  <form onSubmit={handleSubmit} className="p-6 space-y-6">
+                  <form onSubmit={handleSubmit} className="p-4 sm:p-6">
+                    <fieldset disabled={!formReady} className="min-w-0 space-y-6">
                     {/* Essential Information */}
-                    <Card className="border-l-4 border-l-blue-500">
+                    <Card className="border-l-4 border-l-primary">
                       <CardHeader className="pb-3">
                         <CardTitle className="text-lg flex items-center gap-2">
-                          <Target className="h-5 w-5 text-blue-600" />
+                          <Target className="h-5 w-5 text-primary" />
                           {t("tickets:modal.sections.essentialInfo")}
                         </CardTitle>
                       </CardHeader>
@@ -1031,7 +1037,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                         <div>
                           <Label
                             htmlFor="title"
-                            className="text-sm font-medium text-slate-700 flex items-center gap-2"
+                            className="text-sm font-medium text-foreground flex items-center gap-2"
                           >
                             <FileText className="h-4 w-4" />
                             {t("tickets:modal.fields.taskTitle")}
@@ -1047,7 +1053,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                             required
                             readOnly={!canEditField("title")}
                           />
-                          <p className="text-xs text-slate-500 mt-1">
+                          <p className="text-xs text-muted-foreground mt-1">
                             {t("tickets:modal.help.titleHint", {
                               defaultValue: "Be specific and descriptive",
                             })}
@@ -1057,7 +1063,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                         <div>
                           <Label
                             htmlFor="description"
-                            className="text-sm font-medium text-slate-700 flex items-center gap-2"
+                            className="text-sm font-medium text-foreground flex items-center gap-2"
                           >
                             <FileText className="h-4 w-4" />
                             {t("tickets:modal.fields.description")}
@@ -1075,17 +1081,17 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                             className="mt-2 resize-none"
                             readOnly={!canEditField("description")}
                           />
-                          <p className="text-xs text-slate-500 mt-1">
+                          <p className="text-xs text-muted-foreground mt-1">
                             Include context, requirements, and acceptance
                             criteria
                           </p>
                         </div>
 
-                        <div className="grid grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                           <div>
                             <Label
                               htmlFor="category"
-                              className="text-sm font-medium text-slate-700 flex items-center gap-2"
+                              className="text-sm font-medium text-foreground flex items-center gap-2"
                             >
                               <Tag className="h-4 w-4" />
                               {t("tickets:modal.fields.category")}
@@ -1103,7 +1109,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                   handleInputChange("category", value)
                                 }
                               >
-                                <SelectTrigger className="mt-2">
+                                <SelectTrigger id="category" className="mt-2">
                                   <SelectValue placeholder="Select category" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -1123,7 +1129,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                           <div>
                             <Label
                               htmlFor="priority"
-                              className="text-sm font-medium text-slate-700 flex items-center gap-2"
+                              className="text-sm font-medium text-foreground flex items-center gap-2"
                             >
                               <Flag className="h-4 w-4" />
                               {t("tickets:modal.fields.priority")}
@@ -1141,7 +1147,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                   handleInputChange("priority", value)
                                 }
                               >
-                                <SelectTrigger className="mt-2">
+                                <SelectTrigger id="priority" className="mt-2">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -1159,7 +1165,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                           </div>
 
                           <div>
-                            <Label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                            <Label htmlFor="due-date" className="text-sm font-medium text-foreground flex items-center gap-2">
                               <Calendar className="h-4 w-4" />
                               {t("tickets:modal.fields.dueDate")}
                             </Label>
@@ -1171,6 +1177,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                               </div>
                             ) : (
                               <Input
+                                id="due-date"
                                 type="date"
                                 value={toYyyyMmDd(formData.dueDate)}
                                 onChange={(e) =>
@@ -1188,16 +1195,16 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                     {(!task ||
                       ((user as any)?.role !== "customer" &&
                         canEditAssignment)) && (
-                      <Card className="border-l-4 border-l-green-500">
+                      <Card className="border-l-4 border-l-primary/50">
                         <CardHeader className="pb-3">
                           <CardTitle className="text-lg flex items-center gap-2">
-                            <Users className="h-5 w-5 text-green-600" />
+                            <Users className="h-5 w-5 text-primary" />
                             {t("tickets:modal.sections.assignment")}
                           </CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-5">
-                          <div className="flex items-center justify-between gap-4">
-                            <Label className="min-w-max text-sm font-medium text-slate-700 flex items-center gap-2">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <Label htmlFor="assignment-type" className="min-w-max text-sm font-medium text-foreground flex items-center gap-2">
                               {t("tickets:modal.fields.assignmentType")}
                             </Label>
                             {task && !canEditField("assigneeType") ? (
@@ -1232,7 +1239,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                   }
                                 }}
                               >
-                                <SelectTrigger className="mt-2">
+                                <SelectTrigger id="assignment-type" className="mt-2">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -1278,7 +1285,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                   }
                                 }}
                               >
-                                <SelectTrigger className="mt-2">
+                                <SelectTrigger id="assignment-type" className="mt-2">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -1305,9 +1312,9 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                             (
                               effectivePermissions?.allowedAssigneeTypes || []
                             )?.includes("team") && (
-                              <div className="grid grid-cols-2 gap-4">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
-                                  <Label className="text-sm font-medium text-slate-700">
+                                  <Label htmlFor="department" className="text-sm font-medium text-foreground">
                                     {t("tickets:modal.fields.department")}
                                   </Label>
                                   <Select
@@ -1321,7 +1328,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                       !!task && !canEditField("assigneeTeamId")
                                     }
                                   >
-                                    <SelectTrigger className="mt-2">
+                                    <SelectTrigger id="department" className="mt-2">
                                       <SelectValue
                                         placeholder={t(
                                           "tickets:modal.placeholders.selectDept"
@@ -1341,7 +1348,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                   </Select>
                                 </div>
                                 <div>
-                                  <Label className="text-sm font-medium text-slate-700">
+                                  <Label htmlFor="team" className="text-sm font-medium text-foreground">
                                     {t("tickets:modal.fields.teamReq")}
                                   </Label>
                                   <Select
@@ -1353,7 +1360,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                       !!task && !canEditField("assigneeTeamId")
                                     }
                                   >
-                                    <SelectTrigger className="mt-2">
+                                    <SelectTrigger id="team" className="mt-2">
                                       <SelectValue
                                         placeholder={t(
                                           "tickets:modal.placeholders.selectTeam"
@@ -1386,7 +1393,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                             !task &&
                             assignmentMode === "department" && (
                               <div className="w-full space-y-2">
-                                <Label className="text-sm font-medium text-slate-700">
+                                <Label htmlFor="department" className="text-sm font-medium text-foreground">
                                   {t("tickets:modal.fields.department")}
                                 </Label>
                                 <Select
@@ -1396,7 +1403,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                     handleInputChange("teamId", "");
                                   }}
                                 >
-                                  <SelectTrigger className="mt-2">
+                                  <SelectTrigger id="department" className="mt-2">
                                     <SelectValue
                                       placeholder={t(
                                         "tickets:modal.placeholders.selectDept"
@@ -1424,7 +1431,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                               effectivePermissions?.allowedAssigneeTypes || []
                             )?.includes("user") && (
                               <div className="col-span-2">
-                                <Label className="text-sm font-medium text-slate-700">
+                                <Label htmlFor="assignee" className="text-sm font-medium text-foreground">
                                   {t("tickets:modal.fields.assignToUser")}
                                 </Label>
                                 <Select
@@ -1436,7 +1443,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                                     !!task && !canEditField("assigneeId")
                                   }
                                 >
-                                  <SelectTrigger className="mt-2">
+                                  <SelectTrigger id="assignee" className="mt-2">
                                     <SelectValue
                                       placeholder={t(
                                         "tickets:modal.placeholders.searchUser"
@@ -1461,15 +1468,17 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                     )}
 
                     {/* Additional Notes */}
-                    <Card className="border-l-4 border-l-purple-500">
+                    <Card className="border-l-4 border-l-primary/30">
                       <CardHeader className="pb-3">
                         <CardTitle className="text-lg flex items-center gap-2">
-                          <FileText className="h-5 w-5 text-purple-600" />
+                          <FileText className="h-5 w-5 text-primary" />
                           {t("tickets:modal.sections.notes")}
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
                         <Textarea
+                          aria-label={t("tickets:modal.sections.notes")}
+                          readOnly={!canEditField("notes")}
                           placeholder={t("tickets:modal.placeholders.notes", {
                             defaultValue:
                               "Add any additional notes, special instructions, or important details...",
@@ -1483,6 +1492,7 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
                         />
                       </CardContent>
                     </Card>
+                    </fieldset>
                   </form>
                 </TabsContent>
 
@@ -1499,20 +1509,20 @@ export default function TaskModal({ isOpen, onClose, task }: TaskModalProps) {
           </div>
 
           {/* Footer */}
-          <div className="border-t bg-slate-50 px-6 py-4">
+          <div className="border-t bg-muted/40 px-6 py-4">
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose}>
                 {t("tickets:modal.buttons.cancel")}
               </Button>
-              {task && !canEditAnything ? (
+              {task && formReady && !canEditAnything ? (
                 <></>
               ) : (
                 <Button
                   onClick={handleSubmit}
                   disabled={
-                    createTaskMutation.isPending || updateTaskMutation.isPending
+                    !formReady || createTaskMutation.isPending || updateTaskMutation.isPending
                   }
-                  className="bg-blue-600 hover:bg-blue-700"
+                  className="bg-primary hover:bg-primary/90"
                 >
                   {createTaskMutation.isPending || updateTaskMutation.isPending
                     ? task

@@ -85,7 +85,10 @@ services:
       # Role of a NEW SSO account: customer (default) or agent. It stays pending approval.
       SSO_DEFAULT_ROLE: ${SSO_DEFAULT_ROLE:-}
 
-      # AWS credentials from the environment (fallbacks; the admin panel's Bedrock/SES settings take precedence).
+      # OpenRouter model calls use a server-only key. Leave blank to keep AI unavailable.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+
+      # AWS credentials from the environment remain for S3 attachments and SES email.
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_REGION: ${AWS_REGION:-}

@@ -3,7 +3,7 @@ import path from "node:path";
 import request from "supertest";
 import { eq } from "drizzle-orm";
 import { aiUsage, knowledgeArticles, tasks, ticketComplexityScores } from "@shared/schema";
-import { bedrockMock, MOCK_MODEL_ID } from "../mocks/aws-bedrock.mock";
+import { aiModelMock, MOCK_MODEL_ID } from "../mocks/openRouter.mock";
 import { createTestApp } from "./helpers/testApp";
 import { resetDb } from "./helpers/testDb";
 import { createTicketAs, createUser, loginAs } from "./helpers/fixtures";
@@ -12,21 +12,24 @@ import { db } from "../../storage/db";
 import { AI_SYSTEM_USER_ID, ensureAiSystemUser } from "../../utils/aiSystemUser";
 
 /**
- * Requirement caveats that need Bedrock faked at the SDK boundary:
+ * Requirement caveats that need OpenRouter faked at the HTTP boundary:
  * I1 the saved complexity score, I7 usage reporting, I9 processing the learning queue.
  */
 describe("AI caveats (I1, I7, I9)", () => {
+  const priorOpenRouterApiKey = process.env.OPENROUTER_API_KEY;
   let ctx: Awaited<ReturnType<typeof createTestApp>>;
   beforeAll(async () => {
     ctx = await createTestApp();
   });
   afterAll(async () => {
     await ctx.close();
+    if (priorOpenRouterApiKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = priorOpenRouterApiKey;
   });
   beforeEach(async () => {
     await resetDb();
     await ensureAiSystemUser();
-    bedrockMock.reset();
+    aiModelMock.reset();
     jest.spyOn(console, "error").mockImplementation(() => undefined);
     jest.spyOn(console, "warn").mockImplementation(() => undefined);
     jest.spyOn(console, "log").mockImplementation(() => undefined);
@@ -50,13 +53,16 @@ describe("AI caveats (I1, I7, I9)", () => {
       } as any,
       admin.id
     );
+    await storage.updateAISettings({ modelId: MOCK_MODEL_ID, isActive: true,
+      autoResponseEnabled: true, confidenceThreshold: "0.7", maxResponseLength: 1000,
+      maxTokensPerRequest: 3000 }, admin.id);
     return admin;
   }
 
   describe("I1: creating a ticket stores the complexity score the model reported", () => {
     it("one ticket_complexity_scores row, with the faked score, the computed factors and a note", async () => {
       await configureBedrock();
-      bedrockMock.reset({ complexityScore: 37 });
+      aiModelMock.reset({ complexityScore: 37 });
       const customerA = await loginAs(ctx.app, await createUser({ role: "customer" }));
       const created = await createTicketAs(customerA, { title: "Printer is jammed", description: "Paper stuck in tray two" });
       expect(created.status).toBe(201);
@@ -71,13 +77,13 @@ describe("AI caveats (I1, I7, I9)", () => {
 
     it("a different model answer is a different stored score, and with auto-response off nothing is stored", async () => {
       const admin = await configureBedrock();
-      bedrockMock.reset({ complexityScore: 81 });
+      aiModelMock.reset({ complexityScore: 81 });
       const customerA = await loginAs(ctx.app, await createUser({ role: "customer" }));
       const first = await createTicketAs(customerA);
       const [row] = await db.select().from(ticketComplexityScores).where(eq(ticketComplexityScores.ticketId, first.body.id));
       expect(row.complexityScore).toBe(81);
 
-      await storage.updateBedrockSettings({ autoResponseEnabled: false } as any, admin.id);
+      await storage.updateAISettings({ autoResponseEnabled: false }, admin.id);
       const second = await createTicketAs(customerA);
       expect(second.status).toBe(201);
       expect(await db.select().from(ticketComplexityScores).where(eq(ticketComplexityScores.ticketId, second.body.id))).toHaveLength(0);
@@ -216,7 +222,7 @@ describe("AI caveats (I1, I7, I9)", () => {
     it("an admin starts it; with 5 resolved tickets the faked model's pattern becomes a stored article", async () => {
       await configureBedrock();
       const adminA = await resolvedTickets(5);
-      bedrockMock.handler = (p) => {
+      aiModelMock.handler = (p) => {
         if (p.includes("expert knowledge management AI")) return MARK_PATTERNS;
         if (p.includes("technical writer creating a knowledge base article")) return ARTICLE;
         return "{}";
@@ -230,31 +236,31 @@ describe("AI caveats (I1, I7, I9)", () => {
       expect(articles).toHaveLength(1);
       expect(articles[0]).toMatchObject({ title: "Fixing login problems", createdBy: AI_SYSTEM_USER_ID });
       expect(articles[0].content).toContain("Reset the password");
-      expect(bedrockMock.prompts.some((p) => p.includes("expert knowledge management AI"))).toBe(true);
+      expect(aiModelMock.prompts.some((p) => p.includes("expert knowledge management AI"))).toBe(true);
     });
 
     it("with fewer than 5 resolved tickets it starts and learns nothing", async () => {
       await configureBedrock();
       const adminA = await resolvedTickets(4);
-      bedrockMock.prompts = [];
+      aiModelMock.prompts = [];
       const res = await adminA.post("/api/admin/learning-queue/process");
       expect(res.status).toBe(200);
       await new Promise((r) => setTimeout(r, 500));
       expect(await db.select().from(knowledgeArticles)).toHaveLength(0);
-      expect(bedrockMock.prompts.some((p) => p.includes("expert knowledge management AI"))).toBe(false);
+      expect(aiModelMock.prompts.some((p) => p.includes("expert knowledge management AI"))).toBe(false);
     });
 
     it("only an admin may start it (403), anonymous is 401, and a refused call runs nothing", async () => {
       await configureBedrock();
       await resolvedTickets(5);
-      bedrockMock.prompts = [];
+      aiModelMock.prompts = [];
       for (const role of ["agent", "manager", "customer"] as const) {
         const a = await loginAs(ctx.app, await createUser({ role }));
         expect([role, (await a.post("/api/admin/learning-queue/process")).status]).toEqual([role, 403]);
       }
       expect((await request(ctx.app).post("/api/admin/learning-queue/process")).status).toBe(401);
       await new Promise((r) => setTimeout(r, 500));
-      expect(bedrockMock.prompts).toHaveLength(0);
+      expect(aiModelMock.prompts).toHaveLength(0);
       expect(await db.select().from(knowledgeArticles)).toHaveLength(0);
     });
   });

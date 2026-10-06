@@ -43,6 +43,7 @@ import {
   unique,
   uniqueIndex,
   primaryKey,
+  check,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -418,6 +419,32 @@ export const bedrockSettings = pgTable("bedrock_settings", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Provider-neutral AI configuration. A fixed row protects model selection from legacy settings.
+export const aiSettings = pgTable("ai_settings", {
+  id: integer("id").primaryKey().default(1),
+  modelId: varchar("model_id", { length: 255 }).notNull().default("deepseek/deepseek-v4-pro"),
+  autoResponseEnabled: boolean("auto_response_enabled").default(true),
+  confidenceThreshold: decimal("confidence_threshold", { precision: 3, scale: 2 }).default("0.7"),
+  maxResponseLength: integer("max_response_length").default(1000),
+  responseTimeout: integer("response_timeout").default(30),
+  autoLearnEnabled: boolean("auto_learn_enabled").default(true),
+  minResolutionScore: decimal("min_resolution_score", { precision: 3, scale: 2 }).default("0.8"),
+  articleApprovalRequired: boolean("article_approval_required").default(true),
+  complexityThreshold: integer("complexity_threshold").default(70),
+  escalationEnabled: boolean("escalation_enabled").default(true),
+  escalationTeamId: integer("escalation_team_id").references(() => teams.id),
+  temperature: decimal("temperature", { precision: 3, scale: 2 }).default("0.3"),
+  maxTokens: integer("max_tokens").default(2000),
+  dailyLimitUsd: decimal("daily_limit_usd", { precision: 10, scale: 2 }).default("50.0"),
+  monthlyLimitUsd: decimal("monthly_limit_usd", { precision: 10, scale: 2 }).default("100.0"),
+  maxTokensPerRequest: integer("max_tokens_per_request").default(3000),
+  maxRequestsPerMinute: integer("max_requests_per_minute").default(20),
+  isActive: boolean("is_active").default(true),
+  updatedBy: varchar("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => [check("ai_settings_singleton_id", sql`${table.id} = 1`)]);
+
 // Multi-provider email configuration
 export const emailProviders = pgTable("email_providers", {
   id: serial("id").primaryKey(),
@@ -769,12 +796,16 @@ export const aiUsage = pgTable(
     id: serial("id").primaryKey(),
     timestamp: timestamp("timestamp").notNull().defaultNow(),
     modelId: varchar("model_id", { length: 255 }).notNull(),
+    requestedModelId: varchar("requested_model_id", { length: 255 }),
+    generationId: varchar("generation_id", { length: 255 }),
     inputTokens: integer("input_tokens").notNull(),
     outputTokens: integer("output_tokens").notNull(),
     estimatedCost: decimal("estimated_cost", {
       precision: 10,
       scale: 6,
     }).notNull(),
+    verifiedCostUsd: decimal("verified_cost_usd", { precision: 10, scale: 6 }),
+    billingStatus: varchar("billing_status", { length: 16 }).notNull().default("estimated"),
     operation: varchar("operation", { length: 100 }).notNull(),
     userId: varchar("user_id").references(() => users.id),
     ticketId: integer("ticket_id").references(() => tasks.id),
@@ -786,6 +817,8 @@ export const aiUsage = pgTable(
     index("idx_ai_usage_user_id").on(table.userId),
     index("idx_ai_usage_ticket_id").on(table.ticketId),
     index("idx_ai_usage_model_id").on(table.modelId),
+    uniqueIndex("ai_usage_generation_id_uniq").on(table.generationId).where(sql`${table.generationId} IS NOT NULL`),
+    check("ai_usage_billing_status_check", sql`${table.billingStatus} IN ('estimated', 'verified')`),
     index("idx_ai_usage_timestamp_operation").on(
       table.timestamp,
       table.operation
@@ -851,6 +884,7 @@ export type ApiKey = typeof apiKeys.$inferSelect;
 // (server/services/auth/apiKeys.ts), never parsed from a request body.
 export type InsertApiKey = typeof apiKeys.$inferInsert;
 export type BedrockSettings = typeof bedrockSettings.$inferSelect;
+export type AISettings = typeof aiSettings.$inferSelect;
 export type InsertBedrockSettings = z.infer<typeof insertBedrockSettingsSchema>;
 export type EmailTemplate = typeof emailTemplates.$inferSelect;
 export type InsertEmailTemplate = z.infer<typeof insertEmailTemplateSchema>;

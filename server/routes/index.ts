@@ -158,6 +158,7 @@ import {
   analyzeTicket as analyzeTicketWithAI,
 } from "server/services/ai/aiTicketAnalysis";
 import { PROMPT_TEMPLATES } from "server/services/ai/prompts";
+import { isOpenRouterConfigured } from "../env";
 
 // Helper function to sanitize company name for S3 key
 function sanitizeCompanyNameForS3(companyName: string): string {
@@ -1427,8 +1428,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Company settings routes moved to server/admin/settings.ts
 
-  // Bedrock settings routes (admin only)
-  app.get("/api/bedrock/settings", isAuthenticated, async (req: any, res) => {
+  // AWS settings remain available for S3 attachment storage and old-image rollback.
+  const getAwsStorageSettings = async (req: any, res: any) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
@@ -1458,12 +1459,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hasBedrockSecret: !!settings.bedrockSecretAccessKey,
       });
     } catch (error) {
-      logRouteError("Error fetching Bedrock settings", error);
-      fail(res, 500, "Failed to fetch Bedrock settings");
+      logRouteError("Error fetching AWS storage settings", error);
+      fail(res, 500, "Failed to fetch AWS storage settings");
     }
-  });
+  };
+  app.get("/api/storage/aws-settings", isAuthenticated, getAwsStorageSettings);
+  app.get("/api/bedrock/settings", isAuthenticated, getAwsStorageSettings);
 
-  app.post("/api/bedrock/settings", isAuthenticated, async (req: any, res) => {
+  const saveAwsStorageSettings = async (req: any, res: any) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
@@ -1497,15 +1500,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hasBedrockSecret: !!saved.bedrockSecretAccessKey,
       });
     } catch (error) {
-      logRouteError("Error updating Bedrock settings", error);
-      fail(res, 500, "Failed to update Bedrock settings");
+      logRouteError("Error updating AWS storage settings", error);
+      fail(res, 500, "Failed to update AWS storage settings");
     }
-  });
+  };
+  app.post("/api/storage/aws-settings", isAuthenticated, saveAwsStorageSettings);
+  app.post("/api/bedrock/settings", isAuthenticated, saveAwsStorageSettings);
 
   // SMTP, SSO, Email Template routes moved to server/admin/settings.ts
 
-  // AI Settings (admin only)
-  app.get("/api/admin/ai-settings", isAuthenticated, async (req: any, res) => {
+  // Provider-neutral AI settings (admin only). The legacy admin URL shares this contract.
+  const getProviderSettings = async (req: any, res: any) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
@@ -1514,14 +1519,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const settings = await getAISettings();
-      res.json(settings);
+      res.json({ ...settings, openRouterKeyConfigured: isOpenRouterConfigured() });
     } catch (error) {
       logRouteError("Error fetching AI settings", error);
       fail(res, 500, "Failed to fetch AI settings");
     }
-  });
+  };
+  app.get("/api/ai/settings", isAuthenticated, getProviderSettings);
+  app.get("/api/admin/ai-settings", isAuthenticated, getProviderSettings);
 
-  app.put("/api/admin/ai-settings", isAuthenticated, async (req: any, res) => {
+  const saveProviderSettings = async (req: any, res: any) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
@@ -1565,17 +1572,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...(req.body || {}),
       });
       const saved = await saveAISettings(next, userId);
-      res.json(saved);
+      res.json({ ...saved, openRouterKeyConfigured: isOpenRouterConfigured() });
     } catch (error) {
       logRouteError("Error updating AI settings", error);
       fail(res, 500, "Failed to update AI settings");
     }
-  });
+  };
+  app.post("/api/ai/settings", isAuthenticated, saveProviderSettings);
+  app.put("/api/admin/ai-settings", isAuthenticated, saveProviderSettings);
 
-  app.post(
-    "/api/admin/ai-settings/test",
-    isAuthenticated,
-    async (req: any, res) => {
+  const testProviderConnection = async (req: any, res: any) => {
       try {
         const userId = getUserId(req);
         const user = await storage.getUser(userId);
@@ -1583,19 +1589,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return fail(res, 403, "Admin access required");
         }
 
-        // testConnection answers an object ({success, error?}); the object itself is always
-        // truthy, so only its `success` field says whether the model replied.
+        // Error contract { error, message, details? } (I3). The reason code goes in details;
+        // it is also kept at the top level because the admin page and the OpenAPI document read it there.
+        const connectionFailed = (code: string) => ({
+          success: false,
+          error: "ai_connection_failed",
+          message: "OpenRouter connection failed",
+          details: { code },
+          code,
+        });
+        if (!isOpenRouterConfigured()) {
+          return res.status(503).json(connectionFailed("not_configured"));
+        }
         const result = await bedrockIntegration.testConnection();
         if (result.success) {
           return res.json({ success: true });
         }
-        return fail(res, 400, "Bedrock test failed", { code: "bedrock_test_failed" });
+        const reportedCode = (result as { code?: unknown }).code;
+        const allowedCodes = ["not_configured", "auth", "credits", "timeout", "rate_limit", "quota_exceeded", "provider_failure", "invalid_output", "empty_output", "price_unavailable"];
+        const code = typeof reportedCode === "string" && allowedCodes.includes(reportedCode) ? reportedCode : "provider_failure";
+        return res.status(code === "rate_limit" || code === "quota_exceeded" ? 429 : code === "not_configured" ? 503 : 400)
+          .json(connectionFailed(code));
       } catch (error: any) {
-        logRouteError("Error testing Bedrock connection", error);
-        fail(res, 500, "Failed to test Bedrock");
+        logRouteError("Error testing OpenRouter connection", error);
+        fail(res, 500, "Failed to test OpenRouter connection");
       }
-    }
-  );
+  };
+  app.post("/api/ai/test-connection", isAuthenticated, testProviderConnection);
+  app.post("/api/admin/ai-settings/test", isAuthenticated, testProviderConnection);
 
   // Email template routes
 
@@ -1646,12 +1667,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/notifications", isAuthenticated, async (req: any, res) => {
     try {
       const userId = getUserId(req);
-      const limit = req.query.limit ? parseInt(req.query.limit) : 5;
-      const unreadOnly = (req.query.read as string) === "false";
-      if (!unreadOnly) {
-        // For now, only support unread in this minimal implementation
+      const rawLimit = req.query.limit;
+      if (rawLimit !== undefined && (typeof rawLimit !== "string" || !/^\d+$/.test(rawLimit) || Number(rawLimit) < 1 || Number(rawLimit) > 100)) {
+        return fail(res, 400, "limit must be an integer between 1 and 100");
       }
-      const notifications = await storage.getUnreadNotifications(userId, limit);
+      const limit = rawLimit === undefined ? 5 : Number(rawLimit);
+      // History is explicit so existing unread polling clients and MCP parity remain unchanged.
+      const notifications = req.query.read === "all"
+        ? await storage.listNotifications(userId, { unreadOnly: false, limit })
+        : await storage.getUnreadNotifications(userId, limit);
       res.json(notifications);
     } catch (error) {
       logRouteError("Error fetching notifications", error);
@@ -2132,21 +2156,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Check if we have AWS Bedrock credentials (from Bedrock settings or env)
-      const bedrock = await storage.getBedrockSettings();
-      const hasBedrockCredentials =
-        bedrock?.bedrockAccessKeyId &&
-        bedrock?.bedrockSecretAccessKey &&
-        (bedrock?.bedrockRegion || "us-east-1") &&
-        bedrock?.isActive;
+      const aiSettings = await getAISettings();
+      const providerReady = isOpenRouterConfigured() && aiSettings.isActive;
 
       let response = "";
       const relevantDocIds: number[] = [];
       let usageData = null;
       let aiSucceeded = false;
 
-      if (hasBedrockCredentials) {
-        // Use AWS Bedrock for intelligent responses
+      if (providerReady) {
         try {
           // Import helper function (same pattern as knowledgeBaseLearning.ts)
           const { runChatPrompt } = await import(
@@ -2187,16 +2205,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             aiSucceeded = true;
           }
 
-          // Track usage using actual tokens from the result
-          const { recordUsage } = await import("../services/ai/costMonitoring");
-          await recordUsage(
-            result.costEstimate.modelId,
-            result.actualTokens.input,
-            result.actualTokens.output,
-            "aiChat",
-            userId,
-            undefined // ticketId not available in chat context
-          );
+          // The model helper persists usage once, including generation billing metadata.
           usageData = {
             userId,
             sessionId,
@@ -2217,9 +2226,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             });
           }
         } catch (error: any) {
-          // If AI fails, fall back to help documents search (same as "AI not configured")
+          if (isQuotaBlocked(error)) return sendQuotaExceeded(res, error);
+          // If AI fails, fall back to help documents search.
           console.error(
-            "Error calling AWS Bedrock, falling back to help documents:",
+            "Error calling OpenRouter, falling back to help documents:",
             describeAIError(error)
           );
 
@@ -2229,9 +2239,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Fallback logic: Use help documents if AI is not configured OR if AI failed
-      if (!hasBedrockCredentials || !aiSucceeded || !response) {
-        // No AWS credentials configured - use simple fallback
+      // Fallback logic: use help documents if AI is unavailable or failed.
+      if (!providerReady || !aiSucceeded || !response) {
         try {
           // 1) Try company help documents
           const helpDocs = await storage.searchHelpDocuments(trimmedMessage);
@@ -2267,7 +2276,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               }
             } else {
               response =
-                "I'm here to help! However, the AI service is not configured and I couldn't find any matching documents yet.";
+                "I'm here to help! The AI service is unavailable and I couldn't find any matching documents yet.";
             }
           }
         } catch (error) {
@@ -2347,8 +2356,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   );
 
-  // Bedrock usage endpoints
-  app.get("/api/bedrock/usage", isAuthenticated, async (req, res) => {
+  // Provider-neutral usage with the old field names retained for existing clients.
+  const getAiUsage = async (req: any, res: any) => {
     try {
       const userId = getUserId(req);
       const user = await storage.getUser(userId);
@@ -2381,14 +2390,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         totalTokens: u.inputTokens + u.outputTokens,
         modelId: u.modelId,
         cost: Number(u.estimatedCost),
+        requestedModelId: u.requestedModelId,
+        verifiedCostUsd: u.verifiedCostUsd === null ? null : Number(u.verifiedCostUsd),
+        billingStatus: u.billingStatus,
         createdAt: u.createdAt,
       }));
       res.json(legacyUsage);
     } catch (error) {
-      console.error("Error fetching Bedrock usage:", describeAIError(error));
-      fail(res, 500, "Failed to fetch Bedrock usage");
+      console.error("Error fetching AI usage:", describeAIError(error));
+      fail(res, 500, "Failed to fetch AI usage");
     }
-  });
+  };
+  app.get("/api/ai/usage", isAuthenticated, getAiUsage);
+  app.get("/api/bedrock/usage", isAuthenticated, getAiUsage);
 
   // Cost monitoring and management endpoints
   app.get(
@@ -2512,21 +2526,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (result.success) {
           res.json({
             success: true,
-            message: "Bedrock connection successful",
+            message: "OpenRouter connection successful",
             costEstimate: result.costEstimate,
           });
         } else {
-          // Admin-only diagnostic: the test's own failure text is the payload.
-          res.status(400).json({
-            error: "bedrock_test_failed",
+          res.status(result.code === "rate_limit" ? 429 : result.code === "not_configured" ? 503 : 400).json({
+            error: "ai_connection_failed",
             success: false,
-            message: result.error || "Bedrock test failed",
+            message: "OpenRouter connection failed",
+            code: result.code || "provider_failure",
             costEstimate: result.costEstimate,
           });
         }
       } catch (error) {
-        logRouteError("Error testing Bedrock connection", error);
-        fail(res, 500, "Failed to test Bedrock connection");
+        logRouteError("Error testing OpenRouter connection", error);
+        fail(res, 500, "Failed to test OpenRouter connection");
       }
     }
   );
@@ -3933,19 +3947,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(404).json({ error: "not_found", message: "Ticket not found" });
         }
 
-        // Check if Bedrock is configured
-        const bedrockSettings = await storage.getBedrockSettings();
-        if (
-          !bedrockSettings?.bedrockAccessKeyId ||
-          !bedrockSettings?.bedrockSecretAccessKey
-        ) {
+        // Check the active model provider before creating a draft.
+        const aiSettings = await getAISettings();
+        if (!aiSettings.isActive || !isOpenRouterConfigured()) {
           return res
             .status(503)
             .json({ error: "ai_not_configured", message: "AI service not configured" });
         }
 
         // Check AI settings
-        const aiSettings = await getAISettings();
         if (!aiSettings.autoResponseEnabled) {
           return res
             .status(400)
@@ -5110,52 +5120,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // AI System Status Route
   app.get("/api/ai/status", isAuthenticated, requireStaff, async (req: any, res) => {
     try {
-      // 1) Check env credentials
-      const envAwsConfigured = !!(
-        process.env.AWS_ACCESS_KEY_ID &&
-        process.env.AWS_SECRET_ACCESS_KEY &&
-        process.env.AWS_REGION
-      );
-
-      // 2) Check stored SMTP (SES) and Bedrock settings
-      const smtp = undefined as any;
-      let bedrock = undefined as any;
-      try {
-        //smtp = await storage.getSmtpSettings();
-      } catch { /* SMTP settings are no longer read (see commented line above) */ }
-      try {
-        bedrock = await storage.getBedrockSettings();
-      } catch { /* no stored Bedrock settings: treat as not configured */ }
-
-      const sesConfigured = !!(
-        smtp?.awsAccessKeyId &&
-        smtp?.awsSecretAccessKey &&
-        smtp?.awsRegion
-      );
-      const bedrockConfigured = !!(
-        bedrock?.bedrockAccessKeyId &&
-        bedrock?.bedrockSecretAccessKey &&
-        (bedrock?.bedrockRegion || process.env.AWS_REGION)
-      );
-
-      const awsConfigured =
-        envAwsConfigured || sesConfigured || bedrockConfigured;
-
-      // Active model id if available
-      const activeModelId: string | undefined =
-        bedrock?.bedrockModelId || undefined;
+      const settings = await getAISettings();
+      const ready = isOpenRouterConfigured() && settings.isActive;
 
       res.json({
-        awsCredentials: awsConfigured,
-        bedrockAvailable: awsConfigured,
-        modelId: activeModelId,
-        knowledgeLearning: awsConfigured,
-        autoResponse: awsConfigured,
+        provider: "openrouter",
+        providerConfigured: isOpenRouterConfigured(),
+        openRouterAvailable: ready,
+        modelId: settings.modelId,
+        knowledgeLearning: ready && settings.autoLearnEnabled,
+        autoResponse: ready && settings.autoResponseEnabled,
         features: {
-          ticketAnalysis: awsConfigured,
-          autoResponse: awsConfigured,
-          knowledgeLearning: awsConfigured,
-          intelligentSearch: awsConfigured,
+          ticketAnalysis: ready,
+          autoResponse: ready && settings.autoResponseEnabled,
+          knowledgeLearning: ready && settings.autoLearnEnabled,
+          intelligentSearch: ready,
         },
       });
     } catch (error) {

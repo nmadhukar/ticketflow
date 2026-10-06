@@ -5,7 +5,7 @@
  * - User Management: View, edit, approve, ban users with role assignments
  * - System Settings: Company branding, ticket numbering, email configuration
  * - API Key Management: Create, manage, and monitor API keys with proper security
- * - AWS Integration: Separate configuration for SES (email) and Bedrock (AI)
+ * - AWS Integration: SES email and S3 storage settings are separate from OpenRouter AI.
  * - Microsoft 365 SSO: Configure enterprise authentication integration
  * - Help Documentation: Manage help documents and policy files for AI chatbot
  * - Email Templates: Customize system email templates for various events
@@ -31,9 +31,12 @@ import Policies from "@/pages/admin/DocsGuides/Policies";
 import Invitations from "@/pages/admin/UsersGroups/invitations";
 import AiAnalytics from "@/pages/admin/AnalyticsInsights/ai-analytics";
 import AISettings from "@/pages/admin/Configuration/ai-settings";
+import StorageSettings from "@/pages/admin/Configuration/storage-settings";
 import LearningAnalytics from "@/pages/admin/AnalyticsInsights/learning-analytics";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
+import { Link } from "wouter";
+import { Button } from "@/components/ui/button";
 import CompanyConsole from "./Configuration/CompanyConsole";
 import AdminGuides from "./DocsGuides/admin-guides";
 import DeveloperResources from "./Integrations/DeveloperResources";
@@ -53,6 +56,7 @@ const sections: Record<string, JSX.Element> = {
   sso: <Ms365Sso />,
   "ms-teams-integration": <MsTeamIntegration />,
   "ai-settings": <AISettings />,
+  "storage-settings": <StorageSettings />,
   "ai-analytics": <AiAnalytics />,
   "learning-queue": <LearningAnalytics />,
   guidelines: <AdminGuides />,
@@ -62,13 +66,8 @@ export default function AdminPanel() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
 
-  const [activeTab, setActiveTab] = useState("users");
-  const [matchTabRoute, tabParams] = useRoute("/admin/:tab");
-
-  useEffect(() => {
-    const paramTab = (tabParams as any)?.tab as string | undefined;
-    setActiveTab(paramTab || "users");
-  }, [matchTabRoute, (tabParams as any)?.tab]);
+  const [, tabParams] = useRoute("/admin/:tab");
+  const activeTab = tabParams?.tab || "users";
 
   // Deep-link support for section navigation via ?section=... for any active tab
   // Tries multiple id patterns to be resilient across sections/components
@@ -100,7 +99,7 @@ export default function AdminPanel() {
     return null;
   }
 
-  const sectionToRender = sections[activeTab] ?? sections["users"];
+  const sectionToRender = Object.hasOwn(sections, activeTab) ? sections[activeTab] : <div role="alert" className="rounded-xl border bg-card p-8"><h1 className="text-xl font-semibold">Admin page not found</h1><p className="mt-2 text-sm text-muted-foreground">Choose a section from navigation, or return to user management.</p><Button asChild className="mt-4"><Link href="/admin/users">Go to users</Link></Button></div>;
 
   return <MainWrapper>{sectionToRender}</MainWrapper>;
 }

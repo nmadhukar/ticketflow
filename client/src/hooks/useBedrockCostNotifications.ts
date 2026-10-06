@@ -1,8 +1,8 @@
 /**
- * Hook for handling AWS Bedrock cost limit notifications
+ * Hook for handling AI cost limit notifications.
  *
  * This hook provides utilities for displaying toast notifications when
- * Bedrock requests are blocked due to cost limits.
+ * Model requests are blocked due to cost limits.
  */
 
 import { useToast } from "@/hooks/use-toast";
@@ -60,7 +60,7 @@ export function useBedrockCostNotifications() {
   const showCostLimitUpdatedNotification = (limits: any) => {
     toast({
       title: "✅ Cost Limits Updated",
-      description: `Your AWS Bedrock cost limits have been updated:\n\nDaily Limit: $${limits.dailyLimitUSD}\nMonthly Limit: $${limits.monthlyLimitUSD}\nMax Tokens per Request: ${limits.maxTokensPerRequest}`,
+      description: `Your AI cost limits have been updated:\n\nDaily Limit: $${limits.dailyLimitUSD}\nMonthly Limit: $${limits.monthlyLimitUSD}\nMax Tokens per Request: ${limits.maxTokensPerRequest}`,
       duration: 6000,
     });
   };
@@ -72,8 +72,8 @@ export function useBedrockCostNotifications() {
   ) => {
     if (success) {
       toast({
-        title: "✅ Bedrock Connection Successful",
-        description: `AWS Bedrock connection is working properly.${
+        title: "✅ OpenRouter Connection Successful",
+        description: `OpenRouter connection is working properly.${
           costEstimate
             ? `\n\nTest cost: $${
                 costEstimate.estimatedCost?.toFixed(4) || "0.0000"
@@ -84,8 +84,8 @@ export function useBedrockCostNotifications() {
       });
     } else {
       toast({
-        title: "❌ Bedrock Connection Failed",
-        description: `${error || "Failed to connect to AWS Bedrock"}${
+        title: "❌ OpenRouter Connection Failed",
+        description: `${error || "Failed to connect to OpenRouter"}${
           costEstimate
             ? "\n\nThis may be due to cost limits or configuration issues."
             : ""
@@ -100,7 +100,7 @@ export function useBedrockCostNotifications() {
     toast({
       title: "🔄 Usage Data Reset",
       description:
-        "All AWS Bedrock usage tracking data has been reset successfully.",
+        "All AI usage tracking data has been reset successfully.",
       duration: 4000,
     });
   };
@@ -109,7 +109,7 @@ export function useBedrockCostNotifications() {
     toast({
       title: "📊 Usage Data Exported",
       description:
-        "Your AWS Bedrock usage data has been exported and downloaded.",
+        "Your AI usage data has been exported and downloaded.",
       duration: 4000,
     });
   };

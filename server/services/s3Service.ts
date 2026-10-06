@@ -13,12 +13,42 @@ import { storage } from "../storage";
 import { describeError } from "../http/errors";
 
 /**
+ * The region S3 used before it became configurable: hard-coded since 9b9617e. Deployments that
+ * never set AWS_S3_REGION have their bucket here, so it stays the last fallback.
+ */
+export const LEGACY_S3_REGION = "us-east-2";
+
+/**
+ * bedrock_settings.bedrock_region defaults to this at the column level (shared/schema.ts,
+ * migration 0001) and in the storage and save routes, so a row nobody chose a region for carries
+ * it. It cannot be told apart from a region saved on purpose, and it says nothing about the
+ * bucket, so it is never taken as the S3 region. To sign for us-east-1, set AWS_S3_REGION.
+ */
+const BEDROCK_REGION_DEFAULT = "us-east-1";
+
+/**
+ * AWS_S3_REGION first, then a region explicitly saved in bedrock_settings (anything but that
+ * column's default), then the legacy hard-coded region.
+ */
+export function resolveS3Region(
+  envRegion: string | null | undefined,
+  savedRegion: string | null | undefined
+): string {
+  const fromEnv = envRegion?.trim();
+  if (fromEnv) return fromEnv;
+  const saved = savedRegion?.trim();
+  if (saved && saved !== BEDROCK_REGION_DEFAULT) return saved;
+  return LEGACY_S3_REGION;
+}
+
+/**
  * S3 Service for file upload, download, and deletion
  * Handles company logos and task attachments
  *
  * Configuration:
  * - Access Key/Secret: bedrock_settings table ONLY (no env fallback)
- * - Region: AWS_S3_REGION env variable first, then bedrockRegion from bedrock_settings, then "us-east-1" default
+ * - Region: AWS_S3_REGION env variable first, then an explicitly saved bedrockRegion from
+ *   bedrock_settings (not the "us-east-1" column default), then "us-east-2" (see resolveS3Region)
  * - Bucket Name: AWS_S3_BUCKET_NAME environment variable ONLY (no bedrock_settings fallback)
  */
 class S3Service {
@@ -78,7 +108,7 @@ class S3Service {
         describeError(error)
       );
       throw new Error(
-        "AWS credentials not found in bedrock_settings table. Please configure access key, secret, and region in AI Settings."
+        "AWS credentials not found in bedrock_settings table. Please configure access key, secret, and region in Storage Settings."
       );
     }
 
@@ -88,13 +118,12 @@ class S3Service {
 
     if (!accessKeyId || !secretAccessKey) {
       throw new Error(
-        "AWS credentials not configured in bedrock_settings table. Please configure access key and secret in AI Settings."
+        "AWS credentials not configured in bedrock_settings table. Please configure access key and secret in Storage Settings."
       );
     }
 
-    // Region: AWS_S3_REGION env variable first, then bedrockRegion, then default
-    // S3 bucket region can be different from Bedrock region
-    const region = "us-east-2";
+    // S3 bucket region can be different from the saved Bedrock region.
+    const region = resolveS3Region(process.env.AWS_S3_REGION, bedrockSettings?.bedrockRegion);
 
     // Update cache
     this.settingsCache = {
@@ -119,7 +148,7 @@ class S3Service {
   /**
    * Check if S3 is properly configured
    * - Access Key/Secret: bedrock_settings table ONLY
-   * - Region: AWS_S3_REGION env variable or bedrockRegion from bedrock_settings (optional, has default)
+   * - Region: AWS_S3_REGION env variable or an explicitly saved bedrockRegion (optional, falls back to us-east-2)
    * - Bucket Name: AWS_S3_BUCKET_NAME environment variable ONLY
    * @returns Object with isConfigured flag and missing configuration details
    */

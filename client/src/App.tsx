@@ -48,8 +48,6 @@ import { Layout } from "@/components/layout";
 import { AiChatBot } from "@/components/AiChatBot";
 import { ProtectedRoute } from "@/components/protected-route";
 import { ForcedPasswordChange } from "@/components/forced-password-change";
-import { StatsDrawer } from "@/components/stats-drawer";
-import { ActivityDrawer } from "@/components/activity-drawer";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
@@ -68,23 +66,20 @@ import { WebSocketProvider } from "@/hooks/useWebSocket";
 import { PreferencesLoader } from "@/components/preferences-loader";
 import AdminPanel from "./pages/admin";
 
-function RedirectHome() {
+function RedirectTickets({ ticketId }: { ticketId?: string }) {
   const [, setLocation] = useLocation();
-  useEffect(() => setLocation("/"), [setLocation]);
+  useEffect(() => {
+    const query = ticketId && /^\d+$/.test(ticketId) ? `?ticket=${ticketId}` : window.location.search;
+    setLocation(`/tickets${query}`, { replace: true });
+  }, [setLocation, ticketId]);
   return null;
-}
-
-function TasksRoute() {
-  const { user } = useAuth();
-  const role = (user as any)?.role;
-  return role !== "admin" ? <RedirectHome /> : <Tickets />;
 }
 
 function Router() {
   const { isAuthenticated, isLoading, user } = useAuth();
 
   if (isLoading) {
-    return null; // or a loading spinner
+    return <div role="status" className="flex min-h-dvh items-center justify-center gap-3 text-sm text-muted-foreground"><span className="h-5 w-5 animate-spin rounded-full border-2 border-muted border-t-primary motion-reduce:animate-none" />Loading your workspace…</div>;
   }
 
   // An admin reset the password: nothing else works until the user picks their own.
@@ -125,9 +120,11 @@ function Router() {
                   <ProtectedRoute
                     allowedRoles={["admin", "manager", "agent", "customer"]}
                   >
-                    <TasksRoute />
+                    <Tickets />
                   </ProtectedRoute>
                 </Route>
+                <Route path="/my-tasks"><RedirectTickets /></Route>
+                <Route path="/tickets/:id">{(params) => <RedirectTickets ticketId={params.id} />}</Route>
                 <Route path="/teams">
                   <ProtectedRoute allowedRoles={["manager", "agent"]}>
                     <Teams />
@@ -182,8 +179,6 @@ function Router() {
       </Switch>
       {/* Show AI Chat Bot for authenticated users */}
       {!isLoading && isAuthenticated && <AiChatBot />}
-      {!isLoading && isAuthenticated && <StatsDrawer />}
-      {!isLoading && isAuthenticated && <ActivityDrawer />}
     </>
   );
 }

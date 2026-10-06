@@ -227,7 +227,7 @@ export default function AIAnalyticsPage() {
     );
   }
 
-  const systemStatus = aiStatus?.awsCredentials ? "operational" : "unavailable";
+  const systemStatus = aiStatus?.openRouterAvailable ? "operational" : "unavailable";
 
   // Search handler
   const handleSearch = () => {
@@ -259,12 +259,12 @@ export default function AIAnalyticsPage() {
             {systemStatus === "operational" ? (
               <>
                 <CheckCircle className="h-4 w-4 mr-1" />
-                AI System Online
+                AI enabled
               </>
             ) : (
               <>
                 <AlertTriangle className="h-4 w-4 mr-1" />
-                AI System Offline
+                AI unavailable
               </>
             )}
           </Badge>
@@ -273,12 +273,12 @@ export default function AIAnalyticsPage() {
       <CardContent className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">AWS Bedrock</CardTitle>
+            <CardTitle className="text-sm font-medium">OpenRouter</CardTitle>
             <Brain className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {aiStatus?.bedrockAvailable ? "Connected" : "Offline"}
+              {aiStatus?.openRouterAvailable ? "Ready" : "Unavailable"}
             </div>
             <p className="text-xs text-muted-foreground">
               {aiStatus?.modelId

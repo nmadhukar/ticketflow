@@ -1,54 +1,63 @@
-/**
- * AWS Bedrock Integration for Intelligent Ticket Handling
- *
- * This module provides integration with AWS Bedrock using Claude 3 Sonnet
- * for intelligent ticket analysis, response generation, and knowledge base management.
- * Includes comprehensive cost monitoring and request blocking.
- */
-
-import {
-  BedrockRuntimeClient,
-  InvokeModelCommand,
-} from "@aws-sdk/client-bedrock-runtime";
+/** AI workflow compatibility helpers. */
 import { Task } from "@shared/schema";
-import { storage } from "../../storage";
-import {
-  estimateCost,
-  estimateTokens,
-  recordUsage,
-  shouldBlockRequest,
-  loadCostLimits,
-  CostEstimate,
-} from "../../services/ai/costMonitoring";
+import { estimatePromptTokensForBudget, recordUsage, assertBudgetAvailable, getDailyUsage, getMonthlyUsage, reconcileGenerationCost, CostEstimate } from "../../services/ai/costMonitoring";
 import { PROMPT_TEMPLATES } from "./prompts";
 import { getAISettings } from "server/admin/aiSettings";
 import { extractJSON } from "./jsonUtils";
-import { describeAIError } from "./aiErrors";
+import { AiModelError, describeAIError } from "./aiErrors";
+import { createOpenRouterClient } from "./openRouterClient";
+import { createOpenRouterPricing } from "./openRouterPricing";
+import { fitDescriptionToBudget } from "./promptBudget";
+import type { AISettings } from "@shared/interfaces";
 
-export async function getBedrockClient(): Promise<{
-  bedrockClient: BedrockRuntimeClient | null;
-  bedrockModelId: string;
-}> {
-  const settings = await storage.getBedrockSettings();
-  const bedrockAccessKeyId = settings?.bedrockAccessKeyId;
-  const bedrockSecretAccessKey = settings?.bedrockSecretAccessKey;
-  const bedrockRegion = settings?.bedrockRegion || "us-east-1";
-  const bedrockModelId = settings?.bedrockModelId || "";
+/** The most output each prompt that carries a ticket description asks for (before settings.maxTokens). */
+const OPERATION_OUTPUT_CAP = {
+  analyzeTicket: 500,
+  generateResponse: 800,
+  updateKnowledgeBase: 600,
+  ticketAnalysis: 1000,
+  autoResponse: 1500,
+} as const;
+type DescriptionOperation = keyof typeof OPERATION_OUTPUT_CAP;
 
-  if (!bedrockAccessKeyId || !bedrockSecretAccessKey || !bedrockRegion) {
-    console.warn("AWS Bedrock credentials not configured");
-    return { bedrockClient: null, bedrockModelId: "" };
-  }
+/**
+ * M3: the prompt for a ticket, with its description cut to fit settings.maxTokensPerRequest while
+ * leaving the operation's full output allowance. A long (emailed) description used to push the
+ * prompt over the cap and the call was blocked, so the ticket got no AI at all. Only the description
+ * is cut; the cap is unchanged.
+ */
+function promptWithinBudget(
+  settings: AISettings,
+  operation: DescriptionOperation,
+  description: string | null | undefined,
+  buildPrompt: (description: string | null | undefined) => string
+): string {
+  return buildPrompt(
+    fitDescriptionToBudget({
+      description,
+      buildPrompt,
+      maxTokensPerRequest: settings.maxTokensPerRequest,
+      maxOutputTokens: Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP[operation]),
+      operation,
+    })
+  );
+}
 
-  const bedrockClient = new BedrockRuntimeClient({
-    region: bedrockRegion,
-    credentials: {
-      accessKeyId: bedrockAccessKeyId,
-      secretAccessKey: bedrockSecretAccessKey,
-    },
-  });
+/** promptWithinBudget for callers that have not loaded the settings (aiTicketAnalysis). */
+export async function buildPromptWithinBudget(
+  operation: DescriptionOperation,
+  description: string | null | undefined,
+  buildPrompt: (description: string | null | undefined) => string
+): Promise<string> {
+  return promptWithinBudget(await getAISettings(), operation, description, buildPrompt);
+}
 
-  return { bedrockClient, bedrockModelId };
+const pricing = createOpenRouterPricing();
+const modelClient = createOpenRouterClient({ getModelId: async () => (await getAISettings()).modelId, getModelPrice: pricing.getModelPrice });
+
+export async function getBedrockClient() {
+  const settings = await getAISettings();
+  return { bedrockClient: settings.isActive && settings.openRouterKeyConfigured ? modelClient : null, bedrockModelId: settings.modelId };
 }
 
 async function invokeBedrockModel(
@@ -58,240 +67,35 @@ async function invokeBedrockModel(
   temperature: number = 0.3,
   userId?: string,
   ticketId?: string
-): Promise<{
-  response: string;
-  costEstimate: CostEstimate;
-  actualTokens: { input: number; output: number };
-}> {
-  const { bedrockClient, bedrockModelId: modelId } = await getBedrockClient();
-  if (!bedrockClient || !modelId) {
-    throw new Error("No Bedrock model configured");
-  }
-
-  // Estimate tokens before making the request
-  const estimatedInputTokens = estimateTokens(prompt);
-
-  // Enforce per-request token budget (input + output)
-  const limits = await loadCostLimits();
-  const budget = Number(limits.maxTokensPerRequest || 0);
-  const allowedOutputFromBudget =
-    budget > 0 ? Math.max(0, budget - estimatedInputTokens) : maxTokens;
-  if (budget > 0 && allowedOutputFromBudget <= 0) {
-    const error = new Error(
-      `Request exceeds max tokens per request. Prompt uses ${estimatedInputTokens} tokens; limit is ${budget}.`
-    );
-    (error as any).isBlocked = true;
-    (error as any).costEstimate = {
-      inputTokens: estimatedInputTokens,
-      outputTokens: 0,
-      estimatedCost: 0,
-      modelId,
-      operation,
-    } as CostEstimate;
-    throw error;
-  }
-
-  const effectiveMaxTokens = Math.max(
-    1,
-    Math.min(maxTokens, allowedOutputFromBudget)
-  );
-  const estimatedOutputTokens = Math.min(effectiveMaxTokens, 1000); // Conservative estimate
-
-  // Check if request should be blocked
-  const blockCheck = await shouldBlockRequest(
-    modelId,
-    estimatedInputTokens,
-    estimatedOutputTokens,
-    operation
-  );
-
-  if (blockCheck.blocked) {
-    const error = new Error(`Request blocked: ${blockCheck.reason}`);
-    (error as any).isBlocked = true;
-    (error as any).costEstimate = {
-      inputTokens: estimatedInputTokens,
-      outputTokens: estimatedOutputTokens,
-      estimatedCost: blockCheck.estimatedCost,
-      modelId,
-      operation,
-    };
-    throw error;
-  }
-
-  // Prepare request body based on model type
-  let requestBody: any;
-
-  if (modelId.startsWith("anthropic.claude")) {
-    // Claude models use Anthropic format
-    requestBody = {
-      anthropic_version: "bedrock-2023-05-31",
-      max_tokens: effectiveMaxTokens,
-      temperature,
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-    };
-  } else if (modelId.startsWith("amazon.titan")) {
-    // Amazon Titan models use Titan format
-    requestBody = {
-      inputText: prompt,
-      textGenerationConfig: {
-        maxTokenCount: effectiveMaxTokens,
-        temperature,
-        topP: 0.9,
-      },
-    };
-  } else if (modelId.startsWith("ai21.j2")) {
-    // AI21 Jurassic models use AI21 format
-    requestBody = {
-      prompt: prompt,
-      maxTokens: effectiveMaxTokens,
-      temperature,
-      topP: 0.9,
-    };
-  } else if (modelId.startsWith("meta.llama")) {
-    // Meta Llama models use Llama format
-    requestBody = {
-      prompt: prompt,
-      max_gen_len: effectiveMaxTokens,
-      temperature,
-      top_p: 0.9,
-    };
-  } else {
-    // Fallback to Claude format for unknown models
-    requestBody = {
-      anthropic_version: "bedrock-2023-05-31",
-      max_tokens: effectiveMaxTokens,
-      temperature,
-      messages: [
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-    };
-  }
-
-  const input = {
-    modelId,
-    contentType: "application/json",
-    accept: "application/json",
-    body: JSON.stringify(requestBody),
+): Promise<{ response: string; costEstimate: CostEstimate; actualTokens: { input: number; output: number } }> {
+  const settings = await getAISettings();
+  if (!settings.isActive || !settings.openRouterKeyConfigured) throw new AiModelError("not_configured");
+  const price = await pricing.getModelPrice(settings.modelId);
+  const [daily, monthly] = await Promise.all([getDailyUsage(), getMonthlyUsage()]);
+  const promptTokens = estimatePromptTokensForBudget(prompt);
+  const allowedOutputTokens = Math.min(maxTokens, settings.maxTokensPerRequest - promptTokens);
+  assertBudgetAvailable({ promptTokens, maxOutputTokens: allowedOutputTokens, price, settings, todayUsd: daily.totalCost, monthUsd: monthly.totalCost });
+  const result = await modelClient.generate({
+    operation, messages: [{ role: "user", content: prompt }],
+    maxOutputTokens: allowedOutputTokens, temperature,
+    context: { userId, ticketId: ticketId ? Number(ticketId) : undefined },
+  });
+  await recordUsage({
+    modelId: result.actualModel, requestedModelId: result.requestedModel,
+    generationId: result.generationId, inputTokens: result.promptTokens,
+    outputTokens: result.completionTokens, estimatedCost: result.estimatedCostUsd,
+    operation, userId, ticketId,
+  });
+  if (result.generationId) await reconcileGenerationCost(result.generationId);
+  return {
+    response: result.text,
+    costEstimate: {
+      inputTokens: result.promptTokens, outputTokens: result.completionTokens,
+      estimatedCost: result.estimatedCostUsd, modelId: result.actualModel, operation,
+    },
+    actualTokens: { input: result.promptTokens, output: result.completionTokens },
   };
-
-  try {
-    const command = new InvokeModelCommand(input);
-    const response = await bedrockClient.send(command);
-
-    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-
-    // Parse response based on model type
-    let responseText: string;
-    let actualInputTokens: number;
-    let actualOutputTokens: number;
-
-    if (modelId.startsWith("anthropic.claude")) {
-      // Claude response format
-      responseText = responseBody.content?.[0]?.text || "";
-      if (!responseText) {
-        throw new Error(
-          "Empty response from Claude model - check model configuration and prompt"
-        );
-      }
-      actualInputTokens =
-        responseBody.usage?.input_tokens || estimatedInputTokens;
-      actualOutputTokens =
-        responseBody.usage?.output_tokens || estimateTokens(responseText);
-    } else if (modelId.startsWith("amazon.titan")) {
-      // Amazon Titan response format
-      responseText = responseBody.results?.[0]?.outputText || "";
-      if (!responseText) {
-        throw new Error(
-          "Empty response from Titan model - check model configuration and prompt"
-        );
-      }
-      actualInputTokens = responseBody.inputTokenCount || estimatedInputTokens;
-      actualOutputTokens =
-        responseBody.outputTokenCount || estimateTokens(responseText);
-    } else if (modelId.startsWith("ai21.j2")) {
-      // AI21 Jurassic response format
-      responseText = responseBody.completions?.[0]?.data?.text || "";
-      if (!responseText) {
-        throw new Error(
-          "Empty response from AI21 model - check model configuration and prompt"
-        );
-      }
-      actualInputTokens =
-        responseBody.prompt?.tokens?.length || estimatedInputTokens;
-      actualOutputTokens =
-        responseBody.completions[0].data.tokens?.length ||
-        estimateTokens(responseText);
-    } else if (modelId.startsWith("meta.llama")) {
-      // Meta Llama response format
-      responseText = responseBody.generation || "";
-      if (!responseText) {
-        throw new Error(
-          "Empty response from Llama model - check model configuration and prompt"
-        );
-      }
-      actualInputTokens =
-        responseBody.prompt_token_count || estimatedInputTokens;
-      actualOutputTokens =
-        responseBody.generation_token_count || estimateTokens(responseText);
-    } else {
-      // Fallback to Claude format
-      responseText =
-        responseBody.content?.[0]?.text || responseBody.generation || "";
-      if (!responseText) {
-        throw new Error(
-          "Empty response from model (unknown format) - check model configuration and prompt"
-        );
-      }
-      actualInputTokens =
-        responseBody.usage?.input_tokens || estimatedInputTokens;
-      actualOutputTokens =
-        responseBody.usage?.output_tokens || estimateTokens(responseText);
-    }
-
-    // Record usage for billing analysis
-    await recordUsage(
-      modelId,
-      actualInputTokens,
-      actualOutputTokens,
-      operation,
-      userId,
-      ticketId
-    );
-
-    const costEstimate: CostEstimate = {
-      inputTokens: actualInputTokens,
-      outputTokens: actualOutputTokens,
-      estimatedCost: estimateCost(
-        modelId,
-        actualInputTokens,
-        actualOutputTokens
-      ),
-      modelId,
-      operation,
-    };
-
-    return {
-      response: responseText,
-      costEstimate,
-      actualTokens: {
-        input: actualInputTokens,
-        output: actualOutputTokens,
-      },
-    };
-  } catch (error) {
-    console.error("Error invoking Claude model:", describeAIError(error));
-    throw error;
-  }
 }
-
 /**
  * Analyze a ticket to categorize and extract key information
  */
@@ -308,9 +112,11 @@ export async function analyzeTicket(
   costEstimate?: CostEstimate;
 }> {
   try {
-    const prompt = PROMPT_TEMPLATES.analyzeTicket(ticket);
     const settings = await getAISettings();
-    const cap = Math.min(settings.maxTokens, 500);
+    const prompt = promptWithinBudget(settings, "analyzeTicket", ticket.description, (description) =>
+      PROMPT_TEMPLATES.analyzeTicket({ ...ticket, description: description ?? null })
+    );
+    const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.analyzeTicket);
     const temperature = settings.temperature;
     const result = await invokeBedrockModel(
       prompt,
@@ -478,9 +284,11 @@ export async function generateResponse(
       .map((article) => `- ${article.title}: ${article.summary}`)
       .join("\n");
 
-    const prompt = PROMPT_TEMPLATES.generateResponse(ticket, knowledgeBase);
     const settings = await getAISettings();
-    const cap = Math.min(settings.maxTokens, 800);
+    const prompt = promptWithinBudget(settings, "generateResponse", ticket.description, (description) =>
+      PROMPT_TEMPLATES.generateResponse({ ...ticket, description: description ?? null }, knowledgeBase)
+    );
+    const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.generateResponse);
     const temperature = settings.temperature;
     const result = await invokeBedrockModel(
       prompt,
@@ -599,9 +407,11 @@ export async function updateKnowledgeBase(
   costEstimate?: CostEstimate;
 }> {
   try {
-    const prompt = PROMPT_TEMPLATES.extractKnowledge(ticket, resolution);
     const settings = await getAISettings();
-    const cap = Math.min(settings.maxTokens, 600);
+    const prompt = promptWithinBudget(settings, "updateKnowledgeBase", ticket.description, (description) =>
+      PROMPT_TEMPLATES.extractKnowledge({ ...ticket, description: description ?? null }, resolution)
+    );
+    const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.updateKnowledgeBase);
     const temperature = settings.temperature;
 
     const result = await invokeBedrockModel(
@@ -716,18 +526,13 @@ export async function calculateConfidence(
  */
 export async function testBedrockConnection(): Promise<{
   success: boolean;
+  code?: string;
   costEstimate?: CostEstimate;
-  error?: string;
 }> {
   try {
     const response = await getBedrockClient();
 
-    if (!response?.bedrockModelId) {
-      return {
-        success: false,
-        error: "No Bedrock model configured",
-      };
-    }
+    if (!response.bedrockClient) return { success: false, code: "not_configured" };
 
     const testPrompt =
       "Hello, this is a test. Please respond with 'Connection successful'.";
@@ -747,20 +552,17 @@ export async function testBedrockConnection(): Promise<{
   } catch (error) {
     console.error("Bedrock connection test failed:", describeAIError(error));
 
-    // If request was blocked, include cost information
     if ((error as any).isBlocked) {
       return {
         success: false,
         costEstimate: (error as any).costEstimate,
-        error: `Connection test blocked: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`,
+        code: "quota_exceeded",
       };
     }
 
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+      code: error instanceof AiModelError ? error.code : "provider_failure",
     };
   }
 }
@@ -772,10 +574,10 @@ export async function testBedrockConnection(): Promise<{
 export async function getBedrockConfigSummary(): Promise<{
   currentModelId: string | null;
 }> {
-  const [settings] = await Promise.all([storage.getBedrockSettings()]);
+  const settings = await getAISettings();
 
   return {
-    currentModelId: settings?.bedrockRegion ? settings.bedrockModelId : null,
+    currentModelId: settings.isActive ? settings.modelId : null,
   };
 }
 
@@ -829,14 +631,14 @@ export async function exportUsageData(startDate?: string, endDate?: string) {
 
 export async function runTicketAnalysisPrompt(prompt: string) {
   const settings = await getAISettings();
-  const cap = Math.min(settings.maxTokens, 1000);
+  const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.ticketAnalysis);
   const temperature = settings.temperature;
   return invokeBedrockModel(prompt, "ticketAnalysis", cap, temperature);
 }
 
 export async function runAutoResponseForTicketPrompt(prompt: string) {
   const settings = await getAISettings();
-  const cap = Math.min(settings.maxTokens, 1500);
+  const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.autoResponse);
   const temperature = settings.temperature;
   return invokeBedrockModel(prompt, "autoResponse", cap, temperature);
 }

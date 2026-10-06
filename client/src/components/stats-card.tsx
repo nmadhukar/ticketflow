@@ -10,6 +10,7 @@ interface StatsCardProps {
   iconBg?: string; // e.g., "bg-primary/10", "bg-blue-500/10"
   iconColor?: string; // e.g., "text-primary", "text-blue-500"
   loading?: boolean;
+  error?: boolean;
   isActive?: boolean;
   onClick?: () => void;
   className?: string;
@@ -23,6 +24,7 @@ export default function StatsCard({
   iconBg = "bg-muted/10",
   iconColor = "text-muted-foreground",
   loading,
+  error,
   isActive,
   onClick,
   className,
@@ -30,12 +32,21 @@ export default function StatsCard({
   return (
     <Card
       className={cn(
-        "hover:shadow-business transition-shadow",
+        "transition-shadow",
         isActive && "ring-2 ring-primary",
-        onClick && "cursor-pointer",
+        onClick && "cursor-pointer hover:shadow-business focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
         className
       )}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      aria-label={onClick ? title : undefined}
       onClick={onClick}
+      onKeyDown={onClick ? (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onClick();
+        }
+      } : undefined}
     >
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-sm font-medium">{title}</CardTitle>
@@ -51,8 +62,10 @@ export default function StatsCard({
       <CardContent>
         {loading ? (
           <Skeleton className="h-8 w-16 mb-1" />
+        ) : error ? (
+          <div className="text-sm text-muted-foreground" role="status">Unavailable</div>
         ) : (
-          <div className="text-2xl font-bold">{value}</div>
+          <div className="text-2xl font-semibold tracking-tight tabular-nums">{value}</div>
         )}
         {subtitle && (
           <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>

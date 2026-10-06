@@ -5,7 +5,8 @@ document was built on 076197a, with every task merged, and updated by the final 
 after the whole-branch review: rulings R32-R35 and minors M1-M8). It is written for the person
 who deploys. Sections: 1 deploy order and environment variables, 2 owner actions, 3 behaviour
 changes users will notice, 4 rulings, 5 follow-ups, 6 the follow-ups round of 2026-10-03, 7 the
-final follow-ups round of 2026-10-03 (this closes every open line in sections 5 and 6).
+final follow-ups round of 2026-10-03 (this closes every open line in sections 5 and 6), 8 MCP
+documents, 9 the UI overhaul and the move to OpenRouter (PRs #6, #7).
 
 Related files: `API_ENDPOINTS_REFERENCE.md` (every route),
 `TicketFlow_API_Collection.postman_collection.json` (requests),
@@ -1061,3 +1062,87 @@ or guidelines. Task MCP4 adds document search, reading and writing on MCP (rulin
 2. Ask an agent connected over MCP a DoseSpot setup question and check that it calls
    `search_documents`, cites "Dosespot Configuration Document" and answers from it (an MCP tool
    change is verified by asking the agent, not by a connection test).
+
+## 9. UI overhaul and OpenRouter (PRs #6, #7)
+
+PR #6 is the UI overhaul. PR #7 moves the AI from AWS Bedrock to OpenRouter (default model
+`deepseek/deepseek-v4-pro`, key from the server environment only, never stored, returned or
+logged). Both were merged with main (PRs #8 and #9) on `release/ticketflow-ui-openrouter` and
+reviewed as one change; the review's four Important findings and its Minor M1 and M3 are fixed on
+that branch (see "Fixed from the review" below), and M2 and M11 are the deploy steps below. AWS stays in use for S3 (attachments, company
+logo) and SES; the Bedrock credentials and region still live in `bedrock_settings` for S3, and
+`@aws-sdk/client-bedrock-runtime` is gone.
+
+### Deploy steps
+
+1. **Set `OPENROUTER_API_KEY` in Coolify.** It is optional and passed through by docker-compose
+   (`OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}`). Without it no model call is made anywhere and
+   ticket creation is unaffected. Read the warning below before setting it.
+2. **Migration 0023** (`0023_ai_settings.sql`) runs in `npm run db:migrate-sql` before push. It
+   creates `ai_settings` (one row, id 1), copies the first active `bedrock_settings` row into it
+   once, and adds `requested_model_id`, `generation_id`, `verified_cost_usd` and `billing_status`
+   to `ai_usage`, with a CHECK on `billing_status` and a unique index on `generation_id`. It
+   drops and renames nothing, so `bedrock_settings` keeps every column and every legacy usage row
+   is kept as `billing_status = 'estimated'`; a rollback image still works. It is idempotent and
+   never aborts: on a database that predates `bedrock_settings`, `ai_usage` or a column it copies
+   (or has no `teams`), it reports with a NOTICE (`0023: ...`) and leaves the object to
+   `drizzle-kit push`, which creates it. The startup schema check now lists `ai_settings` and the
+   four `ai_usage` columns, so the server refuses to boot if push or 0023 left them out (without
+   `ai_settings` every AI feature would switch off silently). After the deploy the log shows
+   `applied 0023_ai_settings.sql` and `sql-migrations: done`, and no `Startup refused`.
+3. **Set `AWS_S3_REGION` to the S3 bucket's region** in Coolify (and the local stack). The region
+   S3 signs for is now: `AWS_S3_REGION`, then a region explicitly saved on the Storage settings
+   page, then `us-east-2` (the region that was hard-coded before PR #7, so a deployment that never
+   sets it keeps working). A saved region of `us-east-1` is ignored on purpose: it is the column's
+   default and cannot be told from "nobody chose one". To use a bucket in `us-east-1`, set
+   `AWS_S3_REGION=us-east-1`. A wrong region fails every upload, presigned download, delete and
+   company-logo request, so check an attachment upload and download after the deploy.
+
+> **Warning: setting the key starts auto-responses at once.** On an install whose legacy
+> `bedrock_settings` row was active, 0023 copies it as `is_active = true` with its auto-response
+> flag and limits, and the model becomes `deepseek/deepseek-v4-pro` (Bedrock model ids are not
+> carried over). The moment `OPENROUTER_API_KEY` is set, new tickets get customer-visible AI
+> comments and spend starts, under the copied daily and monthly limits, with nobody toggling
+> anything. Before setting the key, open Admin > AI settings and check that the switch, auto-response,
+> confidence threshold and limits are what you want, or switch AI off and turn it on after the test
+> below. An install with no legacy AI row gets no `ai_settings` row, which reads as AI off.
+
+4. **After the deploy, do one live "test connection" in Admin** (Admin > AI settings > Test
+   connection) to confirm the default model answers (M2). The review could not run it (no key): the
+   default model may reason by default, the client sends no reasoning control and the test allows
+   only 50 output tokens, so the visible text can come back empty (`empty_output`) or as truncated
+   JSON (`invalid_output`). If the test fails that way, choose another model in Admin before
+   leaving AI on; otherwise auto-responses would silently never post. The button is enabled only
+   when the key is set on the server, AI is switched on and there are no unsaved changes. The API
+   answers 503 (`not_configured`) when the key is missing or AI is off, and 429 when OpenRouter
+   rate-limits or the test would exceed a spending limit.
+
+### Fixed from the review
+
+- **0023 can no longer abort a deploy** on a database that predates the AI tables (I1).
+- **S3 region fallback** is `us-east-2` again for deployments without `AWS_S3_REGION` (I2).
+- **Test-connection errors** (`POST /api/ai/test-connection` and `/api/admin/ai-settings/test`)
+  follow the error contract `{ error, message, details? }`; the reason code is in `details.code`
+  and is also kept at the top level, where the admin page and the OpenAPI document read it (I3).
+- **Schema check** lists `ai_settings` and the new `ai_usage` columns (I4).
+- **Saving cost limits** (`PUT /api/bedrock/cost-limits`) on an install with no AI settings row no
+  longer turns AI on; the row is created with AI off unless `isActive: true` is sent (M1).
+- **Long tickets still get AI** (M3). The per-request token cap (`maxTokensPerRequest`, default
+  3000) is a ceiling on prompt plus output and is unchanged. A ticket description past about
+  4.5 KB used to push the prompt over it and the call was blocked silently, so emailed tickets got
+  no AI at all. Now, when the prompt plus the operation's output allowance would exceed the cap
+  (a description of roughly 1.3 to 3.5 KB at the defaults, depending on the operation: the more
+  output an operation asks for, the less room is left for the description), the description is cut
+  to fit, with a `[description truncated]` marker, and the full output allowance is kept. The log
+  line carries only the operation name and the original and kept lengths. The instructions and the
+  JSON format around the description are never cut. To give long tickets more of their text, raise
+  `maxTokensPerRequest` in Admin > AI settings.
+
+### Still open (Minor, not fixed here)
+
+M4 (cost reconciliation is awaited inline and the dashboard reads all of `ai_usage`), M5 (a returned
+model with no price throws after the spend), M6 (readiness checks disagree on whitespace keys and
+the AI switch), M7 (`quota_exceeded` is 429 on one test route and 400 on the other), M8 (validation
+gaps in AI settings), M9 (`responseTimeout` is stored but unused), M10 (the help chat answers 429
+when the budget is spent), M12 (`env.example` still lacks `OPENROUTER_API_KEY`, and
+`docs/integrations/dsh-ticketflow-mcp.md` is stale), M13 (test gaps) and M14 (two pricing caches).

@@ -1,29 +1,5 @@
-/**
- * Dashboard Page - Main Hub for Ticket Management
- *
- * Serves as the primary interface for users to:
- * - View system statistics and key metrics
- * - Access recent tickets and activity
- * - Filter and search through assigned tickets
- * - Navigate to detailed ticket views
- * - Create new tickets with quick access
- * - Monitor real-time updates via WebSocket connection
- *
- * Features include:
- * - Interactive dashboard filtering - clicking stats cards filters the tasks table
- * - Visual indicators for active filters with badges and clear button
- * - Stats cards show active state with ring highlight when filtering is applied
- * - Role-based content display (different views for admin vs regular users)
- * - Real-time notifications and updates
- * - Responsive design for desktop and mobile devices
- *
- * Navigation Support:
- * - Direct ticket access via URL parameters
- * - Breadcrumb navigation for deep-linked tickets
- * - Back navigation from ticket detail views
- */
-
 import MainWrapper from "@/components/main-wrapper";
+import { Button } from "@/components/ui/button";
 import { BedrockCostMonitoring } from "@/components/bedrock-cost-monitoring";
 import { S3UsageMonitoring } from "@/components/s3-usage-monitoring";
 import StatsCard from "@/components/stats-card";
@@ -33,7 +9,6 @@ import { useWebSocketContext } from "@/hooks/useWebSocket";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  BarChart3,
   Users,
   UserCog,
   Settings,
@@ -41,7 +16,7 @@ import {
   Ticket,
   FileCheck,
 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 export default function Dashboard() {
@@ -49,8 +24,7 @@ export default function Dashboard() {
   const { isAuthenticated, isLoading, user } = useAuth();
   const { t } = useTranslation(["common", "dashboard"]);
   const { isConnected } = useWebSocketContext();
-
-  const hasCustomerRole = (user as any)?.role === "customer";
+  const [showInfrastructure, setShowInfrastructure] = useState(false);
 
   const hasManagerOrAdminRole = ["manager", "admin"].includes(
     (user as any)?.role
@@ -71,24 +45,18 @@ export default function Dashboard() {
     }
   }, [isAuthenticated, isLoading, toast]);
 
-  const { data: stats, isLoading: statsLoading } = useQuery<any>({
+  const { data: stats, isLoading: statsLoading, isError: statsError, refetch: refetchStats } = useQuery<any>({
     queryKey: ["/api/stats"],
     retry: false,
     enabled: isAuthenticated && hasManagerOrAdminRole,
   });
 
   // Admin-only system overview stats
-  const { data: systemStats, isLoading: systemStatsLoading } = useQuery<any>({
+  const { data: systemStats, isLoading: systemStatsLoading, isError: systemStatsError, refetch: refetchSystemStats } = useQuery<any>({
     queryKey: ["/api/admin/stats"],
     retry: false,
     refetchOnMount: "always",
     enabled: isAuthenticated && (user as any)?.role === "admin",
-  });
-
-  const { data: _recentTasks, isLoading: _tasksLoading } = useQuery<any[]>({
-    queryKey: ["/api/tasks"],
-    retry: false,
-    enabled: isAuthenticated && !hasCustomerRole,
   });
 
   if (isLoading || !isAuthenticated) {
@@ -100,17 +68,48 @@ export default function Dashboard() {
   }
 
   return (
-    <MainWrapper>
-      {/* WebSocket Connection Status */}
+    <MainWrapper action={<Button onClick={() => { window.location.href = "/tickets"; }}>View tickets</Button>}>
+      <div className="mx-auto max-w-7xl space-y-8">
+      <header className="space-y-2">
+        <h1 className="text-2xl font-semibold tracking-tight text-balance">{t("dashboard:title")}</h1>
+        <p className="text-sm text-muted-foreground text-pretty">{t("dashboard:subtitle")}</p>
+      </header>
       {isConnected && (
-        <div className="flex items-center gap-2 text-sm text-green-600 mb-3">
-          <div className="w-2 h-2 rounded-full bg-green-600 animate-pulse" />
+        <div className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
+          <div className="w-2 h-2 rounded-full bg-emerald-500" aria-hidden="true" />
           {t("dashboard:realtimeUpdates")}
         </div>
       )}
-
-      {/* Admin-only System Overview Cards - First Row */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
+      {(statsError || systemStatsError) && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <p className="text-sm">Some dashboard metrics could not load.</p>
+          <Button variant="outline" size="sm" onClick={() => { if (statsError) void refetchStats(); if (systemStatsError) void refetchSystemStats(); }}>Try again</Button>
+        </div>
+      )}
+      <section aria-labelledby="ticket-overview" className="space-y-4">
+        <div>
+          <h2 id="ticket-overview" className="text-lg font-semibold">Ticket overview</h2>
+          <p className="text-sm text-muted-foreground">Track work that is open, moving, or waiting for review.</p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatsCard title={t("dashboard:admin.openTickets")} value={stats?.open ?? 0} icon={<Ticket className="h-4 w-4" />} loading={statsLoading} error={statsError} />
+          <StatsCard title={t("dashboard:stats.inProgress")} value={stats?.inProgress ?? 0} icon={<Ticket className="h-4 w-4" />} loading={statsLoading} error={statsError} />
+          <StatsCard title="On hold" value={stats?.onHold ?? 0} icon={<Ticket className="h-4 w-4" />} loading={statsLoading} error={statsError} />
+          <StatsCard title="Resolved or closed" value={(stats?.resolved ?? 0) + (stats?.closed ?? 0)} icon={<FileCheck className="h-4 w-4" />} loading={statsLoading} error={statsError} />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatsCard title={t("dashboard:admin.highPriority")} value={stats?.highPriority ?? 0} icon={<AlertTriangle className="h-4 w-4" />} loading={statsLoading} error={statsError} />
+          <StatsCard title={t("dashboard:admin.urgentPriority")} value={stats?.urgent ?? systemStats?.urgentTickets ?? 0} icon={<AlertTriangle className="h-4 w-4" />} loading={statsLoading || systemStatsLoading} error={statsError && systemStatsError} />
+          <StatsCard title={t("dashboard:admin.pendingArticles")} value={systemStats?.pendingArticles ?? 0} subtitle={t("dashboard:admin.pendingArticlesSubtitle")} icon={<FileCheck className="h-4 w-4" />} loading={systemStatsLoading} error={systemStatsError} onClick={() => { window.location.href = "/knowledge-base?status=draft"; }} />
+          <StatsCard title={t("dashboard:admin.avgResolutionTime")} value={typeof systemStats?.avgResolutionTime === "number" ? `${systemStats.avgResolutionTime.toFixed(1)}h` : "N/A"} subtitle={t("dashboard:admin.hours")} icon={<Settings className="h-4 w-4" />} loading={systemStatsLoading} error={systemStatsError} />
+        </div>
+      </section>
+      <section aria-labelledby="organization-overview" className="space-y-4">
+        <div>
+          <h2 id="organization-overview" className="text-lg font-semibold">Organization overview</h2>
+          <p className="text-sm text-muted-foreground">People and structure behind ticket work.</p>
+        </div>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatsCard
           title={t("dashboard:admin.totalUsers")}
           value={(systemStats as any)?.totalUsers || 0}
@@ -121,6 +120,7 @@ export default function Dashboard() {
           iconBg="bg-primary/10"
           iconColor="text-primary"
           loading={systemStatsLoading}
+          error={systemStatsError}
         />
         <StatsCard
           title={t("dashboard:admin.totalDepartments")}
@@ -130,6 +130,7 @@ export default function Dashboard() {
           iconBg="bg-secondary/10"
           iconColor="text-secondary-foreground"
           loading={systemStatsLoading}
+          error={systemStatsError}
         />
         <StatsCard
           title={t("dashboard:admin.totalTeams")}
@@ -139,6 +140,7 @@ export default function Dashboard() {
           iconBg="bg-accent/10"
           iconColor="text-accent-foreground"
           loading={systemStatsLoading}
+          error={systemStatsError}
         />
         <StatsCard
           title={t("dashboard:admin.totalTickets")}
@@ -148,70 +150,24 @@ export default function Dashboard() {
           iconBg="bg-muted/10"
           iconColor="text-muted-foreground"
           loading={systemStatsLoading}
+          error={systemStatsError}
         />
       </div>
-
-      {/* Admin-only System Overview Cards - Second Row */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
-        <StatsCard
-          title={t("dashboard:admin.ticketStatus")}
-          value={`${stats?.open || 0} / ${stats?.inProgress || 0} / ${
-            stats?.onHold || 0
-          } / ${(stats?.resolved || 0) + (stats?.closed || 0)}`}
-          subtitle={t("dashboard:admin.openInProgressCompleted")}
-          icon={<BarChart3 className="h-4 w-4" />}
-          iconBg="bg-blue-500/10"
-          iconColor="text-blue-500"
-          loading={systemStatsLoading || statsLoading}
-        />
-        <StatsCard
-          title={t("dashboard:admin.priorityTickets")}
-          value={`${stats?.highPriority || 0} / ${
-            stats?.urgent ?? (systemStats as any)?.urgentTickets ?? 0
-          }`}
-          subtitle={t("dashboard:admin.highUrgent")}
-          icon={<AlertTriangle className="h-4 w-4" />}
-          iconBg="bg-orange-500/10"
-          iconColor="text-orange-500"
-          loading={systemStatsLoading || statsLoading}
-        />
-        <StatsCard
-          title={t("dashboard:admin.avgResolutionTime")}
-          value={
-            (systemStats as any)?.avgResolutionTime !== null &&
-            (systemStats as any)?.avgResolutionTime !== undefined
-              ? `${(systemStats as any).avgResolutionTime.toFixed(1)}h`
-              : "N/A"
-          }
-          subtitle={t("dashboard:admin.hours")}
-          icon={<Settings className="h-4 w-4" />}
-          iconBg="bg-muted/10"
-          iconColor="text-muted-foreground"
-          loading={systemStatsLoading}
-        />
-        <StatsCard
-          title={t("dashboard:admin.pendingArticles")}
-          value={(systemStats as any)?.pendingArticles || 0}
-          subtitle={t("dashboard:admin.pendingArticlesSubtitle")}
-          icon={<FileCheck className="h-4 w-4" />}
-          iconBg="bg-amber-500/10"
-          iconColor="text-amber-500"
-          loading={systemStatsLoading}
-          onClick={() => {
-            window.location.href = "/knowledge-base?status=draft";
-          }}
-        />
-      </div>
-
-      <div className="space-y-6">
+      </section>
+      <details className="rounded-lg border bg-card p-5" onToggle={(event) => setShowInfrastructure(event.currentTarget.open)}>
+        <summary className="cursor-pointer font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Infrastructure usage</summary>
+        <p className="mt-1 text-sm text-muted-foreground">AI model and S3 usage for administrators.</p>
+        {showInfrastructure && <div className="mt-6 space-y-6">
         <div className="space-y-4">
-          <h2 className="text-2xl font-semibold">Bedrock Usage</h2>
+          <h3 className="text-base font-semibold">AI model usage</h3>
           <BedrockCostMonitoring />
         </div>
         <div className="space-y-4">
-          <h2 className="text-2xl font-semibold">S3 Usage</h2>
+          <h3 className="text-base font-semibold">S3 usage</h3>
           <S3UsageMonitoring />
         </div>
+        </div>}
+      </details>
       </div>
     </MainWrapper>
   );

@@ -9,6 +9,15 @@ export function isDevelopmentEnv(nodeEnv: string | undefined = process.env.NODE_
   return (nodeEnv || "development") === "development";
 }
 
+/** Optional deployment secret. Never return it from status/config responses. */
+export function readOpenRouterApiKey(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.OPENROUTER_API_KEY?.trim() || undefined;
+}
+
+export function isOpenRouterConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  return readOpenRouterApiKey(env) !== undefined;
+}
+
 /**
  * R49: how many reverse proxies sit in front of the app (Express "trust proxy" as a hop count).
  * TRUST_PROXY_HOPS is an integer from 0 to 10; unset means 1 (nginx alone); 2 is Coolify/Traefik

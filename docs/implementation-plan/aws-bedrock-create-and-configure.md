@@ -1,5 +1,10 @@
 # AWS Bedrock: Create and Configure Plan
 
+> Legacy rollback reference. The current Ticketflow AI integration uses OpenRouter with a
+> server-only `OPENROUTER_API_KEY`; this Bedrock model setup is for an older image only.
+> AWS credentials and the existing `bedrock_settings` row remain in use for S3
+> attachment storage and may also be needed by the older image during rollback.
+
 ## 1) Prerequisites
 
 - AWS account with admin access (or delegated permissions to manage IAM, Bedrock, VPC, Budgets, CloudTrail).

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { useLocation } from "wouter";
+import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -59,7 +59,6 @@ const departmentSchema = z.object({
 type DepartmentFormData = z.infer<typeof departmentSchema>;
 
 export default function Departments() {
-  const [, setLocation] = useLocation();
   const { t } = useTranslation(["common", "departments"]);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const { toast } = useToast();
@@ -67,7 +66,7 @@ export default function Departments() {
   const { user } = useAuth();
   const isAdmin = (user as any)?.role === "admin";
 
-  const { data: departments = [], isLoading } = useQuery<Department[]>({
+  const { data: departments = [], isLoading, isError, refetch } = useQuery<Department[]>({
     queryKey: ["/api/departments"],
     refetchInterval: 30000, //
     refetchOnMount: "always",
@@ -122,18 +121,10 @@ export default function Departments() {
     createMutation.mutate(data);
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
   return (
     <MainWrapper
       action={
-        isAdmin && departments?.length ? (
+        isAdmin ? (
           <Button className="gap-2" onClick={() => setIsCreateOpen(true)}>
             <Plus className="w-4 h-4" />
             {t("departments:actions.add")}
@@ -141,6 +132,14 @@ export default function Departments() {
         ) : null
       }
     >
+      <div className="mx-auto max-w-7xl space-y-6">
+      <header className="space-y-1">
+        <h1 className="text-2xl font-semibold tracking-tight text-balance">{t("departments:title")}</h1>
+        <p className="text-sm text-muted-foreground text-pretty">{t("departments:subtitle")}</p>
+      </header>
+      {isLoading ? <div role="status" className="rounded-lg border bg-card p-8 text-sm text-muted-foreground">{t("actions.loading")}</div> : isError ? (
+        <Card><CardContent className="space-y-3 p-8"><h2 className="font-semibold">Could not load departments</h2><p className="text-sm text-muted-foreground">Please try again.</p><Button variant="outline" onClick={() => refetch()}>Try again</Button></CardContent></Card>
+      ) : <>
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {departments?.map((department: Department) => {
           const manager = users.find(
@@ -149,11 +148,9 @@ export default function Departments() {
           return (
             <Card
               key={department.id}
-              className="relative group cursor-pointer hover:shadow-lg transition-shadow"
-              onClick={() => {
-                setLocation(`/departments/${department.id}`);
-              }}
+              className="transition-shadow hover:shadow-business"
             >
+              <Link href={`/departments/${department.id}`} className="block h-full rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" aria-label={`Open ${department.name}`}>
               <CardHeader className="pb-4">
                 <div className="flex justify-between items-start">
                   <div className="flex items-center gap-3 flex-1">
@@ -202,25 +199,26 @@ export default function Departments() {
                   </div>
                 )}
               </CardContent>
+              </Link>
             </Card>
           );
         })}
       </div>
-      {!departments?.length && (
-        <Card className="p-12 text-center bg-white rounded-2xl border">
-          <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
-            <Building className="h-8 w-8 text-slate-400" />
+      {!departments.length && (
+        <Card className="p-10 text-center">
+          <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
+            <Building className="h-6 w-6 text-primary" />
           </div>
-          <h3 className="text-2xl font-semibold text-slate-900 mb-2">
+          <h2 className="text-lg font-semibold mb-2">
             {t("departments:empty.title")}
-          </h3>
-          <p className="text-slate-500 mb-6 max-w-xl mx-auto">
+          </h2>
+          <p className="text-sm text-muted-foreground mb-6 max-w-xl mx-auto">
             {t("departments:empty.desc")}
           </p>
           {isAdmin && (
             <Button
               onClick={() => setIsCreateOpen(true)}
-              className="gap-2 bg-blue-600 hover:bg-blue-700"
+              className="gap-2"
             >
               <Plus className="h-4 w-4" />
               {t("departments:empty.create")}
@@ -228,6 +226,7 @@ export default function Departments() {
           )}
         </Card>
       )}
+      </>}
 
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
         <DialogContent>
@@ -344,6 +343,7 @@ export default function Departments() {
           </Form>
         </DialogContent>
       </Dialog>
+      </div>
     </MainWrapper>
   );
 }

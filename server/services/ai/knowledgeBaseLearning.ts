@@ -16,6 +16,7 @@ import type { Task } from "@shared/schema";
 import { db } from "../../storage/db";
 import { learningQueue } from "@shared/schema";
 import { inArray } from "drizzle-orm";
+import { z } from "zod";
 import {
   buildImproveKnowledgeArticlePrompt,
   buildKnowledgeArticlePrompt,
@@ -23,7 +24,6 @@ import {
   buildResolvedTicketsPatternPrompt,
 } from "./prompts";
 import {
-  getBedrockClient,
   runKnowledgeImproveArticlePrompt,
   runKnowledgePatternAnalysisPrompt,
   runKnowledgePatternPrompt,
@@ -33,6 +33,38 @@ import { loadCostLimits, estimateTokens } from "./costMonitoring";
 import { extractJSON } from "./jsonUtils";
 import { describeAIError, isQuotaBlocked } from "./aiErrors";
 import { ensureAiSystemUser } from "../../utils/aiSystemUser";
+
+const resolutionPatternSchema = z.object({
+  problemType: z.string().trim().min(1),
+  commonSolutions: z.array(z.string()),
+  preventiveMeasures: z.array(z.string()),
+  frequency: z.number().finite().min(0),
+  averageResolutionTime: z.number().finite().nonnegative(),
+  successRate: z.number().finite().min(0).max(100),
+});
+
+const generatedKnowledgeArticleSchema = z.object({
+  title: z.string().trim().min(1).max(255),
+  content: z.string().trim().min(1),
+  category: z.string().trim().min(1),
+  tags: z.array(z.string()),
+  difficulty: z.enum(["beginner", "intermediate", "advanced"]),
+  estimatedReadTime: z.number().finite().nonnegative(),
+  confidence: z.number().finite().min(0).max(100),
+});
+
+const knowledgeRankingSchema = z.array(z.object({
+  articleIndex: z.number().int().nonnegative(),
+  relevanceScore: z.number().finite().min(0).max(100),
+  matchedContent: z.string(),
+}));
+
+const knowledgeImprovementSchema = z.object({
+  shouldUpdate: z.boolean(),
+  improvedContent: z.string(),
+  improvementReason: z.string().optional(),
+  confidence: z.number().finite().min(0).max(100),
+});
 
 /**
  * Structure for AI-generated knowledge articles
@@ -89,8 +121,7 @@ export const analyzeResolvedTickets = async (
     comments: Array<{ content: string; userId: string; createdAt: Date }>;
   }>
 ): Promise<ResolutionPattern[]> => {
-  const { bedrockClient, bedrockModelId: modelId } = await getBedrockClient();
-  if (!bedrockClient || !modelId || ticketBatch.length === 0) return [];
+  if (ticketBatch.length === 0 || !process.env.OPENROUTER_API_KEY) return [];
 
   try {
     const ticketSummaries = ticketBatch
@@ -117,7 +148,7 @@ Comments: ${ticket.comments.map((c) => c.content).join("; ")}
       throw new Error("Empty response after JSON extraction");
     }
 
-    const patterns = JSON.parse(cleanedResponse) as ResolutionPattern[];
+    const patterns = z.array(resolutionPatternSchema).parse(JSON.parse(cleanedResponse));
 
     // Log learning activity
     logSecurityEvent({
@@ -150,8 +181,7 @@ export const generateKnowledgeArticle = async (
   pattern: ResolutionPattern,
   relatedTickets: number[]
 ): Promise<KnowledgeArticle | null> => {
-  const { bedrockClient, bedrockModelId: modelId } = await getBedrockClient();
-  if (!bedrockClient || !modelId) return null;
+  if (!process.env.OPENROUTER_API_KEY) return null;
 
   try {
     const prompt = buildKnowledgeArticlePrompt(pattern);
@@ -163,7 +193,7 @@ export const generateKnowledgeArticle = async (
       throw new Error("Empty response after JSON extraction");
     }
 
-    const articleData = JSON.parse(cleanedResponse) as KnowledgeArticle;
+    const articleData = generatedKnowledgeArticleSchema.parse(JSON.parse(cleanedResponse));
 
     const article: KnowledgeArticle = {
       ...articleData,
@@ -568,8 +598,7 @@ export const intelligentKnowledgeSearch = async (
     matchedContent: string;
   }>
 > => {
-  const { bedrockClient, bedrockModelId: modelId } = await getBedrockClient();
-  if (!bedrockClient || !modelId) {
+  if (!process.env.OPENROUTER_API_KEY) {
     // Fallback to basic search
     return await basicKnowledgeSearch(query, category, maxResults);
   }
@@ -608,10 +637,14 @@ Content Preview: ${article.content.substring(0, 300)}...
       return await basicKnowledgeSearch(query, category, maxResults);
     }
 
-    const rankings = JSON.parse(cleanedResponse) as any[];
+    const rankings = knowledgeRankingSchema.parse(JSON.parse(cleanedResponse));
+
+    if (rankings.some((ranking) => ranking.articleIndex >= articles.length)) {
+      return await basicKnowledgeSearch(query, category, maxResults);
+    }
 
     if (rankings.length > 0) {
-      return rankings.map((ranking: any) => ({
+      return rankings.slice(0, maxResults).map((ranking) => ({
         article: articles[ranking.articleIndex],
         relevanceScore: ranking.relevanceScore,
         matchedContent: ranking.matchedContent,
@@ -676,8 +709,7 @@ export const improveKnowledgeArticle = async (
     success: boolean;
   }
 ): Promise<boolean> => {
-  const { bedrockClient, bedrockModelId: modelId } = await getBedrockClient();
-  if (!bedrockClient || !modelId) return false;
+  if (!process.env.OPENROUTER_API_KEY) return false;
 
   try {
     const article = await storage.getKnowledgeArticle(articleId);
@@ -702,9 +734,9 @@ export const improveKnowledgeArticle = async (
         return false;
       }
 
-      const improvement = JSON.parse(cleanedResponse) as any;
+      const improvement = knowledgeImprovementSchema.parse(JSON.parse(cleanedResponse));
 
-      if (improvement.shouldUpdate && improvement.confidence >= 70) {
+      if (improvement.shouldUpdate && improvement.confidence >= 70 && improvement.improvedContent.trim()) {
         await storage.updateKnowledgeArticle(articleId, {
           content: improvement.improvedContent,
           // updatedAt: new Date(),

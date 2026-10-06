@@ -3,7 +3,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { isUnauthorizedError } from "@/lib/authUtils";
 import { apiRequest } from "@/lib/queryClient";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Paperclip, Upload, X } from "lucide-react";
 import { useRef, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
@@ -28,6 +28,7 @@ const TaskAttachments = ({
   onFilesChange?: (files: File[]) => void;
 }) => {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { t } = useTranslation();
   const { user } = useAuth() as any;
   const userRole = user?.role as string | undefined;
@@ -49,6 +50,7 @@ const TaskAttachments = ({
       return res.json();
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/tasks/${task?.id}/attachments`] });
       toast({
         title: t("messages.success"),
         description: t("tickets:modal.toasts.fileAttached"),
@@ -169,7 +171,7 @@ const TaskAttachments = ({
   };
 
   const processFiles = (files: File[]) => {
-    if (files.length === 0) return;
+    if (files.length === 0 || addAttachmentMutation.isPending) return;
 
     if (task?.id) {
       // Existing task: upload immediately (single file)
@@ -187,7 +189,7 @@ const TaskAttachments = ({
 
       const formData = new FormData();
       formData.append("file", file);
-      addAttachmentMutation.mutateAsync(formData);
+      addAttachmentMutation.mutate(formData);
     } else {
       // New task: validate and store files
       const { valid, errors } = validateFiles(files);
@@ -277,12 +279,11 @@ const TaskAttachments = ({
       <CardContent>
         <div
           ref={dropZoneRef}
-          className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer ${
+          className={`border-2 border-dashed rounded-lg text-center transition-colors ${
             isDragging
-              ? "border-blue-500 bg-blue-50"
-              : "border-slate-300 hover:border-blue-500"
+              ? "border-primary bg-primary/5"
+              : "border-border hover:border-primary"
           }`}
-          onClick={handleClick}
           onDragEnter={handleDragEnter}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
@@ -292,56 +293,63 @@ const TaskAttachments = ({
             ref={fileInputRef}
             type="file"
             id="file-upload"
+            aria-label="Ticket attachments"
             className="hidden"
             onChange={handleFileSelect}
             disabled={addAttachmentMutation.isPending}
             multiple={!task?.id} // Allow multiple files for new tasks
           />
-          <div>
-            <Paperclip className="h-8 w-8 mx-auto mb-2 text-slate-400" />
-            <p className="text-sm text-slate-600">
+          <button
+            type="button"
+            aria-label="Choose files"
+            disabled={addAttachmentMutation.isPending}
+            onClick={handleClick}
+            className="w-full rounded-md p-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50"
+          >
+            <Paperclip className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+            <span className="block text-sm text-foreground">
               {isDragging
                 ? "Drop files here"
                 : t("tickets:modal.placeholders.uploadCta")}
-            </p>
-            <p className="text-xs text-slate-500 mt-1">
+            </span>
+            <span className="block text-xs text-muted-foreground mt-1">
               {t("tickets:modal.placeholders.uploadHelp")}
               {!task?.id && (
                 <span className="block mt-1">
                   Max {maxFilesPerRequest} files, {maxFileSizeMB}MB per file
                 </span>
               )}
-            </p>
-          </div>
+            </span>
+          </button>
         </div>
 
         {/* Show selected files for new tasks */}
         {!task?.id && selectedFiles.length > 0 && (
           <div className="mt-4 space-y-2">
-            <p className="text-xs font-medium text-slate-700">
+            <p className="text-xs font-medium text-foreground">
               Selected Files ({selectedFiles.length}):
             </p>
             {selectedFiles.map((file, index) => (
               <div
                 key={index}
-                className="flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200"
+                className="flex items-center justify-between p-2 bg-muted/40 rounded border border-border"
               >
                 <div className="flex items-center gap-2 flex-1 min-w-0">
-                  <Paperclip className="h-4 w-4 text-slate-400 flex-shrink-0" />
-                  <span className="text-sm text-slate-700 truncate">
+                  <Paperclip className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                  <span className="text-sm text-foreground truncate">
                     {file.name}
                   </span>
-                  <span className="text-xs text-slate-500 flex-shrink-0">
+                  <span className="text-xs text-muted-foreground flex-shrink-0">
                     ({formatFileSize(file.size)})
                   </span>
                 </div>
                 <button
                   type="button"
                   onClick={() => handleRemoveFile(index)}
-                  className="ml-2 p-1 hover:bg-slate-200 rounded transition-colors"
-                  aria-label="Remove file"
+                  className="ml-2 flex h-10 w-10 shrink-0 items-center justify-center hover:bg-muted rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label={`Remove ${file.name}`}
                 >
-                  <X className="h-4 w-4 text-slate-500" />
+                  <X className="h-4 w-4 text-muted-foreground" />
                 </button>
               </div>
             ))}

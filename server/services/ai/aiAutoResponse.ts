@@ -18,6 +18,24 @@ import { ensureAiSystemUser } from "../../utils/aiSystemUser";
 import { getAISettings } from "../../admin/aiSettings";
 import { describeAIError, isQuotaBlocked } from "./aiErrors";
 import { containsPattern } from "../../utils/like";
+import { z } from "zod";
+
+const ticketAnalysisResultSchema = z.object({ complexityScore: z.number().finite().min(0).max(100) });
+const generatedResponseSchema = z.object({
+  response: z.string().trim().min(1),
+  suggestedArticles: z.array(z.number().int().positive()),
+});
+const confidenceResultSchema = z.object({
+  confidenceScore: z.number().finite().min(0).max(1),
+  shouldAutoRespond: z.boolean(),
+});
+const extractedKnowledgeSchema = z.object({
+  title: z.string().trim().min(1).max(255),
+  summary: z.string().trim().min(1),
+  content: z.string().trim().min(1),
+  category: z.string().trim().min(1),
+  tags: z.array(z.string()),
+});
 
 interface ComplexityFactors {
   keywords: number;
@@ -60,21 +78,18 @@ export class AIAutoResponseService {
         ticket.description || ""
       );
 
-      // Use Bedrock to analyze the ticket
-      const analysis = await bedrockIntegration.analyzeTicket(ticket);
+      const analysis = ticketAnalysisResultSchema.parse(await bedrockIntegration.analyzeTicket(ticket));
 
-      // Generate AI response using Bedrock
-      const responseResult = await bedrockIntegration.generateResponse(
+      const responseResult = generatedResponseSchema.parse(await bedrockIntegration.generateResponse(
         ticket,
         relevantArticles
-      );
+      ));
 
-      // Calculate confidence using Bedrock
-      const confidenceResult = await bedrockIntegration.calculateConfidence(
+      const confidenceResult = confidenceResultSchema.parse(await bedrockIntegration.calculateConfidence(
         ticket,
         relevantArticles.length,
         analysis.complexityScore
-      );
+      ));
 
       // Calculate complexity factors
       const factors = this.calculateComplexityFactors(ticket, similarTickets);
@@ -343,10 +358,10 @@ export class AIAutoResponseService {
   // Knowledge base learning method for resolved tickets
   async updateKnowledgeBase(ticket: Task, resolution: string): Promise<void> {
     try {
-      const knowledge = await bedrockIntegration.updateKnowledgeBase(
+      const knowledge = extractedKnowledgeSchema.parse(await bedrockIntegration.updateKnowledgeBase(
         ticket,
         resolution
-      );
+      ));
 
       // Store the extracted knowledge in the database
       await db.insert(knowledgeArticles).values({

@@ -27,6 +27,7 @@ for (const name of [
   "E2E_CUSTOMER_A_PASSWORD",
   "E2E_CUSTOMER_B_PASSWORD",
   "E2E_AGENT_PASSWORD",
+  "E2E_MANAGER_PASSWORD",
   "E2E_ADMIN_PASSWORD",
 ]) {
   process.env[name] ??= secret();
@@ -57,6 +58,7 @@ const BLANKED_ENV = Object.fromEntries(
     "SNS_INBOUND_TOPIC_ARN",
     "BEDROCK_ACCESS_KEY_ID",
     "BEDROCK_SECRET_ACCESS_KEY",
+    "OPENROUTER_API_KEY",
     "SMTP_HOST",
     "SMTP_USER",
     "SMTP_PASS",

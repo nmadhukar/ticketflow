@@ -224,11 +224,22 @@ describe("schema safety on deploy (R32)", () => {
       await scratch.query(`ALTER TABLE sns_message_dedupe DROP COLUMN status`);
       await scratch.query(`DROP INDEX ${REQUIRED_INDEXES[0].index}`);
       await scratch.query(`DROP TABLE ticket_number_counters`);
+      // 0023 (I4): without ai_settings every AI feature reads as switched off, silently; without
+      // the ai_usage columns every model call fails after the spend, at recordUsage.
+      await scratch.query(`DROP TABLE ai_settings`);
+      await scratch.query(
+        `ALTER TABLE ai_usage DROP COLUMN requested_model_id, DROP COLUMN generation_id CASCADE, DROP COLUMN verified_cost_usd, DROP COLUMN billing_status CASCADE`
+      );
 
       expect(await findMissingSchemaObjects(scratch)).toEqual([
         "users.locked_until",
         "ticket_number_counters",
         "sns_message_dedupe.status",
+        "ai_settings",
+        "ai_usage.requested_model_id",
+        "ai_usage.generation_id",
+        "ai_usage.verified_cost_usd",
+        "ai_usage.billing_status",
         "index api_keys_key_hash_sha256_uniq",
       ]);
 
@@ -239,7 +250,14 @@ describe("schema safety on deploy (R32)", () => {
       expect(exit).toHaveBeenCalledWith(1);
       expect(lines).toHaveLength(1);
       expect(lines[0]).toMatch(/^Startup refused: the database schema is missing /);
-      for (const name of ["users.locked_until", "ticket_number_counters", "sns_message_dedupe.status", "api_keys_key_hash_sha256_uniq"]) {
+      for (const name of [
+        "users.locked_until",
+        "ticket_number_counters",
+        "sns_message_dedupe.status",
+        "api_keys_key_hash_sha256_uniq",
+        "ai_settings",
+        "ai_usage.billing_status",
+      ]) {
         expect(lines[0]).toContain(name);
       }
     });

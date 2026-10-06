@@ -61,19 +61,19 @@ export default function Teams() {
     }
   }, [isAuthenticated, isLoading, toast]);
 
-  const { data: teams, isLoading: teamsLoading } = useQuery<any[]>({
+  const { data: teams, isLoading: teamsLoading, isError: teamsError, refetch: refetchTeams } = useQuery<any[]>({
     queryKey: ["/api/teams"],
     retry: false,
     enabled:
       isAuthenticated && ["manager", "admin"].includes((user as any)?.role),
     refetchOnMount: "always",
-    initialData: [],
   });
 
   const {
     data: myTeams,
     isLoading: myTeamsLoading,
-    error: _myTeamsError,
+    isError: myTeamsError,
+    refetch: refetchMyTeams,
   } = useQuery<any[]>({
     queryKey: ["/api/teams/my"],
     queryFn: async () => {
@@ -82,7 +82,6 @@ export default function Teams() {
     },
     retry: false,
     enabled: isAuthenticated,
-    initialData: [],
     refetchOnMount: "always",
   });
 
@@ -193,8 +192,7 @@ export default function Teams() {
     <MainWrapper
       action={
         isUserAdminOrManager &&
-        !myTeamsLoading &&
-        !!myTeams?.length && (
+        (
           <Button onClick={() => setIsCreateDialogOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
             {t("teams:actions.create")}
@@ -202,18 +200,25 @@ export default function Teams() {
         )
       }
     >
+      <div className="mx-auto max-w-7xl space-y-8">
+      <header className="space-y-1">
+        <h1 className="text-2xl font-semibold tracking-tight text-balance">{t("teams:title")}</h1>
+        <p className="text-sm text-muted-foreground text-pretty">{t("teams:subtitle")}</p>
+      </header>
       {/* My Teams Section */}
 
-      <div className="mb-8">
-        <h3 className="text-lg font-semibold mb-4">{t("teams:my.title")}</h3>
+      <section aria-labelledby="my-teams-heading" className="space-y-4">
+        <h2 id="my-teams-heading" className="text-lg font-semibold">{t("teams:my.title")}</h2>
         {myTeamsLoading ? (
-          <div className="text-center py-8">{t("teams:my.loading")}</div>
+          <div role="status" className="rounded-lg border bg-card p-8 text-sm text-muted-foreground">{t("teams:my.loading")}</div>
+        ) : myTeamsError ? (
+          <Card><CardContent className="space-y-3 p-8"><h3 className="font-semibold">Could not load your teams</h3><p className="text-sm text-muted-foreground">Please try again.</p><Button variant="outline" onClick={() => refetchMyTeams()}>Try again</Button></CardContent></Card>
         ) : myTeams && myTeams.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {myTeams.map((team: any) => (
               <Card
                 key={team.id}
-                className="hover:shadow-business transition-shadow"
+                className="transition-shadow hover:shadow-business"
               >
                 <CardHeader>
                   <div className="flex items-start justify-between">
@@ -230,7 +235,6 @@ export default function Teams() {
                     {team.createdBy === (user as any)?.id ? (
                       <Badge
                         variant="default"
-                        className="bg-purple-100 text-purple-700 hover:bg-purple-200"
                       >
                         <Crown className="h-3 w-3 mr-1" />
                         {t("teams:my.owner")}
@@ -238,7 +242,6 @@ export default function Teams() {
                     ) : teamAdminStatus?.[team.id] ? (
                       <Badge
                         variant="secondary"
-                        className="bg-blue-100 text-blue-700 hover:bg-blue-200"
                       >
                         <Crown className="h-3 w-3 mr-1" />
                         {t("teams:all.admin")}
@@ -246,7 +249,6 @@ export default function Teams() {
                     ) : (
                       <Badge
                         variant="outline"
-                        className="bg-slate-50 text-slate-700"
                       >
                         <Crown className="h-3 w-3 mr-1" />
                         {t("teams:my.member")}
@@ -259,17 +261,17 @@ export default function Teams() {
                     {team.description || "No description provided"}
                   </CardDescription>
                   <div className="flex items-center justify-between">
-                    <div className="text-xs text-slate-500">
+                    <div className="text-xs text-muted-foreground">
                       {t("teams:my.created", {
                         date: new Date(team.createdAt).toLocaleDateString(),
                       })}
                     </div>
-                    <Link href={`/teams/${team.id}`}>
-                      <Button size="sm" variant="outline" className="h-8">
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={`/teams/${team.id}`}>
                         <ExternalLink className="h-3 w-3 mr-1" />
                         {t("teams:actions.open")}
-                      </Button>
-                    </Link>
+                      </Link>
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -278,15 +280,14 @@ export default function Teams() {
         ) : (
           <Card>
             <CardContent className="p-8 text-center">
-              <Users className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-slate-900 mb-2">
+              <Users className="h-10 w-10 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-medium mb-2">
                 {t("teams:my.emptyTitle")}
               </h3>
-              <p className="text-slate-500 mb-4">{t("teams:my.emptyDesc")}</p>
+              <p className="text-sm text-muted-foreground mb-4">{t("teams:my.emptyDesc")}</p>
               {isUserAdminOrManager ? (
                 <Button
                   onClick={() => setIsCreateDialogOpen(true)}
-                  className="bg-blue-600 hover:bg-blue-700"
                 >
                   <Plus className="h-4 w-4 mr-2" />
                   {t("teams:my.createFirst")}
@@ -297,28 +298,30 @@ export default function Teams() {
             </CardContent>
           </Card>
         )}
-      </div>
+      </section>
 
       {/* All Teams Section */}
       {isUserAdminOrManager ? (
-        <div>
-          <h3 className="text-lg font-semibold text-slate-800 mb-4">
+        <section aria-labelledby="all-teams-heading" className="space-y-4">
+          <h2 id="all-teams-heading" className="text-lg font-semibold">
             {t("teams:all.title")}
-          </h3>
+          </h2>
           {teamsLoading ? (
-            <div className="text-center py-8">{t("teams:all.loading")}</div>
+            <div role="status" className="rounded-lg border bg-card p-8 text-sm text-muted-foreground">{t("teams:all.loading")}</div>
+          ) : teamsError ? (
+            <Card><CardContent className="space-y-3 p-8"><h3 className="font-semibold">Could not load teams</h3><p className="text-sm text-muted-foreground">Please try again.</p><Button variant="outline" onClick={() => refetchTeams()}>Try again</Button></CardContent></Card>
           ) : teams && teams.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {teams.map((team: any) => (
                 <Card
                   key={team.id}
-                  className="hover:shadow-md transition-shadow"
+                  className="transition-shadow hover:shadow-business"
                 >
                   <CardHeader>
                     <div className="flex items-start justify-between">
                       <div className="flex items-center space-x-3 flex-1 min-w-0">
-                        <div className="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                          <Users className="h-6 w-6 text-emerald-600" />
+                        <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                          <Users className="h-6 w-6 text-primary" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <CardTitle className="text-lg line-clamp-2 break-words">
@@ -329,7 +332,6 @@ export default function Teams() {
                       {teamAdminStatus?.[team.id] ? (
                         <Badge
                           variant="secondary"
-                          className="bg-blue-100 text-blue-700 hover:bg-blue-200"
                         >
                           <Crown className="h-3 w-3 mr-1" />
                           {t("teams:all.admin")}
@@ -337,7 +339,6 @@ export default function Teams() {
                       ) : (
                         <Badge
                           variant="outline"
-                          className="bg-slate-50 text-slate-700"
                         >
                           <Crown className="h-3 w-3 mr-1" />
                           {t("teams:my.member")}
@@ -350,17 +351,17 @@ export default function Teams() {
                       {team.description || "No description provided"}
                     </CardDescription>
                     <div className="flex items-center justify-between">
-                      <div className="text-xs text-slate-500">
+                      <div className="text-xs text-muted-foreground">
                         {t("teams:all.created", {
                           date: new Date(team.createdAt).toLocaleDateString(),
                         })}
                       </div>
-                      <Link href={`/teams/${team.id}`}>
-                        <Button size="sm" variant="outline" className="h-8">
+                      <Button asChild size="sm" variant="outline">
+                        <Link href={`/teams/${team.id}`}>
                           <ExternalLink className="h-3 w-3 mr-1" />
                           {t("teams:actions.open")}
-                        </Button>
-                      </Link>
+                        </Link>
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -369,15 +370,15 @@ export default function Teams() {
           ) : (
             <Card>
               <CardContent className="p-8 text-center">
-                <Users className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-slate-900 mb-2">
+                <Users className="h-10 w-10 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-medium mb-2">
                   {t("teams:all.emptyTitle")}
                 </h3>
-                <p className="text-slate-500">{t("teams:all.emptyDesc")}</p>
+                <p className="text-sm text-muted-foreground">{t("teams:all.emptyDesc")}</p>
               </CardContent>
             </Card>
           )}
-        </div>
+        </section>
       ) : (
         <></>
       )}
@@ -456,6 +457,7 @@ export default function Teams() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </div>
     </MainWrapper>
   );
 }

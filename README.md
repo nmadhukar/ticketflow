@@ -33,7 +33,7 @@ A comprehensive enterprise-grade ticketing system designed for small to medium b
 - **Microsoft 365 SSO Integration**: Seamless authentication with Microsoft accounts
 - **Microsoft Teams Integration**: Automatic notifications to Teams channels
 - **Email Integration**: Send and receive emails using AWS SES
-- **AI-Powered Assistant**: AWS Bedrock-powered chatbot that learns from your documentation
+- **AI-Powered Assistant**: OpenRouter-backed chatbot that learns from your documentation
 - **Company Branding**: Custom logos and branding configuration
 - **Department Management**: Organize users into departments with managers
 - **User Invitation System**: Invite users via email with auto-approval
@@ -70,7 +70,7 @@ A comprehensive enterprise-grade ticketing system designed for small to medium b
 - **Authentication**: Passport.js with local strategy & Microsoft OAuth
 - **Session Management**: Express sessions with PostgreSQL store
 - **Email Service**: AWS SES
-- **AI Service**: AWS Bedrock (Claude 3 Sonnet)
+- **AI Service**: OpenRouter with a configurable model ID
 
 ### Database Schema
 
@@ -93,7 +93,7 @@ The system uses a comprehensive relational database schema:
 
 - Node.js 22.12+ (the Docker image uses Node 24)
 - PostgreSQL database (provided by Neon)
-- AWS Account (for SES and Bedrock)
+- AWS Account (optional, for SES email and S3 attachments)
 - Microsoft Azure AD App Registration (optional, for SSO)
 
 ## Installation
@@ -155,10 +155,8 @@ AWS_ACCESS_KEY_ID=your-aws-access-key
 AWS_SECRET_ACCESS_KEY=your-aws-secret-key
 AWS_REGION=us-east-1
 
-# AWS Bedrock (for AI assistant)
-AWS_BEDROCK_ACCESS_KEY_ID=your-bedrock-access-key
-AWS_BEDROCK_SECRET_ACCESS_KEY=your-bedrock-secret-key
-AWS_BEDROCK_REGION=us-east-1
+# OpenRouter (for AI model calls; keep this key on the server)
+OPENROUTER_API_KEY=your-openrouter-api-key
 
 # Microsoft OAuth (for SSO)
 MICROSOFT_CLIENT_ID=your-client-id
@@ -346,7 +344,10 @@ Content-Type: application/json
 }
 ```
 
-### Complete API documentation is available at `/api-docs` when running the application.
+The first-release OpenAPI 3.1 contract is [docs/openapi/ticketflow.yaml](docs/openapi/ticketflow.yaml).
+Run `npm run openapi:check` to validate it. The document lists its covered routes and
+explicitly excludes other legacy endpoints and WebSocket upgrades. Ticketflow MCP is
+documented as one JSON-RPC transport at `POST /api/mcp`, with a scoped API key.
 
 ## Security
 

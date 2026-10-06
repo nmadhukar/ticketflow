@@ -1,0 +1,4626 @@
+openapi: 3.1.0
+info:
+  title: Ticketflow scoped HTTP API
+  version: 1.0.0
+  license:
+    name: MIT
+    identifier: MIT
+  description: First-release contract for authentication, tickets, AI, knowledge,
+    provider configuration, and MCP transport. Other legacy REST endpoints and
+    WebSocket upgrades are outside this document. Provider-neutral endpoints are
+    introduced by the OpenRouter migration; Bedrock-named endpoints remain
+    compatibility routes.
+servers:
+  - url: /
+    description: Same origin as Ticketflow UI
+tags:
+  - name: Authentication
+    description: Account and session management.
+  - name: Tickets
+    description: Ticket creation, updates, history, and comments.
+  - name: Attachments
+    description: Ticket attachment upload and download.
+  - name: AI
+    description: Model-assisted ticket and chat operations.
+  - name: Chat
+    description: Chat sessions and messages.
+  - name: Knowledge
+    description: Knowledge base search and article management.
+  - name: Configuration
+    description: AI provider and AWS storage settings.
+  - name: MCP
+    description: MCP JSON-RPC transport.
+paths:
+  /api/auth/register:
+    post:
+      tags:
+        - Authentication
+      summary: POST /api/auth/register
+      operationId: op1_post__api_auth_register
+      description: ""
+      security: []
+      responses:
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
+                  message:
+                    type: string
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                inviteToken:
+                  type: string
+              required:
+                - email
+                - password
+                - firstName
+                - lastName
+              additionalProperties: true
+  /api/auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: POST /api/auth/login
+      operationId: op2_post__api_auth_login
+      description: ""
+      security: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+              required:
+                - email
+                - password
+              additionalProperties: true
+  /api/auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: POST /api/auth/logout
+      operationId: op3_post__api_auth_logout
+      description: Ends browser session.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /api/auth/user:
+    get:
+      tags:
+        - Authentication
+      summary: GET /api/auth/user
+      operationId: op4_get__api_auth_user
+      description: ""
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/auth/forgot-password:
+    post:
+      tags:
+        - Authentication
+      summary: POST /api/auth/forgot-password
+      operationId: op5_post__api_auth_forgot_password
+      description: ""
+      security: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+              required:
+                - email
+              additionalProperties: true
+  /api/auth/reset-password:
+    post:
+      tags:
+        - Authentication
+      summary: POST /api/auth/reset-password
+      operationId: op6_post__api_auth_reset_password
+      description: ""
+      security: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+                password:
+                  type: string
+                  minLength: 8
+              required:
+                - token
+                - password
+              additionalProperties: true
+  /api/auth/change-password:
+    post:
+      tags:
+        - Authentication
+      summary: POST /api/auth/change-password
+      operationId: op7_post__api_auth_change_password
+      description: ""
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                currentPassword:
+                  type: string
+                password:
+                  type: string
+                  minLength: 8
+              required:
+                - currentPassword
+                - password
+              additionalProperties: true
+  /api/auth/microsoft:
+    get:
+      tags:
+        - Authentication
+      summary: GET /api/auth/microsoft
+      operationId: op8_get__api_auth_microsoft
+      description: Start Microsoft sign-in; route is present even when SSO is not
+        configured.
+      security: []
+      responses:
+        "302":
+          description: Redirect to Microsoft
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Microsoft sign-in unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/auth/microsoft/callback:
+    get:
+      tags:
+        - Authentication
+      summary: GET /api/auth/microsoft/callback
+      operationId: op9_get__api_auth_microsoft_callback
+      description: Microsoft OIDC callback; redirects browser after provider response.
+      security: []
+      responses:
+        "302":
+          description: Redirect after sign-in
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      tags:
+        - Authentication
+      summary: POST /api/auth/microsoft/callback
+      operationId: op10_post__api_auth_microsoft_callback
+      description: Microsoft OIDC callback; redirects browser after provider response.
+      security: []
+      responses:
+        "302":
+          description: Redirect after sign-in
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /api/tasks:
+    get:
+      tags:
+        - Tickets
+      summary: GET /api/tasks
+      operationId: op11_get__api_tasks
+      description: Ticket visibility and role rules apply. API key and enabled JWT
+        bearer credentials are accepted on /api/tasks/**.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Ticket"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Ticket status
+        - name: priority
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Priority
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Category
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Search text
+        - name: assigneeId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Assignee
+        - name: teamId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Team
+        - name: departmentId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Department
+        - name: mine
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - "true"
+              - "false"
+          description: Include caller's own tickets
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Maximum rows
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Starting offset
+    post:
+      tags:
+        - Tickets
+      summary: POST /api/tasks
+      operationId: op12_post__api_tasks
+      description: Create ticket. Optional multipart files use field name files.
+        Ticket service enforces role and assignment rules.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "201":
+          description: Ticket created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TicketInput"
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                priority:
+                  type: string
+                category:
+                  type: string
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+              required:
+                - title
+              additionalProperties: true
+  /api/tasks/{id}:
+    get:
+      tags:
+        - Tickets
+      summary: GET /api/tasks/:id
+      operationId: op13_get__api_tasks_id
+      description: Ticket visibility and role rules apply. API key and enabled JWT
+        bearer credentials are accepted on /api/tasks/**.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+    patch:
+      tags:
+        - Tickets
+      summary: PATCH /api/tasks/:id
+      operationId: op14_patch__api_tasks_id
+      description: Ticket visibility and role rules apply. API key and enabled JWT
+        bearer credentials are accepted on /api/tasks/**.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TicketInput"
+    delete:
+      tags:
+        - Tickets
+      summary: DELETE /api/tasks/:id
+      operationId: op15_delete__api_tasks_id
+      description: Ticket visibility and role rules apply. API key and enabled JWT
+        bearer credentials are accepted on /api/tasks/**.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Ticket deleted
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+  /api/tasks/{id}/history:
+    get:
+      tags:
+        - Tickets
+      summary: GET /api/tasks/:id/history
+      operationId: op16_get__api_tasks_id_history
+      description: Ticket visibility and role rules apply. API key and enabled JWT
+        bearer credentials are accepted on /api/tasks/**.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HistoryEvent"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+  /api/tasks/{id}/comments:
+    get:
+      tags:
+        - Tickets
+      summary: GET /api/tasks/:id/comments
+      operationId: op17_get__api_tasks_id_comments
+      description: Ticket visibility and role rules apply. API key and enabled JWT
+        bearer credentials are accepted on /api/tasks/**.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Comment"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+    post:
+      tags:
+        - Tickets
+      summary: POST /api/tasks/:id/comments
+      operationId: op18_post__api_tasks_id_comments
+      description: Ticket visibility and role rules apply. API key and enabled JWT
+        bearer credentials are accepted on /api/tasks/**.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "201":
+          description: Comment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+              required:
+                - content
+              additionalProperties: true
+  /api/tasks/{id}/attachments:
+    get:
+      tags:
+        - Attachments
+      summary: GET /api/tasks/:id/attachments
+      operationId: op19_get__api_tasks_id_attachments
+      description: ""
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Attachment"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+    post:
+      tags:
+        - Attachments
+      summary: POST /api/tasks/:id/attachments
+      operationId: op20_post__api_tasks_id_attachments
+      description: Upload one file. Caller must see ticket. S3 storage must be configured.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "201":
+          description: Attachment uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Attachment"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+              required:
+                - file
+              additionalProperties: true
+  /api/attachments/{id}/download:
+    get:
+      tags:
+        - Attachments
+      summary: GET /api/attachments/:id/download
+      operationId: op21_get__api_attachments_id_download
+      description: ""
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Attachment bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+  /api/attachments/{id}:
+    delete:
+      tags:
+        - Attachments
+      summary: DELETE /api/attachments/:id
+      operationId: op22_delete__api_attachments_id
+      description: Only uploader, manager, or administrator may delete attachment
+        after ticket access check.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+  /api/ai/analyze-ticket:
+    post:
+      tags:
+        - AI
+      summary: POST /api/ai/analyze-ticket
+      operationId: op23_post__api_ai_analyze_ticket
+      description: Staff role and ticket visibility required. Body identifies a stored
+        ticket; server reads its current text.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Analysis"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ticketId:
+                  type: integer
+              required:
+                - ticketId
+              additionalProperties: true
+  /api/ai/generate-response:
+    post:
+      tags:
+        - AI
+      summary: POST /api/ai/generate-response
+      operationId: op24_post__api_ai_generate_response
+      description: Staff role and ticket visibility required. Body identifies a stored
+        ticket; server reads its current text.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutoResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ticketId:
+                  type: integer
+              required:
+                - ticketId
+              additionalProperties: true
+  /api/tasks/{id}/auto-response:
+    get:
+      tags:
+        - Tickets
+      summary: GET /api/tasks/:id/auto-response
+      operationId: op25_get__api_tasks_id_auto_response
+      description: Ticket visibility and role rules apply. API key and enabled JWT
+        bearer credentials are accepted on /api/tasks/**.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/AutoResponse"
+                  - type: "null"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+  /api/tasks/{id}/auto-response/apply:
+    post:
+      tags:
+        - Tickets
+      summary: POST /api/tasks/:id/auto-response/apply
+      operationId: op26_post__api_tasks_id_auto_response_apply
+      description: Ticket access and staff role required.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  applied:
+                    type: boolean
+                  alreadyApplied:
+                    type: boolean
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+  /api/tasks/{id}/auto-response/generate:
+    post:
+      tags:
+        - Tickets
+      summary: POST /api/tasks/:id/auto-response/generate
+      operationId: op27_post__api_tasks_id_auto_response_generate
+      description: Ticket access and staff role required.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutoResponse"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+  /api/tasks/{id}/auto-response/feedback:
+    post:
+      tags:
+        - Tickets
+      summary: POST /api/tasks/:id/auto-response/feedback
+      operationId: op28_post__api_tasks_id_auto_response_feedback
+      description: Ticket visibility and role rules apply. API key and enabled JWT
+        bearer credentials are accepted on /api/tasks/**.
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                wasHelpful:
+                  type: boolean
+              required:
+                - wasHelpful
+              additionalProperties: true
+  /api/chat:
+    post:
+      tags:
+        - Chat
+      summary: POST /api/chat
+      operationId: op29_post__api_chat
+      description: ""
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatReply"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sessionId:
+                  type: string
+                message:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+              required:
+                - sessionId
+                - message
+              additionalProperties: true
+  /api/chat/{sessionId}:
+    get:
+      tags:
+        - Chat
+      summary: GET /api/chat/:sessionId
+      operationId: op30_get__api_chat_sessionId
+      description: ""
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChatMessage"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+  /api/chat-sessions:
+    get:
+      tags:
+        - Chat
+      summary: GET /api/chat-sessions
+      operationId: op31_get__api_chat_sessions
+      description: ""
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/ai/chat:
+    post:
+      tags:
+        - Chat
+      summary: POST /api/ai/chat
+      operationId: op32_post__api_ai_chat
+      description: Compatibility redirect preserving method and request body.
+      security:
+        - sessionCookie: []
+      responses:
+        "307":
+          description: Temporary redirect
+          headers:
+            Location:
+              schema:
+                type: string
+              description: /api/chat
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sessionId:
+                  type: string
+                message:
+                  type: string
+              required:
+                - sessionId
+                - message
+              additionalProperties: true
+  /api/ai/chat/history/{sessionId}:
+    get:
+      tags:
+        - Chat
+      summary: GET /api/ai/chat/history/:sessionId
+      operationId: op33_get__api_ai_chat_history_sessionId
+      description: Compatibility redirect preserving method and request body.
+      security:
+        - sessionCookie: []
+      responses:
+        "307":
+          description: Temporary redirect
+          headers:
+            Location:
+              schema:
+                type: string
+              description: /api/chat/{sessionId}
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+  /api/ai/knowledge-search:
+    get:
+      tags:
+        - Knowledge
+      summary: GET /api/ai/knowledge-search
+      operationId: op34_get__api_ai_knowledge_search
+      description: Staff role required.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Article"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 500
+          description: Required free-text query
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Category
+        - name: maxResults
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+          description: Maximum results
+  /api/knowledge/search:
+    get:
+      tags:
+        - Knowledge
+      summary: GET /api/knowledge/search
+      operationId: op35_get__api_knowledge_search
+      description: Signed-in session required.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Article"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: query
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+          description: Search text
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 100
+          description: Category
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+          description: Maximum rows
+  /api/knowledge-base/search:
+    post:
+      tags:
+        - Knowledge
+      summary: POST /api/knowledge-base/search
+      operationId: op36_post__api_knowledge_base_search
+      description: Signed-in session required.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Article"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+                limit:
+                  type: integer
+              required:
+                - query
+              additionalProperties: true
+  /api/knowledge/articles:
+    get:
+      tags:
+        - Knowledge
+      summary: GET /api/knowledge/articles
+      operationId: op37_get__api_knowledge_articles
+      description: Signed-in session required.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Article"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Category
+  /api/knowledge/articles/{id}/view:
+    post:
+      tags:
+        - Knowledge
+      summary: POST /api/knowledge/articles/:id/view
+      operationId: op38_post__api_knowledge_articles_id_view
+      description: Signed-in session required.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /api/knowledge/{id}/feedback:
+    post:
+      tags:
+        - Knowledge
+      summary: POST /api/knowledge/:id/feedback
+      operationId: op39_post__api_knowledge_id_feedback
+      description: Signed-in session required.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                wasHelpful:
+                  type: boolean
+              required:
+                - wasHelpful
+              additionalProperties: true
+  /api/knowledge/{id}/track-usage:
+    post:
+      tags:
+        - Knowledge
+      summary: POST /api/knowledge/:id/track-usage
+      operationId: op40_post__api_knowledge_id_track_usage
+      description: Signed-in session required.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /api/knowledge/{id}/rate:
+    post:
+      tags:
+        - Knowledge
+      summary: POST /api/knowledge/:id/rate
+      operationId: op41_post__api_knowledge_id_rate
+      description: Signed-in session required.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rating:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+              required:
+                - rating
+              additionalProperties: true
+  /api/admin/knowledge:
+    get:
+      tags:
+        - Knowledge
+      summary: GET /api/admin/knowledge
+      operationId: op42_get__api_admin_knowledge
+      description: Administrator role required.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Article"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Category
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Article status
+        - name: source
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Source
+        - name: published
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: Publication flag
+    post:
+      tags:
+        - Knowledge
+      summary: POST /api/admin/knowledge
+      operationId: op43_post__api_admin_knowledge
+      description: Administrator role required.
+      security:
+        - sessionCookie: []
+      responses:
+        "201":
+          description: Article created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Article"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArticleInput"
+  /api/admin/knowledge/{id}:
+    get:
+      tags:
+        - Knowledge
+      summary: GET /api/admin/knowledge/:id
+      operationId: op44_get__api_admin_knowledge_id
+      description: Administrator role required.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Article"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+    put:
+      tags:
+        - Knowledge
+      summary: PUT /api/admin/knowledge/:id
+      operationId: op45_put__api_admin_knowledge_id
+      description: Administrator role required.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Article"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArticleInput"
+    delete:
+      tags:
+        - Knowledge
+      summary: DELETE /api/admin/knowledge/:id
+      operationId: op46_delete__api_admin_knowledge_id
+      description: Administrator role required.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+  /api/admin/knowledge/{id}/publish:
+    patch:
+      tags:
+        - Knowledge
+      summary: PATCH /api/admin/knowledge/:id/publish
+      operationId: op47_patch__api_admin_knowledge_id_publish
+      description: Administrator role required.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  isPublished:
+                    type: boolean
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                isPublished:
+                  type: boolean
+              additionalProperties: true
+  /api/admin/knowledge/{id}/unpublish:
+    patch:
+      tags:
+        - Knowledge
+      summary: PATCH /api/admin/knowledge/:id/unpublish
+      operationId: op48_patch__api_admin_knowledge_id_unpublish
+      description: Administrator role required.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Article"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /api/admin/knowledge/{id}/archive:
+    patch:
+      tags:
+        - Knowledge
+      summary: PATCH /api/admin/knowledge/:id/archive
+      operationId: op49_patch__api_admin_knowledge_id_archive
+      description: Administrator role required.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Article"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /api/admin/knowledge/{id}/unarchive:
+    patch:
+      tags:
+        - Knowledge
+      summary: PATCH /api/admin/knowledge/:id/unarchive
+      operationId: op50_patch__api_admin_knowledge_id_unarchive
+      description: Administrator role required.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Article"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Numeric identifier.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /api/ai/status:
+    get:
+      tags:
+        - Configuration
+      summary: GET /api/ai/status
+      operationId: op51_get__api_ai_status
+      description: Staff role required; returns provider readiness and feature availability.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  modelId:
+                    type: string
+                  features:
+                    type: object
+                    properties:
+                      ticketAnalysis:
+                        type: boolean
+                      autoResponse:
+                        type: boolean
+                      knowledgeLearning:
+                        type: boolean
+                      intelligentSearch:
+                        type: boolean
+                    additionalProperties: true
+                  openRouterKeyConfigured:
+                    type: boolean
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/ai/settings:
+    get:
+      tags:
+        - Configuration
+      summary: GET /api/ai/settings
+      operationId: op52_get__api_ai_settings
+      description: Administrator session required. Returns provider-neutral model and
+        feature settings with only a key-configured flag.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AISettings"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      tags:
+        - Configuration
+      summary: POST /api/ai/settings
+      operationId: op53_post__api_ai_settings
+      description: Administrator session required. Updates provider-neutral model and
+        feature settings; OpenRouter key is deployment configuration only.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AISettings"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AISettings"
+  /api/ai/test-connection:
+    post:
+      tags:
+        - AI
+      summary: POST /api/ai/test-connection
+      operationId: op54_post__api_ai_test_connection
+      description: Administrator session required. Sends a fixed harmless prompt to
+        the configured model. Returns safe status/code only.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Model replied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                required:
+                  - success
+                additionalProperties: false
+        "400":
+          description: Provider test failed
+          content:
+            application/json:
+              schema: &a1
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    const: false
+                  error:
+                    type: string
+                    const: ai_connection_failed
+                  message:
+                    type: string
+                  details:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                    required:
+                      - code
+                    additionalProperties: false
+                  code:
+                    type: string
+                    enum:
+                      - not_configured
+                      - auth
+                      - credits
+                      - timeout
+                      - rate_limit
+                      - quota_exceeded
+                      - provider_failure
+                      - invalid_output
+                      - empty_output
+                      - price_unavailable
+                required:
+                  - success
+                  - error
+                  - message
+                  - code
+                additionalProperties: false
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Provider rate limit
+          content:
+            application/json:
+              schema: *a1
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Provider is not configured
+          content:
+            application/json:
+              schema: *a1
+  /api/ai/usage:
+    get:
+      tags:
+        - Configuration
+      summary: GET /api/ai/usage
+      operationId: op55_get__api_ai_usage
+      description: Returns caller's usage. Administrator may select another user with
+        userId.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Usage"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: userId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Admin-only user filter
+        - name: startDate
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Start
+        - name: endDate
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: End
+  /api/storage/aws-settings:
+    get:
+      tags:
+        - Configuration
+      summary: GET /api/storage/aws-settings
+      operationId: op56_get__api_storage_aws_settings
+      description: Administrator session required. Reads retained AWS S3 credential
+        settings; secret is masked and never returned.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AWSSettings"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      tags:
+        - Configuration
+      summary: POST /api/storage/aws-settings
+      operationId: op57_post__api_storage_aws_settings
+      description: Administrator session required. Updates retained AWS S3 settings.
+        Empty secret keeps current secret.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AWSSettings"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bedrockAccessKeyId:
+                  type: string
+                bedrockSecretAccessKey:
+                  type: string
+                bedrockRegion:
+                  type: string
+                bedrockModelId:
+                  type: string
+              additionalProperties: true
+  /api/admin/ai-settings:
+    get:
+      tags:
+        - Configuration
+      summary: GET /api/admin/ai-settings
+      operationId: op58_get__api_admin_ai_settings
+      description: Administrator session required. Returns provider-neutral model and
+        feature settings with only a key-configured flag.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AISettings"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    put:
+      tags:
+        - Configuration
+      summary: PUT /api/admin/ai-settings
+      operationId: op59_put__api_admin_ai_settings
+      description: Administrator session required. Updates provider-neutral model and
+        feature settings; OpenRouter key is deployment configuration only.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AISettings"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AISettings"
+  /api/admin/ai-settings/test:
+    post:
+      tags:
+        - Configuration
+      summary: POST /api/admin/ai-settings/test
+      operationId: op60_post__api_admin_ai_settings_test
+      description: Administrator session required. Sends a fixed harmless prompt to
+        the configured model. Returns safe status/code only.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Model replied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                required:
+                  - success
+                additionalProperties: false
+        "400":
+          description: Provider test failed
+          content:
+            application/json:
+              schema: &a2
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    const: false
+                  error:
+                    type: string
+                    const: ai_connection_failed
+                  message:
+                    type: string
+                  details:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                    required:
+                      - code
+                    additionalProperties: false
+                  code:
+                    type: string
+                    enum:
+                      - not_configured
+                      - auth
+                      - credits
+                      - timeout
+                      - rate_limit
+                      - quota_exceeded
+                      - provider_failure
+                      - invalid_output
+                      - empty_output
+                      - price_unavailable
+                required:
+                  - success
+                  - error
+                  - message
+                  - code
+                additionalProperties: false
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Provider rate limit
+          content:
+            application/json:
+              schema: *a2
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Provider is not configured
+          content:
+            application/json:
+              schema: *a2
+  /api/bedrock/settings:
+    get:
+      tags:
+        - Configuration
+      summary: GET /api/bedrock/settings
+      operationId: op61_get__api_bedrock_settings
+      description: Administrator session required. Reads retained AWS S3 credential
+        settings; secret is masked and never returned.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AWSSettings"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      tags:
+        - Configuration
+      summary: POST /api/bedrock/settings
+      operationId: op62_post__api_bedrock_settings
+      description: Administrator session required. Updates retained AWS S3 settings.
+        Empty secret keeps current secret.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AWSSettings"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bedrockAccessKeyId:
+                  type: string
+                bedrockSecretAccessKey:
+                  type: string
+                bedrockRegion:
+                  type: string
+                bedrockModelId:
+                  type: string
+              additionalProperties: true
+  /api/bedrock/usage:
+    get:
+      tags:
+        - Configuration
+      summary: GET /api/bedrock/usage
+      operationId: op63_get__api_bedrock_usage
+      description: Returns caller's usage. Administrator may select another user with
+        userId.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Usage"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: userId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Admin-only user filter
+        - name: startDate
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Start
+        - name: endDate
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: End
+  /api/bedrock/cost-statistics:
+    get:
+      tags:
+        - Configuration
+      summary: GET /api/bedrock/cost-statistics
+      operationId: op64_get__api_bedrock_cost_statistics
+      description: Signed-in session required. Settings and cost management require
+        administrator role unless stated otherwise.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/bedrock/cost-limits:
+    put:
+      tags:
+        - Configuration
+      summary: PUT /api/bedrock/cost-limits
+      operationId: op65_put__api_bedrock_cost_limits
+      description: Signed-in session required. Settings and cost management require
+        administrator role unless stated otherwise.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dailyLimitUSD:
+                  type: number
+                monthlyLimitUSD:
+                  type: number
+                maxTokensPerRequest:
+                  type: integer
+              additionalProperties: true
+  /api/bedrock/reset-usage:
+    post:
+      tags:
+        - Configuration
+      summary: POST /api/bedrock/reset-usage
+      operationId: op66_post__api_bedrock_reset_usage
+      description: Signed-in session required. Settings and cost management require
+        administrator role unless stated otherwise.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /api/bedrock/export-usage:
+    get:
+      tags:
+        - Configuration
+      summary: GET /api/bedrock/export-usage
+      operationId: op67_get__api_bedrock_export_usage
+      description: Signed-in session required. Settings and cost management require
+        administrator role unless stated otherwise.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Usage"
+                  exportedAt:
+                    type: string
+                    format: date-time
+                  dateRange:
+                    type: object
+                    properties:
+                      startDate:
+                        type: string
+                      endDate:
+                        type: string
+                    additionalProperties: true
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - name: startDate
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Start
+        - name: endDate
+          in: query
+          required: false
+          schema:
+            type: string
+          description: End
+  /api/bedrock/test-connection:
+    get:
+      tags:
+        - AI
+      summary: GET /api/bedrock/test-connection
+      operationId: op68_get__api_bedrock_test_connection
+      description: Legacy route name. Tests the active OpenRouter model connection; it does not call Amazon Bedrock.
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  costEstimate:
+                    type: number
+                additionalProperties: true
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Authentication required or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Authenticated caller lacks permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Resource not found or outside visible scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/mcp:
+    post:
+      tags:
+        - MCP
+      summary: Streamable HTTP MCP JSON-RPC endpoint
+      operationId: op69_post__api_mcp
+      description: "Stateless MCP transport. POST JSON-RPC 2.0 requests with
+        Authorization: Bearer <Ticketflow API key>. Key must carry mcp:tickets.
+        Session cookies and JWTs are rejected. Each request gets a fresh server
+        and transport; no MCP session ID. Use initialize then tools/list and
+        tools/call inside JSON-RPC envelopes. This operation describes
+        transport, not separate REST tool URLs."
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: JSON-RPC result or error envelope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonRpcResponse"
+        "202":
+          description: Accepted MCP notification
+        "400":
+          description: Invalid JSON-RPC request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing or invalid API key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: API key lacks mcp:tickets permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "405":
+          description: Only POST is accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JsonRpcRequest"
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: connect.sid
+      description: Signed-in Express session cookie. Session cookie name comes from
+        the session configuration.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: REST bearer API key or, when enabled, JWT. Bearer access is
+        restricted to /api/tasks/** and /api/auth/user; MCP requires an API key
+        with mcp:tickets.
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        code:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+        lastName:
+          type: string
+        role:
+          type: string
+        mustChangePassword:
+          type: boolean
+      additionalProperties: true
+    Ticket:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        status:
+          type: string
+        priority:
+          type: string
+        category:
+          type: string
+        reporterId:
+          type: string
+        assigneeId:
+          type:
+            - string
+            - "null"
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: true
+    TicketInput:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+        category:
+          type: string
+        assigneeId:
+          type: string
+        teamId:
+          type: integer
+        departmentId:
+          type: integer
+      required:
+        - title
+      additionalProperties: true
+    Comment:
+      type: object
+      properties:
+        id:
+          type: integer
+        taskId:
+          type: integer
+        content:
+          type: string
+        userId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: true
+    Attachment:
+      type: object
+      properties:
+        id:
+          type: integer
+        taskId:
+          type: integer
+        userId:
+          type: string
+        fileName:
+          type: string
+        fileSize:
+          type: integer
+        fileType:
+          type: string
+        fileUrl:
+          type: string
+      additionalProperties: true
+    HistoryEvent:
+      type: object
+      additionalProperties: true
+    Analysis:
+      type: object
+      additionalProperties: true
+      description: AI analysis object; fields vary by the selected analysis workflow.
+    AutoResponse:
+      type: object
+      properties:
+        autoResponse:
+          type: string
+        confidence:
+          type: number
+        complexity:
+          type: string
+        shouldEscalate:
+          type: boolean
+      additionalProperties: true
+    ChatMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+        sessionId:
+          type: string
+        content:
+          type: string
+        role:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      additionalProperties: true
+    ChatReply:
+      type: object
+      properties:
+        message:
+          $ref: "#/components/schemas/ChatMessage"
+        relatedDocuments:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        usageData:
+          type: object
+          properties:
+            inputTokens:
+              type: integer
+            outputTokens:
+              type: integer
+            totalTokens:
+              type: integer
+            cost:
+              type: number
+          additionalProperties: true
+      additionalProperties: true
+    Article:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        summary:
+          type:
+            - string
+            - "null"
+        content:
+          type: string
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        isPublished:
+          type: boolean
+        status:
+          type: string
+      additionalProperties: true
+    ArticleInput:
+      type: object
+      properties:
+        title:
+          type: string
+        summary:
+          type: string
+        content:
+          type: string
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        isPublished:
+          type: boolean
+      required:
+        - title
+        - content
+      additionalProperties: true
+    AISettings:
+      type: object
+      properties:
+        modelId:
+          type: string
+        autoResponseEnabled:
+          type: boolean
+        knowledgeLearningEnabled:
+          type: boolean
+        maxTokensPerRequest:
+          type: integer
+        openRouterKeyConfigured:
+          type: boolean
+          description: Whether server-side OpenRouter key is configured; key value is
+            never returned.
+        confidenceThreshold:
+          type: number
+          minimum: 0
+          maximum: 1
+        maxResponseLength:
+          type: integer
+        responseTimeout:
+          type: integer
+        autoLearnEnabled:
+          type: boolean
+        minResolutionScore:
+          type: number
+          minimum: 0
+          maximum: 1
+        articleApprovalRequired:
+          type: boolean
+        complexityThreshold:
+          type: number
+        escalationEnabled:
+          type: boolean
+        escalationTeamId:
+          type: integer
+        isActive:
+          type: boolean
+        dailyLimitUsd:
+          type: number
+        monthlyLimitUsd:
+          type: number
+        temperature:
+          type: number
+        maxTokens:
+          type: integer
+      additionalProperties: true
+    AWSSettings:
+      type: object
+      properties:
+        bedrockAccessKeyId:
+          type: string
+        bedrockRegion:
+          type: string
+        hasBedrockSecret:
+          type: boolean
+        bedrockModelId:
+          type: string
+          description: Retained legacy model field on AWS storage compatibility response.
+      additionalProperties: true
+    Usage:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: string
+        inputTokens:
+          type: integer
+        outputTokens:
+          type: integer
+        totalTokens:
+          type: integer
+        modelId:
+          type: string
+        cost:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+        requestedModelId:
+          type:
+            - string
+            - "null"
+        verifiedCostUsd:
+          type:
+            - number
+            - "null"
+        billingStatus:
+          type:
+            - string
+            - "null"
+      additionalProperties: true
+    JsonRpcRequest:
+      type: object
+      properties:
+        jsonrpc:
+          type: string
+          const: "2.0"
+        id:
+          oneOf:
+            - type: string
+            - type: integer
+        method:
+          type: string
+        params:
+          type: object
+          additionalProperties: true
+      required:
+        - jsonrpc
+        - method
+      additionalProperties: true
+    JsonRpcResponse:
+      type: object
+      properties:
+        jsonrpc:
+          type: string
+          const: "2.0"
+        id:
+          oneOf:
+            - type: string
+            - type: integer
+            - type: "null"
+        result: {}
+        error:
+          type: object
+          properties:
+            code:
+              type: integer
+            message:
+              type: string
+            data: {}
+          additionalProperties: true
+      required:
+        - jsonrpc
+        - id
+      additionalProperties: true
