@@ -21,28 +21,12 @@ export function estimatePromptTokensForBudget(text: string): number {
 export const DESCRIPTION_TRUNCATION_MARKER = "\n[description truncated]";
 
 /**
- * The least ticket text a prompt may carry (N1). A description is never cut below this many
+ * The least ticket text a cut prompt may carry (N1). A description is never cut below this many
  * characters (or its own length, if shorter): a model that has not seen the ticket must not write a
- * reply the customer will read. If even this much does not fit, there is no call.
+ * reply the customer will read. Where even this much does not fit, the description is not cut at
+ * all and the budget check downstream decides, as it did before descriptions were truncated.
  */
 export const MIN_DESCRIPTION_CHARS = 500;
-
-/**
- * Raised instead of sending a prompt that could not carry MIN_DESCRIPTION_CHARS of the ticket.
- * It is the refusal the cost monitor gives an over-cap request (same message, `isBlocked`, a
- * `costEstimate`), so every caller already handles it: routes answer 429, the auto-response and
- * analysis services rethrow it, and nothing reaches the model. Nothing is spent, hence the 0.
- */
-export class PromptTooLargeError extends Error {
-  readonly isBlocked = true;
-  readonly costEstimate: { inputTokens: number; outputTokens: number; estimatedCost: number };
-
-  constructor(inputTokens: number, outputTokens: number) {
-    super("Request exceeds max tokens per request");
-    this.name = "PromptTooLargeError";
-    this.costEstimate = { inputTokens, outputTokens, estimatedCost: 0 };
-  }
-}
 
 export interface FitDescriptionInput {
   description: string | null | undefined;
@@ -61,10 +45,14 @@ export interface FitDescriptionInput {
  * text that fits, followed by DESCRIPTION_TRUNCATION_MARKER. The log line carries only length
  * numbers and the operation name, never any of the text.
  *
- * It does not lift the ceiling, and it never trades the ticket text away to stay under it. The
+ * It does not lift the ceiling, and it never trades the ticket text away to stay under it. A cut
  * description keeps at least MIN_DESCRIPTION_CHARS characters (all of it, if it is shorter). When
- * the rest of the prompt leaves less room than that, this throws PromptTooLargeError and the model
- * is not called. The log line carries only lengths and the operation name.
+ * the rest of the prompt leaves less room than that, cutting cannot help: the description is
+ * returned whole, exactly as before truncation existed, and the cost monitor's budget check
+ * (assertBudgetAvailable) blocks the call if it is over the cap or lets it run with a smaller
+ * output allowance. So a prompt carries either the floor or more of the ticket, or all of it, and
+ * nothing is refused that the old code would have run. The log lines carry only lengths and the
+ * operation name.
  */
 export function fitDescriptionToBudget(input: FitDescriptionInput): string | null | undefined {
   const { description, buildPrompt } = input;
@@ -84,13 +72,10 @@ export function fitDescriptionToBudget(input: FitDescriptionInput): string | nul
   const floor = Array.from(description.slice(0, MIN_DESCRIPTION_CHARS * 2)).slice(0, MIN_DESCRIPTION_CHARS).join("");
   if (room < Buffer.byteLength(floor, "utf8")) {
     log(
-      `AI prompt skipped: the ticket text does not fit the token cap [operation=${input.operation} ` +
+      `AI prompt description not truncated: below the floor [operation=${input.operation} ` +
         `originalChars=${description.length} floorChars=${floor.length} budgetTokens=${budgetTokens}]`
     );
-    throw new PromptTooLargeError(
-      estimatePromptTokensForBudget(buildPrompt(`${floor}${DESCRIPTION_TRUNCATION_MARKER}`)),
-      input.maxOutputTokens
-    );
+    return description;
   }
 
   // A cut inside a multi-byte character decodes to U+FFFD; drop it rather than send it.

@@ -3,7 +3,6 @@ import {
   estimatePromptTokensForBudget,
   fitDescriptionToBudget,
   MIN_DESCRIPTION_CHARS,
-  PromptTooLargeError,
 } from "../../services/ai/promptBudget";
 
 /**
@@ -70,24 +69,21 @@ describe("fitDescriptionToBudget", () => {
     expect(estimatePromptTokensForBudget(template(kept)) + base.maxOutputTokens).toBeLessThanOrEqual(base.maxTokensPerRequest);
   });
 
-  it("is a ceiling, not a bypass: with a cap too small for the prompt itself, the call is refused rather than sent without the description", () => {
-    const log = jest.fn();
-    let thrown: unknown;
-    try {
-      fitDescriptionToBudget({ ...base, maxTokensPerRequest: 200, description: "x".repeat(5000), log });
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(PromptTooLargeError);
+  it("is a ceiling, not a bypass: with a cap too small for the prompt itself, the description is sent whole and the budget check downstream is left to block it", () => {
+    const description = "x".repeat(5000);
+    const kept = fitDescriptionToBudget({ ...base, maxTokensPerRequest: 200, description, log: () => undefined });
+    expect(kept).toBe(description);
+    expect(estimatePromptTokensForBudget(template(kept)) + base.maxOutputTokens).toBeGreaterThan(200);
   });
 });
 
 /**
  * N1: when everything in the prompt except the description is already over the budget, the
  * description used to be cut to the bare marker (keptChars=0) and the model was still called, so it
- * could write a customer-visible reply without ever seeing the ticket text. Now at least
- * MIN_DESCRIPTION_CHARS of the description stay in, or the call is refused the way the cost
- * monitor refuses an over-cap request (isBlocked), and nothing is sent.
+ * could write a customer-visible reply without ever seeing the ticket text. Now a cut description
+ * keeps at least MIN_DESCRIPTION_CHARS characters (or all of a shorter one). Where even that does
+ * not fit, nothing is cut: the description is returned whole, as before truncation existed, and the
+ * cost monitor's budget check decides whether the call is blocked or runs.
  */
 describe("fitDescriptionToBudget: the floor of ticket text (N1)", () => {
   const OUTPUT = 800;
@@ -102,41 +98,39 @@ describe("fitDescriptionToBudget: the floor of ticket text (N1)", () => {
   };
   const run = (input: { description: string; buildPrompt: ReturnType<typeof templateOf>; maxTokensPerRequest: number; log?: (line: string) => void }) =>
     fitDescriptionToBudget({ operation: "generateResponse", maxOutputTokens: OUTPUT, log: () => undefined, ...input });
-  const refusal = (input: Parameters<typeof run>[0]): any => {
-    try {
-      run(input);
-    } catch (error) {
-      return error;
-    }
-    return undefined;
-  };
+  /** The description without the marker, if one was appended. */
+  const textOf = (prompted: string | null | undefined) =>
+    (prompted ?? "").endsWith(DESCRIPTION_TRUNCATION_MARKER) ? (prompted as string).slice(0, -DESCRIPTION_TRUNCATION_MARKER.length) : (prompted ?? "");
 
   it("the floor is a named constant of at least 500 characters", () => {
     expect(MIN_DESCRIPTION_CHARS).toBeGreaterThanOrEqual(500);
   });
 
-  it("refuses when the rest of the prompt alone is over the budget, instead of sending '[description truncated]' alone", () => {
+  it("returns the whole description when the rest of the prompt alone is over the budget, never '[description truncated]' alone", () => {
     const log = jest.fn();
-    const error = refusal({ description: "y".repeat(5000), buildPrompt: templateOf(9000), maxTokensPerRequest: 3000, log });
-    expect(error).toBeInstanceOf(PromptTooLargeError);
-    // The same refusal the cost monitor gives an over-cap request, so every caller treats it alike.
-    expect(error.isBlocked).toBe(true);
-    expect(error.message).toBe("Request exceeds max tokens per request");
-    expect(error.costEstimate).toMatchObject({ estimatedCost: 0 });
+    const description = "y".repeat(5000);
+    const kept = run({ description, buildPrompt: templateOf(9000), maxTokensPerRequest: 3000, log });
+    expect(kept).toBe(description);
+    expect(kept).not.toContain(DESCRIPTION_TRUNCATION_MARKER);
     expect(log).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses a short description too: the repro was 54 characters with a large rest-of-prompt", () => {
-    const error = refusal({ description: "z".repeat(54), buildPrompt: templateOf(9000), maxTokensPerRequest: 3000 });
-    expect(error).toBeInstanceOf(PromptTooLargeError);
+  it("returns a short description whole too: the repro was 54 characters with a large rest-of-prompt", () => {
+    const description = "z".repeat(54);
+    expect(run({ description, buildPrompt: templateOf(9000), maxTokensPerRequest: 3000 })).toBe(description);
   });
 
-  it("logs the lengths and the operation, and nothing from the description", () => {
+  it("does not throw: the budget check downstream is what blocks or runs the call", () => {
+    expect(() => run({ description: "y".repeat(5000), buildPrompt: templateOf(9000), maxTokensPerRequest: 200 })).not.toThrow();
+  });
+
+  it("logs one line with the lengths and the operation, and nothing from the description", () => {
     const log = jest.fn();
     const secret = "my-password-is-hunter2";
-    refusal({ description: `${secret} ${"q".repeat(3000)}`, buildPrompt: templateOf(9000), maxTokensPerRequest: 3000, log });
+    run({ description: `${secret} ${"q".repeat(3000)}`, buildPrompt: templateOf(9000), maxTokensPerRequest: 3000, log });
     expect(log).toHaveBeenCalledTimes(1);
     const line = String(log.mock.calls[0][0]);
+    expect(line).toContain("AI prompt description not truncated: below the floor");
     expect(line).toMatch(/operation=generateResponse/);
     expect(line).toMatch(/originalChars=\d+/);
     expect(line).toMatch(/floorChars=500/);
@@ -145,10 +139,11 @@ describe("fitDescriptionToBudget: the floor of ticket text (N1)", () => {
     expect(line).not.toContain("qqqq");
   });
 
-  it("refuses when the room left is one byte short of the floor", () => {
+  it("returns the description whole when the room left is a few bytes short of the floor", () => {
     const buildPrompt = templateOf(2000);
     const maxTokensPerRequest = capLeaving(MIN_DESCRIPTION_CHARS - 3, buildPrompt);
-    expect(refusal({ description: "y".repeat(5000), buildPrompt, maxTokensPerRequest })).toBeInstanceOf(PromptTooLargeError);
+    const description = "y".repeat(5000);
+    expect(run({ description, buildPrompt, maxTokensPerRequest })).toBe(description);
   });
 
   it("keeps the floor, and no fewer characters, when that is all the room there is", () => {
@@ -161,13 +156,47 @@ describe("fitDescriptionToBudget: the floor of ticket text (N1)", () => {
     expect(estimatePromptTokensForBudget(buildPrompt(kept)) + OUTPUT).toBeLessThanOrEqual(maxTokensPerRequest);
   });
 
-  it("measures the floor in characters, not bytes: 500 four-byte characters do not fit in 1500 bytes", () => {
+  it("measures the floor in characters, not bytes: 500 four-byte characters do not fit in 1500 bytes, so that description is not cut", () => {
     const buildPrompt = templateOf(2000);
     const maxTokensPerRequest = capLeaving(1500, buildPrompt);
     const emoji = "😀".repeat(2000);
-    expect(refusal({ description: emoji, buildPrompt, maxTokensPerRequest })).toBeInstanceOf(PromptTooLargeError);
-    // The same room is plenty for 500 ASCII characters.
-    expect(() => run({ description: "y".repeat(2000), buildPrompt, maxTokensPerRequest })).not.toThrow();
+    expect(run({ description: emoji, buildPrompt, maxTokensPerRequest })).toBe(emoji);
+    // The same room is plenty for 500 ASCII characters, which are cut to what fits.
+    const ascii = "y".repeat(2000);
+    const kept = run({ description: ascii, buildPrompt, maxTokensPerRequest }) as string;
+    expect(kept.endsWith(DESCRIPTION_TRUNCATION_MARKER)).toBe(true);
+    expect(textOf(kept).length).toBeGreaterThanOrEqual(MIN_DESCRIPTION_CHARS);
+  });
+
+  it("no prompt is ever built with fewer than min(500, length) characters of the description, at any cap", () => {
+    const descriptions = [
+      "z".repeat(54),
+      "w".repeat(499),
+      "w".repeat(500),
+      "w".repeat(501),
+      "y".repeat(5000),
+      "日本語のチケット。".repeat(1000), // 3 bytes per character
+      "😀".repeat(2000), // 4 bytes per character
+      "Привет мир ".repeat(500), // 2 bytes per character
+    ];
+    let cases = 0;
+    for (const otherChars of [0, 800, 2000, 4000, 9000]) {
+      const buildPrompt = templateOf(otherChars);
+      for (let cap = 820; cap <= 4600; cap += 13) {
+        for (const description of descriptions) {
+          const kept = fitDescriptionToBudget({ description, buildPrompt, maxTokensPerRequest: cap, maxOutputTokens: OUTPUT, operation: "generateResponse", log: () => undefined });
+          const text = textOf(kept);
+          const wanted = Math.min(MIN_DESCRIPTION_CHARS, Array.from(description).length);
+          expect(Array.from(text).length).toBeGreaterThanOrEqual(wanted);
+          expect(description.startsWith(text)).toBe(true);
+          // Either all of it, or a cut that says so.
+          if (text !== description) expect(kept!.endsWith(DESCRIPTION_TRUNCATION_MARKER)).toBe(true);
+          expect(text).not.toContain("�");
+          cases++;
+        }
+      }
+    }
+    expect(cases).toBeGreaterThan(1000);
   });
 
   it("a normal long description is still cut and sent, as before", () => {
