@@ -406,6 +406,7 @@ export const bedrockSettings = pgTable("bedrock_settings", {
   complexityThreshold: integer("complexity_threshold").default(70),
   escalationEnabled: boolean("escalation_enabled").default(true),
   escalationTeamId: integer("escalation_team_id").references(() => teams.id),
+  autoRoutingEnabled: boolean("auto_routing_enabled").default(false),
   // AI Settings - Model Configuration (from ai-settings.json)
   temperature: decimal("temperature", { precision: 3, scale: 2 }).default(
     "0.3"
@@ -433,6 +434,7 @@ export const aiSettings = pgTable("ai_settings", {
   complexityThreshold: integer("complexity_threshold").default(70),
   escalationEnabled: boolean("escalation_enabled").default(true),
   escalationTeamId: integer("escalation_team_id").references(() => teams.id),
+  autoRoutingEnabled: boolean("auto_routing_enabled").default(false),
   temperature: decimal("temperature", { precision: 3, scale: 2 }).default("0.3"),
   maxTokens: integer("max_tokens").default(2000),
   dailyLimitUsd: decimal("daily_limit_usd", { precision: 10, scale: 2 }).default("50.0"),

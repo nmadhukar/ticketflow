@@ -4,6 +4,7 @@ import { getAISettings } from "../../admin/aiSettings";
 import { ensureAiSystemUser } from "../../utils/aiSystemUser";
 import { describeAIError } from "./aiErrors";
 import { autoResponseCommentBody } from "./autoResponseComment";
+import { routeTicket } from "./ticketRouting";
 
 /**
  * Runs after a ticket exists. Never throws: a failure here must not fail the
@@ -12,21 +13,28 @@ import { autoResponseCommentBody } from "./autoResponseComment";
  * Settings are read now, not at boot, so an admin toggle applies to the next
  * ticket. With auto-response off, or OpenRouter not configured, no model call is made.
  *
- * There is ONE decision: aiAutoResponseService.analyzeTicket returns
+ * There is ONE auto-response decision: aiAutoResponseService.analyzeTicket returns
  * `shouldAutoRespond` (calculateConfidence, from the admin's enabled flag and
  * threshold) and stores the single auto-response row with wasApplied set from it.
  * This function only acts on that answer: it posts the comment, authored by the AI
  * system user and cut to maxResponseLength, and if the comment cannot be written it
  * sets the row back to not applied so the row and the comment agree.
  *
- * Escalation settings are not applied here: reassigning a customer's new ticket to
- * another team is a routing decision made by people, and this path never did it
- * (it only logged). It is not something AI authorship should start doing silently.
+ * When that analysis finds no confident answer, the ticket is handed to the 0031
+ * routing step (ticketRouting.routeTicket): it classifies the ticket onto the team
+ * that owns its problem area and assigns it. Routing is its OWN opt-in setting
+ * (autoRoutingEnabled, default off), so it runs whether or not auto-response is on,
+ * and it never throws either.
  */
 export async function runCreateTimeAutoResponse(task: Task): Promise<void> {
   try {
     const settings = await getAISettings();
-    if (!settings.autoResponseEnabled || !settings.isActive || !process.env.OPENROUTER_API_KEY) return;
+    if (!settings.isActive || !process.env.OPENROUTER_API_KEY) return;
+
+    if (!settings.autoResponseEnabled) {
+      await routeIfNoReply(task);
+      return;
+    }
 
     const { aiAutoResponseService } = await import("./aiAutoResponse");
     const analysis = await aiAutoResponseService.analyzeTicket(task);
@@ -38,7 +46,11 @@ export async function runCreateTimeAutoResponse(task: Task): Promise<void> {
       `Complexity: ${analysis.complexity}/100. Should escalate: ${analysis.shouldEscalate}`
     );
 
-    if (!analysis.autoResponse || !analysis.shouldAutoRespond) return;
+    if (!analysis.autoResponse || !analysis.shouldAutoRespond) {
+      // No matched solution: classify and assign to the owning team instead of replying.
+      await routeIfNoReply(task);
+      return;
+    }
 
     try {
       const aiUserId = await ensureAiSystemUser();
@@ -72,5 +84,14 @@ export async function runCreateTimeAutoResponse(task: Task): Promise<void> {
     }
   } catch (error) {
     console.error(`AI auto-response for new ticket ${task.id} failed:`, describeAIError(error));
+  }
+}
+
+/** No-match routing, isolated so a routing failure can never affect the auto-response path. */
+async function routeIfNoReply(task: Task): Promise<void> {
+  try {
+    await routeTicket(task);
+  } catch (error) {
+    console.error(`AI ticket routing for new ticket ${task.id} failed:`, describeAIError(error));
   }
 }

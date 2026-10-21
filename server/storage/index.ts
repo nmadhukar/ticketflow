@@ -1926,6 +1926,7 @@ export class DatabaseStorage implements IStorage {
       complexityThreshold: patch.complexityThreshold,
       escalationEnabled: patch.escalationEnabled,
       escalationTeamId: patch.escalationTeamId,
+      autoRoutingEnabled: patch.autoRoutingEnabled,
       temperature: patch.temperature,
       maxTokens: patch.maxTokens,
       dailyLimitUsd: patch.dailyLimitUsd,

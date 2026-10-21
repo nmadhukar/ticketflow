@@ -445,6 +445,7 @@ Updates AI configuration parameters.
 {
   "confidenceThreshold": 0.75,
   "autoResponseEnabled": true,
+  "autoRoutingEnabled": false,
   "maxResponseLength": 1000,
   "bedrockModel": "anthropic.claude-3-sonnet-20240229-v1:0"
 }
@@ -608,7 +609,8 @@ Example client configuration (Streamable HTTP; the key comes from the environmen
 
 DeepSeek Harness (`@deepseek-ai/dsh-mcp-client`), as one entry in a profile's `cordis.patch.yml`; the
 tools then appear as `mcp__ticketflow__<tool>`. From a container on Docker Desktop, a TicketFlow stack on
-the same PC is reached through `host.docker.internal`:
+the same PC is reached through `host.docker.internal` (or `http://app:5000` once the harness has joined
+the TicketFlow network):
 
 ```yaml
 - insert:
@@ -617,13 +619,16 @@ the same PC is reached through `host.docker.internal`:
       config:
         serverName: ticketflow
         transport: streamable-http
-        url: http://host.docker.internal:8088/api/mcp
+        url: http://host.docker.internal:5000/api/mcp
         headers:
           Authorization: !!js "`Bearer ${process.env.TICKETFLOW_MCP_KEY}`"
 ```
 
-Checked end to end on 2026-10-04: a DeepSeek Harness agent called all 20 tools with an admin, two agent
-and a customer key, and every result matched the REST answer for the same user.
+The checked-in kit is `docs/integrations/dsh/`: `cordis.patch.yml`, the `attach-dsh-network.sh` script
+that joins a running harness container to the TicketFlow network, and a runbook. It carries no key
+value: the bearer is `TICKETFLOW_MCP_KEY` in the harness container's environment, issued by an admin
+(Admin > Integrations > Developer resources, or `POST /api/api-keys`) and already scoped to
+`mcp:tickets`. The tool list is the source of truth, not a count written down here.
 
 ## Configuration & Environment
 
@@ -1165,3 +1170,17 @@ snyk monitor
    - **Compliance**: GDPR-compliant data handling
 
 This documentation provides a comprehensive guide for maintaining and extending the TicketFlow codebase. Keep it updated as the application evolves and new features are added.
+
+### Hindsight agent memory
+
+The create-time agent can use an external Hindsight memory service. It is configured entirely by
+environment variables - `HINDSIGHT_ENABLED` ("true" to turn on; default off), `HINDSIGHT_URL`
+(default `http://localhost:8888`), `HINDSIGHT_BANK_ID` (default `ticketflow`) and the optional
+`HINDSIGHT_API_KEY` - so no migration or admin setting is involved and an instance with nothing
+configured behaves exactly as before.
+
+`server/services/ai/hindsight.ts` exposes `recallMemories`, `retainMemory` and
+`retainResolvedTicketMemory`. `aiAutoResponse.analyzeTicket` recalls before generating a reply and
+adds the recalled text to the prompt as an aid; the confidence score still counts only real
+knowledge-base articles. `notifier.afterTicketUpdated` retains one memory when a ticket becomes
+resolved. Both calls are opt-in, non-throwing and log failures by type only.

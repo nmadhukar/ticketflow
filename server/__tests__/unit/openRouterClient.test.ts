@@ -78,6 +78,23 @@ describe("OpenRouter client", () => {
     expect(error.message).not.toContain("private");
   });
 
+  it("disables reasoning only when the caller asks for it", async () => {
+    const fetchImpl = jest.fn(async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }) })) as unknown as typeof fetch;
+    await client(fetchImpl).generate(request);
+    let [, options] = (fetchImpl as jest.Mock).mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(options.body as string)).not.toHaveProperty("reasoning");
+
+    await client(fetchImpl).generate({ ...request, reasoning: false });
+    [, options] = (fetchImpl as jest.Mock).mock.calls[1] as [string, RequestInit];
+    expect(JSON.parse(options.body as string).reasoning).toEqual({ enabled: false });
+  });
+
+  it("rejects a response the provider cut off at the token cap", async () => {
+    // finish_reason "length" means the visible text is a fragment and cannot be trusted.
+    const fetchImpl = jest.fn(async () => ({ ok: true, json: async () => ({ choices: [{ finish_reason: "length", message: { content: '{"response": "cut' } }], usage: { prompt_tokens: 1, completion_tokens: 400 } }) })) as unknown as typeof fetch;
+    await expect(client(fetchImpl).generate(request)).rejects.toMatchObject({ code: "invalid_output" });
+  });
+
   it("sends a caller-approved response schema to OpenRouter", async () => {
     const fetchImpl = jest.fn(async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: "{}" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }) })) as unknown as typeof fetch;
     await client(fetchImpl).generate({ ...request, responseSchema: { type: "object", properties: { answer: { type: "string" } } } });

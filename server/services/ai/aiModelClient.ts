@@ -4,6 +4,12 @@ export type GenerateRequest = {
   maxOutputTokens: number;
   temperature: number;
   responseSchema?: Record<string, unknown>;
+  /**
+   * Set false to ask the provider to skip hidden reasoning for this call. Reasoning tokens
+   * count against maxOutputTokens on a reasoning model, so a structured (JSON) call whose
+   * budget is spent thinking comes back with truncated or empty visible text.
+   */
+  reasoning?: boolean;
   context?: { userId?: string; ticketId?: number };
 };
 

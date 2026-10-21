@@ -4523,6 +4523,10 @@ components:
           type: boolean
         escalationTeamId:
           type: integer
+        autoRoutingEnabled:
+          type: boolean
+          description: When a new ticket matches no known solution, classify it and assign it
+            to the owning team. Off by default.
         isActive:
           type: boolean
         dailyLimitUsd:

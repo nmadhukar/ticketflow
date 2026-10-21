@@ -49,6 +49,10 @@ export function createOpenRouterClient(options: {
             ...(request.responseSchema ? {
               response_format: { type: "json_schema", json_schema: { name: "response", strict: true, schema: request.responseSchema } },
             } : {}),
+            // A reasoning model spends max_tokens on hidden reasoning before it writes the
+            // answer, so a small structured output can come back empty or cut off. Callers
+            // that need parseable JSON set reasoning=false to turn that off.
+            ...(request.reasoning === undefined ? {} : { reasoning: { enabled: request.reasoning } }),
           }),
           signal: AbortSignal.timeout(30_000),
         });
@@ -66,6 +70,9 @@ export function createOpenRouterClient(options: {
       const choices = body?.choices;
       const choice = Array.isArray(choices) ? record(choices[0]) : null;
       const message = record(choice?.message);
+      // "length" means the provider stopped at max_tokens: the visible text (JSON, usually)
+      // is cut off and cannot be trusted, so fail as unusable rather than parse a fragment.
+      if (choice?.finish_reason === "length") throw new AiModelError("invalid_output");
       if (typeof message?.content !== "string") throw new AiModelError("invalid_output");
       const text = message.content.trim();
       if (!text) throw new AiModelError("empty_output");

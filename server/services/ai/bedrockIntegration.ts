@@ -1,7 +1,7 @@
 /** AI workflow compatibility helpers. */
 import { Task } from "@shared/schema";
 import { estimatePromptTokensForBudget, recordUsage, assertBudgetAvailable, getDailyUsage, getMonthlyUsage, reconcileGenerationCost, CostEstimate } from "../../services/ai/costMonitoring";
-import { PROMPT_TEMPLATES } from "./prompts";
+import { PROMPT_TEMPLATES, buildTicketRoutingPrompt } from "./prompts";
 import { getAISettings } from "server/admin/aiSettings";
 import { extractJSON } from "./jsonUtils";
 import { AiModelError, describeAIError } from "./aiErrors";
@@ -17,6 +17,7 @@ const OPERATION_OUTPUT_CAP = {
   updateKnowledgeBase: 600,
   ticketAnalysis: 1000,
   autoResponse: 1500,
+  ticketRouting: 400,
 } as const;
 type DescriptionOperation = keyof typeof OPERATION_OUTPUT_CAP;
 
@@ -66,7 +67,13 @@ async function invokeBedrockModel(
   maxTokens: number = 1000,
   temperature: number = 0.3,
   userId?: string,
-  ticketId?: string
+  ticketId?: string,
+  /**
+   * Passed to the provider when set. The JSON operations pass false: on a reasoning model the
+   * hidden reasoning is drawn from maxTokens, so a tight structured-output cap can be spent
+   * before any visible text is produced. Left undefined for free-text calls (the help chat).
+   */
+  reasoning?: boolean
 ): Promise<{ response: string; costEstimate: CostEstimate; actualTokens: { input: number; output: number } }> {
   const settings = await getAISettings();
   if (!settings.isActive || !settings.openRouterKeyConfigured) throw new AiModelError("not_configured");
@@ -78,6 +85,7 @@ async function invokeBedrockModel(
   const result = await modelClient.generate({
     operation, messages: [{ role: "user", content: prompt }],
     maxOutputTokens: allowedOutputTokens, temperature,
+    ...(reasoning === undefined ? {} : { reasoning }),
     context: { userId, ticketId: ticketId ? Number(ticketId) : undefined },
   });
   await recordUsage({
@@ -124,7 +132,8 @@ export async function analyzeTicket(
       cap,
       temperature,
       userId,
-      ticket.id?.toString()
+      ticket.id?.toString(),
+      false
     );
 
     // Check if response is empty
@@ -277,16 +286,26 @@ export async function generateResponse(
   confidence: number;
   suggestedArticles: number[];
   costEstimate?: CostEstimate;
+  /**
+   * True when no real answer was produced (the model call failed, or it returned JSON with no
+   * response field) and `response` is the holding message. Callers must not treat this as a
+   * matched solution: it means "no answer", the same as an empty reply.
+   */
+  degraded?: boolean;
 }> {
   try {
-    // Format knowledge base content
+    // Format knowledge base content. The id is shown so the model can cite an article by
+    // id; a model that cites it by title instead is resolved back to its id below.
     const knowledgeBase = knowledgeBaseArticles
-      .map((article) => `- ${article.title}: ${article.summary}`)
+      .map((article) => `- [id ${article.id}] ${article.title}: ${article.summary}`)
       .join("\n");
 
     const settings = await getAISettings();
+    // Tell the model the character budget the reply will be held to, so it finishes inside it
+    // rather than being cut off mid-sentence by the store step.
+    const maxCharacters = Math.max(100, Math.min(5000, Number(settings.maxResponseLength) || 1000));
     const prompt = promptWithinBudget(settings, "generateResponse", ticket.description, (description) =>
-      PROMPT_TEMPLATES.generateResponse({ ...ticket, description: description ?? null }, knowledgeBase)
+      PROMPT_TEMPLATES.generateResponse({ ...ticket, description: description ?? null }, knowledgeBase, maxCharacters)
     );
     const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.generateResponse);
     const temperature = settings.temperature;
@@ -296,7 +315,8 @@ export async function generateResponse(
       cap,
       temperature,
       userId,
-      ticket.id?.toString()
+      ticket.id?.toString(),
+      false
     );
 
     // Check if response is empty
@@ -348,10 +368,9 @@ export async function generateResponse(
 
     // Extract the response field from the parsed JSON
     // The AI should return a JSON object with a "response" field containing the actual text
-    const responseText =
-      parsedResponse.response ||
-      parsedResponse.autoResponse ||
+    const holdingMessage =
       "I'm unable to generate an automated response at this time. A support agent will assist you shortly.";
+    const responseText = parsedResponse.response || parsedResponse.autoResponse || holdingMessage;
 
     // Extract confidence from parsed response, or calculate based on knowledge base
     const confidence =
@@ -361,18 +380,22 @@ export async function generateResponse(
         ? 0.8
         : 0.5;
 
-    // Extract suggested articles from parsed response, or use knowledge base articles
-    const suggestedArticles =
-      Array.isArray(parsedResponse.knowledgeBaseArticles) &&
-      parsedResponse.knowledgeBaseArticles.length > 0
-        ? parsedResponse.knowledgeBaseArticles
-        : knowledgeBaseArticles.map((a) => a.id);
+    // Cite back the articles the model referenced, as ids. Models often return the article
+    // titles (or `"id 7"`) rather than bare numbers, so anything that is not already a number
+    // is matched against the articles the model was shown; unresolvable entries are dropped
+    // and, when nothing resolves, the articles we passed are used instead.
+    const suggestedArticles = resolveCitedArticles(
+      parsedResponse.knowledgeBaseArticles,
+      knowledgeBaseArticles
+    );
 
     return {
       response: responseText, // Clean response text only, no markdown or code
       confidence,
       suggestedArticles,
       costEstimate: result.costEstimate,
+      // JSON without a response field is not an answer: mark it so the caller routes the ticket.
+      ...(responseText === holdingMessage ? { degraded: true } : {}),
     };
   } catch (error) {
     console.error("Error generating response:", describeAIError(error));
@@ -387,6 +410,7 @@ export async function generateResponse(
         "I'm unable to generate an automated response at this time. A support agent will assist you shortly.",
       confidence: 0,
       suggestedArticles: [],
+      degraded: true,
     };
   }
 }
@@ -420,7 +444,8 @@ export async function updateKnowledgeBase(
       cap,
       temperature,
       userId,
-      ticket.id?.toString()
+      ticket.id?.toString(),
+      false
     );
 
     // Parse JSON response (extract from markdown if needed)
@@ -542,7 +567,9 @@ export async function testBedrockConnection(): Promise<{
       "testConnection",
       50, // Very small response for testing
       undefined,
-      "system"
+      "system",
+      undefined,
+      false
     );
 
     return {
@@ -633,14 +660,14 @@ export async function runTicketAnalysisPrompt(prompt: string) {
   const settings = await getAISettings();
   const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.ticketAnalysis);
   const temperature = settings.temperature;
-  return invokeBedrockModel(prompt, "ticketAnalysis", cap, temperature);
+  return invokeBedrockModel(prompt, "ticketAnalysis", cap, temperature, undefined, undefined, false);
 }
 
 export async function runAutoResponseForTicketPrompt(prompt: string) {
   const settings = await getAISettings();
   const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.autoResponse);
   const temperature = settings.temperature;
-  return invokeBedrockModel(prompt, "autoResponse", cap, temperature);
+  return invokeBedrockModel(prompt, "autoResponse", cap, temperature, undefined, undefined, false);
 }
 
 export async function runKnowledgePatternPrompt(prompt: string) {
@@ -651,7 +678,10 @@ export async function runKnowledgePatternPrompt(prompt: string) {
     prompt,
     "knowledge_analyzeResolvedTickets",
     cap,
-    temperature
+    temperature,
+    undefined,
+    undefined,
+    false
   );
 }
 
@@ -663,7 +693,10 @@ export async function runKnowledgeArticleGenerationPrompt(prompt: string) {
     prompt,
     "knowledge_generateArticle",
     cap,
-    temperature
+    temperature,
+    undefined,
+    undefined,
+    false
   );
 }
 
@@ -675,7 +708,10 @@ export async function runKnowledgePatternAnalysisPrompt(prompt: string) {
     prompt,
     "knowledge_analyzeResolvedTickets",
     cap,
-    temperature
+    temperature,
+    undefined,
+    undefined,
+    false
   );
 }
 
@@ -687,7 +723,10 @@ export async function runKnowledgeSearchPrompt(prompt: string) {
     prompt,
     "knowledge_searchRanking",
     cap,
-    temperature
+    temperature,
+    undefined,
+    undefined,
+    false
   );
 }
 
@@ -699,7 +738,10 @@ export async function runKnowledgeImproveArticlePrompt(prompt: string) {
     prompt,
     "knowledge_improveArticle",
     cap,
-    temperature
+    temperature,
+    undefined,
+    undefined,
+    false
   );
 }
 
@@ -715,6 +757,85 @@ export async function runChatPrompt(
   return invokeBedrockModel(prompt, "chat", cap, temperature, userId);
 }
 
+/**
+ * 0031: classify a ticket that found no matching solution onto one of the existing teams.
+ * The prompt is budget-fit around the description (fitDescriptionToBudget), then the model's
+ * team id is returned for the caller to re-validate against the live team list before assigning.
+ */
+export async function classifyTicketForRouting(
+  ticket: Pick<Task, "title" | "description" | "category" | "priority" | "id">,
+  departments: Array<{ id: number; name: string }>,
+  teams: Array<{ id: number; name: string; departmentId: number | null }>,
+  userId?: string
+): Promise<{ teamId: number | null; departmentId: number | null; confidence: number; reason: string }> {
+  const settings = await getAISettings();
+  const prompt = promptWithinBudget(settings, "ticketRouting", ticket.description, (description) =>
+    buildTicketRoutingPrompt({
+      title: ticket.title,
+      description: description ?? null,
+      category: ticket.category,
+      priority: ticket.priority,
+      departments,
+      teams,
+    })
+  );
+  const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.ticketRouting);
+  const result = await invokeBedrockModel(
+    prompt,
+    "ticketRouting",
+    cap,
+    // Routing is a classification, not creative writing: ask for the most deterministic answer.
+    0,
+    userId,
+    ticket.id?.toString(),
+    false
+  );
+
+  const cleaned = extractJSON(result.response) || result.response;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new Error("The routing response was not valid JSON");
+  }
+
+  const rawTeamId = Number(parsed.teamId);
+  const teamId = Number.isInteger(rawTeamId) && rawTeamId > 0 ? rawTeamId : null;
+  const rawDepartmentId = Number(parsed.departmentId);
+  const departmentId = Number.isInteger(rawDepartmentId) && rawDepartmentId > 0 ? rawDepartmentId : null;
+  const rawConfidence = Number(parsed.confidence);
+  const confidence = Number.isFinite(rawConfidence) ? Math.max(0, Math.min(1, rawConfidence)) : 0;
+  const reason = typeof parsed.reason === "string" ? parsed.reason.slice(0, 500) : "";
+
+  return { teamId, departmentId, confidence, reason };
+}
+
+/**
+ * The articles the model cited, as ids. A model asked for `knowledgeBaseArticles` ids may still
+ * answer with the titles it was shown (or `"id 7"`), and a single non-numeric entry used to fail the
+ * caller's schema and discard the whole reply. Each entry is accepted when it is already an id of an
+ * article we passed, and otherwise matched by title (or a leading "id N"). Entries that match
+ * nothing are dropped; when none resolve, the articles we passed stand in.
+ */
+function resolveCitedArticles(cited: unknown, articles: any[]): number[] {
+  const known = articles.map((article) => ({ id: Number(article.id), title: String(article.title ?? "") }));
+  if (!Array.isArray(cited) || cited.length === 0) return known.map((article) => article.id);
+
+  const resolved: number[] = [];
+  for (const entry of cited) {
+    const direct = typeof entry === "number" ? entry : Number(String(entry).replace(/^\s*id\s*/i, "").trim());
+    if (Number.isInteger(direct) && known.some((article) => article.id === direct)) {
+      if (!resolved.includes(direct)) resolved.push(direct);
+      continue;
+    }
+    const needle = String(entry).trim().toLowerCase();
+    if (!needle) continue;
+    const byTitle = known.find((article) => article.title.toLowerCase() === needle)
+      ?? known.find((article) => needle.includes(article.title.toLowerCase()) || article.title.toLowerCase().includes(needle));
+    if (byTitle && !resolved.includes(byTitle.id)) resolved.push(byTitle.id);
+  }
+  return resolved.length > 0 ? resolved : known.map((article) => article.id);
+}
 // Export initialization function
 export const bedrockIntegration = {
   getBedrockClient,
@@ -730,6 +851,7 @@ export const bedrockIntegration = {
   exportUsageData,
   runTicketAnalysisPrompt,
   runAutoResponseForTicketPrompt,
+  classifyTicketForRouting,
   runKnowledgePatternPrompt,
   runKnowledgeArticleGenerationPrompt,
   runKnowledgePatternAnalysisPrompt,
