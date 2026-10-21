@@ -11,6 +11,25 @@ import { fitDescriptionToBudget } from "./promptBudget";
 import type { AISettings } from "@shared/interfaces";
 
 /** The most output each prompt that carries a ticket description asks for (before settings.maxTokens). */
+/**
+ * Operations whose visible text must be complete JSON: a provider that stopped at the token cap
+ * returned a fragment, and parsing it would silently produce garbage. Free-text calls (the help
+ * chat, the connection test) are deliberately absent: a short answer that reaches the cap is
+ * truncated but still usable, so it must not be reported as a broken key.
+ */
+const STRUCTURED_OUTPUT_OPERATIONS = new Set([
+  "analyzeTicket",
+  "generateResponse",
+  "updateKnowledgeBase",
+  "ticketAnalysis",
+  "autoResponse",
+  "ticketRouting",
+  "knowledge_analyzeResolvedTickets",
+  "knowledge_generateArticle",
+  "knowledge_searchRanking",
+  "knowledge_improveArticle",
+]);
+
 const OPERATION_OUTPUT_CAP = {
   analyzeTicket: 500,
   generateResponse: 800,
@@ -86,6 +105,7 @@ async function invokeBedrockModel(
     operation, messages: [{ role: "user", content: prompt }],
     maxOutputTokens: allowedOutputTokens, temperature,
     ...(reasoning === undefined ? {} : { reasoning }),
+    ...(STRUCTURED_OUTPUT_OPERATIONS.has(operation) ? { requireCompleteOutput: true } : {}),
     context: { userId, ticketId: ticketId ? Number(ticketId) : undefined },
   });
   await recordUsage({
@@ -296,8 +316,14 @@ export async function generateResponse(
   try {
     // Format knowledge base content. The id is shown so the model can cite an article by
     // id; a model that cites it by title instead is resolved back to its id below.
+    // A recalled memory is prompt context, not a citable article: it has no id, so it is shown
+    // by title alone rather than as the literal "[id undefined]" the old template produced.
     const knowledgeBase = knowledgeBaseArticles
-      .map((article) => `- [id ${article.id}] ${article.title}: ${article.summary}`)
+      .map((article) => {
+        const id = Number(article.id);
+        const label = Number.isInteger(id) && id > 0 ? `[id ${id}] ` : "";
+        return `- ${label}${article.title}: ${article.summary}`;
+      })
       .join("\n");
 
     const settings = await getAISettings();
@@ -818,7 +844,13 @@ export async function classifyTicketForRouting(
  * nothing are dropped; when none resolve, the articles we passed stand in.
  */
 function resolveCitedArticles(cited: unknown, articles: any[]): number[] {
-  const known = articles.map((article) => ({ id: Number(article.id), title: String(article.title ?? "") }));
+  // Only articles with a real id can be cited. A recalled Hindsight memory is passed in as prompt
+  // context and has no id: Number(undefined) is NaN, which failed the caller's
+  // "positive integer" schema and threw the whole analysis away, so enabling memory silently
+  // disabled auto-replies. Such entries are simply not citable.
+  const known = articles
+    .map((article) => ({ id: Number(article.id), title: String(article.title ?? "") }))
+    .filter((article) => Number.isInteger(article.id) && article.id > 0);
   if (!Array.isArray(cited) || cited.length === 0) return known.map((article) => article.id);
 
   const resolved: number[] = [];

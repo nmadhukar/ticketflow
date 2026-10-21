@@ -13,7 +13,7 @@ jest.mock('../../services/ai/bedrockIntegration', () => ({
   },
 }));
 
-import { calculateConfidence, articleRelevance, trimToLength, AIAutoResponseService } from '../../services/ai/aiAutoResponse';
+import { calculateConfidence, articleRelevance, trimToLength, toSearchTerms, AIAutoResponseService } from '../../services/ai/aiAutoResponse';
 import { bedrockIntegration } from '../../services/ai/bedrockIntegration';
 
 const bedrock = bedrockIntegration as unknown as Record<string, jest.Mock<any>>;
@@ -87,6 +87,26 @@ describe('trimToLength: a reply is never cut mid-word', () => {
   it('does not leave the partial word the old slice produced', () => {
     const text = "Once we have this information, we will audit the logs and correct the invoice. - Work w";
     expect(trimToLength(text, text.length - 1)).not.toContain("Work w");
+  });
+});
+
+describe('toSearchTerms: the search keeps non-English words', () => {
+  it('keeps an accented word instead of stripping it to nothing', () => {
+    expect(toSearchTerms('Contraseña caducada')).toContain('contraseña');
+  });
+
+  it('keeps Cyrillic words', () => {
+    expect(toSearchTerms('пароль сбросить')).toContain('пароль');
+  });
+
+  it('keeps CJK words that clear the length floor', () => {
+    // The four-character floor still applies, so a two-character CJK word is dropped as noise;
+    // the point here is that the script survives the split at all.
+    expect(toSearchTerms('密码重置 失败')).toEqual(['密码重置']);
+  });
+
+  it('still drops English stop words and short words', () => {
+    expect(toSearchTerms('please reset the password now')).toEqual(['reset', 'password']);
   });
 });
 

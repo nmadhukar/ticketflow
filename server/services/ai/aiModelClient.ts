@@ -5,6 +5,13 @@ export type GenerateRequest = {
   temperature: number;
   responseSchema?: Record<string, unknown>;
   /**
+   * Set when the visible text must be complete (a JSON operation). A provider that stopped at the
+   * token cap returned a fragment: fail as unusable instead of parsing a partial object. Free-text
+   * calls leave this unset, because a short answer that reached the cap is truncated but still a
+   * valid answer, and refusing it would report a working key as broken.
+   */
+  requireCompleteOutput?: boolean;
+  /**
    * Set false to ask the provider to skip hidden reasoning for this call. Reasoning tokens
    * count against maxOutputTokens on a reasoning model, so a structured (JSON) call whose
    * budget is spent thinking comes back with truncated or empty visible text.

@@ -26,13 +26,16 @@ import { routeTicket } from "./ticketRouting";
  * (autoRoutingEnabled, default off), so it runs whether or not auto-response is on,
  * and it never throws either.
  */
-export async function runCreateTimeAutoResponse(task: Task): Promise<void> {
+export async function runCreateTimeAutoResponse(
+  task: Task,
+  actionBaseUrl: string | null = null
+): Promise<void> {
   try {
     const settings = await getAISettings();
     if (!settings.isActive || !process.env.OPENROUTER_API_KEY) return;
 
     if (!settings.autoResponseEnabled) {
-      await routeIfNoReply(task);
+      await routeIfNoReply(task, actionBaseUrl);
       return;
     }
 
@@ -48,7 +51,7 @@ export async function runCreateTimeAutoResponse(task: Task): Promise<void> {
 
     if (!analysis.autoResponse || !analysis.shouldAutoRespond) {
       // No matched solution: classify and assign to the owning team instead of replying.
-      await routeIfNoReply(task);
+      await routeIfNoReply(task, actionBaseUrl);
       return;
     }
 
@@ -88,9 +91,9 @@ export async function runCreateTimeAutoResponse(task: Task): Promise<void> {
 }
 
 /** No-match routing, isolated so a routing failure can never affect the auto-response path. */
-async function routeIfNoReply(task: Task): Promise<void> {
+async function routeIfNoReply(task: Task, actionBaseUrl: string | null): Promise<void> {
   try {
-    await routeTicket(task);
+    await routeTicket(task, actionBaseUrl);
   } catch (error) {
     console.error(`AI ticket routing for new ticket ${task.id} failed:`, describeAIError(error));
   }

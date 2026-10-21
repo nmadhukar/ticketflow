@@ -124,6 +124,25 @@ describe("Hindsight memory", () => {
     expect(aiModelMock.prompts.join("\n---\n")).toContain("restarting the print spooler");
   });
 
+  it("a recalled memory does not break the reply", async () => {
+    // A memory has no article id: it must be shown as prompt context, never cited, and the
+    // reply must still be stored and posted.
+    await enableAi();
+    enableMemory();
+    fakeMemoryService({ recall: { results: [{ text: "Restarting the print spooler fixed this." }] } });
+
+    const customer = await createUser({ role: "customer" });
+    const customerA = await loginAs(ctx.app, customer);
+    const res = await createTicketAs(customerA, { title: "Printer jam", description: "The spooler is stuck." });
+    expect(res.status).toBe(201);
+
+    // The reply is still posted (the memory did not poison the analysis)...
+    const comments = await db.select().from(taskComments).where(eq(taskComments.taskId, res.body.id as number));
+    expect(comments.some((c) => c.content.startsWith("AI Auto-Response"))).toBe(true);
+    // ...and the memory is shown to the model as context, never as a citable "[id undefined]" article.
+    expect(aiModelMock.prompts.join("\n---\n")).not.toContain("[id undefined]");
+  });
+
   it("retains a memory when a ticket is resolved", async () => {
     const admin = await enableAi();
     enableMemory();

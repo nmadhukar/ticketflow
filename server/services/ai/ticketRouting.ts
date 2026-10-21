@@ -7,6 +7,7 @@ import { bedrockIntegration } from "./bedrockIntegration";
 import { describeAIError } from "./aiErrors";
 import { AI_SYSTEM_USER_ID, ensureAiSystemUser } from "../../utils/aiSystemUser";
 import { defaultTriageAssignment } from "../tickets/triage";
+import { afterTicketUpdated, recipientsNow } from "../tickets/notifier";
 
 /**
  * 0031 content-based routing: the "no matching solution" half of the create-time agent.
@@ -25,6 +26,12 @@ import { defaultTriageAssignment } from "../tickets/triage";
  *
  * The model is only ever allowed to name a team from the live list; an unknown id falls back to the
  * configured escalation team, then to the default triage team.
+ *
+ * A classification below ROUTING_MIN_CONFIDENCE is treated as no answer at all: a guess that weak
+ * moved the ticket out of triage just as confidently as a good one, so it takes the fallback path
+ * instead. And the assignment is written through the same update hooks as a person's change
+ * (afterTicketUpdated), so the realtime broadcast, the Teams webhooks and the team the ticket
+ * landed on all hear about it.
  */
 
 export interface RoutingDecision {
@@ -34,6 +41,12 @@ export interface RoutingDecision {
   confidence: number;
   reason: string;
 }
+
+/**
+ * The weakest classification that is allowed to move a ticket. Below this the model is guessing,
+ * and a wrong queue is worse than the triage queue, so the fallback (escalation, then triage) wins.
+ */
+const ROUTING_MIN_CONFIDENCE = 0.5;
 
 /** The teams an AI may route to: a team in an active department. */
 async function routableTeams() {
@@ -68,7 +81,7 @@ async function hasDeliberateAssignment(task: Task): Promise<boolean> {
  * Classifies and assigns a new ticket, or returns null when routing is off or cannot be applied.
  * Never throws.
  */
-export async function routeTicket(task: Task): Promise<RoutingDecision | null> {
+export async function routeTicket(task: Task, actionBaseUrl: string | null = null): Promise<RoutingDecision | null> {
   try {
     const settings = await getAISettings();
     if (!settings.autoRoutingEnabled || !settings.isActive || !process.env.OPENROUTER_API_KEY) return null;
@@ -85,7 +98,11 @@ export async function routeTicket(task: Task): Promise<RoutingDecision | null> {
         teamList,
         task.createdBy ?? undefined
       );
-      if (model.teamId !== null && teamList.some((team) => team.id === model.teamId)) {
+      if (
+        model.teamId !== null &&
+        model.confidence >= ROUTING_MIN_CONFIDENCE &&
+        teamList.some((team) => team.id === model.teamId)
+      ) {
         decision = { teamId: model.teamId, departmentId: model.departmentId, confidence: model.confidence, reason: model.reason };
       }
     } catch (error) {
@@ -100,12 +117,29 @@ export async function routeTicket(task: Task): Promise<RoutingDecision | null> {
 
     if (task.assigneeType === "team" && task.assigneeTeamId === decision.teamId) return decision;
 
+    // The model calls above take seconds, which is long enough for a person to pick the ticket up.
+    // Re-read before writing, so a decision taken on the row as it was created cannot overwrite an
+    // agent's assignment; a ticket that is no longer in the triage queue is left exactly as it is.
+    const current = await storage.getTask(task.id);
+    if (!current || await hasDeliberateAssignment(current)) return null;
+    if (current.assigneeType === "team" && current.assigneeTeamId === decision.teamId) return decision;
+
     const actor = (await ensureAiSystemUser()) ?? AI_SYSTEM_USER_ID;
-    await storage.updateTask(
-      task.id,
-      { assigneeType: "team", assigneeTeamId: decision.teamId, assigneeId: null },
-      actor
-    );
+    const updates = { assigneeType: "team" as const, assigneeTeamId: decision.teamId, assigneeId: null };
+    // A reassignment changes who can see the ticket: capture the audience BEFORE the write.
+    const recipientsBefore = await recipientsNow(task.id);
+    const updatedTask = await storage.updateTask(task.id, updates, actor);
+    // The same side effects a person's reassignment produces (webhooks, realtime broadcast).
+    await afterTicketUpdated({
+      ticketId: task.id,
+      before: current,
+      updatedTask,
+      updates,
+      actorId: actor,
+      recipientsBefore,
+      reassigns: true,
+      actionBaseUrl,
+    });
     return decision;
   } catch (error) {
     console.error(`AI ticket routing for new ticket ${task.id} failed:`, describeAIError(error));

@@ -89,10 +89,39 @@ describe("OpenRouter client", () => {
     expect(JSON.parse(options.body as string).reasoning).toEqual({ enabled: false });
   });
 
-  it("rejects a response the provider cut off at the token cap", async () => {
-    // finish_reason "length" means the visible text is a fragment and cannot be trusted.
-    const fetchImpl = jest.fn(async () => ({ ok: true, json: async () => ({ choices: [{ finish_reason: "length", message: { content: '{"response": "cut' } }], usage: { prompt_tokens: 1, completion_tokens: 400 } }) })) as unknown as typeof fetch;
-    await expect(client(fetchImpl).generate(request)).rejects.toMatchObject({ code: "invalid_output" });
+  it("rejects a cut-off answer only when the caller needs complete output", async () => {
+    // finish_reason "length" means the visible text stopped at the cap. For a structured (JSON)
+    // call that fragment cannot be trusted; a free-text caller must still get its answer, or a
+    // working key would look broken.
+    const cutOff = () => jest.fn(async () => ({ ok: true, json: async () => ({ choices: [{ finish_reason: "length", message: { content: '{"response": "cut' } }], usage: { prompt_tokens: 1, completion_tokens: 400 } }) })) as unknown as typeof fetch;
+    await expect(client(cutOff()).generate({ ...request, requireCompleteOutput: true })).rejects.toMatchObject({ code: "invalid_output" });
+
+    const result = await client(cutOff()).generate(request);
+    expect(result.text).toBe('{"response": "cut');
+  });
+
+  it("retries once without the reasoning field when the provider rejects it", async () => {
+    // Some models have no switch to turn reasoning off and reject the field outright. That must
+    // not fail every structured call: the retry drops the field and lets the model default apply.
+    const bodies: Record<string, unknown>[] = [];
+    const fetchImpl = jest.fn(async (_url: string, options: RequestInit) => {
+      const body = JSON.parse(options.body as string);
+      bodies.push(body);
+      if ("reasoning" in body) return { ok: false, status: 400, json: async () => ({}) };
+      return { ok: true, json: async () => ({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }) };
+    }) as unknown as typeof fetch;
+
+    const result = await client(fetchImpl).generate({ ...request, reasoning: false });
+    expect(result.text).toBe("ok");
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0].reasoning).toEqual({ enabled: false });
+    expect(bodies[1]).not.toHaveProperty("reasoning");
+  });
+
+  it("does not retry a real bad request when reasoning was never set", async () => {
+    const fetchImpl = jest.fn(async () => ({ ok: false, status: 400, json: async () => ({}) })) as unknown as typeof fetch;
+    await expect(client(fetchImpl).generate(request)).rejects.toMatchObject({ code: "provider_failure", status: 400 });
+    expect((fetchImpl as jest.Mock).mock.calls).toHaveLength(1);
   });
 
   it("sends a caller-approved response schema to OpenRouter", async () => {

@@ -97,6 +97,23 @@ const CONTENT_WEIGHT = 1;
 /** A body-only match needs this many distinct terms: one shared word is far too weak. */
 const MIN_CONTENT_TERMS = 3;
 
+/**
+ * The ticket's search terms. Splitting on [^a-z0-9] discarded every non-English word: an accented
+ * ("Contraseña") or non-Latin (Cyrillic, CJK) ticket produced no terms at all and so could never
+ * match the knowledge base. Split on anything that is not a letter or digit in ANY script instead,
+ * so those tickets search normally. English stop words still apply; other languages simply keep
+ * their words (the length floor is what removes noise there).
+ */
+/** Anything that is not a letter or a digit, in any script (built once: the /u flag needs the constructor here). */
+const NON_WORD = new RegExp("[^\\p{L}\\p{N}]+", "gu");
+
+export function toSearchTerms(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(NON_WORD)
+    .filter((term) => term.length > 3 && !STOP_WORDS.has(term));
+}
+
 /** The relevance score for one article against the ticket's terms (see the weights above). */
 export function articleRelevance(article: any, terms: string[]): number {
   return articleMatch(article, terms).score;
@@ -258,6 +275,7 @@ export class AIAutoResponseService {
   ): Promise<any[]> {
     try {
       // Search for similar tickets by title and description
+      // This path splits on spaces only, which already keeps non-Latin words intact.
       const searchTerms = `${title} ${description}`
         .toLowerCase()
         .split(" ")
@@ -333,14 +351,7 @@ export class AIAutoResponseService {
       // a match: common words ("request", "install", "team") make unrelated articles look
       // relevant, which used to inflate the reply confidence and skip routing. A title or tag
       // hit is worth more than a body hit, and only articles that clear MIN_RELEVANCE are kept.
-      const searchTerms = Array.from(
-        new Set(
-          `${title} ${description}`
-            .toLowerCase()
-            .split(/[^a-z0-9]+/)
-            .filter((term) => term.length > 3 && !STOP_WORDS.has(term))
-        )
-      );
+      const searchTerms = Array.from(new Set(toSearchTerms(`${title} ${description}`)));
 
       if (searchTerms.length === 0) return [];
 

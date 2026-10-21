@@ -7,6 +7,7 @@ import { createTeam, createTicketAs, createUser, loginAs } from "./helpers/fixtu
 import { storage } from "../../storage";
 import { db } from "../../storage/db";
 import { ensureAiSystemUser } from "../../utils/aiSystemUser";
+import * as realtime from "../../realtime/ws";
 import { AI_SYSTEM_USER_ID } from "../../utils/aiSystemUserId";
 import { routeTicket } from "../../services/ai/ticketRouting";
 import type { Task } from "@shared/schema";
@@ -126,6 +127,74 @@ describe("0031 content-based ticket routing", () => {
       assigneeId: null, createdBy: admin.id, ticketNumber: "TKT-1",
     } as unknown as Task;
     expect(await routeTicket(task)).toBeNull();
+  });
+
+  it("a low-confidence guess does not move the ticket out of triage", async () => {
+    const admin = await createUser({ role: "admin" });
+    const escalationTeam = await createTeam(admin, { name: "Escalation" });
+    const routedTeam = await createTeam(admin, { name: "AAA Technical Support" });
+    await enableRouting({ autoRoutingEnabled: true });
+    await storage.updateAISettings({ escalationTeamId: escalationTeam.id }, admin.id);
+
+    const base = aiModelMock.handler;
+    aiModelMock.handler = (p) =>
+      p.includes("expert helpdesk triage router")
+        ? JSON.stringify({ teamId: routedTeam.id, departmentId: null, confidence: 0.05, reason: "guess" })
+        : base(p);
+
+    const customer = await createUser({ role: "customer" });
+    const customerA = await loginAs(ctx.app, customer);
+    const res = await createTicketAs(customerA, { title: "Printerjam broken", description: "The app crashes on save." });
+    expect(res.status).toBe(201);
+
+    const [row] = await taskRow(res.body.id as number);
+    // The weak guess is not acted on: the escalation fallback wins instead.
+    expect(row.assigneeTeamId).not.toBe(routedTeam.id);
+    expect(row.assigneeTeamId).toBe(escalationTeam.id);
+  });
+
+  it("re-reads before writing, so an agent who takes the ticket is not overwritten", async () => {
+    const admin = await createUser({ role: "admin" });
+    const target = await createTeam(admin, { name: "AAA Technical Support" });
+    await enableRouting({ autoRoutingEnabled: true });
+
+    const customer = await createUser({ role: "customer" });
+    const agent = await createUser({ role: "agent" });
+    const customerA = await loginAs(ctx.app, customer);
+    const created = await createTicketAs(customerA, { title: "Printerjam broken", description: "The app crashes on save." });
+    expect(created.status).toBe(201);
+
+    // An agent picks the ticket up first; the routing decision is based on the row as created.
+    await storage.updateTask(created.body.id as number, { assigneeType: "user", assigneeId: agent.id, assigneeTeamId: null }, admin.id);
+    const [row] = await taskRow(created.body.id as number);
+    expect(row.assigneeId).toBe(agent.id);
+    expect(row.assigneeTeamId).toBeNull();
+    expect(target.id).toBeGreaterThan(0);
+
+    // A late routing pass must leave that assignment alone.
+    const [fresh] = await taskRow(created.body.id as number);
+    expect(await routeTicket(fresh as Task)).toBeNull();
+    const [after] = await taskRow(created.body.id as number);
+    expect(after.assigneeId).toBe(agent.id);
+    expect(after.assigneeTeamId).toBeNull();
+  });
+
+  it("notifies the new team through the normal update hooks", async () => {
+    const admin = await createUser({ role: "admin" });
+    const target = await createTeam(admin, { name: "AAA Technical Support" });
+    await enableRouting({ autoRoutingEnabled: true });
+    const notify = jest.spyOn(realtime, "notifyTicket");
+
+    const customer = await createUser({ role: "customer" });
+    const customerA = await loginAs(ctx.app, customer);
+    const res = await createTicketAs(customerA, { title: "Printerjam broken", description: "The app crashes on save." });
+    expect(res.status).toBe(201);
+
+    const [row] = await taskRow(res.body.id as number);
+    expect(row.assigneeTeamId).toBe(target.id);
+    // Routing goes through the same hooks as a person's reassignment: the ticket is announced
+    // as updated, which is what tells the team it landed on their queue.
+    expect(notify).toHaveBeenCalledWith(res.body.id as number, "updated", expect.anything());
   });
 
   it("an unusable model answer falls back to the escalation team, and never throws", async () => {

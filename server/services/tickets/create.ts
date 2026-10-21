@@ -49,7 +49,7 @@ export async function runTicketCreatedHooks(
   const errorType = (e: unknown) => (e instanceof Error ? e.name : "error");
 
   try {
-    await runCreateTimeAutoResponse(task);
+    await runCreateTimeAutoResponse(task, actionBaseUrl);
   } catch (e) {
     console.error(`create-time auto-response failed: ${errorType(e)}`);
   }
