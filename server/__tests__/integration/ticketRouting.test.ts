@@ -154,26 +154,30 @@ describe("0031 content-based ticket routing", () => {
   });
 
   it("re-reads before writing, so an agent who takes the ticket is not overwritten", async () => {
+    // The routing decision is taken on the row as it was created, then the model call takes
+    // seconds. This reproduces that window: the snapshot says "unassigned", the database says
+    // "an agent owns it", and the late write must not act on the stale snapshot.
     const admin = await createUser({ role: "admin" });
     const target = await createTeam(admin, { name: "AAA Technical Support" });
-    await enableRouting({ autoRoutingEnabled: true });
+    const agent = await createUser({ role: "agent" });
+    await enableRouting({ autoRoutingEnabled: false });
 
     const customer = await createUser({ role: "customer" });
-    const agent = await createUser({ role: "agent" });
     const customerA = await loginAs(ctx.app, customer);
     const created = await createTicketAs(customerA, { title: "Printerjam broken", description: "The app crashes on save." });
     expect(created.status).toBe(201);
 
-    // An agent picks the ticket up first; the routing decision is based on the row as created.
-    await storage.updateTask(created.body.id as number, { assigneeType: "user", assigneeId: agent.id, assigneeTeamId: null }, admin.id);
-    const [row] = await taskRow(created.body.id as number);
-    expect(row.assigneeId).toBe(agent.id);
-    expect(row.assigneeTeamId).toBeNull();
+    // The stamp the routing pass will carry: read before anyone touches the ticket.
+    const [snapshot] = await taskRow(created.body.id as number);
+    expect(snapshot.assigneeId).toBeNull();
     expect(target.id).toBeGreaterThan(0);
 
-    // A late routing pass must leave that assignment alone.
-    const [fresh] = await taskRow(created.body.id as number);
-    expect(await routeTicket(fresh as Task)).toBeNull();
+    // Routing is on for the explicit pass, and an agent takes the ticket in the meantime.
+    await enableRouting({ autoRoutingEnabled: true });
+    await storage.updateTask(created.body.id as number, { assigneeType: "user", assigneeId: agent.id, assigneeTeamId: null }, admin.id);
+
+    // A late routing pass carrying the stale snapshot must leave that assignment alone.
+    expect(await routeTicket(snapshot as Task)).toBeNull();
     const [after] = await taskRow(created.body.id as number);
     expect(after.assigneeId).toBe(agent.id);
     expect(after.assigneeTeamId).toBeNull();
