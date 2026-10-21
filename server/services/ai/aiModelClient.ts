@@ -17,6 +17,14 @@ export type GenerateRequest = {
    * budget is spent thinking comes back with truncated or empty visible text.
    */
   reasoning?: boolean;
+  /**
+   * The most tokens this call may ever ask for, prompt excluded: the caller's per-request
+   * budget check passed with `maxOutputTokens`, and this is the same ceiling. It is only read
+   * on the retry that drops a rejected reasoning field, where the model's own default reasoning
+   * is about to draw from max_tokens: the retry may raise the visible allowance toward this
+   * ceiling (never past it), so hidden reasoning cannot spend the whole answer.
+   */
+  maxOutputTokensCeiling?: number;
   context?: { userId?: string; ticketId?: number };
 };
 

@@ -87,23 +87,39 @@ function recallList(payload: unknown): unknown[] {
   return [];
 }
 
+/** The tag that scopes a memory to the customer whose ticket produced it. */
+export function customerScopeTag(createdBy: string | null | undefined): string | null {
+  const id = typeof createdBy === "string" ? createdBy.trim() : "";
+  return id.length > 0 ? `customer:${id}` : null;
+}
+
 /**
  * Memories relevant to a ticket, for the reply prompt. Returns [] when the feature is off,
  * on any failure, or when nothing matches. Never throws.
+ *
+ * `scope` limits the recall to the memories of one customer: it is sent to the service as a
+ * strict tag filter, so a ticket only ever sees resolutions learned from that same customer's
+ * earlier tickets. Callers that have no customer (background jobs) pass nothing and get the
+ * unscoped recall those paths have always had.
  */
 export async function recallMemories(
   query: string,
   limit: number = RECALL_LIMIT,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  scope?: string | null
 ): Promise<string[]> {
   const config = readHindsightConfig(env);
   if (!config) return [];
   const trimmed = query.trim();
   if (trimmed.length === 0) return [];
+  const scopeTag = customerScopeTag(scope);
   try {
     const payload = await postJson(config, memoryUrl(config, "/memories/recall"), {
       query: trimmed.slice(0, 2000),
       limit: Math.max(1, Math.min(20, Math.trunc(limit))),
+      // any_strict: only memories carrying this exact tag come back, so one customer's
+      // resolutions never leak into another customer's reply.
+      ...(scopeTag ? { tags: [scopeTag], tags_match: "any_strict" } : {}),
     });
     return recallList(payload)
       .map(memoryText)
@@ -180,9 +196,12 @@ export async function retainResolvedTicketMemory(
         content,
         context: "resolved support ticket",
         documentId: `ticket-${ticket.id}`,
-        tags: [ticket.category, ticket.priority, "resolved"].filter(
-          (tag): tag is string => typeof tag === "string" && tag.length > 0
-        ),
+        tags: [
+          ticket.category,
+          ticket.priority,
+          "resolved",
+          customerScopeTag(ticket.createdBy),
+        ].filter((tag): tag is string => typeof tag === "string" && tag.length > 0),
       },
       env
     );

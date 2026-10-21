@@ -30,6 +30,15 @@ const STRUCTURED_OUTPUT_OPERATIONS = new Set([
   "knowledge_improveArticle",
 ]);
 
+/**
+ * Extra output tokens allowed on the one retry that drops a rejected reasoning field. A model that
+ * refuses the reasoning switch reasons by default, and those hidden tokens are drawn from
+ * max_tokens: a small structured cap (analyzeTicket asks for 500) could be spent thinking before
+ * any visible text. The retry may ask up to this much more, but never past the per-request token
+ * ceiling, so prompt plus retry still fits maxTokensPerRequest.
+ */
+const REASONING_RETRY_HEADROOM_TOKENS = 1000;
+
 const OPERATION_OUTPUT_CAP = {
   analyzeTicket: 500,
   generateResponse: 800,
@@ -100,10 +109,16 @@ async function invokeBedrockModel(
   const [daily, monthly] = await Promise.all([getDailyUsage(), getMonthlyUsage()]);
   const promptTokens = estimatePromptTokensForBudget(prompt);
   const allowedOutputTokens = Math.min(maxTokens, settings.maxTokensPerRequest - promptTokens);
+  // The retry that drops a rejected reasoning field may raise the visible allowance toward this
+  // ceiling, clamped by the per-request cap: prompt plus ceiling still fits maxTokensPerRequest, so
+  // the retry cannot exceed the request limit. The cost preflight keeps counting the allowance the
+  // first attempt asks for, as it always has.
+  const ceilingOutputTokens = Math.min(allowedOutputTokens + REASONING_RETRY_HEADROOM_TOKENS, settings.maxTokensPerRequest - promptTokens);
   assertBudgetAvailable({ promptTokens, maxOutputTokens: allowedOutputTokens, price, settings, todayUsd: daily.totalCost, monthUsd: monthly.totalCost });
   const result = await modelClient.generate({
     operation, messages: [{ role: "user", content: prompt }],
     maxOutputTokens: allowedOutputTokens, temperature,
+    maxOutputTokensCeiling: ceilingOutputTokens,
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(STRUCTURED_OUTPUT_OPERATIONS.has(operation) ? { requireCompleteOutput: true } : {}),
     context: { userId, ticketId: ticketId ? Number(ticketId) : undefined },

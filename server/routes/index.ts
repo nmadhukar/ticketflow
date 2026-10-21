@@ -751,19 +751,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // never fails the create), realtime broadcast to everyone who can see the
         // ticket, and Teams webhooks whose owner can access it.
         // R34: the Teams link's origin is APP_BASE_URL, never the request's Host header.
-        await runTicketCreatedHooks(task, userId, publicBaseUrl(req));
+        // The hooks return the row as it stands afterwards: create-time routing can move an
+        // unmatched ticket off triage, and the caller must not be handed the pre-routing row.
+        const routedTask = await runTicketCreatedHooks(task, userId, publicBaseUrl(req));
 
         // Return task with warning if some attachments failed
         if (attachmentErrors.length > 0) {
           return res.status(201).json({
-            ...task,
+            ...routedTask,
             warning: `Some attachments failed to link: ${attachmentErrors.join(
               ", "
             )}`,
           });
         }
 
-        res.status(201).json(task);
+        res.status(201).json(routedTask);
       } catch (error) {
         // Validation and permission failures go to the error contract (400/403 with details);
         // anything else gets the shared 500 without internals.

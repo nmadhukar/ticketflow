@@ -201,6 +201,51 @@ describe("0031 content-based ticket routing", () => {
     expect(notify).toHaveBeenCalledWith(res.body.id as number, "updated", expect.anything());
   });
 
+  it("the create response carries the routed row, not the triage snapshot it was created with", async () => {
+    // Routing happens inside the create-time hooks, after the row is written. The POST response
+    // must announce the ticket as it ended up, or the client would show the triage queue the
+    // ticket has already left, and the "updated" event from routing would arrive before it.
+    const admin = await createUser({ role: "admin" });
+    const target = await createTeam(admin, { name: "AAA Technical Support" });
+    await enableRouting({ autoRoutingEnabled: true });
+
+    const customer = await createUser({ role: "customer" });
+    const customerA = await loginAs(ctx.app, customer);
+    const res = await createTicketAs(customerA, { title: "Printerjam broken", description: "The app crashes on save." });
+    expect(res.status).toBe(201);
+
+    // The 201 body already shows the routing decision, not the pre-routing assignment.
+    expect(res.body.assigneeType).toBe("team");
+    expect(res.body.assigneeTeamId).toBe(target.id);
+  });
+
+  it("the created broadcast and webhook see the routed row", async () => {
+    // runTicketCreatedHooks announces the ticket after the AI step has run, so the broadcast and
+    // the Teams "created" webhook are computed from the routed row (who can see it changed).
+    const admin = await createUser({ role: "admin" });
+    const target = await createTeam(admin, { name: "AAA Technical Support" });
+    await enableRouting({ autoRoutingEnabled: true });
+
+    const customer = await createUser({ role: "customer" });
+    const customerA = await loginAs(ctx.app, customer);
+    const created = await createTicketAs(customerA, { title: "Printerjam broken", description: "The app crashes on save." });
+    expect(created.status).toBe(201);
+
+    // Past the create itself, call the shared hook again on the row as it was created (before
+    // routing) and check what it hands back: the row it returns is what the caller and the
+    // broadcasters receive.
+    const [beforeRouting] = await taskRow(created.body.id as number);
+    expect(beforeRouting.assigneeTeamId).toBe(target.id);
+    const hooks = await import("../../services/tickets/create");
+    const returned = await hooks.runTicketCreatedHooks(
+      { ...beforeRouting, assigneeTeamId: null, assigneeType: null, assigneeId: null } as Task,
+      customer.id,
+      null
+    );
+    expect(returned.assigneeTeamId).toBe(target.id);
+    expect(returned.assigneeType).toBe("team");
+  });
+
   it("an unusable model answer falls back to the escalation team, and never throws", async () => {
     const admin = await createUser({ role: "admin" });
     const escalationTeam = await createTeam(admin, { name: "Escalation" });

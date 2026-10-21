@@ -5,7 +5,8 @@
 jest.mock("../../storage/db", () => ({ db: { select: jest.fn() }, pool: {} }));
 
 import type { Task } from "@shared/schema";
-import { recallMemories, retainMemory, retainResolvedTicketMemory, isHindsightEnabled } from "../../services/ai/hindsight";
+import { db } from "../../storage/db";
+import { recallMemories, retainMemory, retainResolvedTicketMemory, isHindsightEnabled, customerScopeTag } from "../../services/ai/hindsight";
 
 const ENABLED = {
   HINDSIGHT_ENABLED: "true",
@@ -94,6 +95,46 @@ describe("Hindsight memory client", () => {
     expect(await recallMemories("   ", 5, ENABLED)).toEqual([]);
     expect(await retainMemory({ content: "  " }, ENABLED)).toBe(false);
     expect(fetchMock()).not.toHaveBeenCalled();
+  });
+
+  it("scopes a recall to one customer, and leaves an unscoped call unfiltered", async () => {
+    // A customer's recalled memories must be their own: the scope reaches the service as a strict
+    // tag filter, so another customer's resolutions can never come back.
+    fetchMock().mockResolvedValue(ok({ results: [] }));
+    await recallMemories("printer jam", 5, ENABLED, "customer-1");
+    expect(JSON.parse(callAt(0)[1].body)).toMatchObject({
+      tags: ["customer:customer-1"],
+      tags_match: "any_strict",
+    });
+
+    await recallMemories("printer jam", 5, ENABLED);
+    expect(JSON.parse(callAt(1)[1].body)).not.toHaveProperty("tags");
+  });
+
+  it("a scope tag is only built for a real customer id", () => {
+    expect(customerScopeTag("user-7")).toBe("customer:user-7");
+    expect(customerScopeTag("  user-7  ")).toBe("customer:user-7");
+    expect(customerScopeTag("")).toBeNull();
+    expect(customerScopeTag("   ")).toBeNull();
+    expect(customerScopeTag(null)).toBeNull();
+    expect(customerScopeTag(undefined)).toBeNull();
+  });
+
+  it("stores a resolved ticket's memory with the creator's scope tag", async () => {
+    (db.select as jest.Mock).mockReturnValue({
+      from: () => ({ where: () => ({ orderBy: () => ({ limit: async () => [{ content: "Restart the spooler." }] }) }) }),
+    });
+    fetchMock().mockResolvedValue(ok({}));
+
+    const stored = await retainResolvedTicketMemory(
+      { id: 9, title: "Printer jam", ticketNumber: "TKT-9", category: "support", priority: "medium", createdBy: "user-7" } as Task,
+      ENABLED
+    );
+
+    expect(stored).toBe(true);
+    const [item] = (JSON.parse(callAt(0)[1].body) as { items: { tags: string[] }[] }).items;
+    expect(item.tags).toContain("customer:user-7");
+    expect(item.tags).toContain("resolved");
   });
 
   it("does not query the database for a resolved-ticket memory while the feature is off", async () => {

@@ -193,7 +193,14 @@ export class AIAutoResponseService {
       // default and never throws, so when it is off the two lines below are all that runs.
       // The recalled text is a prompt aid, not a knowledge match: it is added to the articles
       // the model sees, but confidence still counts only the real knowledge-base articles.
-      const memories = await recallMemories(`${ticket.title} ${ticket.description || ""}`);
+      // Recall is scoped to the ticket's creator: a customer only ever sees resolutions from
+      // their own earlier tickets, never another customer's (Hindsight tag filter).
+      const memories = await recallMemories(
+        `${ticket.title} ${ticket.description || ""}`,
+        undefined,
+        undefined,
+        ticket.createdBy
+      );
       const responseArticles = memories.length > 0
         ? [...relevantArticles, ...memories.map((summary) => ({ title: "Recalled memory", summary }))]
         : relevantArticles;

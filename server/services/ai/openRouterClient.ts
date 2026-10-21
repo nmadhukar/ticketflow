@@ -25,6 +25,22 @@ function rejectsReasoningField(status: number): boolean {
   return status === 400 || status === 422;
 }
 
+/**
+ * Tokens added to the retry's visible allowance when a model refuses the reasoning switch. Such a
+ * model reasons by default, and hidden reasoning is drawn from max_tokens, so a small structured
+ * cap (analyzeTicket asks for 500) could be spent thinking and the answer would come back cut off.
+ * The bump never takes the retry past the caller's per-request ceiling, so the budget the caller
+ * checked still holds.
+ */
+const REASONING_RETRY_HEADROOM_TOKENS = 1000;
+
+function reasoningRetryTokens(maxOutputTokens: number, ceiling: number | undefined): number {
+  const bumped = maxOutputTokens + REASONING_RETRY_HEADROOM_TOKENS;
+  if (typeof ceiling !== "number" || !Number.isSafeInteger(ceiling) || ceiling <= 0) return bumped;
+  // The original allowance is a floor: the retry never asks for less than the first attempt did.
+  return Math.min(bumped, Math.max(maxOutputTokens, ceiling));
+}
+
 export function createOpenRouterClient(options: {
   getModelId?: () => string | undefined | Promise<string | undefined>;
   getApiKey?: () => string | undefined;
@@ -45,10 +61,10 @@ export function createOpenRouterClient(options: {
       if (!request.operation.trim() || !request.messages.length || !Number.isSafeInteger(request.maxOutputTokens) || request.maxOutputTokens <= 0 || !Number.isFinite(request.temperature) || request.temperature < 0 || request.temperature > 2) {
         throw new AiModelError("invalid_output");
       }
-      const requestBody = (includeReasoning: boolean) => JSON.stringify({
+      const requestBody = (includeReasoning: boolean, maxTokens: number) => JSON.stringify({
         model: requestedModel,
         messages: request.messages,
-        max_tokens: request.maxOutputTokens,
+        max_tokens: maxTokens,
         temperature: request.temperature,
         ...(request.responseSchema ? {
           response_format: { type: "json_schema", json_schema: { name: "response", strict: true, schema: request.responseSchema } },
@@ -61,12 +77,12 @@ export function createOpenRouterClient(options: {
           : {}),
       });
 
-      const send = async (includeReasoning: boolean): Promise<Response> => {
+      const send = async (includeReasoning: boolean, maxTokens: number): Promise<Response> => {
         try {
           return await fetchImpl(CHAT_URL, {
             method: "POST",
             headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-            body: requestBody(includeReasoning),
+            body: requestBody(includeReasoning, maxTokens),
             signal: AbortSignal.timeout(30_000),
           });
         } catch (error) {
@@ -75,12 +91,16 @@ export function createOpenRouterClient(options: {
         }
       };
 
-      let response = await send(true);
+      let response = await send(true, request.maxOutputTokens);
       // Not every model accepts the reasoning switch, and some providers reject the field outright,
       // which fails the whole call. Retry once without it and let the model's own default apply,
-      // rather than leave a structured call with no answer at all.
+      // with headroom for the hidden reasoning that default turns on, rather than leave a
+      // structured call with an answer the reasoning tokens have eaten.
       if (!response.ok && request.reasoning !== undefined && rejectsReasoningField(response.status)) {
-        response = await send(false);
+        response = await send(
+          false,
+          reasoningRetryTokens(request.maxOutputTokens, request.maxOutputTokensCeiling)
+        );
       }
       if (!response.ok) throw mapOpenRouterStatus(response.status);
       let body: Record<string, unknown> | null;

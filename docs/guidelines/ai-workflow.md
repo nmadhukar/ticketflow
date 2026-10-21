@@ -196,6 +196,10 @@ Operational Notes
   counts only the real knowledge-base articles, so memory can influence the wording but not the
   auto-respond decision. Retain runs in `notifier.afterTicketUpdated` on the resolve transition,
   beside knowledge-base learning.
+- Memories are scoped per customer: retain tags a memory with `customer:{createdBy}` and recall
+  sends that tag as a strict filter (`tags_match: "any_strict"`), so a ticket only ever recalls
+  resolutions from its own creator's earlier tickets. A recall with no customer scope (a background
+  job) is unscoped, as before.
 - Guards: both calls are best-effort and never throw (a memory service that is down must not fail
   a ticket write); failures are logged by type only, never the ticket text or a memory. The
   service is expected to be reachable only from the server, not the browser.

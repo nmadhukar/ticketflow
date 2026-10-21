@@ -149,3 +149,89 @@ npx.cmd jest --selectProjects integration --runInBand server/__tests__/integrati
 - **Bug 4 is a behaviour decision, not a pure fix.** A truncated reply from the help chat is now
   returned as a short answer instead of an error. That was the intent, but it is a deliberate change
   worth confirming.
+
+---
+
+# Second review round ? three findings
+
+Branch `feat/ai-triage-routing`. Same rule as above: each finding has a test that detects it.
+
+## Summary
+
+| # | Finding | Before | After |
+|---|---------|--------|-------|
+| A | Hindsight memories were shared across customers | **fail** | **pass** |
+| B | The create-time hooks announced the pre-routing assignment | **fail** | **pass** |
+| C | The reasoning retry had no headroom for hidden reasoning | **fail** | **pass** |
+
+## A ? Hindsight memory crossed customers
+
+**What was wrong.** Every resolved ticket was stored as one memory in a single bank with no
+per-customer scope, and recall pulled from that whole bank. A ticket from customer B could
+therefore have customer A's earlier resolution quoted back into its reply.
+
+**The fix.** A memory now carries a `customer:{userId}` scope tag on retain, and recall sends that
+same tag as a strict filter (`tags: [...], tags_match: "any_strict"`), so one customer's resolutions
+can only ever be recalled for that same customer. A caller with no customer (a background job) still
+gets the unscoped recall it always had.
+
+**Regression tests.**
+- `scopes a recall to one customer, and leaves an unscoped call unfiltered` ? `server/__tests__/unit/hindsight.test.ts`
+- `stores a resolved ticket's memory with the creator's scope tag` ? `server/__tests__/unit/hindsight.test.ts`
+- `scopes recall and retain to the same customer, so memories cannot leak across customers` ? `server/__tests__/integration/hindsightMemory.test.ts`
+
+**Honest note on the "internal comments" half of the finding.** This app has no internal-note flag
+on `task_comments` (the table is id / taskId / userId / content / createdAt) and no "internal
+comment" concept anywhere in the code, so the retained memory could not be filtering a flag that
+does not exist. What it does retain is the ticket title, description and its last three comments,
+which for a resolved ticket are the resolution thread. The cross-customer leak was real and is fixed;
+if a private-comment feature is later added, this retain query will need the same filter.
+
+## B ? The create-time hooks announced the pre-routing assignment
+
+**What was wrong.** Routing runs inside `runTicketCreatedHooks`, after the row is written. The
+broadcaster and the Teams "created" webhook were still handed the row as it was created, and
+`POST /api/tasks` returned that same row in its 201. So a client received the routing "updated"
+event before the "created" event, and "created" showed the triage queue the ticket had already left.
+Webhook recipients are worked out from the ticket, so the team the ticket actually landed on could
+be left out.
+
+**The fix.** `runTicketCreatedHooks` now re-reads the ticket after the AI step and returns that row;
+the broadcast, the webhook and the caller's 201 all use it. A re-read that finds nothing (a delete
+racing the create) falls back to the row that came in.
+
+**Regression tests.**
+- `the create response carries the routed row, not the triage snapshot it was created with` ? `server/__tests__/integration/ticketRouting.test.ts`
+- `the created broadcast and webhook see the routed row` ? `server/__tests__/integration/ticketRouting.test.ts`
+
+## C ? The reasoning retry could still come back cut off
+
+**What was wrong.** When a provider rejects the `reasoning` field the client retries without it.
+That gets past the HTTP 400, but a model that reasons by default then spends hidden reasoning tokens
+out of `max_tokens`, and the structured operations reject `finish_reason: "length"`. A small cap
+(`analyzeTicket` asks for 500 tokens) could be spent thinking, so the retry failed anyway.
+
+**The fix.** The retry now asks for headroom (up to +1000 tokens) on top of the original allowance,
+clamped to the per-request ceiling the caller's budget check already passed, so prompt plus retry
+still fits `maxTokensPerRequest`. The first attempt is unchanged, and the cost preflight still counts
+the first attempt's allowance.
+
+**Regression tests.**
+- `gives the reasoning retry headroom so hidden reasoning cannot eat the answer` ? `server/__tests__/unit/openRouterClient.test.ts`
+- `never lets the reasoning retry ask for less than the first attempt` ? `server/__tests__/unit/openRouterClient.test.ts`
+
+## Full run after these three
+
+| Suite | Result |
+|-------|--------|
+| `tsc --noEmit` | clean |
+| `npm run lint` | 0 errors |
+| Unit | 665 passed |
+| Integration | 1706 passed (91 suites) |
+| Client | 56 passed |
+
+## One thing this does not prove
+
+- **Finding C against a live provider.** The retry fires on HTTP 400/422, the same reasoned trigger
+  as bug 5 above. No live model was available to confirm a real provider's refusal status, so the
+  headroom is reasoned rather than observed; the clamp and the headroom amount are one-line changes.

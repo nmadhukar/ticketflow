@@ -169,6 +169,37 @@ describe("Hindsight memory", () => {
     expect(item.document_id).toBe(`ticket-${created.body.id}`);
   });
 
+  it("scopes recall and retain to the same customer, so memories cannot leak across customers", async () => {
+    // The memory a ticket learns must only be recalled for that same customer. The client sends the
+    // creator's scope tag on retain and the same one as a strict filter on recall; this pins the two
+    // together, which is what stops one customer's resolutions reaching another's reply.
+    const admin = await enableAi();
+    enableMemory();
+    const adminA = await loginAs(ctx.app, admin);
+    const alice = await createUser({ role: "customer" });
+    const aliceA = await loginAs(ctx.app, alice);
+    // Installed before the create, so the recall that create runs is recorded too.
+    const calls = fakeMemoryService();
+    const created = await createTicketAs(aliceA, { title: "Printer jam", description: "The spooler is stuck." });
+    expect(created.status).toBe(201);
+
+    await db.insert(taskComments).values({
+      taskId: created.body.id as number, userId: admin.id,
+      content: "Restarted the print spooler and it is resolved.",
+    });
+    expect((await adminA.patch(`/api/tasks/${created.body.id}`).send({ status: "resolved" })).status).toBe(200);
+
+    const retain = calls.find((c) => c.url.endsWith("/memories") && Array.isArray(c.body?.items));
+    const recall = calls.find((c) => c.url.endsWith("/memories/recall"));
+    expect(retain).toBeDefined();
+    expect(recall).toBeDefined();
+
+    const scope = `customer:${alice.id}`;
+    expect(memoryItems(retain!)[0].tags).toContain(scope);
+    expect((recall!.body as { tags?: string[] }).tags).toEqual([scope]);
+    expect((recall!.body as { tags_match?: string }).tags_match).toBe("any_strict");
+  });
+
   it("a memory service that is down never fails the ticket write", async () => {
     await enableAi();
     enableMemory();

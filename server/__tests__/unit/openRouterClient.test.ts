@@ -118,6 +118,37 @@ describe("OpenRouter client", () => {
     expect(bodies[1]).not.toHaveProperty("reasoning");
   });
 
+  it("gives the reasoning retry headroom so hidden reasoning cannot eat the answer", async () => {
+    // A model that refuses the reasoning field reasons by default, and those hidden tokens come
+    // out of max_tokens. With a small structured cap the answer would come back cut off, so the
+    // retry asks for more, up to the caller's ceiling.
+    const bodies: Record<string, unknown>[] = [];
+    const fetchImpl = jest.fn(async (_url: string, options: RequestInit) => {
+      const body = JSON.parse(options.body as string);
+      bodies.push(body);
+      if ("reasoning" in body) return { ok: false, status: 400, json: async () => ({}) };
+      return { ok: true, json: async () => ({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }) };
+    }) as unknown as typeof fetch;
+
+    await client(fetchImpl).generate({ ...request, maxOutputTokens: 400, maxOutputTokensCeiling: 1400, reasoning: false });
+    expect(bodies[0].max_tokens).toBe(400);
+    expect(bodies[1].max_tokens).toBe(1400);
+  });
+
+  it("never lets the reasoning retry ask for less than the first attempt", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const fetchImpl = jest.fn(async (_url: string, options: RequestInit) => {
+      const body = JSON.parse(options.body as string);
+      bodies.push(body);
+      if ("reasoning" in body) return { ok: false, status: 400, json: async () => ({}) };
+      return { ok: true, json: async () => ({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }) };
+    }) as unknown as typeof fetch;
+
+    // A ceiling below the original allowance must not shrink the retry.
+    await client(fetchImpl).generate({ ...request, maxOutputTokens: 400, maxOutputTokensCeiling: 100, reasoning: false });
+    expect(bodies[1].max_tokens).toBe(400);
+  });
+
   it("does not retry a real bad request when reasoning was never set", async () => {
     const fetchImpl = jest.fn(async () => ({ ok: false, status: 400, json: async () => ({}) })) as unknown as typeof fetch;
     await expect(client(fetchImpl).generate(request)).rejects.toMatchObject({ code: "provider_failure", status: 400 });
