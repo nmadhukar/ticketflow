@@ -260,3 +260,56 @@ retry ask for less than the first attempt" plus the zero-usage default in the un
 - **Finding C against a live provider.** The retry fires on HTTP 400/422, the same reasoned trigger
   as bug 5 above. No live model was available to confirm a real provider's refusal status, so the
   headroom is reasoned rather than observed; the clamp and the headroom amount are one-line changes.
+
+## G ? No-match tickets were answered instead of routed (and matches could miss the reply)
+
+**What was wrong.** The auto-respond decision came from `calculateConfidence`, a fixed weighted
+score: base 0.5, with +0.1/+0.2/+0.3 for knowledge-base matches, +0.1 for complexity under 30,
++0.1 for a `support`/`feature` category and -0.1 for `bug`/`incident`. The match itself was the
+smallest term. A `support` ticket of low complexity with **no match at all** already scored 0.6,
+so any threshold at or below that sent a reply to a ticket the agent knew nothing about; a `bug`
+ticket with a real match could score 0.5 and get no reply, then be routed as if unmatched. The
+score measured the ticket's shape, not whether an answer existed.
+
+Observed on the running app: a VPN ticket and a Stripe-webhook ticket both scored 0.6 against a
+0.7 threshold. Neither was answered (both were routed, which was right for the webhook one and
+wrong for the VPN one, whose problem was already in the knowledge base). The reply that was
+produced sat as a draft waiting for a person to click "Apply Response".
+
+**The fix.** The decision is now match-driven. `calculateConfidence` takes the number of similar
+**resolved tickets** as well as knowledge articles, and `shouldAutoRespond` requires at least one
+real match (`knowledgeBaseMatches > 0 || resolvedTicketMatches > 0`) *and* the configured
+threshold. No match means no auto-reply, whatever the score; the ticket goes to routing instead.
+A similar resolved ticket is a match in its own right and adds +0.2, because the same problem was
+already solved here, so how it was fixed is an answer even before an article exists. The threshold
+still decides between "reply" and "human review" within a match, and the admin switch still
+gates everything.
+
+**Why this is the right shape.** The threshold is a bar on confidence, not a substitute for having
+something to say. Separating the two makes the two halves of the agent exact: match -> reply, no
+match -> route.
+
+**Regression tests.**
+- `no match at all never auto-responds, however high the score and low the threshold` ? `server/__tests__/unit/calculateConfidence.test.ts`
+- `a similar resolved ticket is a real match, even with no knowledge article` ? `server/__tests__/unit/calculateConfidence.test.ts`
+- `no match anywhere: no comment is posted, the ticket is not auto-answered` ? `server/__tests__/integration/ai.routes.test.ts`
+- `a similar resolved ticket is a real match: the reply is posted with no knowledge article` ? `server/__tests__/integration/ai.routes.test.ts`
+
+## Full run after this fix
+
+| Suite | Result |
+|-------|--------|
+| `tsc --noEmit` (3 configs) | clean |
+| `npm run lint` | 0 errors |
+| Unit | 669 passed (48 suites) |
+| Integration | 1708 passed (91 suites) |
+| Client | 56 passed |
+
+## Honest caveats
+
+- The match counts come from the same keyword searches as before (`isRelevantMatch` for articles,
+  an ILIKE on resolved tickets). A ticket phrased in words the knowledge base never uses still
+  finds nothing and is routed; that is the intended behaviour, but it means the wording of a demo
+  ticket matters.
+- `knowledge_embeddings` remains unused. This fix does not make search semantic; it only stops a
+  reply being sent without a match.

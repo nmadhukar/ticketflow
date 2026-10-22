@@ -159,8 +159,9 @@ export class AIAutoResponseService {
    * Analyses a ticket and, when it has an id, stores ONE auto-response row for
    * the analysis (this method owns the write; callers must not store another).
    *
-   * `shouldAutoRespond` is the one decision, made by calculateConfidence from the
-   * admin settings (enabled flag and confidence threshold). The row is ALWAYS stored
+   * `shouldAutoRespond` is the one decision, made by calculateConfidence: it needs a real
+   * match (a knowledge article or a similar resolved ticket) and the admin's enabled flag and
+   * confidence threshold. The row is ALWAYS stored
    * with wasApplied false and the text already cut to maxResponseLength (the one
    * clamp): whoever posts the comment (create path, or a person via /apply) marks
    * the row applied afterwards, so no row ever claims a comment that does not exist.
@@ -215,7 +216,10 @@ export class AIAutoResponseService {
       const confidenceResult = confidenceResultSchema.parse(await bedrockIntegration.calculateConfidence(
         ticket,
         relevantArticles.length,
-        analysis.complexityScore
+        analysis.complexityScore,
+        // A similar resolved ticket is a real match too: a repeat of an earlier problem is
+        // answerable from how it was fixed, even before the knowledge base has an article.
+        similarTickets.length
       ));
 
       // Calculate complexity factors

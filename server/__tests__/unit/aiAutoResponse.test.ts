@@ -153,7 +153,8 @@ describe('AIAutoResponseService.analyzeTicket', () => {
     const result = await service.analyzeTicket(ticket);
 
     expect(bedrock.generateResponse).toHaveBeenCalledWith(ticket, articles);
-    expect(bedrock.calculateConfidence).toHaveBeenCalledWith(ticket, articles.length, 20);
+    // The fourth argument is the count of similar resolved tickets: a match in its own right.
+    expect(bedrock.calculateConfidence).toHaveBeenCalledWith(ticket, articles.length, 20, 1);
     expect(result).toMatchObject({
       autoResponse: 'Reset your password.',
       confidence: 0.9,

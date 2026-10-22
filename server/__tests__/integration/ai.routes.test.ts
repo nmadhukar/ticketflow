@@ -141,6 +141,35 @@ describe("AI routes honour settings, access and authorship", () => {
       expect(listed.body[0].user.password).toBeUndefined();
     });
 
+    it("no match anywhere: no comment is posted, the ticket is not auto-answered", async () => {
+      // Nothing in the knowledge base and nothing similar already resolved. The score alone used
+      // to be enough; now a reply needs a real match, so the agent stays quiet (and routes).
+      await setSettings({ threshold: "0.70" });
+      const { id } = await customerTicket({ title: "Quantum widget calibration drift", description: "The framistat reads 42 noon" });
+      expect(aiModelMock.totalCalls()).toBeGreaterThan(0);
+      expect(await commentsOf(id)).toHaveLength(0);
+      const rows = await rowsOf(id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].wasApplied).toBe(false);
+    });
+
+    it("a similar resolved ticket is a real match: the reply is posted with no knowledge article", async () => {
+      await setSettings({ threshold: "0.70" });
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      // One resolved ticket about the exact same problem, and no knowledge base article.
+      const prior = await createTicketAs(adminA, {
+        title: "Printerjam broken",
+        description: "Paper stuck in tray two",
+      });
+      await db.update(tasks).set({ status: "resolved", resolvedAt: new Date() }).where(eq(tasks.id, prior.body.id));
+      const customer = await createUser({ role: "customer" });
+      const customerA = await loginAs(ctx.app, customer);
+      const res = await createTicketAs(customerA, { title: "Printerjam again", description: "Paper stuck in tray two" });
+      expect(res.status).toBe(201);
+      expect(await commentsOf(res.body.id as number)).toHaveLength(1);
+      expect((await rowsOf(res.body.id as number))[0].wasApplied).toBe(true);
+    });
+
     it("the posted comment is cut to maxResponseLength", async () => {
       await setSettings({ maxResponseLength: 100 });
       await seedMatchingArticle();

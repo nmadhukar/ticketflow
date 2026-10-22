@@ -525,11 +525,18 @@ export async function updateKnowledgeBase(
 
 /**
  * Calculate confidence score for AI response
+ *
+ * A score on its own is not a reason to answer: the reply must rest on a real match. The two
+ * match counts are a relevant knowledge article and a resolved ticket about the same thing. With
+ * neither, nothing matched and the ticket is routed instead, whatever the score works out to
+ * (a support ticket with no history already scores 0.6 before any match). The threshold is the bar
+ * within a match. The match rule and the threshold live here together, so there is one decision.
  */
 export async function calculateConfidence(
   ticket: Task,
   knowledgeBaseMatches: number,
-  ticketComplexity: number
+  ticketComplexity: number,
+  resolvedTicketMatches = 0
 ): Promise<{
   confidenceScore: number;
   shouldAutoRespond: boolean;
@@ -545,6 +552,13 @@ export async function calculateConfidence(
     confidence += 0.2;
   } else if (knowledgeBaseMatches > 0) {
     confidence += 0.1;
+  }
+
+  // A similar resolved ticket is a strong match on its own: the same problem was solved here
+  // before, so how it was fixed is an answer even when no article covers it yet. It carries more
+  // weight than a single article because the previous resolution is known to have worked.
+  if (resolvedTicketMatches > 0) {
+    confidence += 0.2;
   }
 
   // Adjust based on complexity
@@ -567,19 +581,22 @@ export async function calculateConfidence(
   // Ensure confidence is between 0 and 1
   confidence = Math.max(0, Math.min(1, confidence));
 
-  // Auto-respond only when the admin has it on and the score reaches the configured threshold
-  // (read now, so a settings change applies to the next ticket).
+  // Auto-respond only when the admin has it on, at least one real match was found, and the score
+  // reaches the configured threshold (read now, so a settings change applies to the next ticket).
   const settings = await getAISettings();
   const threshold = Math.max(0, Math.min(1, Number(settings.confidenceThreshold)));
-  const shouldAutoRespond = settings.autoResponseEnabled && confidence >= threshold;
+  const hasRealMatch = knowledgeBaseMatches > 0 || resolvedTicketMatches > 0;
+  const shouldAutoRespond = settings.autoResponseEnabled && hasRealMatch && confidence >= threshold;
 
   // Generate reasoning
   let reasoning = `Confidence: ${(confidence * 100).toFixed(1)}%. `;
-  reasoning += `Based on ${knowledgeBaseMatches} knowledge base matches, `;
+  reasoning += `Based on ${knowledgeBaseMatches} knowledge base matches and ${resolvedTicketMatches} similar resolved tickets, `;
   reasoning += `complexity score of ${ticketComplexity}, `;
   reasoning += `and category '${ticket.category}'.`;
 
-  if (shouldAutoRespond) {
+  if (!hasRealMatch) {
+    reasoning += " No matching solution found, recommending human review.";
+  } else if (shouldAutoRespond) {
     reasoning += " Recommending automated response.";
   } else {
     reasoning += " Recommending human review.";

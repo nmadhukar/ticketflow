@@ -53,19 +53,57 @@ the provider cut off at the token cap, so a truncated/empty reasoning output is 
 answer" and the ticket is routed instead. If connection tests fail, pick another model in
 **Admin > AI settings**.
 
-## 3. Demo A - match found, AI replies
+## 3. Demo A - match found, the AI replies by itself
 
-1. As the agent, open a resolved ticket and add a resolution comment (this is a "known fix").
-2. As the customer, create a ticket describing the same problem.
-3. Open the ticket: the **AI Assistant** comment answers it, built from the resolved ticket and the
-   knowledge base. Confidence counts only real knowledge-base matches.
+The reply is posted for you; there is nothing to approve. A reply is only sent when there is a real
+match, so seed one first.
 
-## 4. Demo B - no match, routed to the right team
+1. **Seed the match.** Sign in as the **agent**, open any ticket and add a comment that reads like a
+   fix, then set its status to **resolved**. This resolved ticket is the "known fix".
+   Alternatively, rely on the seeded knowledge base: the article **Quick Fixes: VPN Not Connecting**
+   (and **VPN Setup (Windows)** / **VPN Setup (macOS)**) already covers VPN problems.
+2. Sign in as the **customer** (use an incognito window so the two sessions do not clash).
+3. Click **New ticket** and create one that describes the same problem. Use these values:
 
-1. As the customer, create a ticket that resembles nothing already resolved.
-2. Open it: the agent classifies the problem area and assigns the team that owns it, with an
-   "AI Assistant" history entry showing why it moved.
-3. With routing off, the same ticket is left for a person, exactly as before.
+   | Field | Value |
+   |---|---|
+   | Title | `VPN will not connect - times out on Windows` |
+   | Description | `The VPN client times out every time I connect from home. Windows 11, IKEv2.` |
+   | Category | **support** |
+   | Priority | **medium** (or low) |
+   | Assign to | **team**, or leave it as the default |
+
+   Use **support** (or **feature**), not **bug**/incident: those two subtract from the score. The
+   wording matters, because the match is keyword based - keep the distinctive words **vpn**,
+   **connect** and **windows**.
+4. Open the ticket (or refresh it). The **AI Assistant** comment appears **already posted** -
+   `AI Auto-Response (confidence NN%): ...` - with no "Apply Response" button and no trip to the
+   admin portal. That is the "match found -> send" half.
+
+## 4. Demo B - no match, the AI assigns the team
+
+There is no reply here, by design: nothing matched, so the agent classifies the problem and routes it.
+
+1. As the **customer** (incognito), click **New ticket**:
+
+   | Field | Value |
+   |---|---|
+   | Title | `Billing export totals differ from the invoice PDF` |
+   | Description | `The CSV export disagrees with the invoice PDF by a few cents on some rows.` |
+   | Category | **request** (anything but a topic already in the knowledge base) |
+   | Priority | **medium** |
+   | Assign to | **unassigned** |
+
+2. Open it: the agent classifies the problem area and assigns the owning team (for a billing
+   problem, **Finance & Accounting**), with an **AI Assistant** history entry showing why it moved.
+   No AI comment is posted, because no solution matched.
+3. To prove the negative too, make sure **Route unmatched tickets** is off and create the same
+   ticket again: it is left unassigned for a person, exactly as before.
+
+**Choosing values.** Category and priority do not decide the routing - the model reads the ticket
+text. For the reply demo they do shift the score: **support**/**feature** add confidence,
+**bug**/**incident** subtract it, so prefer support for Demo A. Demo B should simply be about
+something the knowledge base does not cover.
 
 ## 5. Demo C - the DeepSeek Harness drives TicketFlow over MCP
 

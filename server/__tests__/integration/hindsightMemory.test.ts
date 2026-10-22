@@ -1,4 +1,4 @@
-﻿import { taskComments, tasks } from "@shared/schema";
+﻿import { knowledgeArticles, taskComments, tasks } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { aiModelMock, MOCK_MODEL_ID } from "../mocks/openRouter.mock";
 import { createTestApp } from "./helpers/testApp";
@@ -126,9 +126,16 @@ describe("Hindsight memory", () => {
 
   it("a recalled memory does not break the reply", async () => {
     // A memory has no article id: it must be shown as prompt context, never cited, and the
-    // reply must still be stored and posted.
+    // reply must still be stored and posted. A reply needs a real match, so a knowledge article
+    // is seeded here (a memory is prompt context and never counts as one on its own).
     await enableAi();
     enableMemory();
+    await db.insert(knowledgeArticles).values({
+      title: "Printer jam fix",
+      content: "How to clear a printer jam",
+      isPublished: true,
+      status: "published",
+    });
     fakeMemoryService({ recall: { results: [{ text: "Restarting the print spooler fixed this." }] } });
 
     const customer = await createUser({ role: "customer" });

@@ -47,7 +47,7 @@ Cost limits (file‑based):
 Core Flow
 
 1. Analyze ticket (Bedrock) → compute: complexity (mapped to 0..100), confidence, suggested response context.
-2. Auto‑Response (if enabled): apply when generated response confidence ≥ configured threshold and not escalated; trim to `maxResponseLength`; respect `responseTimeout`.
+2. Auto‑Response (if enabled): apply when **a real match was found** (a relevant knowledge-base article or a similar resolved ticket) **and** the generated response confidence ≥ the configured threshold; trim to `maxResponseLength`; respect `responseTimeout`. No match means no reply, whatever the score: the ticket goes to routing instead.
 3. Escalation (if enabled): escalate when any:
    - complexityScore ≥ `complexityThreshold`
    - model indicates escalation needed
@@ -150,7 +150,7 @@ Operational Notes
 `processTicketWithAI` no longer exists. The pieces are:
 
 - `server/services/ai/createTimeAutoResponse.ts` (`runCreateTimeAutoResponse`) runs after `POST /api/tasks` has created the ticket. It never throws; failures are logged as error type, HTTP status and ticket id only (never prompts, model output or credentials). Settings are read per ticket: with `autoResponseEnabled` off, or Bedrock unconfigured, no Bedrock call is made.
-- `aiAutoResponseService.analyzeTicket(ticket)` (`server/services/ai/aiAutoResponse.ts`) does the analysis and owns the single `ticket_auto_responses` write for it: one row per analysis, text cut to `maxResponseLength`, always stored with `wasApplied = false`. It returns `shouldAutoRespond`, the one decision, made by the real `calculateConfidence` (`bedrockIntegration.ts`) from the admin settings: `autoResponseEnabled` and `confidenceThreshold`.
+- `aiAutoResponseService.analyzeTicket(ticket)` (`server/services/ai/aiAutoResponse.ts`) does the analysis and owns the single `ticket_auto_responses` write for it: one row per analysis, text cut to `maxResponseLength`, always stored with `wasApplied = false`. It returns `shouldAutoRespond`, the one decision, made by the real `calculateConfidence` (`bedrockIntegration.ts`). The decision needs a real match (`knowledgeBaseMatches > 0 || resolvedTicketMatches > 0`) and the admin settings `autoResponseEnabled` and `confidenceThreshold`; a ticket with no match is never auto-answered, however high its score, and is routed instead.
 - When `shouldAutoRespond` is true the create path posts the comment as the AI system user (`ai-assistant`, shown to clients as "AI Assistant") and only then sets the row `wasApplied = true`. A failed comment leaves the row unapplied.
 - `POST /api/tasks/:id/auto-response/generate` (staff) stores a draft the same way and posts nothing. `POST /api/tasks/:id/auto-response/apply` (staff, idempotent) posts the stored draft as the AI user and marks it applied. `GET /api/tasks/:id/auto-response` shows customers only the latest applied row; staff see the latest row of any kind.
 - `POST /api/ai/analyze-ticket` and `/api/ai/generate-response` (staff) take `{ ticketId }`, load the ticket from the database, require access to it (404 missing, 403 outside scope or customer) and map a cost-limit block to 429 `quota_exceeded`. analyze-ticket stores nothing.
@@ -160,8 +160,8 @@ Operational Notes
 
 #### Content-based routing (0031)
 
-- A new ticket whose analysis finds no confident answer (auto-response would not apply, threshold not
-  met) is classified and assigned to the team that owns its problem area. This is the "no match ->
+- A new ticket whose analysis finds no answer (no match at all, or a match below the confidence
+  threshold) is classified and assigned to the team that owns its problem area. This is the "no match ->
   assign to the right team" half of the create-time agent.
 - It is its own opt-in setting, `ai_settings.auto_routing_enabled` (default off): reassigning a
   customer's ticket is a routing decision, so an admin turns it on deliberately (AI settings page,
