@@ -7,6 +7,7 @@ test("admin separates OpenRouter controls from AWS storage credentials", async (
     autoResponseEnabled: true, confidenceThreshold: 0.7, maxResponseLength: 1000,
     responseTimeout: 30, autoLearnEnabled: true, minResolutionScore: 0.8,
     articleApprovalRequired: true, temperature: 0.3, maxTokens: 2000,
+    autoRoutingEnabled: false,
     maxTokensPerRequest: 3000, dailyLimitUsd: 50, monthlyLimitUsd: 100,
   };
   let storageSettings = {

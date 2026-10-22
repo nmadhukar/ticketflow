@@ -67,6 +67,8 @@ import {
 } from "lucide-react";
 import TaskAttachments from "./task-attachments";
 import { UserSelectItem } from "@/components/ui/user-select-item";
+// The calendar-day helpers live beside the other client utils so they can be tested directly.
+import { toYyyyMmDd, formatHumanDate } from "@/utils/ticketDate.util";
 import type { User as FullUser } from "@shared/schema";
 
 interface TaskModalProps {
@@ -161,30 +163,6 @@ const editableKeys = [
   "departmentId",
   "teamId",
 ];
-
-// Date helpers to normalize yyyy-mm-dd and avoid TZ shifts
-const toYyyyMmDd = (value?: string | null) => {
-  if (!value) return "";
-  // Handles ISO or date-only strings
-  const d = value.includes("T")
-    ? new Date(value)
-    : new Date(`${value}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toISOString().split("T")[0];
-};
-
-const formatHumanDate = (value?: string | null) => {
-  if (!value) return "";
-  const d = value.includes("T")
-    ? new Date(value)
-    : new Date(`${value}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-};
 
 // Role-aware whitelist (fallback when permissions are absent) matching server policy
 const fallbackAllowedByRoleEdit: Record<string, string[]> = {

@@ -249,7 +249,11 @@ fi
 # Keep the tracked Jest configuration unchanged; the runner JSON, not stdout,
 # supplies the test counts. Every discovered test runs: unit, AI, integration
 # (against PostgreSQL) and client.
-if run_node sh -c 'npm exec --no -- jest --runInBand --json --outputFile=/gate-reports/jest.json'; then
+# Jest runs every project (unit, AI, integration, client) in one --runInBand process, so
+# its heap accumulates across the run. Node's default old-space cap (about 2 GB) is below what
+# the full run needs and aborts with "Reached heap limit", leaving no report; raise it well
+# inside the container's memory instead.
+if run_node sh -c 'NODE_OPTIONS=--max-old-space-size=4096 npm exec --no -- jest --runInBand --json --outputFile=/gate-reports/jest.json'; then
   ok 'all Jest suites (unit, AI, integration, client)'
 else
   bad 'all Jest suites (unit, AI, integration, client)'

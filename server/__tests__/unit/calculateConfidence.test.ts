@@ -40,11 +40,27 @@ describe("calculateConfidence: the admin's settings decide shouldAutoRespond", (
     expect(r.reasoning).toContain("automated response");
   });
 
-  it("a threshold below 0.7 is honoured too (a 0.5 score passes at 0.4, fails at 0.7)", async () => {
+  it("a threshold of 0.4 is honoured within a match (a 0.6 score passes at 0.4, fails at 0.7)", async () => {
+    // 'other' + complexity 50 + one article scores 0.6: a real match, so the threshold decides.
     settings({ confidenceThreshold: 0.4 });
-    expect((await calculateConfidence({ category: "other" } as any, 0, 50)).shouldAutoRespond).toBe(true);
+    expect((await calculateConfidence({ category: "other" } as any, 1, 50, 0)).shouldAutoRespond).toBe(true);
     settings({ confidenceThreshold: 0.7 });
-    expect((await calculateConfidence({ category: "other" } as any, 0, 50)).shouldAutoRespond).toBe(false);
+    expect((await calculateConfidence({ category: "other" } as any, 1, 50, 0)).shouldAutoRespond).toBe(false);
+  });
+
+  it("no match at all never auto-responds, however high the score and low the threshold", async () => {
+    // 'other' + complexity 50 scores 0.5 with no article and no resolved ticket, and 0.5 >= 0.4.
+    settings({ confidenceThreshold: 0.4 });
+    const noMatch = await calculateConfidence({ category: "other" } as any, 0, 50, 0);
+    expect(noMatch.shouldAutoRespond).toBe(false);
+    expect(noMatch.reasoning).toContain("No matching solution found");
+  });
+
+  it("a similar resolved ticket is a real match, even with no knowledge article", async () => {
+    settings({ confidenceThreshold: 0.4 });
+    const resolvedMatch = await calculateConfidence({ category: "other" } as any, 0, 50, 1);
+    expect(resolvedMatch.shouldAutoRespond).toBe(true);
+    expect(resolvedMatch.reasoning).toContain("automated response");
   });
 
   it("auto-response switched off: never auto-responds, whatever the score or threshold", async () => {

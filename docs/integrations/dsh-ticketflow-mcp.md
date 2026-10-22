@@ -1,6 +1,6 @@
 # DSH to Ticketflow MCP handoff
 
-Status: handoff only. No DSH connection is configured or enabled.
+Status: endpoint contract plus a checked-in wiring kit (`docs/integrations/dsh/`). The harness connection itself is an operator action: one `docker network connect` and one key in the harness environment. DSH's MCP tools default off; enable MCP in the harness before expecting tools to appear.
 
 ## Ticketflow endpoint
 
@@ -24,9 +24,9 @@ Important: `mcp:tickets` is not a read-only permission. The same tool list also 
 
 The DC4 source Compose default publishes DSH on `127.0.0.1:3080` for its web UI. The current local Docker test container maps host `127.0.0.1:3090` to container port `3080`; this is a separate test mapping, not the DC4 default. Both ports serve the DSH web UI. Neither is a Ticketflow MCP client endpoint or an MCP proxy.
 
-The inspected local DSH container uses Docker network `dsh-local_default`; the local Ticketflow app uses `ticketflow-local_ticketflow-network`. No network path between these networks is configured. DSH still has no documented supported client configuration for this Ticketflow MCP endpoint.
+The harness container runs on its own Docker network; the TicketFlow app runs on `ticketflow-main_ticketflow-network`. `scripts/ai/dsh/attach-dsh-network.sh` joins the two with `docker network connect` (idempotent; no container is recreated), and `docs/integrations/dsh/cordis.patch.yml` is the harness profile entry that registers this endpoint. The runbook is `docs/integrations/dsh/README.md`.
 
-This document records endpoint details only. It does not configure a client, add a Docker network, provision credentials, or make a live connection. A later integration requires confirming supported MCP client configuration in the pinned DSH version, deliberately configuring Docker network access, and provisioning a separate Ticketflow API key for the intended owner. Store that key through the approved secret mechanism; never place its value in this document or logs.
+This document records the endpoint contract; the client configuration lives in `docs/integrations/dsh/`. A live connection still needs the network join and a scoped Ticketflow API key (an admin issues it; every key already carries `mcp:tickets`). Store the key through the harness's approved secret mechanism as `TICKETFLOW_MCP_KEY`; never place its value in this document or logs.
 
 ## Source references
 
@@ -35,6 +35,7 @@ This document records endpoint details only. It does not configure a client, add
 - `server/mcp/tools.ts`: ticket tool names and input fields.
 - `server/mcp/appTools.ts`: additional read-only app tool names and fields.
 - `server/services/auth/apiKeys.ts`: API-key permission and owner handling.
+- `docs/integrations/dsh/`: the harness profile patch, the network-attach script and the runbook.
 - `docs/superpowers/specs/2026-10-04-ticketflow-openrouter-openapi-design.md`: DSH runtime and network snapshot.
 - `deepseek-harness-dc4/docker-compose.yml`: DC4 source default host and container ports.
 - Local Docker inspection: `dsh-local` publishes `127.0.0.1:3090` to container `3080`; local Ticketflow and DSH use distinct networks.

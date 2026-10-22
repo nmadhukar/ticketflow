@@ -13,7 +13,7 @@ jest.mock('../../services/ai/bedrockIntegration', () => ({
   },
 }));
 
-import { calculateConfidence, AIAutoResponseService } from '../../services/ai/aiAutoResponse';
+import { calculateConfidence, articleRelevance, trimToLength, toSearchTerms, AIAutoResponseService } from '../../services/ai/aiAutoResponse';
 import { bedrockIntegration } from '../../services/ai/bedrockIntegration';
 
 const bedrock = bedrockIntegration as unknown as Record<string, jest.Mock<any>>;
@@ -64,6 +64,72 @@ describe('calculateConfidence', () => {
 });
 
 
+describe('trimToLength: a reply is never cut mid-word', () => {
+  it('returns short text unchanged', () => {
+    expect(trimToLength("All good.", 1000)).toBe("All good.");
+  });
+
+  it('ends on a whole sentence when one fits inside the budget', () => {
+    const out = trimToLength("First sentence. Second sentence here that is longer.", 30);
+    expect(out).toBe("First sentence.");
+  });
+
+  it('falls back to a word boundary and marks the cut, never a half word', () => {
+    const full = "alpha bravo charlie delta echo foxtrot golf hotel india";
+    const out = trimToLength(full, 24);
+    expect(out.endsWith("…")).toBe(true);
+    const kept = out.replace("…", "").trimEnd();
+    // Everything kept is a prefix of the original, and it stops on a whole word.
+    expect(full.startsWith(kept)).toBe(true);
+    expect(full[kept.length]).toBe(" ");
+  });
+
+  it('does not leave the partial word the old slice produced', () => {
+    const text = "Once we have this information, we will audit the logs and correct the invoice. - Work w";
+    expect(trimToLength(text, text.length - 1)).not.toContain("Work w");
+  });
+});
+
+describe('toSearchTerms: the search keeps non-English words', () => {
+  it('keeps an accented word instead of stripping it to nothing', () => {
+    expect(toSearchTerms('Contraseña caducada')).toContain('contraseña');
+  });
+
+  it('keeps Cyrillic words', () => {
+    expect(toSearchTerms('пароль сбросить')).toContain('пароль');
+  });
+
+  it('keeps CJK words that clear the length floor', () => {
+    // The four-character floor still applies, so a two-character CJK word is dropped as noise;
+    // the point here is that the script survives the split at all.
+    expect(toSearchTerms('密码重置 失败')).toEqual(['密码重置']);
+  });
+
+  it('still drops English stop words and short words', () => {
+    expect(toSearchTerms('please reset the password now')).toEqual(['reset', 'password']);
+  });
+});
+
+describe('articleRelevance: one shared common word is not a match', () => {
+  it('scores a title or tag hit above a body hit', () => {
+    const article = { title: "Password Reset", content: "reset your password", tags: [] };
+    expect(articleRelevance(article, ["reset"])).toBe(3);
+    expect(articleRelevance({ title: "Guide", content: "reset it", tags: [] }, ["reset"])).toBe(1);
+  });
+
+  it('drops an unrelated article that only shares one body word (the real mouse case)', () => {
+    // "FAQ: Why can’t I see my team’s tickets?" matched the mouse ticket on "request" alone,
+    // in its body; that one hit made confidence pass the threshold and skipped routing.
+    const article = { title: "FAQ: Why can’t I see my team’s tickets?", content: "Submit a request to your admin.", tags: [] };
+    expect(articleRelevance(article, ["request", "mouse", "scroll", "wheel", "desk"])).toBeLessThan(2);
+  });
+
+  it('keeps an article that matches the ticket on several terms', () => {
+    const article = { title: "Quick Fixes: VPN Not Connecting", content: "vpn connection error", tags: [] };
+    expect(articleRelevance(article, ["vpn", "connect", "error"])).toBeGreaterThanOrEqual(2);
+  });
+});
+
 describe('AIAutoResponseService.analyzeTicket', () => {
   const ticket: any = { id: 7, title: 'Cannot login', description: 'invalid credentials', priority: 'high' };
   const articles = [{ id: 11, title: 'Reset your password' }];
@@ -87,7 +153,8 @@ describe('AIAutoResponseService.analyzeTicket', () => {
     const result = await service.analyzeTicket(ticket);
 
     expect(bedrock.generateResponse).toHaveBeenCalledWith(ticket, articles);
-    expect(bedrock.calculateConfidence).toHaveBeenCalledWith(ticket, articles.length, 20);
+    // The fourth argument is the count of similar resolved tickets: a match in its own right.
+    expect(bedrock.calculateConfidence).toHaveBeenCalledWith(ticket, articles.length, 20, 1);
     expect(result).toMatchObject({
       autoResponse: 'Reset your password.',
       confidence: 0.9,
@@ -146,6 +213,22 @@ describe('AIAutoResponseService.analyzeTicket', () => {
 
     const result = await service.analyzeTicket(ticket);
 
+    expect(result.shouldEscalate).toBe(true);
+    expect(storeAutoResponse).not.toHaveBeenCalled();
+  });
+
+  it('never auto-responds on a degraded reply, and stores no row for it', async () => {
+    bedrock.generateResponse.mockResolvedValue({
+      response: "I'm unable to generate an automated response at this time. A support agent will assist you shortly.",
+      suggestedArticles: [],
+      degraded: true,
+    });
+    bedrock.calculateConfidence.mockResolvedValue({ confidenceScore: 0.9, shouldAutoRespond: true });
+
+    const result = await service.analyzeTicket(ticket);
+
+    expect(result.degraded).toBe(true);
+    expect(result.shouldAutoRespond).toBe(false);
     expect(result.shouldEscalate).toBe(true);
     expect(storeAutoResponse).not.toHaveBeenCalled();
   });

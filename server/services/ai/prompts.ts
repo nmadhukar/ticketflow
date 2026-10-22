@@ -54,7 +54,7 @@ export const PROMPT_TEMPLATES = {
   ${JSON_FORMAT_REQUIREMENT}
   `,
 
-  generateResponse: (ticket: Task, knowledgeBase: string) => `
+  generateResponse: (ticket: Task, knowledgeBase: string, maxCharacters?: number) => `
 You are a helpful IT support assistant. Generate a response for the following ticket based on available knowledge.
 
 Ticket Information:
@@ -76,13 +76,14 @@ REQUIRED: Respond with ONLY a JSON object. Start with {. No explanatory text, no
 
 JSON structure:
 {
-  "response": "Your professional support response (keep it concise but thorough, do not exceed 500 words)",
+  "response": "Your professional support response (concise but thorough; complete sentences only)",
   "confidence": confidence_score_0_to_100,
   "knowledgeBaseArticles": ["article_ids_referenced"],
   "escalationNeeded": boolean
 }
 
-Keep the tone professional yet friendly. Be specific and actionable.${JSON_FORMAT_REQUIREMENT}
+Keep the tone professional yet friendly. Be specific and actionable.${maxCharacters ? `
+Finish your answer within roughly ${maxCharacters} characters: make it self-contained and end on a complete sentence.` : ""}${JSON_FORMAT_REQUIREMENT}
   `,
 
   extractKnowledge: (ticket: Task, resolution: string) => `
@@ -376,4 +377,59 @@ export function buildCreateKnowledgeArticlePrompt(resolution: {
     "prerequisites": ["list", "of", "prerequisites"],
     "variations": ["common", "variations", "of", "this", "issue"]
   }${JSON_FORMAT_REQUIREMENT}`;
+}
+
+
+/**
+ * Routing prompt (0031). A new ticket that found no matching solution is classified onto one of
+ * the EXISTING teams. The teams and their departments are listed with their ids, and the model
+ * must answer with a team id from that list, never invent one: ticketRouting.ts validates the id
+ * again before it is assigned. The description is inserted once, verbatim, so the shared budget
+ * helper (fitDescriptionToBudget) can cut it to fit the token cap.
+ */
+export function buildTicketRoutingPrompt(input: {
+  title: string;
+  description?: string | null;
+  category?: string | null;
+  priority?: string | null;
+  departments: Array<{ id: number; name: string }>;
+  teams: Array<{ id: number; name: string; departmentId: number | null }>;
+}) {
+  const departmentLines =
+    input.departments.map((d) => `- ${d.name} (id ${d.id})`).join("\n") || "- (none configured)";
+  const teamLines =
+    input.teams
+      .map((t) => {
+        const department = input.departments.find((d) => d.id === t.departmentId);
+        return `- ${t.name} (id ${t.id})${department ? `, department: ${department.name}` : ""}`;
+      })
+      .join("\n") || "- (none configured)";
+
+  return `You are an expert helpdesk triage router. A new support ticket did not match any known solution, so it must be routed to the team that owns it.
+
+Ticket Details:
+Title: ${input.title}
+Description: ${input.description || "No description provided"}
+Category: ${input.category || "Not specified"}
+Priority: ${input.priority || "Not specified"}
+
+Departments:
+${departmentLines}
+
+Teams (choose exactly one id from this list):
+${teamLines}
+
+Pick the single team whose responsibilities best match the ticket's problem area (for example a
+code defect goes to technical support or engineering, a billing question to billing). Base the
+choice only on this ticket's content.
+
+REQUIRED: Respond with ONLY a JSON object. Start with {. No markdown, no explanatory text.
+
+JSON structure:
+{
+  "teamId": team_id_from_the_list,
+  "departmentId": that_team_department_id,
+  "confidence": confidence_0_to_1,
+  "reason": "One short sentence naming what in the ticket drove this choice"
+}${JSON_FORMAT_REQUIREMENT}`;
 }
