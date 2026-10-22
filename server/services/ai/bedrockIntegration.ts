@@ -35,7 +35,8 @@ const STRUCTURED_OUTPUT_OPERATIONS = new Set([
  * refuses the reasoning switch reasons by default, and those hidden tokens are drawn from
  * max_tokens: a small structured cap (analyzeTicket asks for 500) could be spent thinking before
  * any visible text. The retry may ask up to this much more, but never past the per-request token
- * ceiling, so prompt plus retry still fits maxTokensPerRequest.
+ * ceiling, so prompt plus retry still fits maxTokensPerRequest. The budget preflight below checks
+ * that ceiling, so the larger retry is covered by the cost limits too.
  */
 const REASONING_RETRY_HEADROOM_TOKENS = 1000;
 
@@ -111,10 +112,14 @@ async function invokeBedrockModel(
   const allowedOutputTokens = Math.min(maxTokens, settings.maxTokensPerRequest - promptTokens);
   // The retry that drops a rejected reasoning field may raise the visible allowance toward this
   // ceiling, clamped by the per-request cap: prompt plus ceiling still fits maxTokensPerRequest, so
-  // the retry cannot exceed the request limit. The cost preflight keeps counting the allowance the
-  // first attempt asks for, as it always has.
-  const ceilingOutputTokens = Math.min(allowedOutputTokens + REASONING_RETRY_HEADROOM_TOKENS, settings.maxTokensPerRequest - promptTokens);
-  assertBudgetAvailable({ promptTokens, maxOutputTokens: allowedOutputTokens, price, settings, todayUsd: daily.totalCost, monthUsd: monthly.totalCost });
+  // the retry cannot exceed the request limit. Only a call that sends the reasoning field can retry
+  // at all, so only it carries the headroom; a call without one spends at most its own allowance.
+  // The preflight checks this ceiling, not the first attempt's smaller allowance, so a cost limit
+  // the retry could cross still applies.
+  const ceilingOutputTokens = reasoning === undefined
+    ? allowedOutputTokens
+    : Math.min(allowedOutputTokens + REASONING_RETRY_HEADROOM_TOKENS, settings.maxTokensPerRequest - promptTokens);
+  assertBudgetAvailable({ promptTokens, maxOutputTokens: ceilingOutputTokens, price, settings, todayUsd: daily.totalCost, monthUsd: monthly.totalCost });
   const result = await modelClient.generate({
     operation, messages: [{ role: "user", content: prompt }],
     maxOutputTokens: allowedOutputTokens, temperature,

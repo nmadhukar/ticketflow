@@ -149,6 +149,20 @@ describe("OpenRouter client", () => {
     expect(bodies[1].max_tokens).toBe(400);
   });
 
+  it("keeps the original allowance when the caller passed no ceiling", async () => {
+    // No ceiling means nobody budgeted a larger retry: it must not silently add the headroom.
+    const bodies: Record<string, unknown>[] = [];
+    const fetchImpl = jest.fn(async (_url: string, options: RequestInit) => {
+      const body = JSON.parse(options.body as string);
+      bodies.push(body);
+      if ("reasoning" in body) return { ok: false, status: 400, json: async () => ({}) };
+      return { ok: true, json: async () => ({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }) };
+    }) as unknown as typeof fetch;
+
+    await client(fetchImpl).generate({ ...request, maxOutputTokens: 400, reasoning: false });
+    expect(bodies[1].max_tokens).toBe(400);
+  });
+
   it("does not retry a real bad request when reasoning was never set", async () => {
     const fetchImpl = jest.fn(async () => ({ ok: false, status: 400, json: async () => ({}) })) as unknown as typeof fetch;
     await expect(client(fetchImpl).generate(request)).rejects.toMatchObject({ code: "provider_failure", status: 400 });

@@ -62,16 +62,56 @@ describe("AI budget", () => {
   });
 
   it("persists provider usage once with requested and actual model", async () => {
-    mockGetAIUsage.mockResolvedValue([]);
-    mockGetGenerationCost.mockResolvedValue(null);
-    mockRecordAIUsage.mockResolvedValue({ id: 1 });
-    mockGenerate.mockResolvedValue({ text: "{}", requestedModel: "requested/model", actualModel: "actual/model", promptTokens: 123, completionTokens: 45, generationId: "gen-123", estimatedCostUsd: 0.0002 });
-    const result = await runTicketAnalysisPrompt("Analyze ticket");
-    expect(result.actualTokens).toEqual({ input: 123, output: 45 });
-    expect(result.costEstimate.estimatedCost).toBe(0.0002);
-    expect(mockGenerate).toHaveBeenCalledWith(expect.objectContaining({ maxOutputTokens: 1000 }));
-    expect(mockRecordAIUsage).toHaveBeenCalledTimes(1);
-    expect(mockRecordAIUsage).toHaveBeenCalledWith(expect.objectContaining({ modelId: "actual/model", requestedModelId: "requested/model", generationId: "gen-123", inputTokens: 123, outputTokens: 45, estimatedCost: "0.0002", billingStatus: "estimated" }));
+    // A JSON call now reserves room for the reasoning retry, so the fixtures need limits that
+    // cover that ceiling; this test is about the recorded usage, not the limit.
+    const originalDaily = settings.dailyLimitUsd;
+    const originalMonthly = settings.monthlyLimitUsd;
+    settings.dailyLimitUsd = 10;
+    settings.monthlyLimitUsd = 20;
+    try {
+      mockGetAIUsage.mockResolvedValue([]);
+      mockGetGenerationCost.mockResolvedValue(null);
+      mockRecordAIUsage.mockResolvedValue({ id: 1 });
+      mockGenerate.mockResolvedValue({ text: "{}", requestedModel: "requested/model", actualModel: "actual/model", promptTokens: 123, completionTokens: 45, generationId: "gen-123", estimatedCostUsd: 0.0002 });
+      const result = await runTicketAnalysisPrompt("Analyze ticket");
+      expect(result.actualTokens).toEqual({ input: 123, output: 45 });
+      expect(result.costEstimate.estimatedCost).toBe(0.0002);
+      expect(mockGenerate).toHaveBeenCalledWith(expect.objectContaining({ maxOutputTokens: 1000 }));
+      expect(mockRecordAIUsage).toHaveBeenCalledTimes(1);
+      expect(mockRecordAIUsage).toHaveBeenCalledWith(expect.objectContaining({ modelId: "actual/model", requestedModelId: "requested/model", generationId: "gen-123", inputTokens: 123, outputTokens: 45, estimatedCost: "0.0002", billingStatus: "estimated" }));
+    } finally {
+      settings.dailyLimitUsd = originalDaily;
+      settings.monthlyLimitUsd = originalMonthly;
+    }
+  });
+
+  it("pages the retry ceiling into the daily and monthly preflight", async () => {
+    // The reasoning retry can spend up to 1000 tokens more than the first attempt. A limit the
+    // first attempt alone would fit but the retry would cross must block the call: otherwise the
+    // retry silently spends past the daily/monthly budget.
+    const original = { daily: settings.dailyLimitUsd, monthly: settings.monthlyLimitUsd };
+    const price = { promptUsdPerToken: 0.001, completionUsdPerToken: 0.001 };
+    // analyzeTicket: 1000-token allowance, 2000-token ceiling, plus the prompt.
+    const promptTokens = 23;
+    try {
+      settings.dailyLimitUsd = 1.5; // first attempt (1000) fits at ~1.02; the ceiling (2000) is ~2.02
+      settings.monthlyLimitUsd = 1.5;
+      expect(() =>
+        assertBudgetAvailable({ promptTokens, maxOutputTokens: 1000, price, settings, todayUsd: 0, monthUsd: 0 })
+      ).not.toThrow();
+      expect(() =>
+        assertBudgetAvailable({ promptTokens, maxOutputTokens: 2000, price, settings, todayUsd: 0, monthUsd: 0 })
+      ).toThrow();
+
+      mockGetAIUsage.mockResolvedValue([]);
+      mockGetGenerationCost.mockResolvedValue(null);
+      mockGenerate.mockClear();
+      await expect(runTicketAnalysisPrompt("Analyze ticket")).rejects.toMatchObject({ isBlocked: true });
+      expect(mockGenerate).not.toHaveBeenCalled();
+    } finally {
+      settings.dailyLimitUsd = original.daily;
+      settings.monthlyLimitUsd = original.monthly;
+    }
   });
 
   it("reduces the output cap to fit a long prompt within the request limit", async () => {

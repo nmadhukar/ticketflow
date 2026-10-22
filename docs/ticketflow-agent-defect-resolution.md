@@ -212,9 +212,10 @@ out of `max_tokens`, and the structured operations reject `finish_reason: "lengt
 (`analyzeTicket` asks for 500 tokens) could be spent thinking, so the retry failed anyway.
 
 **The fix.** The retry now asks for headroom (up to +1000 tokens) on top of the original allowance,
-clamped to the per-request ceiling the caller's budget check already passed, so prompt plus retry
-still fits `maxTokensPerRequest`. The first attempt is unchanged, and the cost preflight still counts
-the first attempt's allowance.
+clamped to the per-request ceiling, so prompt plus retry still fits `maxTokensPerRequest`. The
+budget preflight now checks that same ceiling (only for a call that sends the reasoning field, the
+only ones that can retry), so the larger retry is covered by the request and cost limits; the call
+without a retry still checks its own allowance.
 
 **Regression tests.**
 - `gives the reasoning retry headroom so hidden reasoning cannot eat the answer` ? `server/__tests__/unit/openRouterClient.test.ts`
@@ -229,6 +230,30 @@ the first attempt's allowance.
 | Unit | 665 passed |
 | Integration | 1706 passed (91 suites) |
 | Client | 56 passed |
+
+## Third review round ? budget, test-type and ceiling findings
+
+| # | Finding | Severity | Before | After |
+|---|---------|----------|--------|-------|
+| D | Retry tokens could exceed the cost limits | High | **fail** | **pass** |
+| E | Two test types did not compile | Medium | **fail** | **pass** |
+| F | A missing ceiling produced an unbudgeted bump | Low | **fail** | **pass** |
+
+**D.** The reasoning retry may ask for up to 1000 tokens more than the first attempt, but the budget
+preflight checked only the first attempt's allowance, so a retry could spend past the daily or
+monthly limit. The preflight now checks `ceilingOutputTokens` ? and only a call that sends the
+reasoning field (the only ones that can retry) carries that headroom; a call without one still
+checks its own allowance. Regression test: "pages the retry ceiling into the daily and monthly
+preflight" in `server/__tests__/unit/aiBudget.test.ts`.
+
+**E.** Two test types went stale when the hooks changed: the inbound-email transaction test mocked
+`runTicketCreatedHooks` as resolving `undefined` (it returns a `Task` now), and the memory test
+helper's item type lacked `tags`. Both now type-check; `npm run check` is clean on all three
+configs.
+
+**F.** When `maxOutputTokensCeiling` was omitted, the retry added 1000 tokens to an allowance nobody
+budgeted. It now falls back to the original allowance. Regression test: "never lets the reasoning
+retry ask for less than the first attempt" plus the zero-usage default in the unit client suite.
 
 ## One thing this does not prove
 

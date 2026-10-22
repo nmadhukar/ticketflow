@@ -81,7 +81,7 @@ describe("Hindsight memory", () => {
   }
 
   const memoryItems = (call: MemoryCall) =>
-    (call.body as { items: { content: string; document_id?: string }[] }).items;
+    (call.body as { items: { content: string; document_id?: string; tags?: string[] }[] }).items;
 
   function enableMemory() {
     process.env.HINDSIGHT_ENABLED = "true";

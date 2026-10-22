@@ -29,14 +29,16 @@ function rejectsReasoningField(status: number): boolean {
  * Tokens added to the retry's visible allowance when a model refuses the reasoning switch. Such a
  * model reasons by default, and hidden reasoning is drawn from max_tokens, so a small structured
  * cap (analyzeTicket asks for 500) could be spent thinking and the answer would come back cut off.
- * The bump never takes the retry past the caller's per-request ceiling, so the budget the caller
- * checked still holds.
+ * The bump never takes the retry past the caller's per-request ceiling, which the caller has already
+ * had checked against the request and cost limits, so the larger retry is within budget.
  */
 const REASONING_RETRY_HEADROOM_TOKENS = 1000;
 
 function reasoningRetryTokens(maxOutputTokens: number, ceiling: number | undefined): number {
+  // Without a usable ceiling the retry keeps the first attempt's allowance: a larger number here
+  // would be output nobody budgeted for. The caller (invokeBedrockModel) always passes one.
+  if (typeof ceiling !== "number" || !Number.isSafeInteger(ceiling) || ceiling <= 0) return maxOutputTokens;
   const bumped = maxOutputTokens + REASONING_RETRY_HEADROOM_TOKENS;
-  if (typeof ceiling !== "number" || !Number.isSafeInteger(ceiling) || ceiling <= 0) return bumped;
   // The original allowance is a floor: the retry never asks for less than the first attempt did.
   return Math.min(bumped, Math.max(maxOutputTokens, ceiling));
 }
