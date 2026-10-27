@@ -141,6 +141,7 @@ import {
 import { TicketError, ticketErrorToHttp } from "../services/tickets/ticketError";
 import { notifyCommentAdded } from "../services/tickets/notifier";
 import { createMcpRouter } from "../mcp/router";
+import { registerCopilotKit } from "../copilot/mount";
 import {
   runTicketCreatedHooks,
   setTicketCreatedBroadcaster,
@@ -5368,6 +5369,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   } catch (error) {
     logRouteError("AI system initialization error", error);
   }
+
+  // CopilotKit copilot (optional): its own middleware, acting only on
+  // COPILOTKIT_BASE_PATH. Registered after every REST route and before /api/mcp,
+  // so its runtime path can never shadow a real endpoint.
+  registerCopilotKit(app);
 
   // MCP (Streamable HTTP, stateless): after every REST route, before the /api 404 handler
   // the caller installs. Bearer auth ran in setupAuth; the router requires an mcp:tickets key.

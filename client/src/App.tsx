@@ -46,6 +46,7 @@ import { ThemeProvider } from "next-themes";
 import { useAuth } from "@/hooks/useAuth";
 import { Layout } from "@/components/layout";
 import { AiChatBot } from "@/components/AiChatBot";
+import { CopilotAssistant } from "@/components/CopilotAssistant";
 import { ProtectedRoute } from "@/components/protected-route";
 import { ForcedPasswordChange } from "@/components/forced-password-change";
 import NotFound from "@/pages/not-found";
@@ -178,7 +179,12 @@ function Router() {
         )}
       </Switch>
       {/* Show AI Chat Bot for authenticated users */}
-      {!isLoading && isAuthenticated && <AiChatBot />}
+      {!isLoading && isAuthenticated && (
+        <>
+          <AiChatBot />
+          <CopilotAssistant />
+        </>
+      )}
     </>
   );
 }

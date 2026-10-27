@@ -147,3 +147,14 @@
 .priority-low {
   border-left: 4px solid hsl(142, 71%, 45%);
 }
+
+
+/*
+ * CopilotKit copilot: its launcher button shares the bottom-right corner with the
+ * help chatbot's, so lift the copilot clear of it. CopilotKit ships this class
+ * (see BUTTON_BASE_CLASSES in @copilotkit/react-core) and positions it fixed at
+ * bottom-6 right-6; nudging it up keeps both buttons reachable.
+ */
+.copilotKitButton {
+  bottom: 5.5rem;
+}
