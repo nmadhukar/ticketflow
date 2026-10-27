@@ -26,7 +26,10 @@ ensureCopilotStyles();
 
 export function CopilotPopupLazy({ runtimeUrl }: { runtimeUrl: string }) {
   return (
-    <CopilotKit runtimeUrl={runtimeUrl} agent="default">
+    // enableInspector={false} suppresses CopilotKit's development-only Inspector,
+    // which otherwise auto-mounts a second floating launcher of its own on
+    // localhost. The app should show exactly one assistant button.
+    <CopilotKit runtimeUrl={runtimeUrl} agent="default" enableInspector={false}>
       <CopilotPopup
         // Its launcher shares the corner with the help chatbot's; the app stylesheet
         // lifts it clear (see .copilotKitButton in index.css).
