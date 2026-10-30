@@ -77,7 +77,7 @@ REQUIRED: Respond with ONLY a JSON object. Start with {. No explanatory text, no
 JSON structure:
 {
   "response": "Your professional support response (concise but thorough; complete sentences only)",
-  "confidence": confidence_score_0_to_100,
+  "confidence": confidence_0_to_1,
   "knowledgeBaseArticles": ["article_ids_referenced"],
   "escalationNeeded": boolean
 }

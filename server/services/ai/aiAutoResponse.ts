@@ -395,10 +395,10 @@ export class AIAutoResponseService {
             .set({
               usageCount: sql`${knowledgeArticles.usageCount} + 1`,
             })
-            .where(eq(knowledgeArticles.id, result.article.id));
+            .where(eq(knowledgeArticles.id, result.id));
         }
 
-        return semanticResults.map((r) => r.article);
+        return semanticResults;
       }
 
       // Fallback to keyword search if semantic search fails. Every word of four or more
