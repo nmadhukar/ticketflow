@@ -20,6 +20,8 @@ export interface ShutdownDeps {
   closeRealtime(): Promise<void>;
   closeAuth(): Promise<void>;
   closePool(): Promise<void>;
+  /** Releases the copilot's MCP connection, if it was ever built. Optional. */
+  closeCopilot?(): Promise<void>;
   exit(code: number): void;
   log(line: string): void;
   timeoutMs?: number;
@@ -55,6 +57,7 @@ export function createShutdown(deps: ShutdownDeps): (signal: string) => Promise<
       );
       await step("session stores", () => deps.closeAuth());
       await step("database pool", () => deps.closePool());
+      if (deps.closeCopilot) await step("copilot", () => deps.closeCopilot!());
 
       clearTimeout(timer);
       deps.exit(failed ? 1 : 0);

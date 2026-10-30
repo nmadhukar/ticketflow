@@ -19,6 +19,12 @@ function defaultHandler(complexityScore: number): Handler {
       response: "Try restarting the service.", confidence: 0.85, knowledgeBaseArticles: [],
     });
     if (prompt.includes("expert helpdesk AI analyst")) return JSON.stringify(ticketAnalysis);
+    if (prompt.includes("expert helpdesk triage router")) {
+      // First team id listed after the "choose exactly one" marker, so the default answer is a real team.
+      const teamsSection = prompt.split("Teams (choose exactly one id from this list):")[1] ?? "";
+      const teamId = Number(teamsSection.match(/id (\d+)/)?.[1] ?? 0);
+      return JSON.stringify({ teamId, departmentId: null, confidence: 0.8, reason: "mock routing" });
+    }
     if (prompt.includes("professional helpdesk support agent")) return JSON.stringify({
       response: "Try restarting the service.", confidence: 85, knowledgeBaseArticles: [],
       followUpActions: [], escalationNeeded: false,

@@ -78,6 +78,7 @@ import {
   intelligentKnowledgeSearch,
   scheduleKnowledgeLearning,
 } from "../services/ai/knowledgeBaseLearning";
+import { scheduleTicketAutoClose } from "../services/tickets/autoClose";
 import { z } from "zod";
 import { createHash, randomBytes } from "crypto";
 import multer from "multer";
@@ -141,6 +142,7 @@ import {
 import { TicketError, ticketErrorToHttp } from "../services/tickets/ticketError";
 import { notifyCommentAdded } from "../services/tickets/notifier";
 import { createMcpRouter } from "../mcp/router";
+import { registerCopilotKit } from "../copilot/mount";
 import {
   runTicketCreatedHooks,
   setTicketCreatedBroadcaster,
@@ -751,19 +753,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // never fails the create), realtime broadcast to everyone who can see the
         // ticket, and Teams webhooks whose owner can access it.
         // R34: the Teams link's origin is APP_BASE_URL, never the request's Host header.
-        await runTicketCreatedHooks(task, userId, publicBaseUrl(req));
+        // The hooks return the row as it stands afterwards: create-time routing can move an
+        // unmatched ticket off triage, and the caller must not be handed the pre-routing row.
+        const routedTask = await runTicketCreatedHooks(task, userId, publicBaseUrl(req));
 
         // Return task with warning if some attachments failed
         if (attachmentErrors.length > 0) {
           return res.status(201).json({
-            ...task,
+            ...routedTask,
             warning: `Some attachments failed to link: ${attachmentErrors.join(
               ", "
             )}`,
           });
         }
 
-        res.status(201).json(task);
+        res.status(201).json(routedTask);
       } catch (error) {
         // Validation and permission failures go to the error contract (400/403 with details);
         // anything else gets the shared 500 without internals.
@@ -5366,6 +5370,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   } catch (error) {
     logRouteError("AI system initialization error", error);
   }
+
+  // Auto-close: resolved tickets nobody came back to are closed after the follow-up window
+  // (company settings autoCloseDays). Hourly, and the timer never keeps the process alive.
+  if (process.env.AUTOCLOSE_DISABLED !== "1") {
+    scheduleTicketAutoClose();
+    console.log("Ticket auto-close scheduler initialized (runs hourly)");
+  }
+
+  // CopilotKit copilot (optional): its own middleware, acting only on
+  // COPILOTKIT_BASE_PATH. Registered after every REST route and before /api/mcp,
+  // so its runtime path can never shadow a real endpoint.
+  registerCopilotKit(app);
 
   // MCP (Streamable HTTP, stateless): after every REST route, before the /api 404 handler
   // the caller installs. Bearer auth ran in setupAuth; the router requires an mcp:tickets key.

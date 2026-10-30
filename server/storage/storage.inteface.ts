@@ -182,6 +182,7 @@ export interface IStorage {
   // Task operations
   createTask(task: InsertTask, tx?: DbTx): Promise<Task>;
   getTask(id: number): Promise<Task | undefined>;
+  getTaskByNumber(ticketNumber: string): Promise<Task | undefined>;
   updateTask(
     id: number,
     updates: Partial<InsertTask>,

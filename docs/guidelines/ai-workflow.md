@@ -47,7 +47,7 @@ Cost limits (file‑based):
 Core Flow
 
 1. Analyze ticket (Bedrock) → compute: complexity (mapped to 0..100), confidence, suggested response context.
-2. Auto‑Response (if enabled): apply when generated response confidence ≥ configured threshold and not escalated; trim to `maxResponseLength`; respect `responseTimeout`.
+2. Auto‑Response (if enabled): apply when **a real match was found** (a relevant knowledge-base article or a similar resolved ticket) **and** the generated response confidence ≥ the configured threshold; trim to `maxResponseLength`; respect `responseTimeout`. No match means no reply, whatever the score: the ticket goes to routing instead.
 3. Escalation (if enabled): escalate when any:
    - complexityScore ≥ `complexityThreshold`
    - model indicates escalation needed
@@ -150,8 +150,74 @@ Operational Notes
 `processTicketWithAI` no longer exists. The pieces are:
 
 - `server/services/ai/createTimeAutoResponse.ts` (`runCreateTimeAutoResponse`) runs after `POST /api/tasks` has created the ticket. It never throws; failures are logged as error type, HTTP status and ticket id only (never prompts, model output or credentials). Settings are read per ticket: with `autoResponseEnabled` off, or Bedrock unconfigured, no Bedrock call is made.
-- `aiAutoResponseService.analyzeTicket(ticket)` (`server/services/ai/aiAutoResponse.ts`) does the analysis and owns the single `ticket_auto_responses` write for it: one row per analysis, text cut to `maxResponseLength`, always stored with `wasApplied = false`. It returns `shouldAutoRespond`, the one decision, made by the real `calculateConfidence` (`bedrockIntegration.ts`) from the admin settings: `autoResponseEnabled` and `confidenceThreshold`.
+- `aiAutoResponseService.analyzeTicket(ticket)` (`server/services/ai/aiAutoResponse.ts`) does the analysis and owns the single `ticket_auto_responses` write for it: one row per analysis, text cut to `maxResponseLength`, always stored with `wasApplied = false`. It returns `shouldAutoRespond`, the one decision, made by the real `calculateConfidence` (`bedrockIntegration.ts`). The decision needs a real match (`knowledgeBaseMatches > 0 || resolvedTicketMatches > 0`) and the admin settings `autoResponseEnabled` and `confidenceThreshold`; a ticket with no match is never auto-answered, however high its score, and is routed instead.
 - When `shouldAutoRespond` is true the create path posts the comment as the AI system user (`ai-assistant`, shown to clients as "AI Assistant") and only then sets the row `wasApplied = true`. A failed comment leaves the row unapplied.
 - `POST /api/tasks/:id/auto-response/generate` (staff) stores a draft the same way and posts nothing. `POST /api/tasks/:id/auto-response/apply` (staff, idempotent) posts the stored draft as the AI user and marks it applied. `GET /api/tasks/:id/auto-response` shows customers only the latest applied row; staff see the latest row of any kind.
 - `POST /api/ai/analyze-ticket` and `/api/ai/generate-response` (staff) take `{ ticketId }`, load the ticket from the database, require access to it (404 missing, 403 outside scope or customer) and map a cost-limit block to 429 `quota_exceeded`. analyze-ticket stores nothing.
-- Escalation settings (`escalationEnabled`, `escalationTeamId`, `complexityThreshold`) are stored but not active: nothing reassigns tickets from them, and the admin UI does not show them.
+- Escalation settings (`escalationEnabled`, `escalationTeamId`, `complexityThreshold`) are stored but
+  not read by any routing path; the admin UI does not show them. `escalationTeamId` is used only as
+  the routing fallback below.
+
+#### Content-based routing (0031)
+
+- A new ticket whose analysis finds no answer (no match at all, or a match below the confidence
+  threshold) is classified and assigned to the team that owns its problem area. This is the "no match ->
+  assign to the right team" half of the create-time agent.
+- It is its own opt-in setting, `ai_settings.auto_routing_enabled` (default off): reassigning a
+  customer's ticket is a routing decision, so an admin turns it on deliberately (AI settings page,
+  "Route unmatched tickets").
+- `server/services/ai/ticketRouting.ts` (`routeTicket`) fetches the teams in active departments, asks
+  the model (`bedrockIntegration.classifyTicketForRouting`, operation `ticketRouting`) to name one team
+  id, re-validates that id against the live list, then writes the assignment as the AI system user so
+  the change is attributable in the ticket history.
+- Guards: it runs only when routing is on, AI is active and `OPENROUTER_API_KEY` is set; it never
+  throws (failures are logged by type only); a ticket a person already owns (a user assignee, or a
+  team other than the catch-all triage queue) is left alone; an unusable model answer falls back to
+  `escalationTeamId`, then to the default triage team, then to no assignment.
+
+#### Hindsight agent memory
+
+- An external memory service (Hindsight) can be attached to the create-time agent. With it on, a
+  new ticket recalls similar past resolutions before the reply prompt is built, and a resolved
+  ticket is stored as one memory so a later ticket can recall it. This is the memory layer over
+  the keyword ticket and knowledge-base search, not a replacement for it.
+- It is deployment configuration, not a database setting: `HINDSIGHT_ENABLED` (exactly "true",
+  the same shape as `TEAMS_WEBHOOKS_ENABLED`, R84), `HINDSIGHT_URL` (default
+  `http://localhost:8888`), `HINDSIGHT_BANK_ID` (default `ticketflow`) and an optional
+  `HINDSIGHT_API_KEY` sent as a bearer token. The default is off: with it off no request is
+  made and the create and resolve paths are exactly what they were.
+- `server/services/ai/hindsight.ts` is the one client. `recallMemories(query)` calls recall
+  (`POST /v1/default/banks/{bank}/memories/recall`) and returns the memory text;
+  `retainMemory({ content, context, documentId, tags })` calls retain
+  (`POST /v1/default/banks/{bank}/memories`); `retainResolvedTicketMemory(ticket)` builds the
+  one memory from a resolved ticket and its last resolution comments.
+- Recall runs inside `aiAutoResponse.analyzeTicket`, before `generateResponse`, and the recalled
+  text is added to the articles the model sees. It is a prompt aid: the confidence score still
+  counts only the real knowledge-base articles, so memory can influence the wording but not the
+  auto-respond decision. Retain runs in `notifier.afterTicketUpdated` on the resolve transition,
+  beside knowledge-base learning.
+- Memories are scoped per customer: retain tags a memory with `customer:{createdBy}` and recall
+  sends that tag as a strict filter (`tags_match: "any_strict"`), so a ticket only ever recalls
+  resolutions from its own creator's earlier tickets. A recall with no customer scope (a background
+  job) is unscoped, as before.
+- Guards: both calls are best-effort and never throw (a memory service that is down must not fail
+  a ticket write); failures are logged by type only, never the ticket text or a memory. The
+  service is expected to be reachable only from the server, not the browser.
+
+#### DeepSeek Harness wiring (Phase 3)
+
+- The harness drives TicketFlow through the MCP endpoint rather than a private API. The wiring is
+  checked in under `docs/integrations/dsh/`: a `cordis.patch.yml` profile entry that registers
+  `@deepseek-ai/dsh-mcp-client` over streamable HTTP, an `attach-dsh-network.sh` script that joins a
+  running harness container to the TicketFlow network with `docker network connect` (idempotent; no
+  container is recreated), and a runbook.
+- The bearer is `TICKETFLOW_MCP_KEY` in the harness container's environment, never a file. An admin
+  issues it from Admin > Integrations > Developer resources (or `POST /api/api-keys`); every key is
+  already scoped to `mcp:tickets` and acts as its owner, so ticket visibility and permissions follow
+  that user exactly as they do over REST.
+- One endpoint serves both a harness on the host (`http://host.docker.internal:5000/api/mcp`) and one
+  in the same network (`http://app:5000/api/mcp`). The handshake is `initialize` (server name
+  `ticketflow` and the document-search instructions), `tools/list`, then a read-only `tools/call`;
+  the tool list is the source of truth.
+- `mcp:tickets` is not read-only. A client that must not mutate tickets enforces that in its own
+  policy; it should not call the mutation tools during validation.

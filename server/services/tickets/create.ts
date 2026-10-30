@@ -15,7 +15,20 @@ export async function createTicketRecord(
   createdBy: string,
   tx?: DbTx
 ): Promise<Task> {
-  const taskData = insertTaskSchema.parse({ ...fields, createdBy });
+  // `teamId`/`departmentId` are create-time routing hints, not columns. Before they are dropped,
+  // a customer's chosen team is recorded in suggestedTeamId: the ticket itself still starts in
+  // triage, and routing uses this to confirm or correct the suggestion.
+  // The customer flow (applyCustomerRouting) has already turned `teamId` into the assignment,
+  // so the suggestion is read from whichever of the two carries it.
+  const submittedTeam = fields.suggestedTeamId ?? fields.teamId;
+  const isSuggestion = fields.suggestedTeamId !== undefined;
+  const suggestedTeamId =
+    isSuggestion && typeof submittedTeam === "number" && Number.isInteger(submittedTeam) && submittedTeam > 0
+      ? submittedTeam
+      : undefined;
+  // `suggestedTeamId` is not part of the create body (it is server-owned), so it is set on the
+  // parsed data rather than parsed into it.
+  const taskData = { ...insertTaskSchema.parse({ ...fields, createdBy }), suggestedTeamId };
   // R46: with a `tx` (inbound email) the number, the row and the history entry all join it.
   return tx ? storage.createTask(taskData, tx) : storage.createTask(taskData);
 }
@@ -35,36 +48,53 @@ export function hasTicketCreatedBroadcaster(): boolean {
 }
 
 /**
- * Everything that follows a created ticket, shared by POST /api/tasks and inbound email:
- * the AI create-time auto-response (follows settings), the realtime broadcast to the
- * creator, and the Teams webhook notifications. None of them may fail the create.
+ * Everything that follows a created ticket, shared by POST /api/tasks, the copilot's MCP
+ * create_ticket tool and inbound email: the AI create-time analysis (reply, owning team and
+ * status), the realtime broadcast to the creator, and the Teams webhook notifications. None of
+ * them may fail the create.
  * `actionBaseUrl` is the site origin used for the Teams link.
+ *
+ * Returns the ticket as it stands when the hooks finish, which is not always the row that
+ * came in: the AI step can route an unmatched ticket onto another team. The broadcast, the
+ * webhook and the caller's 201 all use that re-read row, so none of them announce the triage
+ * assignment the ticket has already left. A re-read that finds nothing (a delete racing the
+ * create) falls back to the row we were given.
  */
 export async function runTicketCreatedHooks(
   task: Task,
   creatorId: string,
   actionBaseUrl: string | null
-): Promise<void> {
+): Promise<Task> {
   // Log the error type only: error objects can carry request or model text.
   const errorType = (e: unknown) => (e instanceof Error ? e.name : "error");
 
   try {
-    await runCreateTimeAutoResponse(task);
+    await runCreateTimeAutoResponse(task, actionBaseUrl);
   } catch (e) {
     console.error(`create-time auto-response failed: ${errorType(e)}`);
   }
 
+  // The AI step may have reassigned the ticket: everything below announces the row as it is
+  // now, not the snapshot from before routing.
+  let current = task;
   try {
-    broadcaster?.(task, creatorId);
+    current = (await storage.getTask(task.id)) ?? task;
+  } catch (e) {
+    console.error(`re-read after create-time hooks failed: ${errorType(e)}`);
+  }
+
+  try {
+    broadcaster?.(current, creatorId);
   } catch (e) {
     console.error(`WS notify ticket:created failed: ${errorType(e)}`);
   }
 
   try {
-    // Only webhooks whose owner can access this ticket receive it (notifyTicketWebhooks).
+    // Only webhooks whose owner can access this ticket receive it (notifyTicketWebhooks);
+    // access is worked out from the routed row, so the team the ticket landed on is included.
     const user = await storage.getUser(creatorId);
     await notifyTicketWebhooks({
-      task,
+      task: current,
       kind: "created",
       actorEmail: user?.email,
       actionUrl: actionBaseUrl === null ? null : `${actionBaseUrl}/my-tasks`,
@@ -72,4 +102,6 @@ export async function runTicketCreatedHooks(
   } catch (e) {
     console.error(`Teams notifications failed: ${errorType(e)}`);
   }
+
+  return current;
 }

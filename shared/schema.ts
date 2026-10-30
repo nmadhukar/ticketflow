@@ -257,6 +257,9 @@ export const tasks = pgTable("tasks", {
   assigneeId: varchar("assignee_id").references(() => users.id),
   assigneeType: varchar("assignee_type", { length: 20 }).default("user"), // user, team
   assigneeTeamId: integer("assignee_team_id").references(() => teams.id),
+  // A customer's SUGGESTED owner on create (the copilot's routeId). Kept beside the assignment
+  // so routing can see what they asked for while still deciding the final team itself.
+  suggestedTeamId: integer("suggested_team_id").references(() => teams.id),
   createdBy: varchar("created_by")
     .references(() => users.id)
     .notNull(),
@@ -406,6 +409,7 @@ export const bedrockSettings = pgTable("bedrock_settings", {
   complexityThreshold: integer("complexity_threshold").default(70),
   escalationEnabled: boolean("escalation_enabled").default(true),
   escalationTeamId: integer("escalation_team_id").references(() => teams.id),
+  autoRoutingEnabled: boolean("auto_routing_enabled").default(false),
   // AI Settings - Model Configuration (from ai-settings.json)
   temperature: decimal("temperature", { precision: 3, scale: 2 }).default(
     "0.3"
@@ -433,6 +437,7 @@ export const aiSettings = pgTable("ai_settings", {
   complexityThreshold: integer("complexity_threshold").default(70),
   escalationEnabled: boolean("escalation_enabled").default(true),
   escalationTeamId: integer("escalation_team_id").references(() => teams.id),
+  autoRoutingEnabled: boolean("auto_routing_enabled").default(false),
   temperature: decimal("temperature", { precision: 3, scale: 2 }).default("0.3"),
   maxTokens: integer("max_tokens").default(2000),
   dailyLimitUsd: decimal("daily_limit_usd", { precision: 10, scale: 2 }).default("50.0"),

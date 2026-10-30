@@ -105,11 +105,14 @@ app.use(requestLogger(log));
     const { pool } = await import("./storage/db");
     const { closeRealtime } = await import("./realtime/ws");
     const { closeAuth } = await import("./services/auth");
+    const { disposeCopilotKit } = await import("./copilot/runtime");
     const shutdown = createShutdown({
       server,
       closeRealtime,
       closeAuth,
       closePool: () => pool.end(),
+      // Releases the copilot's MCP connection when it was ever built (a no-op otherwise).
+      closeCopilot: disposeCopilotKit,
       exit: (code) => process.exit(code),
       log: (line) => console.log(line),
     });

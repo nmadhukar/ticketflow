@@ -17,6 +17,9 @@ const DEFAULT_SETTINGS: AISettings = {
   complexityThreshold: 70,
   escalationEnabled: true,
   escalationTeamId: undefined,
+  // On by default: a new ticket whose analysis finds no answer is classified onto the team that
+  // owns its problem area by the create-time AI agent. An admin can still switch it off.
+  autoRoutingEnabled: true,
 
   modelId: DEFAULT_OPENROUTER_MODEL,
   isActive: true,
@@ -46,6 +49,7 @@ export async function getAISettings(): Promise<AISettings> {
       complexityThreshold: settings.complexityThreshold ?? 70,
       escalationEnabled: settings.escalationEnabled ?? true,
       escalationTeamId: settings.escalationTeamId || undefined,
+      autoRoutingEnabled: settings.autoRoutingEnabled ?? true,
       modelId: settings.modelId || DEFAULT_OPENROUTER_MODEL,
       isActive: settings.isActive ?? true,
       dailyLimitUsd: Number(settings.dailyLimitUsd ?? 50),
@@ -85,6 +89,7 @@ export async function saveAISettings(
       complexityThreshold: merged.complexityThreshold,
       escalationEnabled: merged.escalationEnabled,
       escalationTeamId: merged.escalationTeamId || null,
+      autoRoutingEnabled: merged.autoRoutingEnabled,
       temperature: merged.temperature.toString(),
       maxTokens: merged.maxTokens,
     },
@@ -116,6 +121,7 @@ export function validateAISettings(input: AISettings): AISettings {
       input.escalationTeamId !== undefined && input.escalationTeamId !== null
         ? Number(input.escalationTeamId)
         : undefined,
+    autoRoutingEnabled: !!input.autoRoutingEnabled,
 
     modelId: String(input.modelId || DEFAULT_SETTINGS.modelId).trim(),
     isActive: !!input.isActive,

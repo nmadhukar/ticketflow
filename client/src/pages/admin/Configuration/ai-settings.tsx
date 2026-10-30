@@ -23,6 +23,7 @@ interface AISettings {
   autoLearnEnabled: boolean;
   minResolutionScore: number;
   articleApprovalRequired: boolean;
+  autoRoutingEnabled: boolean;
   temperature: number;
   maxTokens: number;
   maxTokensPerRequest: number;
@@ -151,6 +152,7 @@ export default function AISettings() {
           <ToggleRow id="auto-response" title="Automatic responses" description="Prepare replies when new tickets qualify." checked={draft.autoResponseEnabled} onChange={(value) => change("autoResponseEnabled", value)} />
           <ToggleRow id="auto-learn" title="Learn from resolved tickets" description="Build knowledge suggestions from completed work." checked={draft.autoLearnEnabled} onChange={(value) => change("autoLearnEnabled", value)} />
           <ToggleRow id="approval-required" title="Require article approval" description="A person reviews AI-generated articles before publishing." checked={draft.articleApprovalRequired} onChange={(value) => change("articleApprovalRequired", value)} />
+          <ToggleRow id="auto-routing" title="Route unmatched tickets" description="When no solution matches, classify the ticket and assign it to the owning team." checked={draft.autoRoutingEnabled} onChange={(value) => change("autoRoutingEnabled", value)} />
         </div>
         <div className="grid gap-5 border-t pt-5 sm:grid-cols-2 lg:grid-cols-4">
           <NumberField id="confidence" label="Reply confidence (%)" value={Math.round(draft.confidenceThreshold * 100)} min={0} max={100} hint="Minimum confidence for automatic replies." onChange={(value) => change("confidenceThreshold", value / 100)} />
