@@ -57,7 +57,7 @@ describe("0031 content-based ticket routing", () => {
 
   const taskRow = (id: number) => db.select().from(tasks).where(eq(tasks.id, id)).limit(1);
 
-  it("off by default: no classification call and no assignment", async () => {
+  it("no settings row at all: AI is off, so no classification call and no assignment", async () => {
     const admin = await createUser({ role: "admin" });
     const team = await createTeam(admin);
     expect(await storage.getAISettings()).toBeUndefined();
@@ -85,6 +85,9 @@ describe("0031 content-based ticket routing", () => {
     expect(res.status).toBe(201);
 
     const [row] = await taskRow(res.body.id as number);
+    // A row that is missing here means the create itself did not land (the routing POST read it
+    // back and answered 201). Name that instead of a bare "cannot read properties of undefined".
+    expect({ id: res.body.id, row: row !== undefined }).toEqual({ id: res.body.id, row: true });
     expect(row.assigneeType).toBe("team");
     expect(row.assigneeTeamId).not.toBeNull();
     expect([target.id, otherTeam.id]).toContain(row.assigneeTeamId as number);
@@ -112,6 +115,7 @@ describe("0031 content-based ticket routing", () => {
     const res = await createTicketAs(customerA, { title: "Printerjam broken" });
     expect(res.status).toBe(201);
     const [row] = await taskRow(res.body.id as number);
+    expect(row).toBeDefined();
     expect(row.assigneeTeamId).toBe(team.id);
     expect(aiModelMock.prompts.every((p) => !p.includes("helpful IT support assistant"))).toBe(true);
   });
@@ -263,11 +267,14 @@ describe("0031 content-based ticket routing", () => {
     expect(row.assigneeTeamId).toBe(escalationTeam.id);
   });
 
-  it("the admin API round-trips the new setting and defaults it off", async () => {
+  it("the admin API round-trips the new setting and gives a fresh install the documented default (on)", async () => {
+    // The DEFAULT for a fresh install is ON (server/admin/aiSettings.ts): a ticket with no
+    // confident answer is assigned to its owning team instead of sitting unowned in triage.
+    // The DB column keeps its own historical default(false) for existing rows.
     const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
     const initial = await adminA.get("/api/admin/ai-settings");
     expect(initial.status).toBe(200);
-    expect(initial.body.autoRoutingEnabled).toBe(false);
+    expect(initial.body.autoRoutingEnabled).toBe(true);
 
     const put = await adminA.put("/api/admin/ai-settings").send({ autoRoutingEnabled: true });
     expect(put.status).toBe(200);

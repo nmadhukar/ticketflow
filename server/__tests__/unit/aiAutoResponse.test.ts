@@ -153,8 +153,9 @@ describe('AIAutoResponseService.analyzeTicket', () => {
     const result = await service.analyzeTicket(ticket);
 
     expect(bedrock.generateResponse).toHaveBeenCalledWith(ticket, articles);
-    // The fourth argument is the count of similar resolved tickets: a match in its own right.
-    expect(bedrock.calculateConfidence).toHaveBeenCalledWith(ticket, articles.length, 20, 1);
+    // The fourth argument is the count of similar resolved tickets (a match in its own right);
+    // the fifth is the MODEL's own confidence in the reply it just wrote, which is the score.
+    expect(bedrock.calculateConfidence).toHaveBeenCalledWith(ticket, articles.length, 20, 1, undefined);
     expect(result).toMatchObject({
       autoResponse: 'Reset your password.',
       confidence: 0.9,
@@ -208,6 +209,40 @@ describe('AIAutoResponseService.analyzeTicket', () => {
     expect(storeAutoResponse).toHaveBeenCalledTimes(1);
   });
 
+  it("passes the model's reported confidence through as the score, and says whether a real match backed it", async () => {
+    bedrock.generateResponse.mockResolvedValue({
+      response: 'Reset your password.',
+      confidence: 0.86,
+      suggestedArticles: [11],
+    });
+    bedrock.calculateConfidence.mockImplementation((async (
+      _t: unknown,
+      _articles: unknown,
+      _complexity: unknown,
+      _resolved: unknown,
+      modelConfidence?: number,
+    ) => ({ confidenceScore: modelConfidence ?? 0, shouldAutoRespond: modelConfidence === 0.86 })) as any);
+
+    const result = await service.analyzeTicket(ticket);
+
+    expect(bedrock.calculateConfidence).toHaveBeenCalledWith(ticket, 1, 20, 1, 0.86);
+    expect(result.confidence).toBe(0.86);
+    expect(result.hasMatch).toBe(true);
+    expect(result.shouldAutoRespond).toBe(true);
+  });
+
+  it('no real match (no article, no similar resolved ticket) is reported as hasMatch false', async () => {
+    jest.spyOn(service as any, 'searchKnowledgeBase').mockResolvedValue([]);
+    jest.spyOn(service as any, 'findSimilarResolvedTickets').mockResolvedValue([]);
+    bedrock.calculateConfidence.mockResolvedValue({ confidenceScore: 0, shouldAutoRespond: false });
+
+    const result = await service.analyzeTicket(ticket);
+
+    expect(bedrock.calculateConfidence).toHaveBeenCalledWith(ticket, 0, 20, 0, undefined);
+    expect(result.hasMatch).toBe(false);
+    expect(result.shouldAutoRespond).toBe(false);
+  });
+
   it('does not store a response when confidence is zero', async () => {
     bedrock.calculateConfidence.mockResolvedValue({ confidenceScore: 0, shouldAutoRespond: false });
 
@@ -245,6 +280,7 @@ describe('AIAutoResponseService.analyzeTicket', () => {
       factors: { keywords: 0, urgency: 0, technical: 0, historical: 0, sentiment: 0 },
       shouldEscalate: true,
       shouldAutoRespond: false,
+      hasMatch: false,
     });
     expect(storeAutoResponse).not.toHaveBeenCalled();
   });

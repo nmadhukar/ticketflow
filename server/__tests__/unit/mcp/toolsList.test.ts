@@ -12,6 +12,7 @@ jest.mock("../../../services/tickets/ticketService", () => ({
   deleteTicket: jest.fn(),
   addComment: jest.fn(),
   getTicketHistory: jest.fn(),
+  resolveTicketId: jest.fn(async (ref: unknown) => ref),
   LIST_MAX_LIMIT: 100,
 }));
 // The app tools (MCP2) read through storage and workspaceReads, which reach the database too.
@@ -21,7 +22,7 @@ jest.mock("../../../services/workspaceReads", () => ({}));
 jest.mock("../../../services/documents/documentLibrary", () => ({}));
 jest.mock("../../../services/documents/documentWrites", () => ({}));
 
-import { TICKET_CATEGORIES } from "@shared/constants";
+import { TICKET_CATEGORIES, TICKET_SEVERITIES } from "@shared/constants";
 import { MCP_INSTRUCTIONS, createMcpServer } from "../../../mcp/server";
 import { mcpUploadLimitBytes } from "../../../services/documents/types";
 import { TicketError } from "../../../services/tickets/ticketError";
@@ -38,7 +39,7 @@ async function connect() {
 }
 
 describe("MCP tools/list", () => {
-  it("lists exactly the eight ticket tools, the twelve app tools (MCP2) and the eleven document tools (MCP4), each with a description and an object input schema", async () => {
+  it("lists exactly the eight ticket tools, the thirteen app tools (MCP2, plus list_routing_options for the copilot) and the eleven document tools (MCP4), each with a description and an object input schema", async () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
@@ -56,6 +57,7 @@ describe("MCP tools/list", () => {
         "list_teams",
         "get_team",
         "list_departments",
+        "list_routing_options",
         "search_knowledge",
         "get_knowledge_article",
         "get_stats",
@@ -76,7 +78,7 @@ describe("MCP tools/list", () => {
         "update_knowledge_article",
       ].sort()
     );
-    expect(tools).toHaveLength(31);
+    expect(tools).toHaveLength(32);
     for (const t of tools) {
       expect(typeof t.description).toBe("string");
       expect((t.description ?? "").length).toBeGreaterThan(10);
@@ -97,6 +99,9 @@ describe("MCP tools/list", () => {
     expect(schema.properties.title.type).toBe("string");
     expect(schema.properties.category.type).toBe("string");
     for (const c of TICKET_CATEGORIES) expect(schema.properties.category.description).toContain(c);
+    // The copilot's Llama filled severity in on its own and wrote "high", which the create rules
+    // refused (VALIDATION), costing a retry. The allowed values belong in the description.
+    for (const s of TICKET_SEVERITIES) expect(schema.properties.severity.description).toContain(s);
   });
 
   it("MCP4: every document tool advertises its required fields as required and typed, with the allowed values in the descriptions", async () => {

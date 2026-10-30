@@ -93,6 +93,59 @@ describe("create_ticket (M3)", () => {
     expect(res.data.code).toBe("VALIDATION");
     expect((await db.select().from(tasks)).length).toBe(before);
   });
+
+  it("a copilot-style create: filler for optional fields is ignored, and a routeId queues the ticket", async () => {
+    // Seen live from the copilot's Llama: it fills absent optional arguments with the STRINGS
+    // "null"/"none"/"[]", which the arg schema refused ("must be number,null"), and each refused
+    // attempt cost a retry. Filler must be dropped; real values must still reach the service.
+    const team = await createTeam(users.manager);
+    const res = await mcp.customer.call("create_ticket", {
+      title: "Jammed printer on the third floor",
+      description: "Jammed since this morning.",
+      category: "incident",
+      priority: "high",
+      severity: "major",
+      notes: "null",
+      assigneeId: "none",
+      assigneeType: "none",
+      assigneeTeamId: "null",
+      dueDate: "null",
+      tags: "[]",
+      estimatedHours: "null",
+      actualHours: "null",
+      routeId: String(team.id),
+    });
+    expect(res.isError).toBe(false);
+    expect(res.data.createdBy).toBe(users.customer.id);
+    const [row] = await db.select().from(tasks).where(eq(tasks.id, res.data.id as number));
+    expect(row).toMatchObject({ title: "Jammed printer on the third floor", severity: "major", notes: null });
+    // routeId is a suggestion only: the ticket keeps normal create semantics and is not assigned
+    // to whoever the key owner is; the routing step owns the final assignment.
+    expect(row.createdBy).toBe(users.customer.id);
+  });
+
+  it("numeric strings and a comma-separated tag list are accepted, not refused", async () => {
+    // The SDK validates arguments against the advertised schema BEFORE the handler runs, so these
+    // had to be advertised as loosely as anyValue is (see ticketFields).
+    const res = await mcp.agent.call("create_ticket", {
+      title: "Budget estimate",
+      category: "request",
+      estimatedHours: "2",
+      tags: "hardware, printer",
+    });
+    expect(res.isError).toBe(false);
+    const [row] = await db.select().from(tasks).where(eq(tasks.id, res.data.id as number));
+    expect(Number(row.estimatedHours)).toBe(2);
+    expect(row.tags).toEqual(["hardware", "printer"]);
+    // R3 still holds: a customer may not send effort hours at all.
+    const refusal = await mcp.customer.call("create_ticket", {
+      title: "Budget estimate",
+      category: "request",
+      estimatedHours: "2",
+    });
+    expect(refusal.isError).toBe(true);
+    expect(refusal.data.code).toBe("VALIDATION");
+  });
 });
 
 describe("get_ticket parity with GET /api/tasks/:id (M4)", () => {
