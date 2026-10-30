@@ -24,7 +24,14 @@ function ensureCopilotStyles(): void {
 
 ensureCopilotStyles();
 
-export function CopilotPopupLazy({ runtimeUrl }: { runtimeUrl: string }) {
+export function CopilotPopupLazy({ runtimeUrl, role }: { runtimeUrl: string; role?: string }) {
+  // A customer is greeted about their own problem and the ticket it will raise; staff are
+  // greeted about working the queue. The server tells us which (GET .../config).
+  const welcomeMessageText =
+    role === "customer"
+      ? "Hi! Tell me what is going wrong. I will ask a couple of questions, raise a ticket for you, and you can check its progress here any time."
+      : "Ask me about a ticket, and I can look up its fix or name the team that owns it.";
+
   return (
     // enableInspector={false} suppresses CopilotKit's development-only Inspector,
     // which otherwise auto-mounts a second floating launcher of its own on
@@ -34,9 +41,14 @@ export function CopilotPopupLazy({ runtimeUrl }: { runtimeUrl: string }) {
         // Its launcher shares the corner with the help chatbot's; the app stylesheet
         // lifts it clear (see .copilotKitButton in index.css).
         defaultOpen={false}
+        // File attachments are off unless a config is passed (useAttachments defaults
+        // `enabled` to false and then renders the Add button disabled). No `onUpload`
+        // means CopilotKit reads the file as base64 into the message itself, so the
+        // picker works with no upload endpoint behind it.
+        attachments={{ enabled: true }}
         labels={{
-          modalHeaderTitle: "TicketFlow Copilot",
-          welcomeMessageText: "Ask me about a ticket, and I can look up its fix or name the team that owns it.",
+          modalHeaderTitle: role === "customer" ? "TicketFlow Support" : "TicketFlow Copilot",
+          welcomeMessageText,
         }}
       />
     </CopilotKit>

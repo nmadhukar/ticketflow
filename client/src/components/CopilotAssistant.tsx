@@ -23,6 +23,8 @@ const CopilotPopupLazy = lazy(() =>
 
 interface CopilotConfig {
   enabled: boolean;
+  /** The signed-in person's role, so the popup can greet a customer differently from staff. */
+  role?: string;
 }
 
 export function CopilotAssistant() {
@@ -37,7 +39,7 @@ export function CopilotAssistant() {
 
   return (
     <Suspense fallback={null}>
-      <CopilotPopupLazy runtimeUrl={RUNTIME_URL} />
+      <CopilotPopupLazy runtimeUrl={RUNTIME_URL} role={data.role} />
     </Suspense>
   );
 }

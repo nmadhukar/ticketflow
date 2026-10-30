@@ -11,6 +11,7 @@ import { describeError } from "../http/errors";
 async function main(): Promise<void> {
   const { createTicketFlowAgentService } = await import("./index");
   const { createAgentApp } = await import("./serve");
+  const { missingModelCredential } = await import("./config");
 
   const service = await createTicketFlowAgentService();
   if (!service) {
@@ -18,6 +19,19 @@ async function main(): Promise<void> {
       "Mastra agent service is off: set MASTRA_AGENT_ENABLED=true and TICKETFLOW_MCP_KEY in .env to start it.",
     );
     return;
+  }
+
+  // Refuse to start a hosted model that has no key: every request would fail with a 401 that
+  // the operator only sees later as a 502 from /agent. One line here saves that hunt.
+  //
+  // The remedy is in .env because that is the file this entry point loads ("dotenv/config" at
+  // the top). A shell variable would be blanked by dotenv when .env leaves the line empty, so
+  // naming it would send the operator to a setting that is already being ignored.
+  const credentialProblem = missingModelCredential(process.env, service.config.modelId);
+  if (credentialProblem) {
+    console.error(`Mastra agent service cannot start: ${credentialProblem}`);
+    await service.disconnect().catch(() => undefined);
+    process.exit(1);
   }
 
   const app = createAgentApp(service);

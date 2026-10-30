@@ -3,7 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { User } from "@shared/schema";
 import { storage } from "../storage";
 import { normalizeRole } from "../permissions/roles";
-import { LIST_MAX_LIMIT, getTicketHistory } from "../services/tickets/ticketService";
+import { LIST_MAX_LIMIT, getTicketHistory, resolveTicketId } from "../services/tickets/ticketService";
 import { guard } from "../services/tickets/ticketError";
 import {
   getReadableKnowledgeArticle,
@@ -18,7 +18,7 @@ import {
 import { displayNameOf } from "../utils/displayName";
 import { selfView } from "../utils/publicUser";
 import { runTool } from "./errors";
-import { MAX_INT, anyValue, assertToolId, given, idArg, pagingValue, toId } from "./args";
+import { MAX_INT, anyValue, assertToolId, given, idArg, pagingValue, ticketRefArg, toId } from "./args";
 
 /**
  * The rest of the app on MCP (task MCP2). Rulings:
@@ -188,6 +188,39 @@ export function registerAppTools(server: McpServer, user: User): void {
     () => runTool(() => guard(async () => ({ departments: await listDepartmentsFor(viewer) })))
   );
 
+  /**
+   * Which team owns what - safe for a customer.
+   *
+   * The copilot has to suggest the owning department and team while it takes a ticket from a
+   * customer, and list_teams refuses customers (they must not enumerate staff teams). This tool
+   * gives exactly what that suggestion needs and nothing more: names and ids, no members, no
+   * internal description. The agent still decides where the ticket finally goes (it routes on
+   * create), so a wrong guess here costs nothing.
+   */
+  server.registerTool(
+    "list_routing_options",
+    {
+      description:
+        "List the active departments and their teams as {departments: [{id, name}], teams: [{id, name, departmentId}]}, so you can suggest who should own a ticket. Safe for every role, customers included: names and ids only, never members or internal notes.",
+      inputSchema: z.object({}),
+    },
+    () =>
+      runTool(() =>
+        guard(async () => {
+          const [departmentRows, teamRows] = await Promise.all([
+            listDepartmentsFor(viewer),
+            storage.getTeams(),
+          ]);
+          const departments = departmentRows.map((d) => ({ id: d.id, name: d.name }));
+          const activeIds = new Set(departments.map((d) => d.id));
+          const teams = teamRows
+            .filter((t) => t.departmentId === null || activeIds.has(t.departmentId))
+            .map((t) => ({ id: t.id, name: t.name, departmentId: t.departmentId ?? null }));
+          return { departments, teams };
+        })
+      )
+  );
+
   server.registerTool(
     "search_knowledge",
     {
@@ -245,11 +278,11 @@ export function registerAppTools(server: McpServer, user: User): void {
     {
       description:
         "A ticket's change history, oldest first, as GET /api/tasks/:id/history. Same access as get_ticket: an unknown id is NOT_FOUND, a ticket the key's owner cannot see is FORBIDDEN. Returns {ticketId, history}.",
-      inputSchema: z.object({ id: idArg("Ticket") }),
+      inputSchema: z.object({ id: ticketRefArg() }),
     },
     (args) =>
       runTool(async () => {
-        const ticketId = toId(args.id);
+        const ticketId = await resolveTicketId(args.id);
         return { ticketId, history: await getTicketHistory(user, ticketId) };
       })
   );

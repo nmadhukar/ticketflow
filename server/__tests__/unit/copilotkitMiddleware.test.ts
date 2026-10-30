@@ -17,7 +17,11 @@ const config: CopilotKitRuntimeConfig = {
 function appWithAuth(authenticated: boolean) {
   const app = express();
   app.use((req, _res, next) => {
-    (req as never as { isAuthenticated: () => boolean }).isAuthenticated = () => authenticated;
+    // A real signed-in request always carries the session's user; the middleware needs its id
+    // and role to build an agent that acts for that person.
+    const fake = req as never as { isAuthenticated: () => boolean; user?: { id: string; role: string } };
+    fake.isAuthenticated = () => authenticated;
+    if (authenticated) fake.user = { id: "customer-1", role: "customer" };
     next();
   });
   app.use(createCopilotKitMiddleware(config, {

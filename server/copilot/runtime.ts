@@ -16,6 +16,7 @@
 import type { RequestHandler } from "express";
 import { describeError } from "../http/errors";
 import { readMastraAgentConfig, type MastraAgentConfig } from "../mastra/config";
+import type { CopilotActor } from "../mastra/agents/ticket-agent";
 import type { CopilotKitRuntimeConfig } from "./config";
 
 interface BuiltCopilotKit {
@@ -24,31 +25,50 @@ interface BuiltCopilotKit {
   dispose: () => Promise<void>;
 }
 
-let built: Promise<BuiltCopilotKit> | null = null;
+/** One built runtime per signed-in user (see buildOnce). */
+const perUser = new Map<string, Promise<BuiltCopilotKit>>();
 
 /**
  * Builds the runtime handler once. Subsequent callers share the first promise, so
  * concurrent first requests start one agent, not several.
+ *
+ * `actor` is the signed-in user the copilot is speaking for. The agent is built to act as that
+ * person (see server/mcp/actAs.ts), so a ticket it creates belongs to the customer rather than
+ * to the API key's owner, and every tool call is limited to what that person may do.
  */
 function buildOnce(
   config: CopilotKitRuntimeConfig,
   _mastraConfig: MastraAgentConfig,
+  actor: CopilotActor,
 ): Promise<BuiltCopilotKit> {
-  built ??= (async () => {
+  // The agent is per-user: sharing one build across users would give every later visitor the
+  // first visitor's identity. Cached per user, so a returning user does not rebuild the agent.
+  const cached = perUser.get(actor.id);
+  if (cached) return cached;
+
+  const building = (async () => {
     // CopilotKit ships opt-out telemetry: its runtime sends anonymous usage events to a
     // vendor endpoint. This project makes no outbound call it was not asked to make (the e2e
     // no-egress guard enforces it), so telemetry is off unless the operator explicitly turns
     // it on. Set before the runtime is imported, because it reads the switch at load time.
     process.env.COPILOTKIT_TELEMETRY_DISABLED ??= "true";
 
+    // One run at a time per agent: the run's identity is what its MCP calls act for.
     const { createTicketFlowAgentService } = await import("../mastra/index");
     const { getLocalAgents } = await import("@ag-ui/mastra");
     const { CopilotRuntime } = await import("@copilotkit/runtime/v2");
     const { createCopilotExpressHandler } = await import("@copilotkit/runtime/v2/express");
 
-    // The same agent service the standalone Mastra process builds: identical
-    // tools, identical model, identical key.
-    const service = await createTicketFlowAgentService();
+    // The same agent service the standalone Mastra process builds, but scoped to this person:
+    // identical model and key, the tools their role may use, and their identity on every call.
+    // The copilot builds its agent on the TicketFlow origin itself, so the agent reaches MCP at
+    // the LOCAL port. TICKETFLOW_MCP_URL is left for the standalone service (Docker/localhost).
+    const port = process.env.PORT?.trim() || "5000";
+    const localMcpUrl = `http://127.0.0.1:${port}/api/mcp`;
+    const service = await createTicketFlowAgentService(
+      { ...process.env, TICKETFLOW_MCP_URL: localMcpUrl },
+      actor,
+    );
     if (!service) throw new Error("mastra agent service is unavailable");
 
     // One agent, registered as "default" so the client needs no agentId.
@@ -74,10 +94,11 @@ function buildOnce(
   })().catch((error) => {
     // A failed build must not be cached: a later request (after the operator fixes
     // the key, say) should be able to try again.
-    built = null;
+    perUser.delete(actor.id);
     throw error;
   });
-  return built;
+  perUser.set(actor.id, building);
+  return building;
 }
 
 /** True when path is the base path itself or a child of it. */
@@ -99,7 +120,8 @@ export function createCopilotKitMiddleware(
   return (req, res, next) => {
     if (!isUnderBasePath(req.path, config.basePath)) return next();
 
-    if (!req.isAuthenticated()) {
+    const user = req.user as { id?: string; role?: string } | undefined;
+    if (!req.isAuthenticated() || !user?.id || !user.role) {
       return res.status(401).json({
         error: "unauthorized",
         message: "Sign in to use the copilot.",
@@ -117,13 +139,21 @@ export function createCopilotKitMiddleware(
     }
 
     // A cheap probe the client calls to decide whether to render the popup. It must
-    // not build the agent, so it answers here.
+    // not build the agent, so it answers here. The role lets the popup greet a customer
+    // differently from staff, without a second request.
     if (req.method === "GET" && req.path === `${config.basePath}/config`) {
-      return res.json({ enabled: true, basePath: config.basePath });
+      return res.json({ enabled: true, basePath: config.basePath, role: user.role });
     }
 
-    buildOnce(config, mastraConfig).then(
-      ({ handler }) => handler(req, res, next),
+    const actor: CopilotActor = { id: user.id, role: user.role };
+
+    buildOnce(config, mastraConfig, actor).then(
+      ({ handler }) => {
+        // The agent built for this user records each run's identity itself (see
+        // createTicketFlowAgentService and server/mcp/actAs.ts), so the agent's MCP calls act as
+        // this person rather than as the API key's owner.
+        handler(req, res, next);
+      },
       (error) => {
         console.error(`CopilotKit runtime failed to start [${describeError(error)}]`);
         if (!res.headersSent) {
@@ -137,15 +167,18 @@ export function createCopilotKitMiddleware(
   };
 }
 
-/** Closes the shared agent connection, if it was ever built. */
+/** Closes every built agent connection (one per user), on shutdown. */
 export async function disposeCopilotKit(): Promise<void> {
-  const pending = built;
-  if (!pending) return;
-  try {
-    const { dispose } = await pending;
-    await dispose();
-  } catch {
-    // A build that already failed has nothing to close.
-  }
-  built = null;
+  const pending = Array.from(perUser.values());
+  perUser.clear();
+  await Promise.all(
+    pending.map(async (build) => {
+      try {
+        const { dispose } = await build;
+        await dispose();
+      } catch {
+        // A build that already failed has nothing to close.
+      }
+    }),
+  );
 }

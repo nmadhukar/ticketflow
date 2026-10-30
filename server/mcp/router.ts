@@ -2,6 +2,7 @@ import { Router, type RequestHandler } from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { User } from "@shared/schema";
 import { createMcpServer } from "./server";
+import { ACT_AS_HEADER, resolveActAsUser } from "./actAs";
 import { createMcpRateLimit, rateLimitingEnabled } from "../security/rateLimiting";
 
 export const MCP_PERMISSION = "mcp:tickets";
@@ -31,8 +32,11 @@ export const requireMcpKey: RequestHandler = (req, res, next) => {
 };
 
 const mcpPost: RequestHandler = async (req, res, next) => {
+  // Act for a signed-in person when the copilot runtime asks (and only then): the tools, the
+  // visibility and the created ticket all follow that person instead of the key's owner.
+  const actor = (await resolveActAsUser(req.header(ACT_AS_HEADER))) ?? (req.user as User);
   // Stateless: a new server and transport per request, no session id.
-  const server = createMcpServer(req.user as User, req.ip);
+  const server = createMcpServer(actor, req.ip);
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,

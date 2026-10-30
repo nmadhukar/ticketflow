@@ -524,72 +524,48 @@ export async function updateKnowledgeBase(
 }
 
 /**
- * Calculate confidence score for AI response
+ * The confidence of an AI answer, as the MODEL reported it.
  *
- * A score on its own is not a reason to answer: the reply must rest on a real match. The two
- * match counts are a relevant knowledge article and a resolved ticket about the same thing. With
- * neither, nothing matched and the ticket is routed instead, whatever the score works out to
- * (a support ticket with no history already scores 0.6 before any match). The threshold is the bar
- * within a match. The match rule and the threshold live here together, so there is one decision.
+ * This used to be a score built from the ticket itself (0.5 base + category + complexity + how
+ * many articles matched), which measured the TICKET, not the answer: a simple support ticket
+ * scored 0.7 with nothing to answer from at all, and a 90% answer landed on 0.8999999999999999.
+ * The model already states how sure it is of the reply it just wrote (generateResponse), so that
+ * is the score now, and it is the only one the status bands and the threshold see.
+ *
+ * A real match is still required, and it is a hard gate rather than a bonus: two booked
+ * probabilities multiplied together is not a confidence anyone can read. A score without a match
+ * is no answer, so it is forced to 0, which lands the ticket in the open band.
+ *
+ * `ticketComplexity` and the article counts are kept for the reasoning line and for callers that
+ * log them; they no longer move the number.
  */
 export async function calculateConfidence(
   ticket: Task,
   knowledgeBaseMatches: number,
   ticketComplexity: number,
-  resolvedTicketMatches = 0
+  resolvedTicketMatches = 0,
+  /** What the model said when it wrote the reply, 0-1. Absent means "no opinion": score 0. */
+  modelConfidence?: number
 ): Promise<{
   confidenceScore: number;
   shouldAutoRespond: boolean;
   reasoning: string;
 }> {
-  // Base confidence calculation
-  let confidence = 0.5;
+  const hasRealMatch = knowledgeBaseMatches > 0 || resolvedTicketMatches > 0;
+  const reported = typeof modelConfidence === "number" && Number.isFinite(modelConfidence)
+    ? Math.max(0, Math.min(1, modelConfidence))
+    : 0;
+  const confidence = hasRealMatch ? reported : 0;
 
-  // Adjust based on knowledge base matches
-  if (knowledgeBaseMatches > 5) {
-    confidence += 0.3;
-  } else if (knowledgeBaseMatches > 2) {
-    confidence += 0.2;
-  } else if (knowledgeBaseMatches > 0) {
-    confidence += 0.1;
-  }
-
-  // A similar resolved ticket is a strong match on its own: the same problem was solved here
-  // before, so how it was fixed is an answer even when no article covers it yet. It carries more
-  // weight than a single article because the previous resolution is known to have worked.
-  if (resolvedTicketMatches > 0) {
-    confidence += 0.2;
-  }
-
-  // Adjust based on complexity
-  if (ticketComplexity < 30) {
-    confidence += 0.1;
-  } else if (ticketComplexity > 70) {
-    confidence -= 0.2;
-  }
-
-  // Adjust based on category
-  const highConfidenceCategories = ["support", "feature"];
-  const lowConfidenceCategories = ["bug", "incident"];
-
-  if (highConfidenceCategories.includes(ticket.category || "")) {
-    confidence += 0.1;
-  } else if (lowConfidenceCategories.includes(ticket.category || "")) {
-    confidence -= 0.1;
-  }
-
-  // Ensure confidence is between 0 and 1
-  confidence = Math.max(0, Math.min(1, confidence));
-
-  // Auto-respond only when the admin has it on, at least one real match was found, and the score
-  // reaches the configured threshold (read now, so a settings change applies to the next ticket).
+  // Auto-respond only when the admin has it on, at least one real match was found, and the model's
+  // own confidence for this answer reaches the configured threshold (read now, so a settings
+  // change applies to the next ticket).
   const settings = await getAISettings();
   const threshold = Math.max(0, Math.min(1, Number(settings.confidenceThreshold)));
-  const hasRealMatch = knowledgeBaseMatches > 0 || resolvedTicketMatches > 0;
   const shouldAutoRespond = settings.autoResponseEnabled && hasRealMatch && confidence >= threshold;
 
   // Generate reasoning
-  let reasoning = `Confidence: ${(confidence * 100).toFixed(1)}%. `;
+  let reasoning = `Confidence: ${(confidence * 100).toFixed(1)}% (model-reported). `;
   reasoning += `Based on ${knowledgeBaseMatches} knowledge base matches and ${resolvedTicketMatches} similar resolved tickets, `;
   reasoning += `complexity score of ${ticketComplexity}, `;
   reasoning += `and category '${ticket.category}'.`;

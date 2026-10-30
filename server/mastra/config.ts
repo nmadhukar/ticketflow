@@ -10,7 +10,8 @@
  * uses. It changes nothing in the TicketFlow app: with the switch off, this process is never
  * started and no Mastra code is loaded.
  */
-import { DEFAULT_MASTRA_MODEL_ID } from "./model";
+import { DEFAULT_MASTRA_MODEL_ID, isLocalModel } from "./model";
+import { readOpenRouterApiKey } from "../env";
 
 export interface MastraAgentConfig {
   /** Port for the standalone agent service. Not the TicketFlow port. */
@@ -30,6 +31,17 @@ export interface MastraAgentConfig {
    * answer, and also sharpens the model's choice.
    */
   toolAllowlist: string[] | null;
+  /**
+   * Act as this signed-in person instead of as the API key's owner.
+   *
+   * The copilot popup is used by a customer to raise and follow up their own tickets. It reaches
+   * TicketFlow through the agent, which holds the server's MCP key, so without this every ticket
+   * it created would belong to the key's owner (an admin) and never appear in the customer's own
+   * list. When set, the MCP client presents this person's identity; see server/mcp/router.ts.
+   *
+   * Never set for the standalone service: it has no request behind it, so it stays the key owner.
+   */
+  actAsUserId?: string;
 }
 
 /**
@@ -48,6 +60,29 @@ export const DEFAULT_TRIAGE_TOOL_ALLOWLIST = [
   "list_teams",
   "list_departments",
   "add_comment",
+  "whoami",
+];
+
+/**
+ * What a CUSTOMER's copilot may use: raise a ticket, follow it up, and find out who owns it.
+ *
+ * Deliberately excluded: every admin/manager-only tool (list_teams, list_users, get_stats), and
+ * every staff write (update_ticket, close_ticket, delete_ticket). Those are refused by each
+ * tool's own rule too; leaving them out of the prompt keeps the model from even trying.
+ * list_routing_options is the customer-safe, names-and-ids-only view the copilot suggests a
+ * department/team from.
+ */
+export const CUSTOMER_TOOL_ALLOWLIST = [
+  "create_ticket",
+  "get_ticket",
+  "list_tickets",
+  "add_comment",
+  "get_ticket_history",
+  "search_knowledge",
+  "get_knowledge_article",
+  "search_documents",
+  "get_document",
+  "list_routing_options",
   "whoami",
 ];
 
@@ -94,6 +129,27 @@ export function toModelRouterId(configuredModelId: string): string {
   if (PROVIDER_PREFIXES.includes(prefix)) return trimmed;
 
   return `openrouter/${trimmed}`;
+}
+
+/**
+ * Why a hosted Llama cannot work yet, or null when the model has everything it needs.
+ *
+ * A hosted OpenRouter model needs OPENROUTER_API_KEY. Without it every call reaches OpenRouter
+ * unauthenticated and comes back 401 "Missing Authentication header", which surfaces only as a
+ * 502 from the agent endpoint after the operator has already started the service. This check
+ * lets run.ts refuse at startup with one actionable line instead.
+ *
+ * Returns null for a local model (LM Studio / Ollama), which needs no OpenRouter key.
+ */
+export function missingModelCredential(
+  env: NodeJS.ProcessEnv,
+  modelId: string,
+): string | null {
+  const hosted = !isLocalModel(modelId);
+  if (hosted && !readOpenRouterApiKey(env)) {
+    return `model ${modelId} is hosted, but OPENROUTER_API_KEY is not set. Set it in .env, or point MASTRA_MODEL_ID at a local model (lmstudio/...).`;
+  }
+  return null;
 }
 
 /** The agent-service coordinates, or null while the feature is off or a required value is missing. */

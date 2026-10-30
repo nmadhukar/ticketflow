@@ -49,6 +49,7 @@
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "@modelcontextprotocol/sdk": "1.31.0",
     "@neondatabase/serverless": "^0.10.4",
+    "@openrouter/ai-sdk-provider": "2.10.0",
     "@radix-ui/react-accordion": "^1.2.4",
     "@radix-ui/react-alert-dialog": "^1.1.7",
     "@radix-ui/react-aspect-ratio": "^1.1.3",

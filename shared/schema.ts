@@ -257,6 +257,9 @@ export const tasks = pgTable("tasks", {
   assigneeId: varchar("assignee_id").references(() => users.id),
   assigneeType: varchar("assignee_type", { length: 20 }).default("user"), // user, team
   assigneeTeamId: integer("assignee_team_id").references(() => teams.id),
+  // A customer's SUGGESTED owner on create (the copilot's routeId). Kept beside the assignment
+  // so routing can see what they asked for while still deciding the final team itself.
+  suggestedTeamId: integer("suggested_team_id").references(() => teams.id),
   createdBy: varchar("created_by")
     .references(() => users.id)
     .notNull(),

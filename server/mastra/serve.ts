@@ -10,6 +10,7 @@ import express, { type Express } from "express";
 import type { TicketFlowAgentService } from "./index";
 import { describeError } from "../http/errors";
 import { isLlamaModel, isLocalModel } from "./model";
+import { missingModelCredential } from "./config";
 
 interface AssistBody {
   message?: string;
@@ -43,6 +44,8 @@ export function createAgentApp(service: TicketFlowAgentService): Express {
         isLlama: isLlamaModel(service.config.modelId),
         // Local means the request never leaves this machine; hosted means it goes to OpenRouter.
         runsLocally: isLocalModel(service.config.modelId),
+        // False means calls will fail with 401 until OPENROUTER_API_KEY is set. Never the key itself.
+        credentialPresent: missingModelCredential(process.env, service.config.modelId) === null,
       },
       mcp: { url: service.config.mcpUrl, tools: service.toolNames.length },
     });

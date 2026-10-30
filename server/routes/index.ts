@@ -78,6 +78,7 @@ import {
   intelligentKnowledgeSearch,
   scheduleKnowledgeLearning,
 } from "../services/ai/knowledgeBaseLearning";
+import { scheduleTicketAutoClose } from "../services/tickets/autoClose";
 import { z } from "zod";
 import { createHash, randomBytes } from "crypto";
 import multer from "multer";
@@ -5368,6 +5369,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log("AI systems initialized successfully");
   } catch (error) {
     logRouteError("AI system initialization error", error);
+  }
+
+  // Auto-close: resolved tickets nobody came back to are closed after the follow-up window
+  // (company settings autoCloseDays). Hourly, and the timer never keeps the process alive.
+  if (process.env.AUTOCLOSE_DISABLED !== "1") {
+    scheduleTicketAutoClose();
+    console.log("Ticket auto-close scheduler initialized (runs hourly)");
   }
 
   // CopilotKit copilot (optional): its own middleware, acting only on

@@ -8,9 +8,10 @@
 import { Mastra } from "@mastra/core/mastra";
 import type { Agent } from "@mastra/core/agent";
 import { PinoLogger } from "@mastra/loggers";
-import { readMastraAgentConfig, type MastraAgentConfig } from "./config";
+import { readMastraAgentConfig, CUSTOMER_TOOL_ALLOWLIST, type MastraAgentConfig } from "./config";
 import { createTicketFlowMcpClient } from "./mcp";
-import { createTicketAgent } from "./agents/ticket-agent";
+import { createTicketAgent, type CopilotActor } from "./agents/ticket-agent";
+import { OpenRouterGateway, OPENROUTER_GATEWAY_ID, openRouterModel } from "./gateway";
 
 export interface TicketFlowAgentService {
   mastra: Mastra;
@@ -49,23 +50,48 @@ function selectTools(
 
 export async function createTicketFlowAgentService(
   env: NodeJS.ProcessEnv = process.env,
+  /**
+   * Build the agent for ONE signed-in person (the copilot). Omitted by the standalone service,
+   * which acts as the API key's owner.
+   */
+  actor?: CopilotActor,
 ): Promise<TicketFlowAgentService | null> {
   const config = readMastraAgentConfig(env);
   if (!config) return null;
 
-  const mcpClient = createTicketFlowMcpClient(config);
+  // Acting for a person also narrows the tools to what that person's role may do, and swaps in
+  // the instructions for their job. The MCP key itself carries more than a customer may use.
+  const scoped: MastraAgentConfig = actor
+    ? {
+        ...config,
+        actAsUserId: actor.id,
+        toolAllowlist: actor.role === "customer" ? CUSTOMER_TOOL_ALLOWLIST : config.toolAllowlist,
+      }
+    : config;
+
+  const mcpClient = createTicketFlowMcpClient(scoped);
   const discovered = await mcpClient.listTools();
-  const tools = selectTools(discovered, config.toolAllowlist);
-  const ticketAgent = createTicketAgent(tools, config.modelId) as Agent;
+  const tools = selectTools(discovered, scoped.toolAllowlist);
+  // An agent with no tools can only talk: it would invent ticket numbers instead of creating
+  // one. Fail here, visibly, rather than serve that to a customer.
+  if (Object.keys(tools).length === 0) {
+    await mcpClient.disconnect().catch(() => undefined);
+    throw new Error("the agent discovered no TicketFlow tools (is the MCP endpoint reachable?)");
+  }
+  // A copilot agent records each run's identity, so its MCP calls act for that person.
+  const ticketAgent = createTicketAgent(tools, openRouterModel(env, scoped.modelId), actor?.role, actor) as Agent;
 
   const mastra = new Mastra({
     agents: { ticketAgent },
+    // Without this the hosted Llama reaches OpenRouter with no Authorization header (401).
+    // See server/mastra/gateway.ts for why the built-in registry entry is not enough.
+    gateways: { [OPENROUTER_GATEWAY_ID]: new OpenRouterGateway(env) },
     logger: new PinoLogger({ name: "ticketflow-mastra", level: "info" }),
   });
 
   return {
     mastra,
-    config,
+    config: scoped,
     toolNames: Object.keys(tools).sort(),
     disconnect: () => mcpClient.disconnect(),
   };

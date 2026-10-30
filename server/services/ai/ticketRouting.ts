@@ -5,7 +5,7 @@ import { storage } from "../../storage";
 import { getAISettings } from "../../admin/aiSettings";
 import { bedrockIntegration } from "./bedrockIntegration";
 import { describeAIError } from "./aiErrors";
-import { AI_SYSTEM_USER_ID, ensureAiSystemUser } from "../../utils/aiSystemUser";
+import { ensureAiSystemUser, isAiSystemUserId } from "../../utils/aiSystemUser";
 import { defaultTriageAssignment } from "../tickets/triage";
 import { afterTicketUpdated, recipientsNow } from "../tickets/notifier";
 
@@ -16,9 +16,9 @@ import { afterTicketUpdated, recipientsNow } from "../tickets/notifier";
  * that owns its problem area, and the assignment is written with the AI system user as the actor
  * (so task history shows why the ticket moved). Everything here is opt-in and best-effort:
  *
- *  - It runs only when ai_settings.auto_routing_enabled is on, AI is active and OpenRouter is
- *    configured. The default is off: reassigning a customer's ticket is a routing decision, so an
- *    admin turns it on deliberately.
+ *  - It runs only when ai_settings.auto_routing_enabled is on (the default: the AI owning team
+ *    assignment is part of the create-time agent), AI is active and OpenRouter is configured.
+ *    An admin can still turn it off, which leaves every new ticket unassigned/in triage.
  *  - It never throws; a failure is logged by type (never the ticket text or model output) and the
  *    ticket is left as it was created.
  *  - A ticket a person already owns (a user assignee, or a team other than the catch-all triage
@@ -66,15 +66,28 @@ async function routableDepartments() {
     .orderBy(departments.name);
 }
 
+/** The name of the team the customer suggested on create, or null. */
+function suggestedTeamName(task: Task, teamList: Array<{ id: number; name: string }>): string | null {
+  const suggestedId = (task as { suggestedTeamId?: number | null }).suggestedTeamId;
+  if (!suggestedId) return null;
+  return teamList.find((team) => team.id === suggestedId)?.name ?? null;
+}
+
 /** True when the ticket is already assigned to something more specific than the triage queue. */
 async function hasDeliberateAssignment(task: Task): Promise<boolean> {
-  if (task.assigneeId) return true;
-  if (task.assigneeType !== "team" || !task.assigneeTeamId) return false;
-  const triage = await defaultTriageAssignment();
-  // No triage team configured: a team assignee was chosen by a person, so leave it.
-  if (triage === null) return true;
-  // The catch-all triage queue is not a deliberate routing decision; anything else is.
-  return triage.assigneeTeamId !== task.assigneeTeamId;
+  // A user owner is a person's decision. The AI account as assignee is not: it is how a ticket
+  // raised inside the copilot arrives (the agent's own identity), and it must still be routed.
+  if (task.assigneeId && !isAiSystemUserId(task.assigneeId)) return true;
+  // An explicit team owner is someone's decision, so routing leaves it.
+  if (task.assigneeType === "team" && task.assigneeTeamId) {
+    const triage = await defaultTriageAssignment();
+    // No triage team configured: a team assignee was therefore chosen by a person.
+    if (triage === null) return true;
+    // The catch-all triage queue is not a deliberate routing decision; anything else is.
+    return triage.assigneeTeamId !== task.assigneeTeamId;
+  }
+  // Unassigned is nobody's decision: the AI owns the first assignment.
+  return false;
 }
 
 /**
@@ -84,16 +97,22 @@ async function hasDeliberateAssignment(task: Task): Promise<boolean> {
 export async function routeTicket(task: Task, actionBaseUrl: string | null = null): Promise<RoutingDecision | null> {
   try {
     const settings = await getAISettings();
-    if (!settings.autoRoutingEnabled || !settings.isActive || !process.env.OPENROUTER_API_KEY) return null;
+    if (settings.autoRoutingEnabled === false || !settings.isActive || !process.env.OPENROUTER_API_KEY) return null;
     if (await hasDeliberateAssignment(task)) return null;
 
     const [teamList, departmentList] = await Promise.all([routableTeams(), routableDepartments()]);
     if (teamList.length === 0) return null;
 
     let decision: RoutingDecision | null = null;
+    // A copilot ticket may carry the customer's own suggestion (suggestedTeamId). Routing still
+    // decides; the suggestion is only shown to the model as a hint, never applied blindly.
+    const suggested = suggestedTeamName(task, teamList);
+    const routingInput: Task = suggested
+      ? { ...task, description: `${task.description ?? ""}\n\nThe customer suggested this team: ${suggested}. Use it only if it fits.` }
+      : task;
     try {
       const model = await bedrockIntegration.classifyTicketForRouting(
-        task,
+        routingInput,
         departmentList,
         teamList,
         task.createdBy ?? undefined
@@ -124,7 +143,13 @@ export async function routeTicket(task: Task, actionBaseUrl: string | null = nul
     if (!current || await hasDeliberateAssignment(current)) return null;
     if (current.assigneeType === "team" && current.assigneeTeamId === decision.teamId) return decision;
 
-    const actor = (await ensureAiSystemUser()) ?? AI_SYSTEM_USER_ID;
+    // The assignment is attributed to the AI account, and task_history.user_id is a foreign key to
+    // users: without the real row the history insert fails and the assignment is rolled back.
+    const actor = await ensureAiSystemUser();
+    if (!actor) {
+      console.error(`AI ticket routing for ticket ${task.id}: skipped (AI system user unavailable)`);
+      return null;
+    }
     const updates = { assigneeType: "team" as const, assigneeTeamId: decision.teamId, assigneeId: null };
     // A reassignment changes who can see the ticket: capture the audience BEFORE the write.
     const recipientsBefore = await recipientsNow(task.id);

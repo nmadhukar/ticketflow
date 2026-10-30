@@ -19,6 +19,7 @@ import { getAISettings } from "../../admin/aiSettings";
 import { describeAIError, isQuotaBlocked } from "./aiErrors";
 import { recallMemories } from "./hindsight";
 import { containsPattern } from "../../utils/like";
+import type { TicketStatus } from "@shared/constants";
 import { z } from "zod";
 
 const ticketAnalysisResultSchema = z.object({ complexityScore: z.number().finite().min(0).max(100) });
@@ -27,6 +28,8 @@ const generatedResponseSchema = z.object({
   // bedrockIntegration normalises the model's citations to ids; coerce defensively so a stray
   // entry can never throw away an otherwise good reply.
   suggestedArticles: z.array(z.coerce.number().int().positive()),
+  /** How sure the model says it is of this reply, 0-1. Source of the confidence score. */
+  confidence: z.number().finite().min(0).max(1).optional(),
   // Set by bedrockIntegration.generateResponse when no real answer was produced: the caller
   // must route the ticket instead of posting the holding message as a reply.
   degraded: z.boolean().optional(),
@@ -140,6 +143,38 @@ function articleMatch(article: any, terms: string[]): { score: number; titleTagH
   return { score: titleTagHits * TITLE_TAG_WEIGHT + contentHits * CONTENT_WEIGHT, titleTagHits, contentHits };
 }
 
+/**
+ * The ticket status an AI answer earns.
+ *
+ * A new ticket is always created "open"; the create-time analysis may then move it. The bands are
+ * the owner's decision (2026-10-29), SIMPLIFIED on their request:
+ *
+ *  - no answer: the analysis matched no knowledge article and no earlier resolved ticket, so the
+ *    AI has nothing to say and the ticket is left OPEN for a person (and routed to its team). The
+ *    confidence score is NOT consulted here: calculateConfidence starts at 0.5 and adds for the
+ *    ticket's category, so a support ticket scores 0.7 with no match at all. A score without a
+ *    match measures the ticket, not the answer.
+ *  - 90% and over: the agent is sure, so the ticket is RESOLVED. Resolved is the last AI state:
+ *    the ticket is never closed by the AI. Closing is the follow-up window's job (a resolved
+ *    ticket can be reopened, and autoCloseDays exists for exactly that), not the analysis's.
+ *  - 50-90%: a real answer the AI is not sure of, so IN_PROGRESS; a person takes it from there.
+ *  - below 50%: nothing usable, OPEN.
+ *
+ * `hasMatch` is the honest "did the AI have anything to answer from" flag, and it decides first.
+ */
+export function statusForConfidence(confidence: number, hasMatch = true): TicketStatus {
+  // No real match means no answer, whatever the score works out to (see above).
+  if (!hasMatch) return "open";
+
+  // The score is BUILT by adding tenths (0.5 + 0.3 + 0.1), so 0.9 is really 0.8999999999999999 and
+  // a naive `>= 0.9` put a 90% answer in the on_hold band. Compare on a whole-number percentage,
+  // which is also the number the customer is shown ("confidence 90.0%").
+  const percent = Number.isFinite(confidence) ? Math.round(Math.max(0, Math.min(1, confidence)) * 100) : 0;
+  if (percent >= 90) return "resolved";
+  if (percent >= 50) return "in_progress";
+  return "open";
+}
+
 /** True when the article is a strong enough match to count as knowledge for the ticket. */
 function isRelevantMatch(article: any, terms: string[]): boolean {
   const { titleTagHits, contentHits } = articleMatch(article, terms);
@@ -173,6 +208,11 @@ export class AIAutoResponseService {
     factors: ComplexityFactors;
     shouldEscalate: boolean;
     shouldAutoRespond: boolean;
+    /**
+     * True when the analysis had something real to answer from (a knowledge article or an earlier
+     * resolved ticket). False means the reply is a guess at best, so the ticket must stay open.
+     */
+    hasMatch: boolean;
     autoResponseRowId?: number;
     /** True when no real answer was produced; `autoResponse` is the holding message. */
     degraded?: boolean;
@@ -219,7 +259,9 @@ export class AIAutoResponseService {
         analysis.complexityScore,
         // A similar resolved ticket is a real match too: a repeat of an earlier problem is
         // answerable from how it was fixed, even before the knowledge base has an article.
-        similarTickets.length
+        similarTickets.length,
+        // The model's own confidence in the reply it just wrote: the score, gated by a real match.
+        responseResult.confidence
       ));
 
       // Calculate complexity factors
@@ -255,6 +297,7 @@ export class AIAutoResponseService {
         factors,
         shouldEscalate: !shouldAutoRespond,
         shouldAutoRespond,
+        hasMatch: relevantArticles.length > 0 || similarTickets.length > 0,
         autoResponseRowId,
         ...(responseResult.degraded === true ? { degraded: true } : {}),
       };
@@ -275,6 +318,7 @@ export class AIAutoResponseService {
         },
         shouldEscalate: true,
         shouldAutoRespond: false,
+        hasMatch: false,
       };
     }
   }

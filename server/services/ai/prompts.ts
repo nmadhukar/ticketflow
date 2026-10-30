@@ -195,6 +195,11 @@ Generate a response that:
 4. Includes relevant troubleshooting steps if applicable
 5. Mentions when they can expect follow-up
 
+"confidence" is how sure you are that this response ACTUALLY resolves the customer's problem,
+from 0 to 100. Be honest and conservative: lower it when the articles only partly fit, or when
+you are guessing. If there are no relevant knowledge articles above, your answer is a best guess,
+so do not report more than 40.
+
 REQUIRED: Respond with ONLY a JSON object. Start with {. No explanatory text, no markdown.
 
 JSON structure:
