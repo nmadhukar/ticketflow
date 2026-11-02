@@ -27,10 +27,11 @@ ensureCopilotStyles();
 export function CopilotPopupLazy({ runtimeUrl, role }: { runtimeUrl: string; role?: string }) {
   // A customer is greeted about their own problem and the ticket it will raise; staff are
   // greeted about working the queue. The server tells us which (GET .../config).
+  // Keep both to two short lines: the welcome is the first thing anyone reads in the popup.
   const welcomeMessageText =
     role === "customer"
-      ? "Hi! Tell me what is going wrong. I will ask a couple of questions, raise a ticket for you, and you can check its progress here any time."
-      : "Ask me about a ticket, and I can look up its fix or name the team that owns it.";
+      ? "Need help? Describe your issue and I'll find a known fix - or raise a ticket and route it to the right team."
+      : "Need help? Ask me about any ticket to find solutions or reach the right team.";
 
   return (
     // enableInspector={false} suppresses CopilotKit's development-only Inspector,

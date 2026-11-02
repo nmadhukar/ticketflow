@@ -178,13 +178,12 @@ function Router() {
           </WebSocketProvider>
         )}
       </Switch>
-      {/* Show AI Chat Bot for authenticated users */}
-      {!isLoading && isAuthenticated && (
-        <>
-          <AiChatBot />
-          <CopilotAssistant />
-        </>
-      )}
+      {/* Show the assistant launcher for authenticated users.
+          When the copilot is enabled, CopilotAssistant (below) is the only assistant button:
+          it publishes that state on its config query, and the help chatbot yields the corner
+          to it instead of stacking a second "Ask AI" button underneath. */}
+      {!isLoading && isAuthenticated && <AiChatBot />}
+      <CopilotAssistant />
     </>
   );
 }

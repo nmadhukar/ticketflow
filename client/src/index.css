@@ -150,11 +150,15 @@
 
 
 /*
- * CopilotKit copilot: its launcher button shares the bottom-right corner with the
- * help chatbot's, so lift the copilot clear of it. CopilotKit ships this class
- * (see BUTTON_BASE_CLASSES in @copilotkit/react-core) and positions it fixed at
- * bottom-6 right-6; nudging it up keeps both buttons reachable.
+ * CopilotKit copilot launcher.
+ *
+ * It is the single assistant button: when the copilot is enabled the help chatbot's floating
+ * "Ask AI" button is not drawn (see AiChatBot.tsx), so the copilot takes that button's place in
+ * the bottom-right corner. CopilotKit ships this class (see BUTTON_BASE_CLASSES in
+ * @copilotkit/react-core) and positions it fixed at bottom-6 right-6 by default; the rule keeps
+ * it there explicitly, with the chatbot's own lift removed.
  */
 .copilotKitButton {
-  bottom: 5.5rem;
+  bottom: 1.5rem;
+  right: 1.5rem;
 }
