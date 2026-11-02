@@ -44,7 +44,8 @@ function secretIssues(env: NodeJS.ProcessEnv): AgentsConfigIssue[] {
 
 function modelIssues(env: NodeJS.ProcessEnv): AgentsConfigIssue[] {
   const provider = readProvider(env);
-  if (!(provider in PROVIDER_KEYS)) {
+  // hasOwn, not `in`: "constructor" or "toString" must not pass as a provider.
+  if (!Object.hasOwn(PROVIDER_KEYS, provider)) {
     return [{
       setting: 'ASSISTANT_MODEL_PROVIDER',
       message: `ASSISTANT_MODEL_PROVIDER "${provider}" is not supported; use ${Object.keys(PROVIDER_KEYS).join(' or ')}.`,

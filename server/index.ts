@@ -101,17 +101,23 @@ app.use(requestLogger(log));
   // session stores and the pool, then exit. node is PID 1 (`exec node`, R66), where a signal with
   // no handler is ignored. See ./shutdown.
   {
-    const { createShutdown } = await import("./shutdown");
+    const { createShutdown, closeHttpServer } = await import("./shutdown");
     const { pool } = await import("./storage/db");
     const { closeRealtime } = await import("./realtime/ws");
     const { closeAuth } = await import("./services/auth");
     // The assistant's internal listener (nginx never proxies it); null unless ASSISTANT_ENABLED=true.
-    const { startInternalServer, closeServer } = await import("./assistant/internalServer");
-    const assistantServer = startInternalServer({ log });
+    // Its listen error arrives after `shutdown` below exists, and stops the app the orderly way.
+    const { startInternalServer } = await import("./assistant/internalServer");
+    const assistantServer = startInternalServer({
+      log,
+      onError: () => void shutdown("assistant listener error", { failed: true }),
+    });
     const shutdown = createShutdown({
       server,
       closeRealtime,
-      closeAssistant: assistantServer ? () => closeServer(assistantServer) : undefined,
+      closeAssistant: assistantServer
+        ? () => (assistantServer.listening ? closeHttpServer(assistantServer) : Promise.resolve())
+        : undefined,
       closeAuth,
       closePool: () => pool.end(),
       exit: (code) => process.exit(code),

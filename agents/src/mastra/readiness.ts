@@ -30,7 +30,10 @@ export async function assistantReadiness(
     };
   }
   try {
-    await fetchImpl(readMcpUrl(env), { method: 'GET', signal: AbortSignal.timeout(timeoutMs) });
+    const response = await fetchImpl(readMcpUrl(env), { method: 'GET', signal: AbortSignal.timeout(timeoutMs) });
+    // Only that it answered matters. Discard the body so the connection is released, not held
+    // until garbage collection, however often /ready is polled.
+    await response.body?.cancel();
     return { status: 'ready', checks: { configuration: 'ok', mcp: 'reachable' } };
   } catch {
     return { status: 'not_ready', checks: { configuration: 'ok', mcp: 'unreachable' } };

@@ -15,6 +15,10 @@ export const ASSISTANT_SECRET_NAMES = [
   "ASSISTANT_AGENT_SECRET_PREVIOUS",
 ] as const;
 
+function isAssistantSecretName(name: string): boolean {
+  return (ASSISTANT_SECRET_NAMES as readonly string[]).includes(name);
+}
+
 /** Secrets the assistant ones must differ from: reusing one would let either forge the other. */
 const OTHER_SECRETS = ["SESSION_SECRET", "JWT_SECRET"] as const;
 
@@ -59,27 +63,22 @@ export function assistantConfigProblems(env: NodeJS.ProcessEnv = process.env): s
   }
 
   // Every assistant secret must be distinct from every other secret, assistant or not.
-  // The assistant names come first, so every pair below has an assistant secret on the left.
   const named = [...ASSISTANT_SECRET_NAMES, ...OTHER_SECRETS]
     .map((name) => ({ name, value: read(env, name) }))
     .filter((entry) => entry.value !== undefined);
-  for (let i = 0; i < ASSISTANT_SECRET_NAMES.length && i < named.length; i++) {
-    const a = named[i];
-    if (!(ASSISTANT_SECRET_NAMES as readonly string[]).includes(a.name)) break;
+  named.forEach((a, i) => {
+    if (!isAssistantSecretName(a.name)) return;
     for (const b of named.slice(i + 1)) {
       if (a.value === b.value) problems.push(`${a.name} must differ from ${b.name}.`);
     }
-  }
+  });
 
+  // The default port counts too: it must not collide with the public one.
   const internalPort = env.ASSISTANT_INTERNAL_PORT?.trim();
-  if (internalPort) {
-    const n = Number(internalPort);
-    const publicPort = Number(env.PORT?.trim() || "5000");
-    if (!/^\d+$/.test(internalPort) || n < 1 || n > 65535) {
-      problems.push("ASSISTANT_INTERNAL_PORT must be an integer from 1 to 65535.");
-    } else if (n === publicPort) {
-      problems.push("ASSISTANT_INTERNAL_PORT must differ from PORT: the internal listener is never public.");
-    }
+  if (internalPort && (!/^\d+$/.test(internalPort) || Number(internalPort) < 1 || Number(internalPort) > 65535)) {
+    problems.push("ASSISTANT_INTERNAL_PORT must be an integer from 1 to 65535.");
+  } else if (readInternalPort(env) === Number(env.PORT?.trim() || "5000")) {
+    problems.push("ASSISTANT_INTERNAL_PORT must differ from PORT: the internal listener is never public.");
   }
 
   const runMax = env.ASSISTANT_RUN_MAX_SECONDS?.trim();
@@ -106,4 +105,20 @@ export function readAssistantSecrets(env: NodeJS.ProcessEnv = process.env): Assi
 export function readRunMaxSeconds(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env.ASSISTANT_RUN_MAX_SECONDS?.trim();
   return raw ? Number(raw) : DEFAULT_RUN_MAX_SECONDS;
+}
+
+export const DEFAULT_INTERNAL_PORT = 5100;
+/**
+ * Loopback unless told otherwise, so a non-Docker deployment never opens this port to the
+ * network. docker-compose.yml sets 0.0.0.0: there the private `assistant` network is the boundary.
+ */
+export const DEFAULT_INTERNAL_HOST = "127.0.0.1";
+
+export function readInternalPort(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.ASSISTANT_INTERNAL_PORT?.trim();
+  return raw ? Number(raw) : DEFAULT_INTERNAL_PORT;
+}
+
+export function readInternalHost(env: NodeJS.ProcessEnv = process.env): string {
+  return env.ASSISTANT_INTERNAL_HOST?.trim() || DEFAULT_INTERNAL_HOST;
 }

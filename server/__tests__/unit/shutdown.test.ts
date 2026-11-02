@@ -47,6 +47,13 @@ describe("graceful shutdown", () => {
     expect(f.exits).toEqual([0]);
   });
 
+  it("a shutdown caused by a fault runs the same steps and exits 1", async () => {
+    const f = fakes();
+    await createShutdown({ ...f.deps, timeoutMs: 50 })("assistant listener error", { failed: true });
+    expect(f.order).toEqual(["closeRealtime", "server.close", "closeIdleConnections", "closeAuth", "closePool"]);
+    expect(f.exits).toEqual([1]);
+  });
+
   it("runs once: a second signal while shutting down does nothing", async () => {
     const f = fakes();
     const shutdown = createShutdown({ ...f.deps, timeoutMs: 50 });

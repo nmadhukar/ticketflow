@@ -134,6 +134,8 @@ export class AssistantRuns<U extends RunUser = RunUser> {
     }
 
     const user = await this.deps.loadUser(claims.sub);
+    // The run may have ended while the user was loading: an ended run is refused, never approved.
+    if (this.runs.get(claims.jti) !== run) return { ok: false, reason: "run_not_open", ...ids };
     if (!user) return { ok: false, reason: "user_not_found", ...ids };
     if (this.deps.blockReason(user)) return { ok: false, reason: "user_blocked", ...ids };
     if (user.mustChangePassword) return { ok: false, reason: "password_change_required", ...ids };
@@ -155,9 +157,11 @@ export class AssistantRuns<U extends RunUser = RunUser> {
   async renew(token: string): Promise<RunAuthResult<U> & { mcpToken?: string }> {
     const result = await this.authenticate(token);
     if (!result.ok) return result;
-    const run = this.runs.get(result.runId)!;
-    const iat = result.issuedAt;
     const ids = { runId: result.runId, userId: result.user.id };
+    // From here to the update of latestIat nothing awaits, so two renewals of one token cannot both pass.
+    const run = this.runs.get(result.runId);
+    if (!run) return { ok: false, reason: "run_not_open", ...ids };
+    const iat = result.issuedAt;
 
     if (iat !== run.latestIat) return { ok: false, reason: "already_renewed", ...ids };
     const nowSeconds = Math.floor(this.now() / 1000);

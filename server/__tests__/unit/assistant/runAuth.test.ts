@@ -120,6 +120,41 @@ describe("assistant runs", () => {
     await expect(runs.authenticate(mcpToken)).resolves.toMatchObject({ ok: false, reason: "run_not_open", runId });
   });
 
+  it("refuses, rather than approves, a run that ends while the user is being reloaded", async () => {
+    const users = new Map<string, RunUser>([["cust-1", { id: "cust-1", role: "customer" }]]);
+    let endDuringLoad: string | null = null;
+    // loadUser reads `runs` only when called, after this assignment.
+    const runs: AssistantRuns<RunUser> = new AssistantRuns<RunUser>({
+      sessionSecrets: [SESSION_SECRET],
+      agentSecret: AGENT_SECRET,
+      runMaxSeconds: 900,
+      loadUser: async (id) => {
+        await Promise.resolve();
+        if (endDuringLoad) runs.end(endDuringLoad); // the stream finished meanwhile
+        return users.get(id);
+      },
+      blockReason: () => null,
+      now: () => START,
+    });
+    const a = runs.start("cust-1", "support-assistant");
+    endDuringLoad = a.runId;
+    await expect(runs.authenticate(a.mcpToken)).resolves.toMatchObject({ ok: false, reason: "run_not_open" });
+
+    // renew goes through the same check, so it refuses instead of throwing on the missing run.
+    const b = runs.start("cust-1", "support-assistant");
+    endDuringLoad = b.runId;
+    await expect(runs.renew(b.mcpToken)).resolves.toMatchObject({ ok: false, reason: "run_not_open" });
+  });
+
+  it("lets only one of two concurrent renewals of the same token succeed", async () => {
+    const { runs, advance } = setup();
+    const { mcpToken } = runs.start("cust-1", "support-assistant");
+    advance(ASSISTANT_TOKEN_TTL_SECONDS - RENEW_WINDOW_SECONDS);
+    const results = await Promise.all([runs.renew(mcpToken), runs.renew(mcpToken)]);
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(results.find((r) => !r.ok)).toMatchObject({ reason: "already_renewed" });
+  });
+
   it("refuses a validly signed token whose run id belongs to another user's run", async () => {
     const { runs } = setup();
     const other = runs.start("cust-1", "support-assistant");

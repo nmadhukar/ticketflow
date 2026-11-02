@@ -67,8 +67,16 @@ export function tokenAudience(hop: TokenHop, agentId: AssistantAgentId): string 
   return `${AUDIENCE_PREFIX[hop]}${agentId}`;
 }
 
+/** Derived keys by hop and secret: every MCP call verifies a token, and the key never changes. */
+const derivedKeys = new Map<string, Buffer>();
+
 function signature(hop: TokenHop, payload: string, secret: string): Buffer {
-  const key = Buffer.from(hkdfSync("sha256", secret, "", KEY_INFO[hop], 32));
+  const cacheKey = `${hop}\0${secret}`;
+  let key = derivedKeys.get(cacheKey);
+  if (!key) {
+    key = Buffer.from(hkdfSync("sha256", secret, "", KEY_INFO[hop], 32));
+    derivedKeys.set(cacheKey, key);
+  }
   return createHmac("sha256", key).update(payload).digest();
 }
 

@@ -35,6 +35,9 @@ test('Studio is refused in production and must be strong elsewhere', () => {
 
 test('the model: a supported provider, its key, and valid ids', () => {
   assert.deepEqual(settings({ ...VALID_ENV, ASSISTANT_MODEL_PROVIDER: 'anthropic' }), ['ASSISTANT_MODEL_PROVIDER']);
+  for (const inherited of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    assert.deepEqual(settings({ ...VALID_ENV, ASSISTANT_MODEL_PROVIDER: inherited }), ['ASSISTANT_MODEL_PROVIDER'], inherited);
+  }
   assert.deepEqual(settings({ ...VALID_ENV, OPENROUTER_API_KEY: '' }), ['OPENROUTER_API_KEY']);
   assert.deepEqual(settings({ ...VALID_ENV, ASSISTANT_MODEL_PROVIDER: 'openai', OPENAI_API_KEY: 'sk-test', ASSISTANT_MODEL: 'gpt-5-mini' }), []);
   assert.deepEqual(settings({ ...VALID_ENV, ASSISTANT_MODEL: 'bad model' }), ['ASSISTANT_MODEL']);
@@ -81,5 +84,12 @@ test('readiness: invalid configuration names settings; otherwise the MCP route d
     throw new TypeError('fetch failed');
   };
   assert.equal((await assistantReadiness(VALID_ENV, { fetch: answered })).status, 'ready');
+
+  // The probe's response body is discarded, so polling never holds connections open.
+  let cancelled = false;
+  const withBody = async () =>
+    new Response(new ReadableStream({ pull(c) { c.enqueue(new TextEncoder().encode('{"error":"not_found"}')); }, cancel() { cancelled = true; } }), { status: 404 });
+  assert.equal((await assistantReadiness(VALID_ENV, { fetch: withBody })).status, 'ready');
+  assert.equal(cancelled, true);
   assert.deepEqual((await assistantReadiness(VALID_ENV, { fetch: refused })).checks, { configuration: 'ok', mcp: 'unreachable' });
 });

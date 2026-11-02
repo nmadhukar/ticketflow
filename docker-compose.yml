@@ -149,6 +149,7 @@ services:
       ASSISTANT_RUN_MAX_SECONDS: ${ASSISTANT_RUN_MAX_SECONDS:-}
       # Internal listener for the agents service only: not published, not proxied by nginx.
       ASSISTANT_INTERNAL_PORT: 5100
+      ASSISTANT_INTERNAL_HOST: 0.0.0.0
       ASSISTANT_AGENT_URL: http://agents:4111
     restart: unless-stopped
     networks:

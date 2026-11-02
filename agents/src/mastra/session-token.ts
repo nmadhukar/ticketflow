@@ -51,8 +51,15 @@ function isAgentId(value: unknown): value is AgentId {
   return (AGENT_IDS as readonly unknown[]).includes(value);
 }
 
+/** Derived keys by secret: every request verifies a token, and the key never changes. */
+const derivedKeys = new Map<string, Buffer>();
+
 function signature(payload: string, secret: string): Buffer {
-  const key = Buffer.from(hkdfSync('sha256', secret, '', KEY_INFO, 32));
+  let key = derivedKeys.get(secret);
+  if (!key) {
+    key = Buffer.from(hkdfSync('sha256', secret, '', KEY_INFO, 32));
+    derivedKeys.set(secret, key);
+  }
   return createHmac('sha256', key).update(payload).digest();
 }
 
