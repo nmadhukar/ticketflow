@@ -55,7 +55,7 @@ beforeAll(() => {
   });
   app = createInternalApp({
     runs: async () => runs,
-    createMcpServer: async (user, agentId, ip) => createAssistantMcpServer(user, agentId, ip),
+    createMcpServer: async (user, agentId, ip, runId) => createAssistantMcpServer(user, agentId, ip, runId),
   });
 });
 afterAll(async () => {

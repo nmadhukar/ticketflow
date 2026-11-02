@@ -44,6 +44,7 @@ import {
   uniqueIndex,
   primaryKey,
   check,
+  uuid,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -1278,3 +1279,46 @@ export type InsertResolutionPattern = z.infer<
 >;
 export type LearningQueue = typeof learningQueue.$inferSelect;
 export type InsertLearningQueue = z.infer<typeof insertLearningQueueSchema>;
+
+/**
+ * Writes the in-app assistant proposed (migration 0035). The assistant never writes a ticket or a
+ * comment itself: it records a proposal here, the user sees it as a card, and only their Confirm
+ * (POST /api/assistant/proposals/:id/confirm) executes it, once, as that user, through the normal
+ * ticket service. See server/assistant/proposals.ts.
+ *
+ * `payload` is the proposed text; it is cleared 7 days after the proposal is decided, and the row
+ * is deleted after 90 days. `payload_sha256` stays, so a duplicate can be recognised without it.
+ */
+export const assistantWriteProposals = pgTable(
+  "assistant_write_proposals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: varchar("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    agentId: varchar("agent_id", { length: 40 }).notNull(),
+    runId: uuid("run_id").notNull(),
+    action: varchar("action", { length: 32 }).notNull(),
+    ticketId: integer("ticket_id").references(() => tasks.id, { onDelete: "cascade" }),
+    payload: jsonb("payload"),
+    payloadSha256: varchar("payload_sha256", { length: 64 }).notNull(),
+    status: varchar("status", { length: 16 }).notNull().default("pending"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    expiresAt: timestamp("expires_at").notNull(),
+    decidedAt: timestamp("decided_at"),
+    resultRef: varchar("result_ref", { length: 40 }),
+    failureCode: varchar("failure_code", { length: 40 }),
+  },
+  (table) => [
+    index("idx_assistant_proposals_dedupe").on(table.userId, table.action, table.payloadSha256, table.createdAt),
+    index("idx_assistant_proposals_status_expires").on(table.status, table.expiresAt),
+    index("idx_assistant_proposals_created_at").on(table.createdAt),
+    check("assistant_proposals_action_check", sql`${table.action} IN ('create_ticket', 'add_comment')`),
+    check(
+      "assistant_proposals_status_check",
+      sql`${table.status} IN ('pending', 'executing', 'executed', 'rejected', 'expired', 'failed')`
+    ),
+  ]
+);
+
+export type AssistantWriteProposal = typeof assistantWriteProposals.$inferSelect;

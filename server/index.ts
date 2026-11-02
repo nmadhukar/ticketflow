@@ -112,6 +112,8 @@ app.use(requestLogger(log));
       log,
       onError: () => void shutdown("assistant listener error", { failed: true }),
     });
+    // Expiry and retention of assistant-proposed writes (hourly, unref'd), with the assistant on.
+    if (assistantServer) (await import("./assistant/proposals")).startProposalCleanup(log);
     const shutdown = createShutdown({
       server,
       closeRealtime,

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  isPermittedTool,
   ensureFreshToken,
   loadRunTools,
   sanitizeOptionalToolArguments,
@@ -93,4 +94,14 @@ test('drops nulls the schema does not allow, and keeps the ones it does', () => 
     limit: 5,
   });
   assert.equal(sanitizeOptionalToolArguments('text', schema), 'text');
+});
+
+test('passes read-only tools and the two proposal tools to the model, never another write', () => {
+  assert.equal(isPermittedTool({ name: 'get_ticket', annotations: { readOnlyHint: true } }), true);
+  assert.equal(isPermittedTool({ name: 'propose_comment', annotations: { readOnlyHint: false } }), true);
+  assert.equal(isPermittedTool({ name: 'propose_ticket' }), true);
+  for (const name of ['add_comment', 'create_ticket', 'delete_ticket', 'update_ticket', 'propose_delete']) {
+    assert.equal(isPermittedTool({ name, annotations: { readOnlyHint: false } }), false, name);
+    assert.equal(isPermittedTool({ name }), false, name);
+  }
 });

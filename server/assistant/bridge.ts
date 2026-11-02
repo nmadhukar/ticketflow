@@ -6,6 +6,8 @@ import { configuredBaseUrl } from "../utils/appBaseUrl";
 import { createCustomRateLimit, rateLimitingEnabled } from "../security/rateLimiting";
 import { isAssistantEnabled } from "./config";
 import { logAssistantSecurityEvent } from "./securityLog";
+import { assistantWritesEnabled } from "./toolPolicy";
+import { ticketErrorToHttp } from "../services/tickets/ticketError";
 import type { AssistantRuns } from "./runAuth";
 
 /**
@@ -18,7 +20,8 @@ import type { AssistantRuns } from "./runAuth";
  * Only the caller's own agent is registered, so a customer cannot reach the staff agent by
  * changing the id in the URL.
  *
- *   GET /api/assistant/availability   whether this user has an assistant, and which
+ *   GET  /api/assistant/availability                 whether this user has an assistant, and which
+ *   POST /api/assistant/proposals/:proposal/confirm|reject the user's decision on a proposed write
  */
 
 export const COPILOT_BASE_PATH = "/api/copilotkit";
@@ -141,6 +144,46 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
     const found = assistantFor(req);
     if (!req.isAuthenticated?.() || !req.user) return deny(res, 401, "unauthorized", "Sign in to use the assistant.");
     res.json({ enabled: isAssistantEnabled(env) && !!found, agentId: found?.agentId ?? null });
+  });
+
+  /**
+   * The user's decision on a proposal card. Only Confirm writes, as the signed-in user (reloaded
+   * by the session on this request), through the normal ticket service (proposals.ts).
+   */
+  // ":proposal", not ":id": every :id param is checked as a numeric id (http/install.ts), and this is a UUID.
+  const PROPOSAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  app.post("/api/assistant/proposals/:proposal/:decision", async (req, res, next) => {
+    try {
+      const decision = req.params.decision;
+      if (decision !== "confirm" && decision !== "reject") return deny(res, 404, "not_found", "Not found.");
+      if (!req.isAuthenticated?.() || !req.user) return deny(res, 401, "unauthorized", "Sign in to use the assistant.");
+      if (!isAssistantEnabled(env) || !assistantWritesEnabled(env)) return deny(res, 503, "assistant_writes_disabled", "Assistant changes are switched off.");
+      const found = assistantFor(req);
+      if (!found) return deny(res, 403, "assistant_unavailable", "The assistant is not available for your account.");
+      if (!sameOrigin(req, env)) {
+        logAssistantSecurityEvent({ event: "write_refused", reason: "cross_origin", userId: found.user.id, agentId: found.agentId, ip: req.ip });
+        return deny(res, 403, "forbidden", "Cross-site request refused.");
+      }
+      if (!PROPOSAL_ID.test(req.params.proposal)) return deny(res, 404, "not_found", "That proposal was not found.");
+
+      const proposals = await import("./proposals");
+      try {
+        const result =
+          decision === "confirm"
+            ? await proposals.confirmProposal(found.user, req.params.proposal, req.body?.edits)
+            : await proposals.rejectProposal(found.user, req.params.proposal);
+        res.json(result);
+      } catch (error) {
+        if (error instanceof proposals.ProposalDecisionError) {
+          if (error.code === "not_found") return deny(res, 404, "not_found", "That proposal was not found.");
+          if (error.code === "expired") return deny(res, 410, "expired", "This proposal has expired. Ask the assistant again.");
+          return res.status(409).json({ error: "already_decided", message: "This proposal was already handled.", ...error.current });
+        }
+        throw ticketErrorToHttp(error);
+      }
+    } catch (error) {
+      next(error);
+    }
   });
 
   const runLimit: RequestHandler = rateLimitingEnabled()

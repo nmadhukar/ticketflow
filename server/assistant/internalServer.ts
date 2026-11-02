@@ -28,13 +28,13 @@ export const MCP_SESSION_HEADER = "x-ticketflow-mcp-session";
 
 export interface InternalAppDeps {
   runs: () => Promise<AssistantRuns<User>>;
-  createMcpServer: (user: User, agentId: AssistantAgentId, ip?: string) => Promise<McpServer>;
+  createMcpServer: (user: User, agentId: AssistantAgentId, ip: string | undefined, runId: string) => Promise<McpServer>;
 }
 
 // Loaded on first use: both reach the database, which modules describing the app must not.
 const defaultDeps: InternalAppDeps = {
   runs: async () => (await import("./runs")).assistantRuns(),
-  createMcpServer: async (user, agentId, ip) => (await import("./mcpServer")).createAssistantMcpServer(user, agentId, ip),
+  createMcpServer: async (user, agentId, ip, runId) => (await import("./mcpServer")).createAssistantMcpServer(user, agentId, ip, runId),
 };
 
 function sessionToken(req: Request): string | null {
@@ -69,7 +69,7 @@ export function createInternalApp(deps: InternalAppDeps = defaultDeps): Express 
       }
 
       // Stateless, as the public endpoint: a new server and transport per request.
-      const server = await deps.createMcpServer(auth.user, auth.agentId, req.ip);
+      const server = await deps.createMcpServer(auth.user, auth.agentId, req.ip, auth.runId);
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
       res.on("close", () => {
         void transport.close();

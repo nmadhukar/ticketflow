@@ -84,6 +84,16 @@ export const REQUIRED_TABLES: RequiredTable[] = [
       "billing_status",
     ],
   },
+  // 0035 assistant write proposals: every assistant-proposed ticket or comment, and its decision.
+  {
+    table: "assistant_write_proposals",
+    columns: [
+      "payload_sha256",
+      "status",
+      "expires_at",
+      "result_ref",
+    ],
+  },
 ];
 
 /** 0014: unique partial index over hashed keys. */

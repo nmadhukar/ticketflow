@@ -147,9 +147,20 @@ function withSanitizedInput(tool: McpTool, inputSchema: unknown): McpTool {
 let client: MCPClient | undefined;
 
 /**
+ * Tools that only PROPOSE a write: TicketFlow records a draft and the user confirms it in the
+ * chat. They are the only tools not marked read-only that this service passes to a model.
+ */
+export const PROPOSAL_TOOL_NAMES = new Set(['propose_ticket', 'propose_comment']);
+
+/** Read-only tools, and the named proposal tools; never any other tool, whatever the server lists. */
+export function isPermittedTool(definition: { name: string; annotations?: { readOnlyHint?: boolean } }): boolean {
+  return definition.annotations?.readOnlyHint === true || PROPOSAL_TOOL_NAMES.has(definition.name);
+}
+
+/**
  * The run's tools, discovered AS the run's user: TicketFlow lists only what that user's agent may
- * call, all read-only. Anything not marked read-only is dropped here as well, so a write tool can
- * only ever reach a model through a deliberate change on both sides.
+ * call. Anything that is neither read-only nor a proposal is dropped here as well, so a direct
+ * write can only ever reach a model through a deliberate change on both sides.
  */
 export async function loadRunTools({ requestContext }: { requestContext?: RequestContext } = {}) {
   const user = userFrom(requestContext);
@@ -157,10 +168,10 @@ export async function loadRunTools({ requestContext }: { requestContext?: Reques
   client ??= createTicketFlowClient();
   const { definitions, errors } = await discoveryUser.run(user, () => client!.listToolDefinitionsWithErrors());
   if (errors[SERVER_NAME]) throw new Error(`TicketFlow MCP discovery failed: ${errors[SERVER_NAME]}`);
-  const readOnly = Object.values(definitions[SERVER_NAME] ?? {}).filter((d) => d.annotations?.readOnlyHint === true);
+  const permitted = Object.values(definitions[SERVER_NAME] ?? {}).filter(isPermittedTool);
   const tools = Object.fromEntries(
     await Promise.all(
-      readOnly.map(async (definition) => {
+      permitted.map(async (definition) => {
         const tool = await client!.toolFromDefinition({ serverName: SERVER_NAME, definition });
         return [`ticketflow_${definition.name}`, withSanitizedInput(tool, definition.inputSchema)] as const;
       }),

@@ -23,6 +23,20 @@ const SHARED_READS = [
   "get_document",
 ] as const;
 
+/**
+ * Tools that PROPOSE a write (proposals.ts): they record a draft the user confirms on a card, and
+ * write nothing to tickets. Customers may propose a ticket or a comment; staff a comment only.
+ * Switched off as a whole with ASSISTANT_WRITES_ENABLED=false.
+ */
+export const ASSISTANT_PROPOSAL_TOOLS: Record<AssistantAgentId, readonly string[]> = {
+  "support-assistant": ["propose_ticket", "propose_comment"],
+  "ticket-assistant": ["propose_comment"],
+};
+
+export function assistantWritesEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.ASSISTANT_WRITES_ENABLED?.trim() !== "false";
+}
+
 export const ASSISTANT_READ_TOOLS: Record<AssistantAgentId, readonly string[]> = {
   "support-assistant": SHARED_READS,
   "ticket-assistant": [
