@@ -1,6 +1,6 @@
 import request from "supertest";
 import { eq } from "drizzle-orm";
-import { assistantWriteProposals, taskComments, tasks, type User } from "@shared/schema";
+import { assistantAuditEvents, assistantWriteProposals, taskComments, tasks, type User } from "@shared/schema";
 import { db } from "../../../storage/db";
 import { storage } from "../../../storage";
 import { keyOwnerBlockReason } from "../../../services/auth/apiKeys";
@@ -8,6 +8,7 @@ import { createInternalApp } from "../../../assistant/internalServer";
 import { createAssistantMcpServer } from "../../../assistant/mcpServer";
 import { cleanUpProposals } from "../../../assistant/proposals";
 import { AssistantRuns } from "../../../assistant/runAuth";
+import { setAuditSink } from "../../../assistant/securityLog";
 import { createTestApp } from "../helpers/testApp";
 import { resetDb } from "../helpers/testDb";
 import { createUser, loginAs } from "../helpers/fixtures";
@@ -269,5 +270,35 @@ describe("assistant proposals", () => {
     expect(await proposal(ancient)).toBeUndefined();
     expect(await proposal(stuck)).toMatchObject({ status: "failed", failureCode: "INTERRUPTED" });
     expect(await proposal(busy)).toMatchObject({ status: "executing" });
+  });
+
+  it("records the proposal, the confirmation and the write in the audit trail", async () => {
+    const id = await proposeAsA();
+    const a = await loginAs(ctx.app, A);
+    expect((await a.post(`/api/assistant/proposals/${id}/confirm`).set("Origin", ORIGIN).send({})).status).toBe(200);
+    // Background writes settle.
+    await new Promise((r) => setTimeout(r, 200));
+    const events = await db.select().from(assistantAuditEvents).where(eq(assistantAuditEvents.proposalId, id));
+    expect(events.map((e) => e.eventType).sort()).toEqual(["write_confirmed", "write_executed", "write_proposed"]);
+    for (const e of events) expect(e).toMatchObject({ actorUserId: A.id, ticketId, agentId: "support-assistant" });
+  });
+
+  it("writes nothing when the confirmation cannot be recorded", async () => {
+    const id = await proposeAsA();
+    const a = await loginAs(ctx.app, A);
+    const errors = jest.spyOn(console, "error").mockImplementation(() => {});
+    const restore = setAuditSink(async () => {
+      throw new Error("audit store down");
+    });
+    try {
+      const res = await a.post(`/api/assistant/proposals/${id}/confirm`).set("Origin", ORIGIN).send({});
+      expect(res.status).toBe(503);
+      expect(res.body.error).toBe("audit_unavailable");
+    } finally {
+      setAuditSink(restore);
+      errors.mockRestore();
+    }
+    expect(await comments()).toEqual([]);
+    expect(await proposal(id)).toMatchObject({ status: "pending" });
   });
 });

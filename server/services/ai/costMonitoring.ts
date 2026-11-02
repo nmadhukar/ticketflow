@@ -184,6 +184,8 @@ export async function recordUsage(
     requestedModelId?: string; generationId?: string; estimatedCost: number;
     verifiedCostUsd?: number; billingStatus?: "estimated" | "verified";
     userId?: string; ticketId?: string;
+    /** An in-app assistant run (migration 0033); every other AI feature leaves it out. */
+    assistantRunId?: string;
   }
 ): Promise<void> {
   const cost = usage.estimatedCost;
@@ -207,6 +209,7 @@ export async function recordUsage(
       operation: usage.operation,
       userId: validUserId,
       ticketId: usage.ticketId ? parseInt(usage.ticketId) : null,
+      assistantRunId: usage.assistantRunId ?? null,
     };
     try {
       await storage.recordAIUsage(row);

@@ -112,6 +112,8 @@ test('readiness checks the conversation store when staff history is on', async (
   const answered = async () => new Response(null, { status: 405 });
   const ok = await assistantReadiness({ ...HISTORY_ENV, ASSISTANT_HISTORY_RETENTION_DAYS: '14' }, { fetch: answered, checkHistory: async () => {} });
   assert.equal(ok.historyRetentionDays, 14);
+  assert.equal(ok.provider, "openrouter");
+  assert.deepEqual(ok.models, { "support-assistant": "openai/gpt-5-mini", "ticket-assistant": "openai/gpt-5-mini" });
   assert.deepEqual(ok.checks, {
     configuration: 'ok',
     mcp: 'reachable',

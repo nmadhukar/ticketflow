@@ -17,9 +17,16 @@ function probe(responses: Array<Response | Error>, start = 0) {
 }
 
 describe("sidecar history status", () => {
+  it("keeps the provider and models reported, through later unknown answers", async () => {
+    const { status, advance } = probe([ready("ok", { provider: "openrouter", models: { "ticket-assistant": "openai/gpt-5-mini", bad: 3 } }), new TypeError("down")]);
+    expect(await status()).toMatchObject({ provider: "openrouter", models: { "ticket-assistant": "openai/gpt-5-mini" } });
+    advance(61_000);
+    expect(await status()).toMatchObject({ state: "unknown", provider: "openrouter", models: { "ticket-assistant": "openai/gpt-5-mini" } });
+  });
+
   it("history ok is on, with its retention; off is off; both are definitive", async () => {
-    expect(await probe([ready("ok", { historyRetentionDays: 14 })]).status()).toEqual({ state: "on", memory: true, retentionDays: 14 });
-    expect(await probe([ready("off")]).status()).toEqual({ state: "off", memory: false, retentionDays: null });
+    expect(await probe([ready("ok", { historyRetentionDays: 14 })]).status()).toEqual({ state: "on", memory: true, retentionDays: 14, provider: null, models: {} });
+    expect(await probe([ready("off")]).status()).toEqual({ state: "off", memory: false, retentionDays: null, provider: null, models: {} });
   });
 
   it("the history check decides, not the overall status: a 503 from an MCP blip with history ok is still on", async () => {
@@ -38,7 +45,7 @@ describe("sidecar history status", () => {
   });
 
   it("before any definitive answer, memory is unknown (null)", async () => {
-    expect(await probe([new TypeError("down")]).status()).toEqual({ state: "unknown", memory: null, retentionDays: null });
+    expect(await probe([new TypeError("down")]).status()).toEqual({ state: "unknown", memory: null, retentionDays: null, provider: null, models: {} });
     expect(await probe([new Response("not json", { status: 502 })]).status()).toMatchObject({ state: "unknown", memory: null });
   });
 

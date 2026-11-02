@@ -54,6 +54,9 @@ import { createUser, loginAs } from "../helpers/fixtures";
 import { issueApiKey } from "../../../services/auth/apiKeys";
 import { verifyAssistantToken } from "../../../assistant/sessionToken";
 import { assistantRuns } from "../../../assistant/runs";
+import { db } from "../../../storage/db";
+import { aiUsage, assistantAuditEvents, assistantUsageEvents } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 const ENV: Record<string, string> = {
   ASSISTANT_ENABLED: "true",
@@ -159,6 +162,13 @@ describe("assistant bridge", () => {
     // The response has ended, so the run's MCP token is refused from now on.
     await new Promise((resolve) => setImmediate(resolve));
     await expect(assistantRuns().authenticate(mcpToken)).resolves.toMatchObject({ ok: false, reason: "run_not_open" });
+
+    // The fake runtime never runs the agent, so the run is recorded as never started.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const verified2 = verifyAssistantToken("agent", bearer, [ENV.ASSISTANT_AGENT_SECRET]);
+    const runId = verified2.ok ? verified2.claims.jti : "";
+    const [row] = await db.select().from(assistantUsageEvents).where(eq(assistantUsageEvents.runId, runId));
+    expect(row).toMatchObject({ userId: customer.id, agentId: "support-assistant", status: "stopped", errorCategory: "not_started", toolNames: [] });
   });
 
   it("opens no run, and gives the sidecar no token, for requests other than a run", async () => {
@@ -213,6 +223,24 @@ describe("assistant bridge", () => {
     } finally {
       sidecarHistory = "ok";
       delete process.env.ASSISTANT_STAFF_HISTORY;
+    }
+  });
+
+  it("stops running once the AI budget is spent, and records the refusal", async () => {
+    await db.insert(aiUsage).values({ modelId: "openai/gpt-5-mini", inputTokens: 1, outputTokens: 1, estimatedCost: "5000", operation: "test.spend" });
+    try {
+      const c = await loginAs(ctx.app, customer);
+      const res = await c.post("/api/copilotkit/agent/support-assistant/run").set("Origin", ORIGIN).send(runBody);
+      expect(res.status).toBe(429);
+      expect(res.body.error).toBe("assistant_budget_reached");
+      expect(recorded.clients).toEqual([]);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const usage = await db.select().from(assistantUsageEvents).where(eq(assistantUsageEvents.userId, customer.id));
+      expect(usage).toEqual([expect.objectContaining({ status: "refused", errorCategory: "daily_budget" })]);
+      const audit = await db.select().from(assistantAuditEvents).where(eq(assistantAuditEvents.actorUserId, customer.id));
+      expect(audit).toEqual([expect.objectContaining({ eventType: "run_refused", reason: "daily_budget" })]);
+    } finally {
+      await db.delete(aiUsage).where(eq(aiUsage.operation, "test.spend"));
     }
   });
 });

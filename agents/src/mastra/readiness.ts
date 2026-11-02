@@ -1,4 +1,5 @@
-import { readMcpUrl, readRetentionDays, staffHistoryEnabled } from './config.ts';
+import { readMcpUrl, readModel, readProvider, readRetentionDays, staffHistoryEnabled } from './config.ts';
+import { AGENT_IDS } from './session-token.ts';
 import { agentsConfigIssues } from './config-issues.ts';
 
 /**
@@ -10,7 +11,13 @@ import { agentsConfigIssues } from './config-issues.ts';
  */
 export type AssistantReadiness =
   // historyRetentionDays: how long saved conversations are kept, for the app to tell staff.
-  | { status: 'ready'; checks: { configuration: 'ok'; mcp: 'reachable'; history: 'ok' | 'off' }; historyRetentionDays?: number }
+  | {
+      status: 'ready';
+      checks: { configuration: 'ok'; mcp: 'reachable'; history: 'ok' | 'off' };
+      historyRetentionDays?: number;
+      provider: string;
+      models: Record<string, string>;
+    }
   | { status: 'not_ready'; checks: { configuration: 'ok'; mcp: 'reachable' | 'unreachable'; history: 'ok' | 'off' | 'unreachable' } }
   | { status: 'not_ready'; checks: { configuration: 'invalid' }; settings: string[] };
 
@@ -62,6 +69,9 @@ export async function assistantReadiness(
       status: 'ready',
       checks: { configuration: 'ok', mcp, history },
       ...(history === 'ok' ? { historyRetentionDays: readRetentionDays(env) } : {}),
+      // Which model each agent uses (no secrets): the app records usage and cost against it.
+      provider: readProvider(env),
+      models: Object.fromEntries(AGENT_IDS.map((id) => [id, readModel(id, env)])),
     };
   }
   return { status: 'not_ready', checks: { configuration: 'ok', mcp, history } };

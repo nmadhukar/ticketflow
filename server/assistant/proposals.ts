@@ -7,7 +7,7 @@ import { addComment, createTicket, getTicket, prepareTicketCreate } from "../ser
 import { commentBodySchema } from "../services/tickets/commentSchema";
 import { TicketError } from "../services/tickets/ticketError";
 import { publicBaseUrl } from "../utils/appBaseUrl";
-import { logAssistantSecurityEvent } from "./securityLog";
+import { logAssistantSecurityEvent, recordAssistantAudit } from "./securityLog";
 
 /**
  * Assistant-proposed writes. The assistant never writes a ticket or a comment: its propose_* tools
@@ -113,7 +113,7 @@ async function record(
       expiresAt: new Date(now.getTime() + PROPOSAL_TTL_MINUTES * 60_000),
     })
     .returning();
-  logAssistantSecurityEvent({ event: "write_proposed", reason: action, userId: user.id, runId: run.runId, agentId: run.agentId });
+  logAssistantSecurityEvent({ event: "write_proposed", reason: action, userId: user.id, runId: run.runId, agentId: run.agentId, proposalId: row.id, ticketId });
   return row;
 }
 
@@ -184,7 +184,7 @@ export async function rejectProposal(user: User, id: string): Promise<DecisionRe
     .where(pendingAndLive(user, id))
     .returning();
   if (!row) return explain(user, id);
-  logAssistantSecurityEvent({ event: "write_rejected", reason: row.action, userId: user.id, runId: row.runId, agentId: row.agentId });
+  logAssistantSecurityEvent({ event: "write_rejected", reason: row.action, userId: user.id, runId: row.runId, agentId: row.agentId, proposalId: row.id, ticketId: row.ticketId });
   return { status: "rejected" };
 }
 
@@ -214,6 +214,13 @@ export async function confirmProposal(user: User, id: string, edits: unknown = u
     await prepareTicketCreate(user, finalPayload);
   }
 
+  // The user's decision is on the record before anything is written: if it cannot be recorded,
+  // nothing is (AuditUnavailableError, a 503).
+  await recordAssistantAudit(
+    { event: "write_confirmed", reason: action, userId: user.id, runId: row.runId, agentId: row.agentId, proposalId: row.id, ticketId: row.ticketId },
+    { required: true },
+  );
+
   // Claim, so a second confirm (double click, retry) finds nothing to claim.
   const [claimed] = await db
     .update(assistantWriteProposals)
@@ -221,7 +228,7 @@ export async function confirmProposal(user: User, id: string, edits: unknown = u
     .where(pendingAndLive(user, id))
     .returning();
   if (!claimed) return explain(user, id);
-  const audit = { userId: user.id, runId: claimed.runId, agentId: claimed.agentId };
+  const audit = { userId: user.id, runId: claimed.runId, agentId: claimed.agentId, proposalId: claimed.id, ticketId: claimed.ticketId };
 
   let result: DecisionResult;
   let resultRef: string;

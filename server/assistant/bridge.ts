@@ -5,11 +5,14 @@ import { normalizeRole } from "../permissions/roles";
 import { configuredBaseUrl } from "../utils/appBaseUrl";
 import { createCustomRateLimit, rateLimitingEnabled } from "../security/rateLimiting";
 import { isAssistantEnabled, isStaffHistoryEnabled } from "./config";
-import { logAssistantSecurityEvent } from "./securityLog";
+import { AuditUnavailableError, logAssistantSecurityEvent } from "./securityLog";
 import { assistantWritesEnabled } from "./toolPolicy";
 import { ticketErrorToHttp } from "../services/tickets/ticketError";
 import type { AssistantRuns } from "./runAuth";
-import { LruMap, RunEndings, TrackedRunner, type RunnerLike } from "./runTracking";
+import { LruMap, RunEndings, TrackedRunner, type RunFinish, type RunnerLike } from "./runTracking";
+import { budgetExhausted, defaultUsageDeps, recordRun, type RunContext, type UsageDeps } from "./usage";
+import { randomUUID } from "crypto";
+import { registerAssistantAdminRoutes } from "./admin";
 import { createSidecarHistoryStatus, type SidecarHistory } from "./sidecarStatus";
 import { map, type Observable } from "rxjs";
 import { deleteHistory, getHistory, HistoryError, isThreadId, listHistory, mastraThreadId, newestTurn, STAFF_AGENT } from "./history";
@@ -107,6 +110,10 @@ export interface BridgeDeps {
   createHandler?: CopilotHandlerFactory;
   /** Whether the sidecar has saved conversations working; the default asks its /ready. */
   historyStatus?: () => Promise<SidecarHistory>;
+  /** Whether the AI budgets are used up (a reason, or null); the default reads ai_usage. */
+  budget?: () => Promise<string | null>;
+  /** Where run usage and cost are recorded; the default writes assistant_usage_events and ai_usage. */
+  usage?: () => Promise<UsageDeps>;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -202,6 +209,9 @@ const createHandler: CopilotHandlerFactory = async (userId, agentId, env, ending
 export function registerAssistantRoutes(app: Express, deps: BridgeDeps = defaultDeps): void {
   const env = deps.env ?? process.env;
 
+  // Admin views of usage and the audit trail: available whether or not the assistant is on.
+  registerAssistantAdminRoutes(app);
+
   // Saved conversations are SHOWN only when the app's switch is on AND the sidecar reports them
   // working now. How staff runs are BUILT follows whether the sidecar's agent has memory: its last
   // definitive answer, or the app's switch before it has given one (sidecarStatus.ts). A blip in
@@ -257,6 +267,7 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
             : await proposals.rejectProposal(found.user, req.params.proposal);
         res.json(result);
       } catch (error) {
+        if (error instanceof AuditUnavailableError) return deny(res, 503, "audit_unavailable", "This could not be recorded, so nothing was done. Please try again.");
         if (error instanceof proposals.ProposalDecisionError) {
           if (error.code === "not_found") return deny(res, 404, "not_found", "That proposal was not found.");
           if (error.code === "expired") return deny(res, 410, "expired", "This proposal has expired. Ask the assistant again.");
@@ -313,7 +324,11 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
     const found = res.locals.assistant as Found;
     if (!isThreadId(req.params.thread)) return deny(res, 404, "not_found", "That conversation was not found.");
     try {
-      res.json(await getHistory(historyDeps, found.user, req.params.thread));
+      const conversation = await getHistory(historyDeps, found.user, req.params.thread);
+      if (!conversation.available) {
+        logAssistantSecurityEvent({ event: "history_withheld", reason: conversation.reason, userId: found.user.id, agentId: found.agentId, ip: req.ip });
+      }
+      res.json(conversation);
     } catch (error) {
       historyError(error, res, next);
     }
@@ -337,6 +352,13 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
 
   // Least recently used goes first, so an active conversation is never the one dropped.
   const handlers = new LruMap<string, Promise<RequestHandler>>(MAX_CACHED_HANDLERS);
+  const budget = deps.budget ?? budgetExhausted;
+  let usageDeps: Promise<UsageDeps> | undefined;
+  const usage = () =>
+    (usageDeps ??= (deps.usage ?? defaultUsageDeps)().catch((error) => {
+      usageDeps = undefined; // a failed load is retried on the next run
+      throw error;
+    }));
   const makeHandler = deps.createHandler ?? createHandler;
   const endings = new RunEndings();
 
@@ -362,19 +384,52 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
 
       const proceed = async () => {
         if (classified.route === "run") {
+          const status = await historyStatus();
+          const context = (runId: string): RunContext => ({
+            runId,
+            userId: found.user.id,
+            agentId: found.agentId,
+            provider: status.provider,
+            model: status.models[found.agentId] ?? null,
+            startedAt: new Date(),
+          });
+          // The assistant's spend counts towards the AI budgets (ai_usage); once they are used up it
+          // stops. A failure to read them is logged and does not stop it.
+          const blocked = await budget().catch((error) => {
+            console.error(`Assistant budget check failed [${error instanceof Error ? error.name : "error"}]`);
+            return null;
+          });
+          if (blocked) {
+            const refusedRun = randomUUID();
+            logAssistantSecurityEvent({ event: "run_refused", reason: blocked, userId: found.user.id, agentId: found.agentId, runId: refusedRun, ip: req.ip });
+            void usage().then((d) => recordRun(d, context(refusedRun), { status: "refused", errorCategory: blocked }));
+            return deny(res, 429, "assistant_budget_reached", "The assistant has reached its spending limit for now. Please try again later.");
+          }
+
           const runs = await deps.runs();
           const run = runs.start(found.user.id, found.agentId);
           req.headers[INTERNAL_AGENT_TOKEN] = run.agentToken;
           req.headers[INTERNAL_MCP_TOKEN] = run.mcpToken;
-          const end = () => runs.end(run.runId);
+          const runContext = context(run.runId);
+          // Ends the run's tokens and records how it went, once.
+          let finished = false;
+          const finish: RunFinish = (summary) => {
+            if (finished) return;
+            finished = true;
+            runs.end(run.runId);
+            void usage().then((d) => recordRun(d, runContext, summary)).catch(() => undefined);
+          };
           const endingKey = RunEndings.key(found.user.id, req.body?.threadId, req.body?.runId);
           if (endingKey) {
             // The run's tokens end when its agent run ends (TrackedRunner), which may outlive this
             // request; if the runner never takes the run over, they end with the request.
-            endings.expect(endingKey, end);
+            endings.expect(endingKey, finish);
             res.on("close", () => endings.release(endingKey));
           } else {
-            res.on("close", end);
+            // No thread or run id to follow the agent run by: finished with the request.
+            res.on("close", () =>
+              finish({ status: "stopped", errorCategory: "untracked", toolNames: [], proposalCount: 0, stepCount: 0, inputTokens: 0, outputTokens: 0, durationMs: Date.now() - runContext.startedAt.getTime() }),
+            );
           }
         }
         const key = `${found.user.id}:${found.agentId}`;

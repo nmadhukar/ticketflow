@@ -1,36 +1,81 @@
-import { finalize, type Observable } from "rxjs";
+import { finalize, tap, type Observable } from "rxjs";
 
 /**
- * Ends each assistant run when its AGENT run ends, not when the browser's request does.
+ * Ends each assistant run when its AGENT run ends, not when the browser's request does, and
+ * reports how it went.
  *
  * CopilotKit's runner executes the agent apart from the HTTP request that started it (a client
  * can drop and reconnect), so the run's tokens must live exactly as long as that execution: the
- * bridge registers "end this run" under the CopilotKit thread and run ids, and the runner below
- * calls it when the agent's event stream completes, fails or is stopped. A run the runner never
- * picks up (refused before it started) is ended when its request closes; the run registry's
- * maximum length (runAuth.ts) is the backstop for anything else.
+ * bridge registers "finish this run" under the CopilotKit thread and run ids, and the runner below
+ * calls it, with a summary of the run, when the agent's event stream completes, fails or is
+ * dropped. A run the runner never picks up (refused before it started) is finished when its
+ * request closes; the run registry's maximum length (runAuth.ts) is the backstop for anything else.
  */
+
+export interface RunSummary {
+  /** completed: RUN_FINISHED; failed: RUN_ERROR or an error; stopped: dropped before either. */
+  status: "completed" | "failed" | "stopped";
+  errorCategory: string | null;
+  /** Tool names in call order (repeats kept), as the model called them. */
+  toolNames: string[];
+  proposalCount: number;
+  /** Model steps: one per usage entry the run reported. */
+  stepCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  durationMs: number;
+}
+
+export type RunFinish = (summary: RunSummary) => void;
+
 export class RunEndings {
-  private readonly pending = new Map<string, () => void>();
+  private readonly pending = new Map<string, RunFinish>();
 
   static key(userId: string, threadId: unknown, runId: unknown): string | null {
     return typeof threadId === "string" && threadId && typeof runId === "string" && runId ? `${userId}\0${threadId}\0${runId}` : null;
   }
 
-  expect(key: string, end: () => void): void {
-    this.pending.set(key, end);
+  expect(key: string, finish: RunFinish): void {
+    this.pending.set(key, finish);
   }
 
-  /** The end callback for an agent run starting now; it is then the runner's to call. */
-  take(key: string): (() => void) | undefined {
-    const end = this.pending.get(key);
+  /** The finish callback for an agent run starting now; it is then the runner's to call. */
+  take(key: string): RunFinish | undefined {
+    const finish = this.pending.get(key);
     this.pending.delete(key);
-    return end;
+    return finish;
   }
 
-  /** For a request that closed: ends its run unless the runner took it over. */
+  /** For a request that closed: finishes its run (never started) unless the runner took it over. */
   release(key: string): void {
-    this.take(key)?.();
+    this.take(key)?.({ ...emptySummary(), status: "stopped", errorCategory: "not_started" });
+  }
+}
+
+function emptySummary(): RunSummary {
+  return { status: "stopped", errorCategory: null, toolNames: [], proposalCount: 0, stepCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0 };
+}
+
+type AgUiEvent = { type?: string; toolCallName?: unknown; code?: unknown; usage?: unknown };
+
+/** Folds one AG-UI event into the summary. Content is never read: only names, codes and counts. */
+export function observe(summary: RunSummary, event: unknown): void {
+  const e = (event && typeof event === "object" ? event : {}) as AgUiEvent;
+  if (e.type === "TOOL_CALL_START" && typeof e.toolCallName === "string") {
+    const name = e.toolCallName.replace(/^ticketflow_/, "");
+    summary.toolNames.push(name);
+    if (name.startsWith("propose_")) summary.proposalCount += 1;
+  } else if (e.type === "RUN_ERROR") {
+    summary.status = "failed";
+    summary.errorCategory = typeof e.code === "string" && /^[a-z0-9_.-]{1,40}$/i.test(e.code) ? e.code : "run_error";
+  } else if (e.type === "RUN_FINISHED") {
+    if (summary.status !== "failed") summary.status = "completed";
+    const steps = Array.isArray(e.usage) ? e.usage : e.usage && typeof e.usage === "object" ? [e.usage] : [];
+    for (const step of steps as Array<{ inputTokens?: unknown; outputTokens?: unknown }>) {
+      summary.stepCount += 1;
+      summary.inputTokens += Number.isFinite(step?.inputTokens) ? Number(step.inputTokens) : 0;
+      summary.outputTokens += Number.isFinite(step?.outputTokens) ? Number(step.outputTokens) : 0;
+    }
   }
 }
 
@@ -42,19 +87,32 @@ export interface RunnerLike {
   stop(request: unknown): Promise<boolean | undefined>;
 }
 
-/** One user's runner: CopilotKit's, plus the run endings for that user's runs. */
+/** One user's runner: CopilotKit's, plus the finish (end and report) of that user's runs. */
 export class TrackedRunner implements RunnerLike {
   constructor(
     private readonly delegate: RunnerLike,
     private readonly endings: RunEndings,
     private readonly userId: string,
+    private readonly now: () => number = Date.now,
   ) {}
 
   run(request: Parameters<RunnerLike["run"]>[0]): Observable<unknown> {
     const key = RunEndings.key(this.userId, request.input?.threadId ?? request.threadId, request.input?.runId);
-    const end = key ? this.endings.take(key) : undefined;
+    const finish = key ? this.endings.take(key) : undefined;
     const events = this.delegate.run(request);
-    return end ? events.pipe(finalize(end)) : events;
+    if (!finish) return events;
+    const started = this.now();
+    const summary = emptySummary();
+    return events.pipe(
+      tap({
+        next: (event) => observe(summary, event),
+        error: () => {
+          summary.status = "failed";
+          summary.errorCategory ??= "stream_error";
+        },
+      }),
+      finalize(() => finish({ ...summary, durationMs: this.now() - started })),
+    );
   }
 
   connect(request: unknown) {

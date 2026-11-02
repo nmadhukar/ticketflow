@@ -45,6 +45,7 @@ import {
   primaryKey,
   check,
   uuid,
+  bigserial,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -811,6 +812,8 @@ export const aiUsage = pgTable(
     userId: varchar("user_id").references(() => users.id),
     ticketId: integer("ticket_id").references(() => tasks.id),
     createdAt: timestamp("created_at").defaultNow(),
+    // In-app assistant runs only (migration 0033): links the run's cost to assistant_usage_events.
+    assistantRunId: uuid("assistant_run_id"),
   },
   (table) => [
     index("idx_ai_usage_timestamp").on(table.timestamp),
@@ -818,6 +821,7 @@ export const aiUsage = pgTable(
     index("idx_ai_usage_user_id").on(table.userId),
     index("idx_ai_usage_ticket_id").on(table.ticketId),
     index("idx_ai_usage_model_id").on(table.modelId),
+    index("idx_ai_usage_assistant_run_id").on(table.assistantRunId),
     uniqueIndex("ai_usage_generation_id_uniq").on(table.generationId).where(sql`${table.generationId} IS NOT NULL`),
     check("ai_usage_billing_status_check", sql`${table.billingStatus} IN ('estimated', 'verified')`),
     index("idx_ai_usage_timestamp_operation").on(
@@ -1322,3 +1326,83 @@ export const assistantWriteProposals = pgTable(
 );
 
 export type AssistantWriteProposal = typeof assistantWriteProposals.$inferSelect;
+
+/**
+ * One row per in-app assistant run (migration 0033): outcome, timing, tools and proposals. No
+ * content, tokens or cost: ai_usage holds cost, linked by ai_usage.assistant_run_id. Kept 90 days.
+ */
+export const assistantUsageEvents = pgTable(
+  "assistant_usage_events",
+  {
+    id: serial("id").primaryKey(),
+    runId: uuid("run_id").notNull().unique(),
+    agentId: varchar("agent_id", { length: 40 }).notNull(),
+    userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+    provider: varchar("provider", { length: 40 }),
+    model: varchar("model", { length: 255 }),
+    startedAt: timestamp("started_at").notNull(),
+    durationMs: integer("duration_ms").notNull(),
+    status: varchar("status", { length: 16 }).notNull(),
+    errorCategory: varchar("error_category", { length: 40 }),
+    stepCount: integer("step_count").notNull().default(0),
+    // No default: drizzle-kit cannot compare an array default and would re-apply it on every push.
+    toolNames: text("tool_names").array().notNull(),
+    proposalCount: integer("proposal_count").notNull().default(0),
+  },
+  (table) => [
+    index("idx_assistant_usage_started_at").on(table.startedAt),
+    index("idx_assistant_usage_agent_started").on(table.agentId, table.startedAt),
+    index("idx_assistant_usage_user_id").on(table.userId),
+    check("assistant_usage_status_check", sql`${table.status} IN ('completed', 'failed', 'stopped', 'refused')`),
+  ]
+);
+
+export type AssistantUsageEvent = typeof assistantUsageEvents.$inferSelect;
+
+/**
+ * The in-app assistant's durable security record (migration 0034). Codes and ids only: never a
+ * token, message, ticket content or raw IP (ip_hash is keyed). No foreign keys, so a record outlives
+ * the user or ticket it names. Kept 365 days.
+ */
+export const ASSISTANT_AUDIT_EVENT_TYPES = [
+  "mcp_auth_refused",
+  "renew_refused",
+  "run_refused",
+  "write_proposed",
+  "write_confirmed",
+  "write_rejected",
+  "write_executed",
+  "write_failed",
+  "write_refused",
+  "history_withheld",
+  "history_deleted",
+] as const;
+export type AssistantAuditEventType = (typeof ASSISTANT_AUDIT_EVENT_TYPES)[number];
+
+export const assistantAuditEvents = pgTable(
+  "assistant_audit_events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    occurredAt: timestamp("occurred_at").notNull().defaultNow(),
+    eventType: varchar("event_type", { length: 32 }).notNull(),
+    actorUserId: varchar("actor_user_id"),
+    agentId: varchar("agent_id", { length: 40 }),
+    runId: uuid("run_id"),
+    proposalId: uuid("proposal_id"),
+    ticketId: integer("ticket_id"),
+    reason: varchar("reason", { length: 80 }),
+    ipHash: varchar("ip_hash", { length: 32 }),
+    details: jsonb("details"),
+  },
+  (table) => [
+    index("idx_assistant_audit_occurred_at").on(table.occurredAt),
+    index("idx_assistant_audit_type_occurred").on(table.eventType, table.occurredAt),
+    index("idx_assistant_audit_actor").on(table.actorUserId),
+    check(
+      "assistant_audit_event_type_check",
+      sql`${table.eventType} IN ('mcp_auth_refused', 'renew_refused', 'run_refused', 'write_proposed', 'write_confirmed', 'write_rejected', 'write_executed', 'write_failed', 'write_refused', 'history_withheld', 'history_deleted')`
+    ),
+  ]
+);
+
+export type AssistantAuditEvent = typeof assistantAuditEvents.$inferSelect;

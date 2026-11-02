@@ -3,6 +3,7 @@ import {
   DEFAULT_RUN_MAX_SECONDS,
   isAssistantEnabled,
   readAssistantSecrets,
+  readRetentionDays,
   readRunMaxSeconds,
 } from "../../../assistant/config";
 import { startupConfigProblems } from "../../../startup/config";
@@ -106,5 +107,14 @@ describe("assistant config", () => {
       "ASSISTANT_AGENT_SECRET must be set when ASSISTANT_ENABLED=true.",
     ]);
     expect(startupConfigProblems({ ...GOOD, NODE_ENV: "development" })).toEqual([]);
+  });
+
+  it("validates the usage and audit retention periods, with their defaults", () => {
+    expect(readRetentionDays("ASSISTANT_USAGE_RETENTION_DAYS", {})).toBe(90);
+    expect(readRetentionDays("ASSISTANT_AUDIT_RETENTION_DAYS", {})).toBe(365);
+    expect(readRetentionDays("ASSISTANT_AUDIT_RETENTION_DAYS", { ASSISTANT_AUDIT_RETENTION_DAYS: "730" })).toBe(730);
+    expect(assistantConfigProblems({ ...GOOD, ASSISTANT_AUDIT_RETENTION_DAYS: "29" })).toEqual(["ASSISTANT_AUDIT_RETENTION_DAYS must be an integer from 30 to 3650."]);
+    expect(assistantConfigProblems({ ...GOOD, ASSISTANT_USAGE_RETENTION_DAYS: "0" })).toEqual(["ASSISTANT_USAGE_RETENTION_DAYS must be an integer from 1 to 365."]);
+    expect(assistantConfigProblems({ ...GOOD, ASSISTANT_USAGE_RETENTION_DAYS: "abc" })).toHaveLength(1);
   });
 });

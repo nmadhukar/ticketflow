@@ -89,6 +89,13 @@ export function assistantConfigProblems(env: NodeJS.ProcessEnv = process.env): s
     problems.push("ASSISTANT_INTERNAL_PORT must differ from PORT: the internal listener is never public.");
   }
 
+  for (const [name, range] of Object.entries(RETENTION_RANGES)) {
+    const raw = env[name]?.trim();
+    if (raw && (!/^\d+$/.test(raw) || Number(raw) < range.min || Number(raw) > range.max)) {
+      problems.push(`${name} must be an integer from ${range.min} to ${range.max}.`);
+    }
+  }
+
   const runMax = env.ASSISTANT_RUN_MAX_SECONDS?.trim();
   if (runMax) {
     const n = Number(runMax);
@@ -113,6 +120,20 @@ export function readAssistantSecrets(env: NodeJS.ProcessEnv = process.env): Assi
 export function readRunMaxSeconds(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env.ASSISTANT_RUN_MAX_SECONDS?.trim();
   return raw ? Number(raw) : DEFAULT_RUN_MAX_SECONDS;
+}
+
+/**
+ * How long assistant records are kept, in days. Usage analytics 90; the audit trail 365, never
+ * less than 30 (an organisation may need longer: confirm before production).
+ */
+export const RETENTION_RANGES = {
+  ASSISTANT_USAGE_RETENTION_DAYS: { min: 1, max: 365, default: 90 },
+  ASSISTANT_AUDIT_RETENTION_DAYS: { min: 30, max: 3650, default: 365 },
+} as const;
+
+export function readRetentionDays(name: keyof typeof RETENTION_RANGES, env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env[name]?.trim();
+  return raw ? Number(raw) : RETENTION_RANGES[name].default;
 }
 
 export const DEFAULT_INTERNAL_PORT = 5100;

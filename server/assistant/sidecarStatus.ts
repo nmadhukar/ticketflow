@@ -19,6 +19,9 @@ export interface SidecarHistory {
   /** Whether the sidecar's agent has memory, as last definitively reported; null if never. */
   memory: boolean | null;
   retentionDays: number | null;
+  /** The provider and each agent's model, as last reported (usage and cost are recorded against them). */
+  provider: string | null;
+  models: Record<string, string>;
 }
 
 export function createSidecarHistoryStatus(
@@ -30,6 +33,7 @@ export function createSidecarHistoryStatus(
   let cached: { until: number; value: SidecarHistory } | null = null;
   let pending: Promise<SidecarHistory> | null = null;
   let lastDefinitive: { memory: boolean; retentionDays: number | null } | null = null;
+  let lastModels: { provider: string | null; models: Record<string, string> } = { provider: null, models: {} };
 
   const settle = (state: HistoryState, retentionDays: number | null): SidecarHistory => {
     if (state !== "unknown") lastDefinitive = { memory: state === "on", retentionDays };
@@ -37,6 +41,7 @@ export function createSidecarHistoryStatus(
       state,
       memory: lastDefinitive?.memory ?? null,
       retentionDays: state === "on" ? retentionDays : null,
+      ...lastModels,
     };
     cached = { until: now() + (state === "unknown" ? (opts.unknownTtlMs ?? 10_000) : (opts.ttlMs ?? 60_000)), value };
     return value;
@@ -46,7 +51,16 @@ export function createSidecarHistoryStatus(
     try {
       // Longer than the sidecar's own checks (its MCP and store probes, 3 s each, in parallel).
       const res = await fetchImpl(new URL("/ready", agentUrl), { signal: AbortSignal.timeout(opts.timeoutMs ?? 5000) });
-      const body = (await res.json().catch(() => ({}))) as { checks?: { history?: unknown }; historyRetentionDays?: unknown };
+      const body = (await res.json().catch(() => ({}))) as {
+        checks?: { history?: unknown };
+        historyRetentionDays?: unknown;
+        provider?: unknown;
+        models?: unknown;
+      };
+      if (typeof body.provider === "string" && body.models && typeof body.models === "object") {
+        const models = Object.fromEntries(Object.entries(body.models).filter(([, v]) => typeof v === "string")) as Record<string, string>;
+        lastModels = { provider: body.provider, models };
+      }
       const history = body.checks?.history;
       const days = Number.isInteger(body.historyRetentionDays) ? (body.historyRetentionDays as number) : null;
       if (history === "ok") return settle("on", days);
