@@ -1,0 +1,23 @@
+
+# DeepSeek Harness profile patch. It registers TicketFlow's MCP endpoint as a tool
+# source, so the harness sees the ticket tools as mcp__ticketflow__<tool>.
+#
+# Merge it into the profile the harness runs, for example:
+#   dsh --profile headless --patch /opt/dsh/profile/cordis.patch.yml
+#
+# The bearer key is read from TICKETFLOW_MCP_KEY in the harness container's
+# environment; no key value belongs in this file. Issue one from an admin account
+# (Admin > Integrations > Developer resources, or POST /api/api-keys); every key
+# is already scoped to mcp:tickets by the server. See README.md in this folder.
+- insert:
+    - id: mcp-ticketflow
+      name: "@deepseek-ai/dsh-mcp-client"
+      config:
+        serverName: ticketflow
+        transport: streamable-http
+        # Same Docker network as the TicketFlow app: see attach-dsh-network.sh.
+        # A harness reaching an app running on the host instead uses
+        # http://host.docker.internal:5000/api/mcp.
+        url: http://app:5000/api/mcp
+        headers:
+          Authorization: !!js "`Bearer ${process.env.TICKETFLOW_MCP_KEY}`"

@@ -44,7 +44,7 @@ describe("inbound email: insert and done mark share one transaction (R46)", () =
     // The after-effects (AI, getUser, webhooks) run after SNS is answered; left running they would
     // still hold locks when the next test's TRUNCATE starts ("deadlock detected"). This file is
     // about the transaction, not the hooks (email.inbound.test.ts covers them).
-    jest.spyOn(createMod, "runTicketCreatedHooks").mockResolvedValue(undefined);
+    jest.spyOn(createMod, "runTicketCreatedHooks").mockImplementation(async (task) => task);
     jest.spyOn(console, "error").mockImplementation(() => undefined);
     jest.spyOn(console, "warn").mockImplementation(() => undefined);
   });

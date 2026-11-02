@@ -71,6 +71,8 @@ export const REQUIRED_TABLES: RequiredTable[] = [
       "daily_limit_usd",
       "monthly_limit_usd",
       "max_tokens_per_request",
+      // 0031 content-based routing.
+      "auto_routing_enabled",
     ],
   },
   // 0023 OpenRouter usage accounting: without these columns every model call fails after the

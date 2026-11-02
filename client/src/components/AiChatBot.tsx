@@ -51,6 +51,14 @@ export function AiChatBot() {
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [message, setMessage] = useState("");
+  // When the copilot is enabled it owns the assistant corner (CopilotAssistant publishes its
+  // config on this query key). The help chatbot stays mounted - its chat history is kept - but it
+  // does not draw a launcher while the copilot launcher is there, so the app shows exactly one
+  // assistant button.
+  const copilotConfig = useQuery<{ enabled?: boolean }>({
+    queryKey: ["/api/copilotkit", "config"],
+  });
+  const hidesLauncher = copilotConfig.data?.enabled === true;
   const MAX_MESSAGE_LENGTH = 2000;
   const [sessionId, setSessionId] = useState(() => {
     const existing =
@@ -347,7 +355,7 @@ export function AiChatBot() {
         </CardContent>
       )}
     </Card>
-  ) : (
+  ) : hidesLauncher ? null : (
     <Button
       onClick={toggleChat}
       className="fixed bottom-4 right-4 z-40 h-12 gap-2 rounded-full px-4 shadow-lg sm:bottom-6 sm:right-6"

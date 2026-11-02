@@ -33,6 +33,18 @@ export const anyValue = () =>
 export const idArg = (what: string) =>
   anyValue().describe(`${what} id: a positive integer, as a number or a string of digits such as "12"`);
 
+/**
+ * The `id` argument for a ticket tool. A ticket can be named the way the UI shows it
+ * (TKT-2026-0610) as well as by its database id, because an agent reads the ticket number
+ * off the page and a person reads it aloud, and neither has a raw id to hand. Still
+ * anyValue, so a bad value reaches the handler and comes back as a coded VALIDATION
+ * rather than a protocol error.
+ */
+export const ticketRefArg = () =>
+  anyValue().describe(
+    'Ticket id or number: digits such as "42", or the number shown in the UI such as "TKT-2026-0610"'
+  );
+
 export const MAX_INT = 2147483647;
 const ID_PATTERN = /^[1-9][0-9]{0,9}$/;
 

@@ -19,6 +19,33 @@ export function isOpenRouterConfigured(env: NodeJS.ProcessEnv = process.env): bo
 }
 
 /**
+ * Hindsight agent memory. The service's own coordinates are deployment configuration,
+ * so the switch lives here beside them rather than in the database: a database toggle would
+ * silently do nothing when no URL is set. OFF unless HINDSIGHT_ENABLED is exactly "true",
+ * the same shape as TEAMS_WEBHOOKS_ENABLED (R84).
+ */
+export interface HindsightConfig {
+  url: string;
+  /** Optional: a self-hosted instance may run without auth. Sent as a bearer token when set. */
+  apiKey?: string;
+  bankId: string;
+}
+
+export const DEFAULT_HINDSIGHT_URL = "http://localhost:8888";
+export const DEFAULT_HINDSIGHT_BANK_ID = "ticketflow";
+
+/** The Hindsight coordinates, or null while the feature is off or the URL is missing. */
+export function readHindsightConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): HindsightConfig | null {
+  if (env.HINDSIGHT_ENABLED !== "true") return null;
+  const url = (env.HINDSIGHT_URL?.trim() || DEFAULT_HINDSIGHT_URL).replace(/\/+$/, "");
+  const bankId = env.HINDSIGHT_BANK_ID?.trim() || DEFAULT_HINDSIGHT_BANK_ID;
+  const apiKey = env.HINDSIGHT_API_KEY?.trim() || undefined;
+  return { url, apiKey, bankId };
+}
+
+/**
  * R49: how many reverse proxies sit in front of the app (Express "trust proxy" as a hop count).
  * TRUST_PROXY_HOPS is an integer from 0 to 10; unset means 1 (nginx alone); 2 is Coolify/Traefik
  * in front of nginx; 0 trusts no proxy header at all (a Dockerfile-only deploy with nothing in

@@ -16,6 +16,33 @@ function tokenCount(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+/**
+ * Whether a failed status is likely the provider refusing the reasoning field rather than a real
+ * problem with the request: a validation rejection (400/422) is the shape that takes. The retry is
+ * a single extra attempt that drops the field, so a genuine bad request simply fails as before.
+ */
+function rejectsReasoningField(status: number): boolean {
+  return status === 400 || status === 422;
+}
+
+/**
+ * Tokens added to the retry's visible allowance when a model refuses the reasoning switch. Such a
+ * model reasons by default, and hidden reasoning is drawn from max_tokens, so a small structured
+ * cap (analyzeTicket asks for 500) could be spent thinking and the answer would come back cut off.
+ * The bump never takes the retry past the caller's per-request ceiling, which the caller has already
+ * had checked against the request and cost limits, so the larger retry is within budget.
+ */
+const REASONING_RETRY_HEADROOM_TOKENS = 1000;
+
+function reasoningRetryTokens(maxOutputTokens: number, ceiling: number | undefined): number {
+  // Without a usable ceiling the retry keeps the first attempt's allowance: a larger number here
+  // would be output nobody budgeted for. The caller (invokeBedrockModel) always passes one.
+  if (typeof ceiling !== "number" || !Number.isSafeInteger(ceiling) || ceiling <= 0) return maxOutputTokens;
+  const bumped = maxOutputTokens + REASONING_RETRY_HEADROOM_TOKENS;
+  // The original allowance is a floor: the retry never asks for less than the first attempt did.
+  return Math.min(bumped, Math.max(maxOutputTokens, ceiling));
+}
+
 export function createOpenRouterClient(options: {
   getModelId?: () => string | undefined | Promise<string | undefined>;
   getApiKey?: () => string | undefined;
@@ -36,25 +63,46 @@ export function createOpenRouterClient(options: {
       if (!request.operation.trim() || !request.messages.length || !Number.isSafeInteger(request.maxOutputTokens) || request.maxOutputTokens <= 0 || !Number.isFinite(request.temperature) || request.temperature < 0 || request.temperature > 2) {
         throw new AiModelError("invalid_output");
       }
-      let response: Response;
-      try {
-        response = await fetchImpl(CHAT_URL, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: requestedModel,
-            messages: request.messages,
-            max_tokens: request.maxOutputTokens,
-            temperature: request.temperature,
-            ...(request.responseSchema ? {
-              response_format: { type: "json_schema", json_schema: { name: "response", strict: true, schema: request.responseSchema } },
-            } : {}),
-          }),
-          signal: AbortSignal.timeout(30_000),
-        });
-      } catch (error) {
-        const name = record(error)?.name;
-        throw new AiModelError(name === "AbortError" || name === "TimeoutError" ? "timeout" : "provider_failure");
+      const requestBody = (includeReasoning: boolean, maxTokens: number) => JSON.stringify({
+        model: requestedModel,
+        messages: request.messages,
+        max_tokens: maxTokens,
+        temperature: request.temperature,
+        ...(request.responseSchema ? {
+          response_format: { type: "json_schema", json_schema: { name: "response", strict: true, schema: request.responseSchema } },
+        } : {}),
+        // A reasoning model spends max_tokens on hidden reasoning before it writes the answer, so a
+        // small structured output can come back empty or cut off. Callers that need parseable JSON
+        // set reasoning=false to turn that off.
+        ...(includeReasoning && request.reasoning !== undefined
+          ? { reasoning: { enabled: request.reasoning } }
+          : {}),
+      });
+
+      const send = async (includeReasoning: boolean, maxTokens: number): Promise<Response> => {
+        try {
+          return await fetchImpl(CHAT_URL, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+            body: requestBody(includeReasoning, maxTokens),
+            signal: AbortSignal.timeout(30_000),
+          });
+        } catch (error) {
+          const name = record(error)?.name;
+          throw new AiModelError(name === "AbortError" || name === "TimeoutError" ? "timeout" : "provider_failure");
+        }
+      };
+
+      let response = await send(true, request.maxOutputTokens);
+      // Not every model accepts the reasoning switch, and some providers reject the field outright,
+      // which fails the whole call. Retry once without it and let the model's own default apply,
+      // with headroom for the hidden reasoning that default turns on, rather than leave a
+      // structured call with an answer the reasoning tokens have eaten.
+      if (!response.ok && request.reasoning !== undefined && rejectsReasoningField(response.status)) {
+        response = await send(
+          false,
+          reasoningRetryTokens(request.maxOutputTokens, request.maxOutputTokensCeiling)
+        );
       }
       if (!response.ok) throw mapOpenRouterStatus(response.status);
       let body: Record<string, unknown> | null;
@@ -66,6 +114,13 @@ export function createOpenRouterClient(options: {
       const choices = body?.choices;
       const choice = Array.isArray(choices) ? record(choices[0]) : null;
       const message = record(choice?.message);
+      // "length" means the provider stopped at max_tokens. For a structured (JSON) call the
+      // visible text is a fragment that cannot be trusted, so it fails as unusable. A free-text
+      // call (the help chat, the connection test) sets no such flag: its answer is shorter than
+      // asked for, not broken, and throwing here made a working key look misconfigured.
+      if (request.requireCompleteOutput === true && choice?.finish_reason === "length") {
+        throw new AiModelError("invalid_output");
+      }
       if (typeof message?.content !== "string") throw new AiModelError("invalid_output");
       const text = message.content.trim();
       if (!text) throw new AiModelError("empty_output");

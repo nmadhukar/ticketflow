@@ -2,8 +2,8 @@ import express, { type Express } from "express";
 import { installRequestPipeline } from "../../../security/pipeline";
 import { registerRoutes } from "../../../routes/index";
 import { closeAuth } from "../../../services/auth";
-import { closeDb, resetDb } from "./testDb";
-import { recordJsonResponses } from "./noSecrets";
+import { closeDb, resetDb, trackBackgroundWork } from "./testDb";
+import { recordResponse } from "./noSecrets";
 import { installErrorHandling } from "../../../http/install";
 import { registerHealthRoutes } from "../../../http/health";
 
@@ -22,9 +22,25 @@ export async function createTestApp(): Promise<{
   // rate limit is not installed: production enables it only with NODE_ENV=production.
   installRequestPipeline(app, { bodyLimit: "50mb", sanitize: true });
 
-  // Test-only: record every JSON body so the integration-wide afterEach hook
-  // (helpers/secretsHook.ts) can fail on password/token fields in any response.
-  app.use(recordJsonResponses);
+  // Test-only, replacing recordJsonResponses (same recording, see noSecrets.ts) so that the work
+  // still running when the response is sent holds the resetDb barrier open. A create kicks off its
+  // AI hooks and the realtime learning path on chains that outlive the response; truncating then
+  // made the NEXT test fail with a foreign key or a deadlock (see testDb.ts).
+  app.use((req, res, next) => {
+    const realJson = res.json.bind(res);
+    res.json = ((body?: unknown) => {
+      recordResponse(`${req.method} ${req.originalUrl}`, body);
+      return realJson(body);
+    }) as typeof res.json;
+    next();
+  });
+  app.use((_req, _res, next) => {
+    // From here to the end of the request, anything the handler leaves running is tracked.
+    trackBackgroundWork(
+      new Promise<void>((resolve) => _res.once("close", resolve)),
+    );
+    next();
+  });
 
   // registerRoutes starts a daily cleanup setInterval that would keep Jest
   // alive; unref any timer created while the routes are being registered.
