@@ -9,6 +9,10 @@ import { logAssistantSecurityEvent } from "./securityLog";
 import { assistantWritesEnabled } from "./toolPolicy";
 import { ticketErrorToHttp } from "../services/tickets/ticketError";
 import type { AssistantRuns } from "./runAuth";
+import { LruMap, RunEndings, TrackedRunner, type RunnerLike } from "./runTracking";
+
+/** Per-user CopilotKit handlers kept in memory; the least recently used beyond this is dropped. */
+const MAX_CACHED_HANDLERS = 500;
 
 /**
  * The browser's only way to the assistant: /api/copilotkit, CopilotKit's AG-UI routes, proxied to
@@ -84,7 +88,12 @@ function deny(res: Response, status: number, code: string, message: string) {
   res.status(status).json({ error: code, message });
 }
 
-export type CopilotHandlerFactory = (userId: string, agentId: AssistantAgentId, env: NodeJS.ProcessEnv) => Promise<RequestHandler>;
+export type CopilotHandlerFactory = (
+  userId: string,
+  agentId: AssistantAgentId,
+  env: NodeJS.ProcessEnv,
+  endings: RunEndings,
+) => Promise<RequestHandler>;
 
 export interface BridgeDeps {
   runs: () => Promise<AssistantRuns<User>>;
@@ -102,7 +111,7 @@ function agentUrl(env: NodeJS.ProcessEnv): string {
 }
 
 /** Built on first use: the CopilotKit and Mastra client modules are large and unused while the assistant is off. */
-const createHandler: CopilotHandlerFactory = async (userId, agentId, env) => {
+const createHandler: CopilotHandlerFactory = async (userId, agentId, env, endings) => {
   const [{ CopilotRuntime, InMemoryAgentRunner }, { createCopilotExpressHandler }, { MastraAgent }, { MastraClient }] = await Promise.all([
     import("@copilotkit/runtime/v2"),
     import("@copilotkit/runtime/v2/express"),
@@ -110,9 +119,16 @@ const createHandler: CopilotHandlerFactory = async (userId, agentId, env) => {
     import("@mastra/client-js"),
   ]);
   process.env.COPILOTKIT_TELEMETRY_DISABLED ??= "true";
+  // One runner per user, so threads of different users never share a store; small, because one is
+  // held per active user (at most MAX_CACHED_HANDLERS). TrackedRunner ends each assistant run when
+  // its agent run ends (runTracking.ts).
+  const runner = new TrackedRunner(
+    new InMemoryAgentRunner({ maxThreads: 20, maxRunsPerThread: 20, maxBytes: 2 * 1024 * 1024 }) as unknown as RunnerLike,
+    endings,
+    userId,
+  );
   const runtime = new CopilotRuntime({
-    // One runner per user, so threads of different users never share a store.
-    runner: new InMemoryAgentRunner({ maxThreads: 50, maxRunsPerThread: 20, maxBytes: 8 * 1024 * 1024 }),
+    runner: runner as unknown as InstanceType<typeof InMemoryAgentRunner>,
     agents: ({ request }: { request: globalThis.Request }) => {
       const agentToken = request.headers.get(INTERNAL_AGENT_TOKEN);
       const mcpToken = request.headers.get(INTERNAL_MCP_TOKEN);
@@ -190,9 +206,10 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
     ? createCustomRateLimit({ windowMs: 15 * 60 * 1000, max: (req) => (assistantFor(req)?.agentId === "support-assistant" ? 30 : 60), message: "Too many assistant requests. Please wait a few minutes." })
     : (_req, _res, next) => next();
 
-  const handlers = new Map<string, Promise<RequestHandler>>();
-  const MAX_CACHED_HANDLERS = 500;
+  // Least recently used goes first, so an active conversation is never the one dropped.
+  const handlers = new LruMap<string, Promise<RequestHandler>>(MAX_CACHED_HANDLERS);
   const makeHandler = deps.createHandler ?? createHandler;
+  const endings = new RunEndings();
 
   app.use(COPILOT_BASE_PATH, async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -216,17 +233,25 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
 
       const proceed = async () => {
         if (classified.route === "run") {
-          const run = (await deps.runs()).start(found.user.id, found.agentId);
+          const runs = await deps.runs();
+          const run = runs.start(found.user.id, found.agentId);
           req.headers[INTERNAL_AGENT_TOKEN] = run.agentToken;
           req.headers[INTERNAL_MCP_TOKEN] = run.mcpToken;
-          // The run's tokens die with its response: a tool call after that is refused.
-          res.on("close", () => void deps.runs().then((runs) => runs.end(run.runId)));
+          const end = () => runs.end(run.runId);
+          const endingKey = RunEndings.key(found.user.id, req.body?.threadId, req.body?.runId);
+          if (endingKey) {
+            // The run's tokens end when its agent run ends (TrackedRunner), which may outlive this
+            // request; if the runner never takes the run over, they end with the request.
+            endings.expect(endingKey, end);
+            res.on("close", () => endings.release(endingKey));
+          } else {
+            res.on("close", end);
+          }
         }
         const key = `${found.user.id}:${found.agentId}`;
         let handler = handlers.get(key);
         if (!handler) {
-          if (handlers.size >= MAX_CACHED_HANDLERS) handlers.delete(handlers.keys().next().value!);
-          handler = makeHandler(found.user.id, found.agentId, env);
+          handler = makeHandler(found.user.id, found.agentId, env, endings);
           // A failed build is not kept: the next request tries again.
           handler.catch(() => handlers.delete(key));
           handlers.set(key, handler);

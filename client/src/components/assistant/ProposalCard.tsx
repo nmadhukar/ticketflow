@@ -84,7 +84,10 @@ export function ProposalCard({ proposal }: { proposal: ProposalView }) {
       if (status === 409) return setOutcome({ state: "done", message: "This was already handled." });
       if (status === 410) return setOutcome({ state: "done", message: "This proposal has expired. Ask the assistant again." });
       if (status === 401) return setOutcome({ state: "error", message: "Your session has expired. Sign in again." });
-      setOutcome({ state: "error", message: body?.message ?? "That did not work. Please try again." });
+      // 400: the text was refused and the proposal is still open, so it can be fixed and retried.
+      // Anything else (no access any more, an error) closed it on the server: say so, no retry.
+      if (status === 400) return setOutcome({ state: "error", message: body?.message ?? "Please check the text and try again." });
+      setOutcome({ state: "done", message: body?.message ?? "That could not be done. Ask the assistant again if you still need it." });
     } catch {
       setOutcome({ state: "error", message: "Could not reach TicketFlow. Please try again." });
     }
@@ -119,7 +122,11 @@ export function ProposalCard({ proposal }: { proposal: ProposalView }) {
         <p className="mt-2 text-muted-foreground" role="status">{outcome.message}</p>
       ) : (
         <div className="mt-2 flex items-center gap-2">
-          <Button size="sm" disabled={outcome.state === "busy" || !text.trim()} onClick={() => run("confirm")}>
+          <Button
+            size="sm"
+            disabled={outcome.state === "busy" || !text.trim() || (!isComment && !title.trim())}
+            onClick={() => run("confirm")}
+          >
             {isComment ? "Confirm and post" : "Confirm and create"}
           </Button>
           <Button size="sm" variant="ghost" disabled={outcome.state === "busy"} onClick={() => run("reject")}>

@@ -62,12 +62,28 @@ describe("ProposalCard", () => {
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("already handled"));
     unmount();
 
+    // 400: the text was refused, the proposal is still open, so the card stays usable.
+    mockFetch(400, { message: "A comment needs 1 to 10000 characters of text." });
+    const second = render(<ProposalCard proposal={comment} />);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and post" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("1 to 10000 characters"));
+    expect(screen.getByRole("button", { name: "Confirm and post" })).toBeEnabled();
+    second.unmount();
+
+    // 403: the server closed the proposal, so the card says so and offers no retry.
     mockFetch(403, { message: "You do not have access to this ticket" });
     render(<ProposalCard proposal={comment} />);
     fireEvent.click(screen.getByRole("button", { name: "Confirm and post" }));
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("You do not have access to this ticket"));
-    // A refusal leaves the card usable for another try.
-    expect(screen.getByRole("button", { name: "Confirm and post" })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("You do not have access to this ticket"));
+    expect(screen.queryByRole("button", { name: "Confirm and post" })).not.toBeInTheDocument();
+  });
+
+  it("cannot confirm a ticket without a title", () => {
+    render(<ProposalCard proposal={{ ...comment, action: "create_ticket", ticket: undefined, draft: { title: "VPN drops", description: "x" } }} />);
+    const confirm = screen.getByRole("button", { name: "Confirm and create" });
+    expect(confirm).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("Ticket title"), { target: { value: "   " } });
+    expect(confirm).toBeDisabled();
   });
 
   it("a ticket proposal shows its fields and reports the new ticket number", async () => {

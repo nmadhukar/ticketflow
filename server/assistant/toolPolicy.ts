@@ -33,8 +33,12 @@ export const ASSISTANT_PROPOSAL_TOOLS: Record<AssistantAgentId, readonly string[
   "ticket-assistant": ["propose_comment"],
 };
 
+/** Values that switch writes off. Any spelling of "off" an operator might reach for counts. */
+const OFF_VALUES = new Set(["false", "0", "off", "no", "disabled"]);
+
+/** On unless switched off: an emergency stop must not depend on the exact word typed. */
 export function assistantWritesEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.ASSISTANT_WRITES_ENABLED?.trim() !== "false";
+  return !OFF_VALUES.has(env.ASSISTANT_WRITES_ENABLED?.trim().toLowerCase() ?? "");
 }
 
 export const ASSISTANT_READ_TOOLS: Record<AssistantAgentId, readonly string[]> = {

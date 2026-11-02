@@ -105,20 +105,17 @@ app.use(requestLogger(log));
     const { pool } = await import("./storage/db");
     const { closeRealtime } = await import("./realtime/ws");
     const { closeAuth } = await import("./services/auth");
-    // The assistant's internal listener (nginx never proxies it); null unless ASSISTANT_ENABLED=true.
-    // Its listen error arrives after `shutdown` below exists, and stops the app the orderly way.
+    const { isAssistantEnabled } = await import("./assistant/config");
     const { startInternalServer } = await import("./assistant/internalServer");
-    const assistantServer = startInternalServer({
-      log,
-      onError: () => void shutdown("assistant listener error", { failed: true }),
-    });
-    // Expiry and retention of assistant-proposed writes (hourly, unref'd), with the assistant on.
-    if (assistantServer) (await import("./assistant/proposals")).startProposalCleanup(log);
+    // The assistant's internal listener (nginx never proxies it); null unless ASSISTANT_ENABLED=true.
+    // `shutdown` exists before the listener starts, so its listen error (a taken port) always has
+    // the orderly shutdown to go to.
+    let assistantServer: import("http").Server | null = null;
     const shutdown = createShutdown({
       server,
       closeRealtime,
-      closeAssistant: assistantServer
-        ? () => (assistantServer.listening ? closeHttpServer(assistantServer) : Promise.resolve())
+      closeAssistant: isAssistantEnabled()
+        ? () => (assistantServer?.listening ? closeHttpServer(assistantServer) : Promise.resolve())
         : undefined,
       closeAuth,
       closePool: () => pool.end(),
@@ -127,6 +124,12 @@ app.use(requestLogger(log));
     });
     process.once("SIGTERM", () => void shutdown("SIGTERM"));
     process.once("SIGINT", () => void shutdown("SIGINT"));
+    assistantServer = startInternalServer({
+      log,
+      onError: () => void shutdown("assistant listener error", { failed: true }),
+    });
+    // Expiry and retention of assistant-proposed writes (hourly, unref'd), with the assistant on.
+    if (assistantServer) (await import("./assistant/proposals")).startProposalCleanup(log);
   }
 
   server

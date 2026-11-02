@@ -48,13 +48,17 @@ async function ticketIdFrom(user: User, ref: unknown): Promise<number> {
   return toId(ref);
 }
 
+/** Lets a read tool's `id` be a ticket number too; any other value goes to the tool unchanged. */
 function withTicketNumbers(user: User, callback: ToolCallback): ToolCallback {
   return async (args, extra) => {
     const ref = args?.id;
     if (typeof ref !== "string" || !TICKET_NUMBER.test(ref.trim())) return callback(args, extra);
-    const id = await resolveTicketNumber(user, ref);
-    // Not visible to this user, or no such ticket: the same answer either way.
-    if (id === null) return toolError(new TicketError("NOT_FOUND", "Ticket not found"));
+    let id: number;
+    try {
+      id = await ticketIdFrom(user, ref);
+    } catch (error) {
+      return toolError(error);
+    }
     return callback({ ...args, id }, extra);
   };
 }

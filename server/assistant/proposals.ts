@@ -193,54 +193,98 @@ export async function rejectProposal(user: User, id: string): Promise<DecisionRe
  * the text on the card before confirming; it is validated like the original.
  */
 export async function confirmProposal(user: User, id: string, edits: unknown = undefined): Promise<DecisionResult> {
-  // Claim first, so a second confirm (double click, retry) finds nothing to claim.
+  const row = await loadOwn(user, id);
+  if (row.status !== "pending" || row.expiresAt <= new Date()) return explain(user, id);
+
+  const action = row.action as ProposalAction;
+  const original = (row.payload as Record<string, unknown>) ?? {};
+  const changed = edits && typeof edits === "object" ? (edits as Record<string, unknown>) : {};
+  const finalPayload: Record<string, unknown> =
+    action === "add_comment"
+      ? { content: typeof changed.content === "string" ? changed.content : original.content }
+      : { ...original, ...pickTicketFields(changed) };
+
+  // Validate BEFORE claiming: a rejected edit leaves the proposal pending, so the user can fix the
+  // text on the card and confirm again.
+  if (action === "add_comment") {
+    if (!commentBodySchema.safeParse({ content: finalPayload.content }).success) {
+      throw new TicketError("VALIDATION", "A comment needs 1 to 10000 characters of text.");
+    }
+  } else {
+    await prepareTicketCreate(user, finalPayload);
+  }
+
+  // Claim, so a second confirm (double click, retry) finds nothing to claim.
   const [claimed] = await db
     .update(assistantWriteProposals)
     .set({ status: "executing", decidedAt: new Date() })
     .where(pendingAndLive(user, id))
     .returning();
   if (!claimed) return explain(user, id);
-
-  const action = claimed.action as ProposalAction;
-  const original = (claimed.payload as Record<string, unknown>) ?? {};
-  const changed = edits && typeof edits === "object" ? (edits as Record<string, unknown>) : {};
   const audit = { userId: user.id, runId: claimed.runId, agentId: claimed.agentId };
+
+  let result: DecisionResult;
+  let resultRef: string;
   try {
-    let result: DecisionResult;
-    let finalPayload: Record<string, unknown>;
-    let resultRef: string;
     if (action === "add_comment") {
-      finalPayload = { content: typeof changed.content === "string" ? changed.content : original.content };
       const comment = await addComment(user, claimed.ticketId!, finalPayload.content);
       result = { status: "executed", action, commentId: comment.id };
       resultRef = `comment:${comment.id}`;
     } else {
-      finalPayload = { ...original, ...pickTicketFields(changed) };
       const ticket = await createTicket(user, finalPayload, { actionBaseUrl: publicBaseUrl() });
       result = { status: "executed", action, ticketNumber: ticket.ticketNumber };
       resultRef = ticket.ticketNumber;
     }
+  } catch (error) {
+    const failureCode = error instanceof TicketError ? error.code : "INTERNAL";
+    // A validation refusal (rules checked again by the service) leaves it decidable; anything else
+    // (no access any more, an internal error) is final.
+    await db
+      .update(assistantWriteProposals)
+      .set(failureCode === "VALIDATION" ? { status: "pending", decidedAt: null } : { status: "failed", failureCode })
+      .where(and(eq(assistantWriteProposals.id, id), eq(assistantWriteProposals.status, "executing")));
+    logAssistantSecurityEvent({ event: "write_failed", reason: `${action}:${failureCode}`, ...audit });
+    throw error;
+  }
+
+  // The write happened. From here the user is told so whatever the bookkeeping does: a failure to
+  // record it must never turn a posted comment into a reported error (cleanUpProposals settles a
+  // row left "executing").
+  try {
     await db
       .update(assistantWriteProposals)
       .set({ status: "executed", resultRef, payload: finalPayload, payloadSha256: sha256({ action, ticketId: claimed.ticketId, payload: finalPayload }) })
       .where(eq(assistantWriteProposals.id, id));
-    const edited = !sameContent(finalPayload, original);
-    logAssistantSecurityEvent({ event: "write_executed", reason: edited ? `${action}:edited` : action, ...audit });
-    return result;
   } catch (error) {
-    const failureCode = error instanceof TicketError ? error.code : "INTERNAL";
-    await db.update(assistantWriteProposals).set({ status: "failed", failureCode }).where(eq(assistantWriteProposals.id, id));
-    logAssistantSecurityEvent({ event: "write_failed", reason: `${action}:${failureCode}`, ...audit });
-    throw error;
+    console.error(`assistant proposal ${id}: written, but its status was not saved [${error instanceof Error ? error.name : "error"}]`);
   }
+  const edited = !sameContent(finalPayload, original);
+  logAssistantSecurityEvent({ event: "write_executed", reason: edited ? `${action}:edited` : action, ...audit });
+  return result;
 }
 
+/** A proposal "executing" for longer than this was interrupted (a crash between claim and outcome). */
+export const INTERRUPTED_AFTER_MINUTES = 10;
+
 /**
- * Retention: pending proposals past their expiry become expired; proposed text is cleared 7 days
- * after a proposal is decided or expired; rows are deleted after 90 days. Returns what it changed.
+ * Retention: pending proposals past their expiry become expired; one left "executing" (the process
+ * stopped between the claim and the outcome) becomes failed, INTERRUPTED; proposed text is cleared
+ * 7 days after a proposal is decided or expired; rows are deleted after 90 days.
  */
-export async function cleanUpProposals(now = new Date()): Promise<{ expired: number; cleared: number; deleted: number }> {
+export async function cleanUpProposals(
+  now = new Date(),
+): Promise<{ expired: number; interrupted: number; cleared: number; deleted: number }> {
   const day = 24 * 60 * 60 * 1000;
+  const interrupted = await db
+    .update(assistantWriteProposals)
+    .set({ status: "failed", failureCode: "INTERRUPTED" })
+    .where(
+      and(
+        eq(assistantWriteProposals.status, "executing"),
+        lt(assistantWriteProposals.decidedAt, new Date(now.getTime() - INTERRUPTED_AFTER_MINUTES * 60_000)),
+      ),
+    )
+    .returning({ id: assistantWriteProposals.id });
   const expired = await db
     .update(assistantWriteProposals)
     .set({ status: "expired" })
@@ -261,14 +305,18 @@ export async function cleanUpProposals(now = new Date()): Promise<{ expired: num
     .delete(assistantWriteProposals)
     .where(lt(assistantWriteProposals.createdAt, new Date(now.getTime() - 90 * day)))
     .returning({ id: assistantWriteProposals.id });
-  return { expired: expired.length, cleared: cleared.length, deleted: deleted.length };
+  return { expired: expired.length, interrupted: interrupted.length, cleared: cleared.length, deleted: deleted.length };
 }
 
 /** Hourly, unref'd (as tickets/autoClose.ts), once the assistant is enabled. */
 export function startProposalCleanup(log: (line: string) => void = console.log): NodeJS.Timeout {
   const run = () =>
     cleanUpProposals()
-      .then((r) => (r.expired || r.cleared || r.deleted) && log(`assistant proposals: ${r.expired} expired, ${r.cleared} cleared, ${r.deleted} deleted`))
+      .then(
+        (r) =>
+          (r.expired || r.interrupted || r.cleared || r.deleted) &&
+          log(`assistant proposals: ${r.expired} expired, ${r.interrupted} interrupted, ${r.cleared} cleared, ${r.deleted} deleted`),
+      )
       .catch((error) => console.error(`assistant proposal cleanup failed [${error instanceof Error ? error.name : "error"}]`));
   void run();
   const timer = setInterval(run, 60 * 60 * 1000);

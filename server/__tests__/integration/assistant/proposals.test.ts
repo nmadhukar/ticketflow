@@ -153,17 +153,27 @@ describe("assistant proposals", () => {
     expect(await comments()).toHaveLength(1);
   });
 
-  it("the user can edit the text on the card before confirming; the edit is validated", async () => {
+  it("a refused edit leaves the proposal open, and the corrected edit then goes through", async () => {
     const id = await proposeAsA();
     const agent = await loginAs(ctx.app, A);
-    const bad = await agent.post(`/api/assistant/proposals/${id}/confirm`).set("Origin", ORIGIN).send({ edits: { content: "" } });
+    const bad = await agent.post(`/api/assistant/proposals/${id}/confirm`).set("Origin", ORIGIN).send({ edits: { content: "   " } });
     expect(bad.status).toBe(400);
-    expect(await proposal(id)).toMatchObject({ status: "failed", failureCode: "VALIDATION" });
+    expect(await proposal(id)).toMatchObject({ status: "pending", decidedAt: null });
+    expect(await comments()).toEqual([]);
 
-    const id2 = await proposeAsA("Second draft");
-    const ok = await agent.post(`/api/assistant/proposals/${id2}/confirm`).set("Origin", ORIGIN).send({ edits: { content: "My own words" } });
+    const ok = await agent.post(`/api/assistant/proposals/${id}/confirm`).set("Origin", ORIGIN).send({ edits: { content: "My own words" } });
     expect(ok.status).toBe(200);
     expect((await comments()).map((c) => c.content)).toEqual(["My own words"]);
+    expect(await proposal(id)).toMatchObject({ status: "executed", payload: { content: "My own words" } });
+  });
+
+  it("a ticket proposal with its title cleared is refused and stays open", async () => {
+    const run = runs.start(A.id, "support-assistant");
+    const proposed = await callTool(run.mcpToken, "propose_ticket", { title: "Scanner offline", description: "Since 9am", category: "support" });
+    const a = await loginAs(ctx.app, A);
+    const res = await a.post(`/api/assistant/proposals/${proposed.data.proposalId}/confirm`).set("Origin", ORIGIN).send({ edits: { title: "" } });
+    expect(res.status).toBe(400);
+    expect(await proposal(proposed.data.proposalId)).toMatchObject({ status: "pending" });
   });
 
   it("only the proposal's owner can decide it, from this site, while it is live", async () => {
@@ -240,13 +250,24 @@ describe("assistant proposals", () => {
   it("retention: expires pending, clears text after 7 days, deletes after 90", async () => {
     const day = 24 * 60 * 60 * 1000;
     const now = Date.now();
-    const [stale, decided, ancient] = [await proposeAsA("a"), await proposeAsA("b"), await proposeAsA("c")];
+    const [stale, decided, ancient, stuck, busy] = [
+      await proposeAsA("a"),
+      await proposeAsA("b"),
+      await proposeAsA("c"),
+      await proposeAsA("d"),
+      await proposeAsA("e"),
+    ];
     await db.update(assistantWriteProposals).set({ expiresAt: new Date(now - 1000) }).where(eq(assistantWriteProposals.id, stale));
     await db.update(assistantWriteProposals).set({ status: "rejected", decidedAt: new Date(now - 8 * day) }).where(eq(assistantWriteProposals.id, decided));
     await db.update(assistantWriteProposals).set({ createdAt: new Date(now - 91 * day) }).where(eq(assistantWriteProposals.id, ancient));
-    expect(await cleanUpProposals(new Date(now))).toEqual({ expired: 1, cleared: 1, deleted: 1 });
+    // Left "executing" by a crash 11 minutes ago, and one claimed a moment ago (still running).
+    await db.update(assistantWriteProposals).set({ status: "executing", decidedAt: new Date(now - 11 * 60_000) }).where(eq(assistantWriteProposals.id, stuck));
+    await db.update(assistantWriteProposals).set({ status: "executing", decidedAt: new Date(now - 60_000) }).where(eq(assistantWriteProposals.id, busy));
+    expect(await cleanUpProposals(new Date(now))).toEqual({ expired: 1, interrupted: 1, cleared: 1, deleted: 1 });
     expect(await proposal(stale)).toMatchObject({ status: "expired" });
     expect(await proposal(decided)).toMatchObject({ status: "rejected", payload: null });
     expect(await proposal(ancient)).toBeUndefined();
+    expect(await proposal(stuck)).toMatchObject({ status: "failed", failureCode: "INTERRUPTED" });
+    expect(await proposal(busy)).toMatchObject({ status: "executing" });
   });
 });

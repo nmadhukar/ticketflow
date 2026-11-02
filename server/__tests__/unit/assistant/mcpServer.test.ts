@@ -10,6 +10,7 @@ jest.mock("../../../services/documents/documentWrites", () => ({}));
 
 import type { AssistantAgentId } from "@shared/assistant";
 import { ASSISTANT_MCP_INSTRUCTIONS, createAssistantMcpServer } from "../../../assistant/mcpServer";
+import { assistantWritesEnabled } from "../../../assistant/toolPolicy";
 import { createMcpServer, MCP_INSTRUCTIONS } from "../../../mcp/server";
 
 async function listFor(server: ReturnType<typeof createMcpServer>) {
@@ -84,6 +85,15 @@ describe("assistant MCP surface", () => {
 
     const off = await listFor(createAssistantMcpServer({ id: "c", role: "customer" } as never, "support-assistant", undefined, run, { ASSISTANT_WRITES_ENABLED: "false" }));
     expect(proposals(off.tools)).toEqual([]);
+  });
+
+  it("treats any usual spelling of off as off for ASSISTANT_WRITES_ENABLED, and anything else as on", () => {
+    for (const off of ["false", "FALSE", " False ", "0", "off", "OFF", "no", "disabled"]) {
+      expect(assistantWritesEnabled({ ASSISTANT_WRITES_ENABLED: off })).toBe(false);
+    }
+    for (const on of [undefined, "", "true", "1", "yes"]) {
+      expect(assistantWritesEnabled({ ASSISTANT_WRITES_ENABLED: on })).toBe(true);
+    }
   });
 
   it("cannot call a tool it does not list", async () => {
