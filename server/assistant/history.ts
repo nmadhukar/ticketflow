@@ -1,12 +1,12 @@
 import type { User } from "@shared/schema";
 import type { AssistantRuns } from "./runAuth";
-import { resolveTicketNumber } from "./ticketRef";
+import { visibleTicketNumbers } from "./ticketRef";
 
 /**
  * A staff member's saved assistant conversations, read from the sidecar's memory as that user.
  *
- * Each call opens a short run (so the sidecar receives this user's tokens, and its auth scopes
- * memory to user:<id>), calls one memory route, and ends the run. Thread ids are prefixed with the
+ * Each request opens one short run (so the sidecar receives this user's tokens, and its auth scopes
+ * memory to user:<id>), makes its memory calls, and ends the run. Thread ids are prefixed with the
  * user's id before they reach Mastra (bridge.ts), so a request can only name its own threads; the
  * prefix never leaves the server.
  *
@@ -49,41 +49,55 @@ export interface HistoryDeps {
   runs: () => Promise<AssistantRuns<User>>;
   agentUrl: string;
   fetch?: typeof fetch;
-  resolveTicket?: (user: User, number: string) => Promise<number | null>;
+  /** Which of these ticket numbers the user can see now (ticketRef.ts in production). */
+  visibleTickets?: (user: User, numbers: string[]) => Promise<Set<string>>;
 }
 
 export class HistoryError extends Error {
   constructor(
     public readonly status: number,
-    public readonly code: string,
+    public readonly code: "not_found" | "history_unavailable",
   ) {
     super(code);
   }
 }
 
-/** Calls one memory route of the staff agent as `user`, inside a run that ends right after. */
-async function asUser<T>(deps: HistoryDeps, user: User, path: string, init: RequestInit = {}): Promise<T | null> {
+type MemoryCall = <T>(path: string, init?: RequestInit) => Promise<T | null>;
+
+/**
+ * Runs `work` with memory calls made as `user`, inside ONE run that ends when it is done. A call
+ * returns null for 404 (no such thread for this user). Any other refusal (403 from the sidecar's
+ * auth, a 5xx) is a fault, not an absence, and is reported as unavailable: a misconfiguration must
+ * not look like "no saved conversations".
+ */
+async function asUser<R>(deps: HistoryDeps, user: User, work: (call: MemoryCall) => Promise<R>): Promise<R> {
   const runs = await deps.runs();
   const run = runs.start(user.id, STAFF_AGENT);
-  try {
+  const call: MemoryCall = async <T>(path: string, init: RequestInit = {}) => {
     const url = new URL(path, deps.agentUrl);
     url.searchParams.set("agentId", STAFF_AGENT);
-    const res = await (deps.fetch ?? fetch)(url, {
-      ...init,
-      headers: { Authorization: `Bearer ${run.agentToken}`, "X-TicketFlow-MCP-Session": run.mcpToken, Accept: "application/json" },
-      signal: AbortSignal.timeout(10_000),
-    });
-    // The sidecar refuses another user's thread (403) and reports a missing one (404): both are
-    // "not found" here, so neither reveals the other.
-    if (res.status === 404 || res.status === 403) {
+    let res: Response;
+    try {
+      res = await (deps.fetch ?? fetch)(url, {
+        ...init,
+        headers: { Authorization: `Bearer ${run.agentToken}`, "X-TicketFlow-MCP-Session": run.mcpToken, Accept: "application/json" },
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch {
+      throw new HistoryError(503, "history_unavailable");
+    }
+    if (res.status === 404) {
       await res.body?.cancel();
       return null;
     }
     if (!res.ok) {
       await res.body?.cancel();
-      throw new HistoryError(502, "history_unavailable");
+      throw new HistoryError(503, "history_unavailable");
     }
     return res.status === 204 ? ({} as T) : ((await res.json()) as T);
+  };
+  try {
+    return await work(call);
   } finally {
     runs.end(run.runId);
   }
@@ -97,10 +111,10 @@ export interface HistoryThread {
 }
 
 export async function listHistory(deps: HistoryDeps, user: User): Promise<HistoryThread[]> {
-  const body = await asUser<{ threads?: Array<{ id: string; title?: string | null; createdAt: string; updatedAt: string }> }>(
-    deps,
-    user,
-    `/api/memory/threads?perPage=50&page=0&orderBy=${encodeURIComponent(JSON.stringify({ field: "updatedAt", direction: "DESC" }))}`,
+  const body = await asUser(deps, user, (call) =>
+    call<{ threads?: Array<{ id: string; title?: string | null; createdAt: string; updatedAt: string }> }>(
+      `/api/memory/threads?perPage=50&page=0&orderBy=${encodeURIComponent(JSON.stringify({ field: "updatedAt", direction: "DESC" }))}`,
+    ),
   );
   return (body?.threads ?? [])
     .map((t) => ({ t, threadId: clientThreadId(user.id, t.id) }))
@@ -138,26 +152,28 @@ function textOf(message: StoredMessage): string {
 
 export async function getHistory(deps: HistoryDeps, user: User, threadId: string): Promise<HistoryConversation> {
   const id = encodeURIComponent(mastraThreadId(user.id, threadId));
-  const stored: StoredMessage[] = [];
-  for (let page = 0; stored.length < MAX_MESSAGES; page++) {
-    const body = await asUser<{ messages?: StoredMessage[]; hasMore?: boolean }>(
-      deps,
-      user,
-      `/api/memory/threads/${id}/messages?perPage=${MESSAGE_PAGE}&page=${page}&orderBy=${encodeURIComponent(JSON.stringify({ field: "createdAt", direction: "ASC" }))}`,
-    );
-    if (!body) {
-      if (page === 0) throw new HistoryError(404, "not_found");
-      break;
+  const order = encodeURIComponent(JSON.stringify({ field: "createdAt", direction: "ASC" }));
+  const stored = await asUser(deps, user, async (call) => {
+    const messages: StoredMessage[] = [];
+    for (let page = 0; messages.length < MAX_MESSAGES; page++) {
+      const body = await call<{ messages?: StoredMessage[]; hasMore?: boolean }>(
+        `/api/memory/threads/${id}/messages?perPage=${MESSAGE_PAGE}&page=${page}&orderBy=${order}`,
+      );
+      if (!body) {
+        if (page === 0) throw new HistoryError(404, "not_found");
+        break;
+      }
+      messages.push(...(body.messages ?? []));
+      if (!body.hasMore || !body.messages?.length) break;
     }
-    stored.push(...(body.messages ?? []));
-    if (!body.hasMore || !body.messages?.length) break;
-  }
+    return messages;
+  });
 
-  // Shown only if every ticket it mentions is still visible to this user.
-  const resolve = deps.resolveTicket ?? resolveTicketNumber;
-  for (const number of ticketNumbersIn(stored)) {
-    if ((await resolve(user, number)) === null) return { available: false, reason: "access_changed" };
-  }
+  // Shown only if every ticket it mentions is still visible to this user (one query for all).
+  const mentioned = ticketNumbersIn(stored);
+  const visible = await (deps.visibleTickets ?? visibleTicketNumbers)(user, mentioned);
+  if (mentioned.some((n) => !visible.has(n))) return { available: false, reason: "access_changed" };
+
   const messages = stored
     .filter((m): m is StoredMessage & { role: "user" | "assistant" } => m.role === "user" || m.role === "assistant")
     .map((m) => ({ role: m.role, text: textOf(m), createdAt: m.createdAt }))
@@ -166,6 +182,8 @@ export async function getHistory(deps: HistoryDeps, user: User, threadId: string
 }
 
 export async function deleteHistory(deps: HistoryDeps, user: User, threadId: string): Promise<void> {
-  const done = await asUser<unknown>(deps, user, `/api/memory/threads/${encodeURIComponent(mastraThreadId(user.id, threadId))}`, { method: "DELETE" });
+  const done = await asUser(deps, user, (call) =>
+    call<unknown>(`/api/memory/threads/${encodeURIComponent(mastraThreadId(user.id, threadId))}`, { method: "DELETE" }),
+  );
   if (done === null) throw new HistoryError(404, "not_found");
 }

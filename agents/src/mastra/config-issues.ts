@@ -97,8 +97,10 @@ function historyIssues(env: NodeJS.ProcessEnv): AgentsConfigIssue[] {
   if (raw && (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 365)) {
     issues.push({ setting: 'ASSISTANT_HISTORY_RETENTION_DAYS', message: 'ASSISTANT_HISTORY_RETENTION_DAYS must be an integer from 1 to 365.' });
   }
-  if (!staffHistoryEnabled(env)) return issues;
   const value = readStorageUrl(env);
+  // Checked whenever it is set (the store and its retention run then, history on or off), and
+  // required while history is on.
+  if (!value && !staffHistoryEnabled(env)) return issues;
   let url: URL | null = null;
   try {
     url = value ? new URL(value) : null;
@@ -108,7 +110,7 @@ function historyIssues(env: NodeJS.ProcessEnv): AgentsConfigIssue[] {
   if (!url || !['postgres:', 'postgresql:'].includes(url.protocol) || !url.username || !url.password) {
     issues.push({
       setting: 'MASTRA_DATABASE_URL',
-      message: "MASTRA_DATABASE_URL must be the assistant role's postgres:// URL (user and password) when ASSISTANT_STAFF_HISTORY=true.",
+      message: "MASTRA_DATABASE_URL must be the assistant role's postgres:// URL, with user and password (required when ASSISTANT_STAFF_HISTORY=true).",
     });
   }
   return issues;

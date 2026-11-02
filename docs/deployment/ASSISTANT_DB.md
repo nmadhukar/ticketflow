@@ -14,7 +14,8 @@ withholds one from a user who has since lost access to a ticket it mentions.
 
 ## Switch it on
 
-1. Choose a password of at least 24 characters, without spaces, quotes or backslashes:
+1. Choose a password of at least 24 characters, using only letters, digits and `. _ ~ -` (it goes
+   into a URL as-is):
    `openssl rand -base64 32 | tr -d '/+='`
 2. Create the role and schema, as the database owner. In Docker Compose the app container has the
    owner's `DATABASE_URL`:
@@ -41,8 +42,13 @@ withholds one from a user who has since lost access to a ticket it mentions.
 
 ## Switch it off
 
-Set `ASSISTANT_STAFF_HISTORY=false` and restart. Nothing is deleted; saved conversations are simply
-not used or shown. To delete them all, see Remove.
+Set `ASSISTANT_STAFF_HISTORY=false` and restart. Saved conversations are no longer used or shown,
+and nothing is deleted at once. Keep `MASTRA_DATABASE_URL` set: the agents service then goes on
+deleting each conversation at the end of its retention period. To delete them all now, see Remove.
+
+The app uses saved conversations only while the agents service reports them working (its `/ready`
+says `history: "ok"`), so a mismatch between the two services' settings turns history off rather
+than making the assistant forget the conversation on every turn.
 
 ## Back up and restore
 

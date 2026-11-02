@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { tasks, type User } from "@shared/schema";
 
 /**
@@ -19,4 +19,16 @@ export async function resolveTicketNumber(user: User, value: string): Promise<nu
     .where(and(eq(tasks.ticketNumber, value.trim().toUpperCase()), ticketVisibilityWhere(user)))
     .limit(1);
   return row?.id ?? null;
+}
+
+/** Which of these ticket numbers this user can see now: one query, whatever the count. */
+export async function visibleTicketNumbers(user: User, numbers: string[]): Promise<Set<string>> {
+  const wanted = Array.from(new Set(numbers.map((n) => n.trim().toUpperCase())));
+  if (wanted.length === 0) return new Set();
+  const [{ db }, { ticketVisibilityWhere }] = await Promise.all([import("../storage/db"), import("../permissions/ticketAccess")]);
+  const rows = await db
+    .select({ ticketNumber: tasks.ticketNumber })
+    .from(tasks)
+    .where(and(inArray(tasks.ticketNumber, wanted), ticketVisibilityWhere(user)));
+  return new Set(rows.map((r) => r.ticketNumber));
 }

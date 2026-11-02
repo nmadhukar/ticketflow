@@ -16,11 +16,18 @@ import { readStorageUrl, staffHistoryEnabled, STORAGE_SCHEMA } from './config.ts
  * (retention.ts), and the app hides a saved conversation from a user who has since lost access to
  * a ticket it mentions.
  *
- * Off (no storage, no memory) unless ASSISTANT_STAFF_HISTORY=true.
+ * The store exists whenever MASTRA_DATABASE_URL is set, so retention keeps deleting old
+ * conversations even after ASSISTANT_STAFF_HISTORY is switched off; that switch decides only
+ * whether the agent uses memory.
  */
+
+/** Below the role's CONNECTION LIMIT 10, leaving room for a second container during a redeploy. */
+export const STORAGE_POOL_MAX = 4;
+
 export function createStorage(env: NodeJS.ProcessEnv = process.env): PostgresStore | undefined {
-  if (!staffHistoryEnabled(env)) return undefined;
-  return new PostgresStore({ id: 'ticketflow-assistant', connectionString: readStorageUrl(env), schemaName: STORAGE_SCHEMA });
+  const url = readStorageUrl(env);
+  if (!url) return undefined;
+  return new PostgresStore({ id: 'ticketflow-assistant', connectionString: url, schemaName: STORAGE_SCHEMA, max: STORAGE_POOL_MAX });
 }
 
 export function createStaffMemory(store: PostgresStore | undefined): Memory | undefined {
@@ -34,4 +41,7 @@ export function createStaffMemory(store: PostgresStore | undefined): Memory | un
 }
 
 export const storage = createStorage();
-export const staffMemory = createStaffMemory(storage);
+/** Every saved conversation, for retention: present whenever the store is. */
+export const conversationStore = createStaffMemory(storage);
+/** The agent's memory: only while staff history is switched on. */
+export const staffMemory = staffHistoryEnabled() ? conversationStore : undefined;

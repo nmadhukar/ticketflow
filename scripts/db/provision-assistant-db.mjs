@@ -28,7 +28,11 @@ export function readOptions(env = process.env) {
   if (!adminUrl) problems.push("DATABASE_URL (the database owner's connection) is required.");
   if (!IDENT.test(user)) problems.push("MASTRA_DB_USER must be a lowercase identifier (letters, digits, underscore).");
   if (password.length < MIN_PASSWORD_LENGTH) problems.push(`MASTRA_DB_PASSWORD must be at least ${MIN_PASSWORD_LENGTH} characters.`);
-  if (/[\s'"\\]/.test(password)) problems.push("MASTRA_DB_PASSWORD must not contain spaces, quotes or backslashes (it goes into a connection URL).");
+  // URL-safe only: the password is written as-is into MASTRA_DATABASE_URL, where @ : / # ? % would
+  // change what the URL means (and verify() below could not notice, as it builds its URL encoded).
+  if (!/^[A-Za-z0-9._~-]+$/.test(password)) {
+    problems.push("MASTRA_DB_PASSWORD may contain only letters, digits and . _ ~ - (it goes into MASTRA_DATABASE_URL as-is).");
+  }
   return { problems, adminUrl, user, password };
 }
 

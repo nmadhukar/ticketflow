@@ -16,6 +16,7 @@ interface Availability {
   enabled: boolean;
   agentId: AssistantAgentId | null;
   history?: boolean;
+  historyRetentionDays?: number | null;
 }
 
 const AssistantPanel = lazy(() => import("./AssistantPanel"));
@@ -67,7 +68,7 @@ export function AssistantShell() {
           </div>
           {showHistory && (
             <div className="min-h-0 flex-1">
-              <HistoryPanel />
+              <HistoryPanel retentionDays={data.historyRetentionDays} />
             </div>
           )}
         </div>

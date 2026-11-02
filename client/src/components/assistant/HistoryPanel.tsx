@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 /**
  * A staff member's saved assistant conversations (GET/DELETE /api/assistant/history): a list, a
  * read-only transcript, and Delete. A conversation that mentions a ticket the user can no longer
- * see is withheld by the server and shown as such. Kept 30 days.
+ * see is withheld by the server and shown as such. How long they are kept comes from the server
+ * (availability's historyRetentionDays).
  */
 interface Thread {
   threadId: string;
@@ -23,14 +24,30 @@ const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyl
 function Transcript({ threadId, onBack }: { threadId: string; onBack: () => void }) {
   const client = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  const { data, isLoading, isError } = useQuery<Conversation>({ queryKey: ["/api/assistant/history", threadId], staleTime: 0 });
+  const [deleting, setDeleting] = useState(false);
+  const threadKey = ["/api/assistant/history", threadId];
+  const { data, isLoading, isError } = useQuery<Conversation>({ queryKey: threadKey, staleTime: 0 });
 
   const remove = async () => {
+    if (deleting) return;
     setError(null);
-    const res = await fetch(`/api/assistant/history/${encodeURIComponent(threadId)}`, { method: "DELETE", credentials: "include" });
-    if (!res.ok && res.status !== 404) return setError("Could not delete it. Please try again.");
-    await client.invalidateQueries({ queryKey: LIST_KEY });
-    onBack();
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/assistant/history/${encodeURIComponent(threadId)}`, { method: "DELETE", credentials: "include" });
+      // 404: already gone, which is what was asked.
+      if (!res.ok && res.status !== 404) {
+        setError("Could not delete it. Please try again.");
+        return;
+      }
+      // Drop this conversation's cache first: refreshing it would ask for what was just deleted.
+      client.removeQueries({ queryKey: threadKey, exact: true });
+      await client.invalidateQueries({ queryKey: LIST_KEY, exact: true });
+      onBack();
+    } catch {
+      setError("Could not reach TicketFlow. Please try again.");
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -39,7 +56,7 @@ function Transcript({ threadId, onBack }: { threadId: string; onBack: () => void
         <Button variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft className="mr-1 h-4 w-4" /> Back
         </Button>
-        <Button variant="ghost" size="sm" aria-label="Delete this conversation" onClick={remove}>
+        <Button variant="ghost" size="sm" aria-label="Delete this conversation" disabled={deleting} onClick={remove}>
           <Trash2 className="h-4 w-4" />
         </Button>
       </div>
@@ -62,7 +79,7 @@ function Transcript({ threadId, onBack }: { threadId: string; onBack: () => void
   );
 }
 
-export function HistoryPanel() {
+export function HistoryPanel({ retentionDays }: { retentionDays?: number | null }) {
   const [open, setOpen] = useState<string | null>(null);
   const { data, isLoading, isError } = useQuery<{ threads: Thread[] }>({ queryKey: LIST_KEY, staleTime: 0 });
   if (open) return <Transcript threadId={open} onBack={() => setOpen(null)} />;
@@ -70,7 +87,7 @@ export function HistoryPanel() {
     <div className="h-full overflow-y-auto p-2 text-sm">
       {isLoading && <p className="p-2 text-muted-foreground">Loading…</p>}
       {isError && <p className="p-2 text-destructive">Saved conversations are unavailable right now.</p>}
-      {data && data.threads.length === 0 && <p className="p-2 text-muted-foreground">No saved conversations. They are kept for 30 days.</p>}
+      {data && data.threads.length === 0 && <p className="p-2 text-muted-foreground">No saved conversations.{retentionDays ? ` They are kept for ${retentionDays} days.` : ""}</p>}
       <ul>
         {data?.threads.map((t) => (
           <li key={t.threadId}>

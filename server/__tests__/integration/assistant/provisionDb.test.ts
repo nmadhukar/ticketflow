@@ -55,6 +55,11 @@ describe("assistant database provisioning", () => {
     await expect(run(process.execPath, [SCRIPT], { env: env({ MASTRA_DB_PASSWORD: "short" }) })).rejects.toMatchObject({
       stderr: expect.stringMatching(/at least 24 characters/),
     });
+    for (const bad of ["Has@AtSign-0123456789abcdefgh", "Has#Hash-0123456789abcdefghi", "Has/Slash-0123456789abcdefg", "Has:Colon-0123456789abcdefg"]) {
+      await expect(run(process.execPath, [SCRIPT], { env: env({ MASTRA_DB_PASSWORD: bad }) })).rejects.toMatchObject({
+        stderr: expect.stringMatching(/only letters, digits/),
+      });
+    }
     await expect(run(process.execPath, [SCRIPT], { env: env({ MASTRA_DB_USER: "x; drop role y" }) })).rejects.toMatchObject({
       stderr: expect.stringMatching(/lowercase identifier/),
     });

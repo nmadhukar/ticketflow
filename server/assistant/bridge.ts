@@ -10,6 +10,7 @@ import { assistantWritesEnabled } from "./toolPolicy";
 import { ticketErrorToHttp } from "../services/tickets/ticketError";
 import type { AssistantRuns } from "./runAuth";
 import { LruMap, RunEndings, TrackedRunner, type RunnerLike } from "./runTracking";
+import { createSidecarHistoryStatus, type SidecarHistory } from "./sidecarStatus";
 import { map, type Observable } from "rxjs";
 import { deleteHistory, getHistory, HistoryError, isThreadId, listHistory, mastraThreadId, newestTurn, STAFF_AGENT } from "./history";
 
@@ -96,12 +97,16 @@ export type CopilotHandlerFactory = (
   agentId: AssistantAgentId,
   env: NodeJS.ProcessEnv,
   endings: RunEndings,
+  /** Whether staff runs use saved conversations right now (app switch AND sidecar). */
+  historyOn: () => Promise<boolean>,
 ) => Promise<RequestHandler>;
 
 export interface BridgeDeps {
   runs: () => Promise<AssistantRuns<User>>;
   /** The CopilotKit handler for one user's agent; the default is the real runtime below. */
   createHandler?: CopilotHandlerFactory;
+  /** Whether the sidecar has saved conversations working; the default asks its /ready. */
+  historyStatus?: () => Promise<SidecarHistory>;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -148,7 +153,7 @@ export function historyAgentClass<C extends new (...args: never[]) => MastraAgen
 }
 
 /** Built on first use: the CopilotKit and Mastra client modules are large and unused while the assistant is off. */
-const createHandler: CopilotHandlerFactory = async (userId, agentId, env, endings) => {
+const createHandler: CopilotHandlerFactory = async (userId, agentId, env, endings, historyOn) => {
   const [{ CopilotRuntime, InMemoryAgentRunner }, { createCopilotExpressHandler }, { MastraAgent }, { MastraClient }] = await Promise.all([
     import("@copilotkit/runtime/v2"),
     import("@copilotkit/runtime/v2/express"),
@@ -166,13 +171,14 @@ const createHandler: CopilotHandlerFactory = async (userId, agentId, env, ending
   );
   const runtime = new CopilotRuntime({
     runner: runner as unknown as InstanceType<typeof InMemoryAgentRunner>,
-    agents: ({ request }: { request: globalThis.Request }) => {
+    agents: async ({ request }: { request: globalThis.Request }) => {
       const agentToken = request.headers.get(INTERNAL_AGENT_TOKEN);
       const mcpToken = request.headers.get(INTERNAL_MCP_TOKEN);
       // Tokens exist only on a run request (set below); anything else reaching Mastra is refused there.
       const headers: Record<string, string> = agentToken && mcpToken ? { Authorization: `Bearer ${agentToken}`, "X-TicketFlow-MCP-Session": mcpToken } : {};
       const client = new MastraClient({ baseUrl: agentUrl(env), headers });
-      const AgentClass = agentId === "ticket-assistant" && isStaffHistoryEnabled(env) ? historyAgentClass(MastraAgent, userId) : MastraAgent;
+      // Only the newest turn goes to Mastra when memory holds the rest: never on the app's word alone.
+      const AgentClass = agentId === STAFF_AGENT && (await historyOn()) ? historyAgentClass(MastraAgent, userId) : MastraAgent;
       const agent = new AgentClass({
         agentId,
         agent: client.getAgent(agentId),
@@ -194,15 +200,25 @@ const createHandler: CopilotHandlerFactory = async (userId, agentId, env, ending
 export function registerAssistantRoutes(app: Express, deps: BridgeDeps = defaultDeps): void {
   const env = deps.env ?? process.env;
 
-  app.get("/api/assistant/availability", (req, res) => {
-    const found = assistantFor(req);
-    if (!req.isAuthenticated?.() || !req.user) return deny(res, 401, "unauthorized", "Sign in to use the assistant.");
-    res.json({
-      enabled: isAssistantEnabled(env) && !!found,
-      agentId: found?.agentId ?? null,
-      // Saved conversations are offered to staff only, when switched on.
-      history: isAssistantEnabled(env) && isStaffHistoryEnabled(env) && found?.agentId === STAFF_AGENT,
-    });
+  // Saved conversations are on only when the app's switch is AND the sidecar reports them working.
+  const historyStatus = deps.historyStatus ?? createSidecarHistoryStatus(agentUrl(env));
+  const historyOn = async () => isAssistantEnabled(env) && isStaffHistoryEnabled(env) && (await historyStatus()).on;
+
+  app.get("/api/assistant/availability", async (req, res, next) => {
+    try {
+      const found = assistantFor(req);
+      if (!req.isAuthenticated?.() || !req.user) return deny(res, 401, "unauthorized", "Sign in to use the assistant.");
+      // Offered to staff only; the sidecar is asked only for them.
+      const history = found?.agentId === STAFF_AGENT && (await historyOn());
+      res.json({
+        enabled: isAssistantEnabled(env) && !!found,
+        agentId: found?.agentId ?? null,
+        history,
+        ...(history ? { historyRetentionDays: (await historyStatus()).retentionDays } : {}),
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
   /**
@@ -251,21 +267,25 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
    * and the thread ids are prefixed with the user's id.
    */
   const historyDeps = { runs: deps.runs, agentUrl: agentUrl(env) };
-  const historyGuard = (req: Request, res: Response, write: boolean): ReturnType<typeof assistantFor> | undefined => {
+  const historyGuard = async (req: Request, res: Response, write: boolean): Promise<ReturnType<typeof assistantFor> | undefined> => {
     if (!req.isAuthenticated?.() || !req.user) return void deny(res, 401, "unauthorized", "Sign in to use the assistant.");
-    if (!isAssistantEnabled(env) || !isStaffHistoryEnabled(env)) return void deny(res, 503, "history_disabled", "Saved conversations are switched off.");
     const found = assistantFor(req);
     if (!found || found.agentId !== STAFF_AGENT) return void deny(res, 403, "forbidden", "Saved conversations are for staff.");
     if (write && !sameOrigin(req, env)) return void deny(res, 403, "forbidden", "Cross-site request refused.");
+    if (!(await historyOn())) return void deny(res, 503, "history_disabled", "Saved conversations are switched off.");
     return found;
   };
+  // Each read opens a run and calls the sidecar, so reads are limited per user, like runs.
+  const historyLimit: RequestHandler = rateLimitingEnabled()
+    ? createCustomRateLimit({ windowMs: 15 * 60 * 1000, max: 120, message: "Too many requests for saved conversations. Please wait a few minutes." })
+    : (_req, _res, next) => next();
   const historyError = (error: unknown, res: Response, next: NextFunction) => {
     if (error instanceof HistoryError) return deny(res, error.status, error.code, error.code === "not_found" ? "That conversation was not found." : "Saved conversations are unavailable right now.");
     return next(error);
   };
 
-  app.get("/api/assistant/history", async (req, res, next) => {
-    const found = historyGuard(req, res, false);
+  app.get("/api/assistant/history", historyLimit, async (req, res, next) => {
+    const found = await historyGuard(req, res, false);
     if (!found) return;
     try {
       res.json({ threads: await listHistory(historyDeps, found.user) });
@@ -275,8 +295,8 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
   });
 
   // ":thread", not ":id": every :id param is checked as a numeric id (http/install.ts).
-  app.get("/api/assistant/history/:thread", async (req, res, next) => {
-    const found = historyGuard(req, res, false);
+  app.get("/api/assistant/history/:thread", historyLimit, async (req, res, next) => {
+    const found = await historyGuard(req, res, false);
     if (!found) return;
     if (!isThreadId(req.params.thread)) return deny(res, 404, "not_found", "That conversation was not found.");
     try {
@@ -286,8 +306,8 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
     }
   });
 
-  app.delete("/api/assistant/history/:thread", async (req, res, next) => {
-    const found = historyGuard(req, res, true);
+  app.delete("/api/assistant/history/:thread", historyLimit, async (req, res, next) => {
+    const found = await historyGuard(req, res, true);
     if (!found) return;
     if (!isThreadId(req.params.thread)) return deny(res, 404, "not_found", "That conversation was not found.");
     try {
@@ -348,7 +368,7 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
         const key = `${found.user.id}:${found.agentId}`;
         let handler = handlers.get(key);
         if (!handler) {
-          handler = makeHandler(found.user.id, found.agentId, env, endings);
+          handler = makeHandler(found.user.id, found.agentId, env, endings, historyOn);
           // A failed build is not kept: the next request tries again.
           handler.catch(() => handlers.delete(key));
           handlers.set(key, handler);

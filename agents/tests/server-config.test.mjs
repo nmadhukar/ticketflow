@@ -101,14 +101,17 @@ test('staff history needs the assistant role URL, and a sane retention', () => {
   assert.deepEqual(settings({ ...HISTORY_ENV, MASTRA_DATABASE_URL: '' }), ['MASTRA_DATABASE_URL']);
   assert.deepEqual(settings({ ...HISTORY_ENV, MASTRA_DATABASE_URL: 'postgres://postgres:5432/ticketflow' }), ['MASTRA_DATABASE_URL']);
   assert.deepEqual(settings({ ...HISTORY_ENV, MASTRA_DATABASE_URL: 'mysql://u:p@db/x' }), ['MASTRA_DATABASE_URL']);
-  // Off: the URL is not needed and not checked.
-  assert.deepEqual(settings({ ...VALID_ENV, MASTRA_DATABASE_URL: 'nonsense' }), []);
+  // Off: not required, but checked when set (the store and retention run whenever it is).
+  assert.deepEqual(settings({ ...VALID_ENV, MASTRA_DATABASE_URL: 'nonsense' }), ['MASTRA_DATABASE_URL']);
+  assert.deepEqual(settings({ ...VALID_ENV, MASTRA_DATABASE_URL: HISTORY_ENV.MASTRA_DATABASE_URL }), []);
   for (const bad of ['0', '366', 'x']) assert.deepEqual(settings({ ...VALID_ENV, ASSISTANT_HISTORY_RETENTION_DAYS: bad }), ['ASSISTANT_HISTORY_RETENTION_DAYS'], bad);
 });
 
 test('readiness checks the conversation store when staff history is on', async () => {
   const answered = async () => new Response(null, { status: 405 });
-  assert.deepEqual((await assistantReadiness(HISTORY_ENV, { fetch: answered, checkHistory: async () => {} })).checks, {
+  const ok = await assistantReadiness({ ...HISTORY_ENV, ASSISTANT_HISTORY_RETENTION_DAYS: '14' }, { fetch: answered, checkHistory: async () => {} });
+  assert.equal(ok.historyRetentionDays, 14);
+  assert.deepEqual(ok.checks, {
     configuration: 'ok',
     mcp: 'reachable',
     history: 'ok',
@@ -118,4 +121,9 @@ test('readiness checks the conversation store when staff history is on', async (
   assert.equal(down.checks.history, 'unreachable');
   const hung = await assistantReadiness(HISTORY_ENV, { fetch: answered, timeoutMs: 50, checkHistory: () => new Promise(() => {}) });
   assert.equal(hung.checks.history, 'unreachable');
+});
+
+test('the conversation store pool stays under the role connection limit (10)', async () => {
+  const { STORAGE_POOL_MAX } = await import('../src/mastra/storage.ts');
+  assert.ok(STORAGE_POOL_MAX > 0 && STORAGE_POOL_MAX * 2 <= 10, 'two containers during a redeploy must fit');
 });

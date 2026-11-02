@@ -18,6 +18,7 @@ function fakeDeps(responses: Array<{ status: number; body?: unknown }>, visible:
   const started: string[] = [];
   const ended: string[] = [];
   const calls: string[] = [];
+  const visibilityCalls: string[][] = [];
   const deps: HistoryDeps = {
     agentUrl: "http://agents.test:4111",
     runs: async () =>
@@ -33,9 +34,12 @@ function fakeDeps(responses: Array<{ status: number; body?: unknown }>, visible:
       const next = responses.shift() ?? { status: 500 };
       return new Response(next.body === undefined ? null : JSON.stringify(next.body), { status: next.status });
     }) as typeof fetch,
-    resolveTicket: async (_u, number) => (visible.includes(number) ? 1 : null),
+    visibleTickets: async (_u, numbers) => {
+      visibilityCalls.push(numbers);
+      return new Set(numbers.filter((n) => visible.includes(n)));
+    },
   };
-  return { deps, started, ended, calls };
+  return { deps, started, ended, calls, visibilityCalls };
 }
 
 describe("assistant history", () => {
@@ -100,7 +104,8 @@ describe("assistant history", () => {
     });
     expect(calls.map((c) => c.match(/page=(\d+)/)?.[1])).toEqual(["0", "1"]);
     expect(calls[0]).toContain(encodeURIComponent("u:staff-1:t1"));
-    expect(ended).toHaveLength(2);
+    // One run for the whole read, whatever the number of pages.
+    expect(ended).toHaveLength(1);
   });
 
   it("withholds a conversation that mentions a ticket the user can no longer see", async () => {
@@ -108,14 +113,28 @@ describe("assistant history", () => {
     await expect(getHistory(deps, user, "t1")).resolves.toEqual({ available: false, reason: "access_changed" });
   });
 
-  it("treats the sidecar's 403 and 404 alike, as not found, and anything else as unavailable", async () => {
-    for (const status of [403, 404]) {
+  it("404 is not found; any other refusal is unavailable, never an empty list", async () => {
+    const missing = fakeDeps([{ status: 404 }]);
+    await expect(getHistory(missing.deps, user, "t1")).rejects.toMatchObject({ status: 404, code: "not_found" });
+    expect(missing.ended).toHaveLength(1);
+    for (const status of [403, 500]) {
       const { deps, ended } = fakeDeps([{ status }]);
-      await expect(getHistory(deps, user, "t1")).rejects.toMatchObject({ status: 404, code: "not_found" });
+      await expect(listHistory(deps, user)).rejects.toMatchObject({ status: 503, code: "history_unavailable" });
       expect(ended).toHaveLength(1);
     }
-    const { deps } = fakeDeps([{ status: 500 }]);
-    await expect(listHistory(deps, user)).rejects.toBeInstanceOf(HistoryError);
+    const down = fakeDeps([]);
+    down.deps.fetch = (async () => {
+      throw new TypeError("fetch failed");
+    }) as typeof fetch;
+    await expect(listHistory(down.deps, user)).rejects.toBeInstanceOf(HistoryError);
+  });
+
+  it("checks every mentioned ticket in one call", async () => {
+    const many = Array.from({ length: 40 }, (_, i) => `TKT-2026-${String(i).padStart(4, "0")}`);
+    const { deps, visibilityCalls } = fakeDeps([{ status: 200, body: { messages: [{ role: "assistant", createdAt: "x", content: { parts: [{ type: "text", text: many.join(" ") }] } }] } }], many);
+    await expect(getHistory(deps, user, "t1")).resolves.toMatchObject({ available: true });
+    expect(visibilityCalls).toHaveLength(1);
+    expect(visibilityCalls[0]).toHaveLength(40);
   });
 });
 

@@ -38,11 +38,12 @@ jest.mock("@copilotkit/runtime/v2", () => ({
 }));
 jest.mock("@copilotkit/runtime/v2/express", () => ({
   // Resolves the agents the way CopilotKit does for a request, then answers.
-  createCopilotExpressHandler: ({ runtime }: { runtime: { options: { agents: (ctx: { request: Request }) => Record<string, unknown> } } }) =>
-    (req: import("express").Request, res: import("express").Response) => {
+  createCopilotExpressHandler: ({ runtime }: { runtime: { options: { agents: (ctx: { request: Request }) => Promise<Record<string, unknown>> } } }) =>
+    async (req: import("express").Request, res: import("express").Response) => {
       const headers = new Headers();
       for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") headers.set(k, v);
-      const agents = runtime.options.agents({ request: new Request(`http://app${req.originalUrl}`, { headers }) });
+      // The factory may be async (it asks the sidecar whether history is on); CopilotKit awaits it.
+      const agents = await runtime.options.agents({ request: new Request(`http://app${req.originalUrl}`, { headers }) });
       res.json({ agents: Object.keys(agents) });
     },
 }));
@@ -54,11 +55,10 @@ import { issueApiKey } from "../../../services/auth/apiKeys";
 import { verifyAssistantToken } from "../../../assistant/sessionToken";
 import { assistantRuns } from "../../../assistant/runs";
 
-const ENV = {
+const ENV: Record<string, string> = {
   ASSISTANT_ENABLED: "true",
   ASSISTANT_SESSION_SECRET: "bridge-test-assistant-session-secret-01",
   ASSISTANT_AGENT_SECRET: "bridge-test-assistant-agent-secret-0002",
-  ASSISTANT_AGENT_URL: "http://agents.test:4111",
   APP_BASE_URL: "http://tickets.test",
 };
 const ORIGIN = ENV.APP_BASE_URL;
@@ -67,10 +67,20 @@ let ctx: Awaited<ReturnType<typeof createTestApp>>;
 const saved: Record<string, string | undefined> = {};
 let customer: User;
 let staff: User;
+// A stand-in sidecar that answers only /ready, saying whether saved conversations work.
+let sidecarHistory = "ok";
+let sidecar: import("http").Server;
 
 const runBody = { threadId: "thread-1", runId: "run-1", messages: [{ id: "m1", role: "user", content: "hello" }], tools: [], context: [], state: {}, forwardedProps: {} };
 
 beforeAll(async () => {
+  const { createServer } = await import("http");
+  sidecar = createServer((req, res) => {
+    res.writeHead(req.url === "/ready" ? 200 : 404, { "content-type": "application/json" });
+    res.end(JSON.stringify({ status: "ready", checks: { history: sidecarHistory }, historyRetentionDays: 21 }));
+  });
+  await new Promise<void>((resolve) => sidecar.listen(0, "127.0.0.1", resolve));
+  ENV.ASSISTANT_AGENT_URL = `http://127.0.0.1:${(sidecar.address() as import("net").AddressInfo).port}`;
   for (const [k, v] of Object.entries(ENV)) {
     saved[k] = process.env[k];
     process.env[k] = v;
@@ -79,6 +89,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await ctx.close();
+  sidecar.close();
   for (const [k, v] of Object.entries(saved)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
@@ -175,7 +186,8 @@ describe("assistant bridge", () => {
 
     process.env.ASSISTANT_STAFF_HISTORY = "true";
     try {
-      expect((await s.get("/api/assistant/availability")).body).toMatchObject({ agentId: "ticket-assistant", history: true });
+      // The retention shown to staff is the sidecar's, not a constant.
+      expect((await s.get("/api/assistant/availability")).body).toMatchObject({ agentId: "ticket-assistant", history: true, historyRetentionDays: 21 });
       expect((await c.get("/api/assistant/availability")).body).toMatchObject({ agentId: "support-assistant", history: false });
       expect((await request(ctx.app).get("/api/assistant/history")).status).toBe(401);
       expect((await c.get("/api/assistant/history")).status).toBe(403);
@@ -184,6 +196,22 @@ describe("assistant bridge", () => {
       expect((await s.get("/api/assistant/history/bad%20id")).status).toBe(404);
       expect((await s.get(`/api/assistant/history/${"x".repeat(121)}`)).status).toBe(404);
     } finally {
+      delete process.env.ASSISTANT_STAFF_HISTORY;
+    }
+  });
+
+  it("history is off while the sidecar says so, whatever the app's switch says", async () => {
+    // A second app, so its cached sidecar status starts empty. Not closed here: its close would
+    // end the shared database pool; the main app's afterAll closes what both share.
+    const app2 = await createTestApp();
+    process.env.ASSISTANT_STAFF_HISTORY = "true";
+    sidecarHistory = "off";
+    try {
+      const s = await loginAs(app2.app, staff);
+      expect((await s.get("/api/assistant/availability")).body).toMatchObject({ history: false });
+      expect((await s.get("/api/assistant/history")).status).toBe(503);
+    } finally {
+      sidecarHistory = "ok";
       delete process.env.ASSISTANT_STAFF_HISTORY;
     }
   });

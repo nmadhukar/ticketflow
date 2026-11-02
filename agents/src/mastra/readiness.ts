@@ -1,4 +1,4 @@
-import { readMcpUrl, staffHistoryEnabled } from './config.ts';
+import { readMcpUrl, readRetentionDays, staffHistoryEnabled } from './config.ts';
 import { agentsConfigIssues } from './config-issues.ts';
 
 /**
@@ -9,7 +9,8 @@ import { agentsConfigIssues } from './config-issues.ts';
  * containers. No model call is made: it would cost money.
  */
 export type AssistantReadiness =
-  | { status: 'ready'; checks: { configuration: 'ok'; mcp: 'reachable'; history: 'ok' | 'off' } }
+  // historyRetentionDays: how long saved conversations are kept, for the app to tell staff.
+  | { status: 'ready'; checks: { configuration: 'ok'; mcp: 'reachable'; history: 'ok' | 'off' }; historyRetentionDays?: number }
   | { status: 'not_ready'; checks: { configuration: 'ok'; mcp: 'reachable' | 'unreachable'; history: 'ok' | 'off' | 'unreachable' } }
   | { status: 'not_ready'; checks: { configuration: 'invalid' }; settings: string[] };
 
@@ -54,6 +55,12 @@ export async function assistantReadiness(
       new Promise<'unreachable'>((resolve) => setTimeout(() => resolve('unreachable'), timeoutMs).unref()),
     ]).catch(() => 'unreachable' as const);
   }
-  if (mcp === 'reachable' && history !== 'unreachable') return { status: 'ready', checks: { configuration: 'ok', mcp, history } };
+  if (mcp === 'reachable' && history !== 'unreachable') {
+    return {
+      status: 'ready',
+      checks: { configuration: 'ok', mcp, history },
+      ...(history === 'ok' ? { historyRetentionDays: readRetentionDays(env) } : {}),
+    };
+  }
   return { status: 'not_ready', checks: { configuration: 'ok', mcp, history } };
 }
