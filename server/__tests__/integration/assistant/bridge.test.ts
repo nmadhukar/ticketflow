@@ -96,9 +96,9 @@ beforeEach(async () => {
 describe("assistant bridge", () => {
   it("reports each role's agent, and refuses without a session", async () => {
     const c = await loginAs(ctx.app, customer);
-    expect((await c.get("/api/assistant/availability")).body).toEqual({ enabled: true, agentId: "support-assistant" });
+    expect((await c.get("/api/assistant/availability")).body).toEqual({ enabled: true, agentId: "support-assistant", history: false });
     const s = await loginAs(ctx.app, staff);
-    expect((await s.get("/api/assistant/availability")).body).toEqual({ enabled: true, agentId: "ticket-assistant" });
+    expect((await s.get("/api/assistant/availability")).body).toEqual({ enabled: true, agentId: "ticket-assistant", history: false });
     expect((await request(ctx.app).get("/api/assistant/availability")).status).toBe(401);
     expect((await request(ctx.app).get("/api/copilotkit/info")).status).toBe(401);
   });
@@ -161,10 +161,30 @@ describe("assistant bridge", () => {
     process.env.ASSISTANT_ENABLED = "false";
     try {
       const c = await loginAs(ctx.app, customer);
-      expect((await c.get("/api/assistant/availability")).body).toEqual({ enabled: false, agentId: "support-assistant" });
+      expect((await c.get("/api/assistant/availability")).body).toEqual({ enabled: false, agentId: "support-assistant", history: false });
       expect((await c.get("/api/copilotkit/info")).status).toBe(503);
     } finally {
       process.env.ASSISTANT_ENABLED = "true";
+    }
+  });
+
+  it("saved conversations: off by default, staff only, own-site deletes, valid ids only", async () => {
+    const c = await loginAs(ctx.app, customer);
+    const s = await loginAs(ctx.app, staff);
+    expect((await s.get("/api/assistant/history")).status).toBe(503);
+
+    process.env.ASSISTANT_STAFF_HISTORY = "true";
+    try {
+      expect((await s.get("/api/assistant/availability")).body).toMatchObject({ agentId: "ticket-assistant", history: true });
+      expect((await c.get("/api/assistant/availability")).body).toMatchObject({ agentId: "support-assistant", history: false });
+      expect((await request(ctx.app).get("/api/assistant/history")).status).toBe(401);
+      expect((await c.get("/api/assistant/history")).status).toBe(403);
+      expect((await s.delete("/api/assistant/history/t1")).status).toBe(403);
+      expect((await s.delete("/api/assistant/history/t1").set("Origin", "http://evil.test")).status).toBe(403);
+      expect((await s.get("/api/assistant/history/bad%20id")).status).toBe(404);
+      expect((await s.get(`/api/assistant/history/${"x".repeat(121)}`)).status).toBe(404);
+    } finally {
+      delete process.env.ASSISTANT_STAFF_HISTORY;
     }
   });
 });

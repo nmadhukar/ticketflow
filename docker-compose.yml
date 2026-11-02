@@ -25,6 +25,10 @@ services:
     restart: unless-stopped
     networks:
       - ticketflow-network
+      # The agents service stores saved staff conversations here, as its own role in its own
+      # `mastra` schema (scripts/db/provision-assistant-db.mjs), reaching it over this internal
+      # network only.
+      - assistant
 
   # Build the image and run migrations before starting the app
   app:
@@ -151,6 +155,9 @@ services:
       ASSISTANT_INTERNAL_PORT: 5100
       ASSISTANT_INTERNAL_HOST: 0.0.0.0
       ASSISTANT_AGENT_URL: http://agents:4111
+      # Saved staff conversations; also set on the agents service (same value). Provision the
+      # database role first: docs/deployment/ASSISTANT_DB.md.
+      ASSISTANT_STAFF_HISTORY: ${ASSISTANT_STAFF_HISTORY:-false}
     restart: unless-stopped
     networks:
       - ticketflow-network
@@ -177,6 +184,14 @@ services:
       ASSISTANT_STAFF_MODEL: ${ASSISTANT_STAFF_MODEL:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Saved staff conversations (off unless "true", the app's value): the assistant role's URL,
+      # never the app's DATABASE_URL. See docs/deployment/ASSISTANT_DB.md.
+      ASSISTANT_STAFF_HISTORY: ${ASSISTANT_STAFF_HISTORY:-false}
+      MASTRA_DATABASE_URL: ${MASTRA_DATABASE_URL:-}
+      ASSISTANT_HISTORY_RETENTION_DAYS: ${ASSISTANT_HISTORY_RETENTION_DAYS:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
     mem_limit: 1g
     restart: unless-stopped
     healthcheck:

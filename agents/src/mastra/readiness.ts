@@ -1,25 +1,33 @@
-import { readMcpUrl } from './config.ts';
+import { readMcpUrl, staffHistoryEnabled } from './config.ts';
 import { agentsConfigIssues } from './config-issues.ts';
 
 /**
  * Whether this sidecar can serve the assistant now, as opposed to /health, which says only that
- * the process answers. Ready needs a valid configuration and an app MCP endpoint that answers.
- * Any HTTP answer counts: the endpoint refuses a GET without a token, and that refusal proves the
- * route between the two containers. No model call is made: it would cost money.
+ * the process answers. Ready needs a valid configuration, an app MCP endpoint that answers and,
+ * with staff history on, a conversation store that answers. Any HTTP answer from the MCP route
+ * counts: it refuses a GET without a token, and that refusal proves the route between the two
+ * containers. No model call is made: it would cost money.
  */
 export type AssistantReadiness =
-  | { status: 'ready'; checks: { configuration: 'ok'; mcp: 'reachable' } }
-  | { status: 'not_ready'; checks: { configuration: 'ok'; mcp: 'unreachable' } }
+  | { status: 'ready'; checks: { configuration: 'ok'; mcp: 'reachable'; history: 'ok' | 'off' } }
+  | { status: 'not_ready'; checks: { configuration: 'ok'; mcp: 'reachable' | 'unreachable'; history: 'ok' | 'off' | 'unreachable' } }
   | { status: 'not_ready'; checks: { configuration: 'invalid' }; settings: string[] };
 
 interface ReadinessOptions {
   fetch?: typeof fetch;
   timeoutMs?: number;
+  /** Proves the conversation store answers; the default asks the staff memory for nothing. */
+  checkHistory?: () => Promise<void>;
+}
+
+async function defaultHistoryCheck(): Promise<void> {
+  const { staffMemory } = await import('./storage.ts');
+  await staffMemory?.listThreads({ page: 0, perPage: 1, filter: { resourceId: 'readiness-probe' } });
 }
 
 export async function assistantReadiness(
   env: NodeJS.ProcessEnv = process.env,
-  { fetch: fetchImpl = fetch, timeoutMs = 3000 }: ReadinessOptions = {},
+  { fetch: fetchImpl = fetch, timeoutMs = 3000, checkHistory = defaultHistoryCheck }: ReadinessOptions = {},
 ): Promise<AssistantReadiness> {
   const issues = agentsConfigIssues(env);
   if (issues.length > 0) {
@@ -29,13 +37,23 @@ export async function assistantReadiness(
       settings: [...new Set(issues.map((issue) => issue.setting))],
     };
   }
+  let mcp: 'reachable' | 'unreachable' = 'unreachable';
   try {
     const response = await fetchImpl(readMcpUrl(env), { method: 'GET', signal: AbortSignal.timeout(timeoutMs) });
     // Only that it answered matters. Discard the body so the connection is released, not held
     // until garbage collection, however often /ready is polled.
     await response.body?.cancel();
-    return { status: 'ready', checks: { configuration: 'ok', mcp: 'reachable' } };
+    mcp = 'reachable';
   } catch {
-    return { status: 'not_ready', checks: { configuration: 'ok', mcp: 'unreachable' } };
+    // reported below
   }
+  let history: 'ok' | 'off' | 'unreachable' = 'off';
+  if (staffHistoryEnabled(env)) {
+    history = await Promise.race([
+      checkHistory().then(() => 'ok' as const),
+      new Promise<'unreachable'>((resolve) => setTimeout(() => resolve('unreachable'), timeoutMs).unref()),
+    ]).catch(() => 'unreachable' as const);
+  }
+  if (mcp === 'reachable' && history !== 'unreachable') return { status: 'ready', checks: { configuration: 'ok', mcp, history } };
+  return { status: 'not_ready', checks: { configuration: 'ok', mcp, history } };
 }

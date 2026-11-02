@@ -4,12 +4,14 @@ import { agentForRole, ASSISTANT_AGENT_IDS, type AssistantAgentId } from "@share
 import { normalizeRole } from "../permissions/roles";
 import { configuredBaseUrl } from "../utils/appBaseUrl";
 import { createCustomRateLimit, rateLimitingEnabled } from "../security/rateLimiting";
-import { isAssistantEnabled } from "./config";
+import { isAssistantEnabled, isStaffHistoryEnabled } from "./config";
 import { logAssistantSecurityEvent } from "./securityLog";
 import { assistantWritesEnabled } from "./toolPolicy";
 import { ticketErrorToHttp } from "../services/tickets/ticketError";
 import type { AssistantRuns } from "./runAuth";
 import { LruMap, RunEndings, TrackedRunner, type RunnerLike } from "./runTracking";
+import { map, type Observable } from "rxjs";
+import { deleteHistory, getHistory, HistoryError, isThreadId, listHistory, mastraThreadId, newestTurn, STAFF_AGENT } from "./history";
 
 /** Per-user CopilotKit handlers kept in memory; the least recently used beyond this is dropped. */
 const MAX_CACHED_HANDLERS = 500;
@@ -26,6 +28,7 @@ const MAX_CACHED_HANDLERS = 500;
  *
  *   GET  /api/assistant/availability                 whether this user has an assistant, and which
  *   POST /api/assistant/proposals/:proposal/confirm|reject the user's decision on a proposed write
+ *   GET|DELETE /api/assistant/history[/:thread]       a staff member's saved conversations
  */
 
 export const COPILOT_BASE_PATH = "/api/copilotkit";
@@ -110,6 +113,40 @@ function agentUrl(env: NodeJS.ProcessEnv): string {
   return env.ASSISTANT_AGENT_URL?.trim() || DEFAULT_AGENT_URL;
 }
 
+type RunInput = { threadId: string; messages: Array<{ role?: string }> } & Record<string, unknown>;
+interface MastraAgentLike {
+  run(input: RunInput): Observable<unknown>;
+  clone(): unknown;
+}
+
+/**
+ * The staff agent when its conversations are saved (Mastra memory):
+ *   - the thread id Mastra sees is prefixed with the user's id (history.ts), so no request can name
+ *     another user's thread, whatever id the browser sends; events carry the browser's id back;
+ *   - only the newest turn is sent: memory supplies the earlier ones.
+ * CopilotKit clones the agent for each run, and MastraAgent.clone() builds the base class, so the
+ * copy is given this class back.
+ */
+export function historyAgentClass<C extends new (...args: never[]) => MastraAgentLike>(Base: C, userId: string): C {
+  // @ts-expect-error TS2545: a mixin over a generic constructor; the shape is MastraAgentLike.
+  return class HistoryMastraAgent extends Base {
+    run(input: RunInput) {
+      const scoped = mastraThreadId(userId, input.threadId);
+      return super.run({ ...input, threadId: scoped, messages: newestTurn(input.messages) }).pipe(
+        map((event) =>
+          event && typeof event === "object" && (event as { threadId?: unknown }).threadId === scoped ? { ...event, threadId: input.threadId } : event,
+        ),
+      );
+    }
+
+    clone() {
+      const copy = super.clone() as object;
+      Object.setPrototypeOf(copy, Object.getPrototypeOf(this));
+      return copy;
+    }
+  };
+}
+
 /** Built on first use: the CopilotKit and Mastra client modules are large and unused while the assistant is off. */
 const createHandler: CopilotHandlerFactory = async (userId, agentId, env, endings) => {
   const [{ CopilotRuntime, InMemoryAgentRunner }, { createCopilotExpressHandler }, { MastraAgent }, { MastraClient }] = await Promise.all([
@@ -135,7 +172,8 @@ const createHandler: CopilotHandlerFactory = async (userId, agentId, env, ending
       // Tokens exist only on a run request (set below); anything else reaching Mastra is refused there.
       const headers: Record<string, string> = agentToken && mcpToken ? { Authorization: `Bearer ${agentToken}`, "X-TicketFlow-MCP-Session": mcpToken } : {};
       const client = new MastraClient({ baseUrl: agentUrl(env), headers });
-      const agent = new MastraAgent({
+      const AgentClass = agentId === "ticket-assistant" && isStaffHistoryEnabled(env) ? historyAgentClass(MastraAgent, userId) : MastraAgent;
+      const agent = new AgentClass({
         agentId,
         agent: client.getAgent(agentId),
         remoteClient: client,
@@ -159,7 +197,12 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
   app.get("/api/assistant/availability", (req, res) => {
     const found = assistantFor(req);
     if (!req.isAuthenticated?.() || !req.user) return deny(res, 401, "unauthorized", "Sign in to use the assistant.");
-    res.json({ enabled: isAssistantEnabled(env) && !!found, agentId: found?.agentId ?? null });
+    res.json({
+      enabled: isAssistantEnabled(env) && !!found,
+      agentId: found?.agentId ?? null,
+      // Saved conversations are offered to staff only, when switched on.
+      history: isAssistantEnabled(env) && isStaffHistoryEnabled(env) && found?.agentId === STAFF_AGENT,
+    });
   });
 
   /**
@@ -199,6 +242,60 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
       }
     } catch (error) {
       next(error);
+    }
+  });
+
+  /**
+   * A staff member's saved conversations (history.ts): list, read (withheld if a ticket it mentions
+   * is no longer visible to them) and delete. Their own only: the sidecar scopes memory to the user
+   * and the thread ids are prefixed with the user's id.
+   */
+  const historyDeps = { runs: deps.runs, agentUrl: agentUrl(env) };
+  const historyGuard = (req: Request, res: Response, write: boolean): ReturnType<typeof assistantFor> | undefined => {
+    if (!req.isAuthenticated?.() || !req.user) return void deny(res, 401, "unauthorized", "Sign in to use the assistant.");
+    if (!isAssistantEnabled(env) || !isStaffHistoryEnabled(env)) return void deny(res, 503, "history_disabled", "Saved conversations are switched off.");
+    const found = assistantFor(req);
+    if (!found || found.agentId !== STAFF_AGENT) return void deny(res, 403, "forbidden", "Saved conversations are for staff.");
+    if (write && !sameOrigin(req, env)) return void deny(res, 403, "forbidden", "Cross-site request refused.");
+    return found;
+  };
+  const historyError = (error: unknown, res: Response, next: NextFunction) => {
+    if (error instanceof HistoryError) return deny(res, error.status, error.code, error.code === "not_found" ? "That conversation was not found." : "Saved conversations are unavailable right now.");
+    return next(error);
+  };
+
+  app.get("/api/assistant/history", async (req, res, next) => {
+    const found = historyGuard(req, res, false);
+    if (!found) return;
+    try {
+      res.json({ threads: await listHistory(historyDeps, found.user) });
+    } catch (error) {
+      historyError(error, res, next);
+    }
+  });
+
+  // ":thread", not ":id": every :id param is checked as a numeric id (http/install.ts).
+  app.get("/api/assistant/history/:thread", async (req, res, next) => {
+    const found = historyGuard(req, res, false);
+    if (!found) return;
+    if (!isThreadId(req.params.thread)) return deny(res, 404, "not_found", "That conversation was not found.");
+    try {
+      res.json(await getHistory(historyDeps, found.user, req.params.thread));
+    } catch (error) {
+      historyError(error, res, next);
+    }
+  });
+
+  app.delete("/api/assistant/history/:thread", async (req, res, next) => {
+    const found = historyGuard(req, res, true);
+    if (!found) return;
+    if (!isThreadId(req.params.thread)) return deny(res, 404, "not_found", "That conversation was not found.");
+    try {
+      await deleteHistory(historyDeps, found.user, req.params.thread);
+      logAssistantSecurityEvent({ event: "history_deleted", reason: "user", userId: found.user.id, agentId: found.agentId });
+      res.status(204).end();
+    } catch (error) {
+      historyError(error, res, next);
     }
   });
 

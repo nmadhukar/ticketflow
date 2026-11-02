@@ -29,6 +29,14 @@ export function isAssistantEnabled(env: NodeJS.ProcessEnv = process.env): boolea
   return env.ASSISTANT_ENABLED === "true";
 }
 
+/**
+ * Saved staff conversations (the sidecar's PostgreSQL memory). The same switch as the agents
+ * service: on, staff runs send only each new message, as memory holds the conversation.
+ */
+export function isStaffHistoryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.ASSISTANT_STAFF_HISTORY === "true";
+}
+
 function read(env: NodeJS.ProcessEnv, name: string): string | undefined {
   const value = env[name]?.trim();
   return value ? value : undefined;

@@ -56,6 +56,11 @@ test('history routes are open to the staff agent only, for its own agentId', asy
   // Creating or renaming a thread stays closed.
   assert.equal(auth.authorizeUser(staff, request('/api/memory/threads?agentId=ticket-assistant')), false);
   assert.equal(isHistoryRoute('PATCH', new URL('http://x/api/memory/threads/t-1?agentId=ticket-assistant')), false);
+  // The app sends the prefixed thread id encoded; it is matched decoded, as Mastra routes on it.
+  assert.equal(isHistoryRoute('GET', new URL('http://x/api/memory/threads/u%3Astaff-1%3At1/messages?agentId=ticket-assistant')), true);
+  // An encoded slash must not open a deeper route, and a broken escape is refused.
+  assert.equal(isHistoryRoute('GET', new URL('http://x/api/memory/threads/a%2Fworking-memory?agentId=ticket-assistant')), false);
+  assert.equal(isHistoryRoute('GET', new URL('http://x/api/memory/threads/%E0%A4%A?agentId=ticket-assistant')), false);
 });
 
 test('the Studio token works in development only, scoped to its own resource', async () => {

@@ -1,6 +1,7 @@
 import { Agent } from '@mastra/core/agent';
 import { modelRouterId } from '../config.ts';
 import { loadRunTools } from '../mcp.ts';
+import { staffMemory } from '../storage.ts';
 import { FORMAT_RULES, SAFETY_RULES } from './rules.ts';
 
 /**
@@ -37,4 +38,6 @@ export const ticketAssistant = new Agent({
   tools: loadRunTools,
   instructions: STAFF_INSTRUCTIONS,
   defaultOptions: { maxSteps: 8 },
+  // Saved staff conversations, when ASSISTANT_STAFF_HISTORY=true (storage.ts).
+  ...(staffMemory ? { memory: staffMemory } : {}),
 });

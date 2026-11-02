@@ -15,7 +15,8 @@ export interface AssistantSecurityEvent {
     | "write_rejected"
     | "write_executed"
     | "write_failed"
-    | "write_refused";
+    | "write_refused"
+    | "history_deleted";
   reason: string;
   userId?: string;
   runId?: string;

@@ -48,6 +48,28 @@ export function readMcpUrl(env: NodeJS.ProcessEnv = process.env): string {
   return trimmed(env, 'ASSISTANT_MCP_URL') || DEV_MCP_URL;
 }
 
+/**
+ * Saved staff conversations: on only with ASSISTANT_STAFF_HISTORY=true, the same switch the app
+ * reads (it then sends only each new message, as memory holds the rest). They are stored through
+ * MASTRA_DATABASE_URL, the assistant's own role and `mastra` schema
+ * (scripts/db/provision-assistant-db.mjs). Customers' conversations are never saved.
+ */
+export function staffHistoryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.ASSISTANT_STAFF_HISTORY === 'true';
+}
+
+export function readStorageUrl(env: NodeJS.ProcessEnv = process.env): string {
+  return trimmed(env, 'MASTRA_DATABASE_URL');
+}
+
+export const STORAGE_SCHEMA = 'mastra';
+export const DEFAULT_HISTORY_RETENTION_DAYS = 30;
+
+export function readRetentionDays(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = trimmed(env, 'ASSISTANT_HISTORY_RETENTION_DAYS');
+  return raw ? Number(raw) : DEFAULT_HISTORY_RETENTION_DAYS;
+}
+
 /** Current ASSISTANT_AGENT_SECRET first, then the previous one during a rotation. */
 export function readAgentSecrets(env: NodeJS.ProcessEnv = process.env): string[] {
   const current = trimmed(env, 'ASSISTANT_AGENT_SECRET');

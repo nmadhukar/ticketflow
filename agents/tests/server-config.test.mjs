@@ -91,5 +91,31 @@ test('readiness: invalid configuration names settings; otherwise the MCP route d
     new Response(new ReadableStream({ pull(c) { c.enqueue(new TextEncoder().encode('{"error":"not_found"}')); }, cancel() { cancelled = true; } }), { status: 404 });
   assert.equal((await assistantReadiness(VALID_ENV, { fetch: withBody })).status, 'ready');
   assert.equal(cancelled, true);
-  assert.deepEqual((await assistantReadiness(VALID_ENV, { fetch: refused })).checks, { configuration: 'ok', mcp: 'unreachable' });
+  assert.deepEqual((await assistantReadiness(VALID_ENV, { fetch: refused })).checks, { configuration: 'ok', mcp: 'unreachable', history: 'off' });
+});
+
+const HISTORY_ENV = { ...VALID_ENV, ASSISTANT_STAFF_HISTORY: 'true', MASTRA_DATABASE_URL: 'postgres://ticketflow_mastra:pw-long-enough@postgres:5432/ticketflow' };
+
+test('staff history needs the assistant role URL, and a sane retention', () => {
+  assert.deepEqual(settings(HISTORY_ENV), []);
+  assert.deepEqual(settings({ ...HISTORY_ENV, MASTRA_DATABASE_URL: '' }), ['MASTRA_DATABASE_URL']);
+  assert.deepEqual(settings({ ...HISTORY_ENV, MASTRA_DATABASE_URL: 'postgres://postgres:5432/ticketflow' }), ['MASTRA_DATABASE_URL']);
+  assert.deepEqual(settings({ ...HISTORY_ENV, MASTRA_DATABASE_URL: 'mysql://u:p@db/x' }), ['MASTRA_DATABASE_URL']);
+  // Off: the URL is not needed and not checked.
+  assert.deepEqual(settings({ ...VALID_ENV, MASTRA_DATABASE_URL: 'nonsense' }), []);
+  for (const bad of ['0', '366', 'x']) assert.deepEqual(settings({ ...VALID_ENV, ASSISTANT_HISTORY_RETENTION_DAYS: bad }), ['ASSISTANT_HISTORY_RETENTION_DAYS'], bad);
+});
+
+test('readiness checks the conversation store when staff history is on', async () => {
+  const answered = async () => new Response(null, { status: 405 });
+  assert.deepEqual((await assistantReadiness(HISTORY_ENV, { fetch: answered, checkHistory: async () => {} })).checks, {
+    configuration: 'ok',
+    mcp: 'reachable',
+    history: 'ok',
+  });
+  const down = await assistantReadiness(HISTORY_ENV, { fetch: answered, checkHistory: async () => { throw new Error('ECONNREFUSED'); } });
+  assert.equal(down.status, 'not_ready');
+  assert.equal(down.checks.history, 'unreachable');
+  const hung = await assistantReadiness(HISTORY_ENV, { fetch: answered, timeoutMs: 50, checkHistory: () => new Promise(() => {}) });
+  assert.equal(hung.checks.history, 'unreachable');
 });

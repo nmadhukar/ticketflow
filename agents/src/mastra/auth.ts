@@ -67,7 +67,15 @@ const HISTORY_ROUTES: Array<[method: string, path: RegExp]> = [
 
 export function isHistoryRoute(method: string, url: URL): boolean {
   if (url.searchParams.get('agentId') !== HISTORY_AGENT_ID) return false;
-  return HISTORY_ROUTES.some(([m, path]) => m === method.toUpperCase() && path.test(url.pathname));
+  // Matched decoded, as Mastra decodes the :threadId it routes on: the app sends "u%3A<user>%3A<id>".
+  // A path that does not decode is refused.
+  let pathname: string;
+  try {
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    return false;
+  }
+  return HISTORY_ROUTES.some(([m, path]) => m === method.toUpperCase() && path.test(pathname));
 }
 
 /**
