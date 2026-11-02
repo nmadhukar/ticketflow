@@ -1,5 +1,6 @@
 import { appBaseUrlProblem } from "../utils/appBaseUrl";
 import { secretProblem } from "../security/secrets";
+import { assistantConfigProblems } from "../assistant/config";
 
 /**
  * Configuration the server refuses to start without. Runs first at boot, before
@@ -8,6 +9,8 @@ import { secretProblem } from "../security/secrets";
  *
  *  - APP_BASE_URL (ruling R34): required in production, and well-formed whenever set.
  *  - SESSION_SECRET and JWT_SECRET: set, and not a placeholder, in production.
+ *  - With ASSISTANT_ENABLED=true, in every environment: the assistant token secrets
+ *    (assistant/config.ts).
  */
 export function startupConfigProblems(env: NodeJS.ProcessEnv = process.env): string[] {
   const problems: string[] = [];
@@ -17,6 +20,7 @@ export function startupConfigProblems(env: NodeJS.ProcessEnv = process.env): str
     const problem = secretProblem(name, env);
     if (problem) problems.push(problem);
   }
+  problems.push(...assistantConfigProblems(env));
   return problems;
 }
 
