@@ -38,23 +38,25 @@ export async function assistantReadiness(
       settings: [...new Set(issues.map((issue) => issue.setting))],
     };
   }
-  let mcp: 'reachable' | 'unreachable' = 'unreachable';
-  try {
-    const response = await fetchImpl(readMcpUrl(env), { method: 'GET', signal: AbortSignal.timeout(timeoutMs) });
-    // Only that it answered matters. Discard the body so the connection is released, not held
-    // until garbage collection, however often /ready is polled.
-    await response.body?.cancel();
-    mcp = 'reachable';
-  } catch {
-    // reported below
-  }
-  let history: 'ok' | 'off' | 'unreachable' = 'off';
-  if (staffHistoryEnabled(env)) {
-    history = await Promise.race([
-      checkHistory().then(() => 'ok' as const),
-      new Promise<'unreachable'>((resolve) => setTimeout(() => resolve('unreachable'), timeoutMs).unref()),
-    ]).catch(() => 'unreachable' as const);
-  }
+  // Both checks at once, so /ready answers within one timeout (the app's probe waits a little longer).
+  const mcpCheck = (async (): Promise<'reachable' | 'unreachable'> => {
+    try {
+      const response = await fetchImpl(readMcpUrl(env), { method: 'GET', signal: AbortSignal.timeout(timeoutMs) });
+      // Only that it answered matters. Discard the body so the connection is released, not held
+      // until garbage collection, however often /ready is polled.
+      await response.body?.cancel();
+      return 'reachable';
+    } catch {
+      return 'unreachable';
+    }
+  })();
+  const historyCheck: Promise<'ok' | 'off' | 'unreachable'> = staffHistoryEnabled(env)
+    ? Promise.race([
+        checkHistory().then(() => 'ok' as const),
+        new Promise<'unreachable'>((resolve) => setTimeout(() => resolve('unreachable'), timeoutMs).unref()),
+      ]).catch(() => 'unreachable' as const)
+    : Promise.resolve('off' as const);
+  const [mcp, history] = await Promise.all([mcpCheck, historyCheck]);
   if (mcp === 'reachable' && history !== 'unreachable') {
     return {
       status: 'ready',

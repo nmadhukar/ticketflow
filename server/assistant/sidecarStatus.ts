@@ -1,45 +1,64 @@
 /**
- * What the agents service reports about saved staff conversations (its public /ready).
+ * What the agents service says about saved staff conversations (its public /ready).
  *
- * The app sends staff runs only their newest message when memory holds the rest, so it must not
- * rely on its own ASSISTANT_STAFF_HISTORY alone: if the sidecar has no memory (switched off there,
- * or its store is down), every turn would start from nothing. History counts as on only when both
- * the app's switch and the sidecar say so. Cached briefly, so runs do not each pay for a probe.
+ * Its `checks.history` decides, whatever the overall status: "ok" means the agent has memory, "off"
+ * means it has none. Both are definitive. Anything else (unreachable, timed out, a configuration
+ * fault, history "unreachable") is UNKNOWN: a blip must not flip how runs are built, so the last
+ * definitive answer stands until a new one arrives.
+ *
+ *   - `state` (current): on / off / unknown. The history routes and availability need "on".
+ *   - `memory` (for building runs): the current definitive answer, else the last one, else null
+ *     (never heard): the caller then uses its own switch.
+ *
+ * Cached: a definitive answer for 60 s, an unknown one for 10 s; one probe at a time.
  */
+export type HistoryState = "on" | "off" | "unknown";
+
 export interface SidecarHistory {
-  on: boolean;
+  state: HistoryState;
+  /** Whether the sidecar's agent has memory, as last definitively reported; null if never. */
+  memory: boolean | null;
   retentionDays: number | null;
 }
 
-const OFF: SidecarHistory = { on: false, retentionDays: null };
-
 export function createSidecarHistoryStatus(
   agentUrl: string,
-  opts: { fetch?: typeof fetch; ttlMs?: number; failureTtlMs?: number; now?: () => number } = {},
+  opts: { fetch?: typeof fetch; ttlMs?: number; unknownTtlMs?: number; timeoutMs?: number; now?: () => number } = {},
 ): () => Promise<SidecarHistory> {
   const fetchImpl = opts.fetch ?? fetch;
   const now = opts.now ?? Date.now;
   let cached: { until: number; value: SidecarHistory } | null = null;
   let pending: Promise<SidecarHistory> | null = null;
+  let lastDefinitive: { memory: boolean; retentionDays: number | null } | null = null;
+
+  const settle = (state: HistoryState, retentionDays: number | null): SidecarHistory => {
+    if (state !== "unknown") lastDefinitive = { memory: state === "on", retentionDays };
+    const value: SidecarHistory = {
+      state,
+      memory: lastDefinitive?.memory ?? null,
+      retentionDays: state === "on" ? retentionDays : null,
+    };
+    cached = { until: now() + (state === "unknown" ? (opts.unknownTtlMs ?? 10_000) : (opts.ttlMs ?? 60_000)), value };
+    return value;
+  };
 
   const probe = async (): Promise<SidecarHistory> => {
     try {
-      const res = await fetchImpl(new URL("/ready", agentUrl), { signal: AbortSignal.timeout(3000) });
+      // Longer than the sidecar's own checks (its MCP and store probes, 3 s each, in parallel).
+      const res = await fetchImpl(new URL("/ready", agentUrl), { signal: AbortSignal.timeout(opts.timeoutMs ?? 5000) });
       const body = (await res.json().catch(() => ({}))) as { checks?: { history?: unknown }; historyRetentionDays?: unknown };
-      const on = res.ok && body.checks?.history === "ok";
-      const days = body.historyRetentionDays;
-      const value = on ? { on, retentionDays: Number.isInteger(days) ? (days as number) : null } : OFF;
-      cached = { until: now() + (opts.ttlMs ?? 60_000), value };
-      return value;
+      const history = body.checks?.history;
+      const days = Number.isInteger(body.historyRetentionDays) ? (body.historyRetentionDays as number) : null;
+      if (history === "ok") return settle("on", days);
+      if (history === "off") return settle("off", null);
+      return settle("unknown", null);
     } catch {
-      cached = { until: now() + (opts.failureTtlMs ?? 10_000), value: OFF };
-      return OFF;
+      return settle("unknown", null);
     }
   };
 
   return async () => {
     if (cached && now() < cached.until) return cached.value;
-    // One probe at a time; concurrent callers share it.
     pending ??= probe().finally(() => {
       pending = null;
     });

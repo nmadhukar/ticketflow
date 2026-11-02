@@ -46,9 +46,14 @@ Set `ASSISTANT_STAFF_HISTORY=false` and restart. Saved conversations are no long
 and nothing is deleted at once. Keep `MASTRA_DATABASE_URL` set: the agents service then goes on
 deleting each conversation at the end of its retention period. To delete them all now, see Remove.
 
-The app uses saved conversations only while the agents service reports them working (its `/ready`
-says `history: "ok"`), so a mismatch between the two services' settings turns history off rather
-than making the assistant forget the conversation on every turn.
+The app shows saved conversations to staff only while its own switch is on AND the agents service
+reports them working (its `/ready` says `history: "ok"`). How staff messages are sent follows the
+agents service alone: with memory there, only each new message is sent; without, the whole
+conversation is. A mismatch between the two services' settings therefore never makes the assistant
+forget the conversation, and a brief probe failure changes nothing (the last answer stands).
+
+With history off, a bad `MASTRA_DATABASE_URL` does not stop the agents service (the customer
+assistant keeps working); it logs that saved conversations are not being deleted.
 
 ## Back up and restore
 

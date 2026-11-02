@@ -10,7 +10,7 @@ import {
   ticketNumbersIn,
   type HistoryDeps,
 } from "../../../assistant/history";
-import { historyAgentClass } from "../../../assistant/bridge";
+import { staffAgentClass } from "../../../assistant/bridge";
 
 const user = { id: "staff-1", role: "agent" } as User;
 
@@ -138,7 +138,7 @@ describe("assistant history", () => {
   });
 });
 
-describe("staff agent with saved conversations", () => {
+describe("staff agent", () => {
   class FakeAgent {
     static seen: Array<{ threadId: string; messages: unknown[] }> = [];
     run(input: { threadId: string; messages: Array<{ role?: string }> }) {
@@ -151,7 +151,7 @@ describe("staff agent with saved conversations", () => {
   }
 
   it("prefixes the thread for Mastra, restores it in events, and sends only the newest turn", async () => {
-    const Agent = historyAgentClass(FakeAgent, "staff-1");
+    const Agent = staffAgentClass(FakeAgent, "staff-1", true);
     const agent = new Agent();
     const events = await firstValueFrom(
       agent.run({ threadId: "t1", messages: [{ role: "user" }, { role: "assistant" }, { role: "user" }] }).pipe(toArray()),
@@ -162,5 +162,12 @@ describe("staff agent with saved conversations", () => {
     const copy = agent.clone() as InstanceType<typeof Agent>;
     copy.run({ threadId: "t2", messages: [{ role: "user" }] });
     expect(FakeAgent.seen.at(-1)?.threadId).toBe("u:staff-1:t2");
+  });
+
+  it("without memory still prefixes the thread, and sends the whole conversation", () => {
+    const Agent = staffAgentClass(FakeAgent, "staff-1", false);
+    new Agent().run({ threadId: "t9", messages: [{ role: "user" }, { role: "assistant" }, { role: "user" }] });
+    expect(FakeAgent.seen.at(-1)).toMatchObject({ threadId: "u:staff-1:t9" });
+    expect(FakeAgent.seen.at(-1)?.messages).toHaveLength(3);
   });
 });

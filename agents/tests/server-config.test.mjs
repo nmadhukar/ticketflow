@@ -101,8 +101,9 @@ test('staff history needs the assistant role URL, and a sane retention', () => {
   assert.deepEqual(settings({ ...HISTORY_ENV, MASTRA_DATABASE_URL: '' }), ['MASTRA_DATABASE_URL']);
   assert.deepEqual(settings({ ...HISTORY_ENV, MASTRA_DATABASE_URL: 'postgres://postgres:5432/ticketflow' }), ['MASTRA_DATABASE_URL']);
   assert.deepEqual(settings({ ...HISTORY_ENV, MASTRA_DATABASE_URL: 'mysql://u:p@db/x' }), ['MASTRA_DATABASE_URL']);
-  // Off: not required, but checked when set (the store and retention run whenever it is).
-  assert.deepEqual(settings({ ...VALID_ENV, MASTRA_DATABASE_URL: 'nonsense' }), ['MASTRA_DATABASE_URL']);
+  // Off: not required, and a bad value is not fatal (it would take the customer assistant down);
+  // storage.ts warns that retention is not running instead.
+  assert.deepEqual(settings({ ...VALID_ENV, MASTRA_DATABASE_URL: 'nonsense' }), []);
   assert.deepEqual(settings({ ...VALID_ENV, MASTRA_DATABASE_URL: HISTORY_ENV.MASTRA_DATABASE_URL }), []);
   for (const bad of ['0', '366', 'x']) assert.deepEqual(settings({ ...VALID_ENV, ASSISTANT_HISTORY_RETENTION_DAYS: bad }), ['ASSISTANT_HISTORY_RETENTION_DAYS'], bad);
 });
@@ -126,4 +127,22 @@ test('readiness checks the conversation store when staff history is on', async (
 test('the conversation store pool stays under the role connection limit (10)', async () => {
   const { STORAGE_POOL_MAX } = await import('../src/mastra/storage.ts');
   assert.ok(STORAGE_POOL_MAX > 0 && STORAGE_POOL_MAX * 2 <= 10, 'two containers during a redeploy must fit');
+});
+
+test('a usable store URL needs postgres, a user and a password; anything else is not used', async () => {
+  const { usableStorageUrl } = await import('../src/mastra/storage.ts');
+  assert.equal(usableStorageUrl({ MASTRA_DATABASE_URL: HISTORY_ENV.MASTRA_DATABASE_URL }), HISTORY_ENV.MASTRA_DATABASE_URL);
+  for (const bad of ['', 'nonsense', 'postgres://postgres:5432/x', 'mysql://u:p@db/x']) assert.equal(usableStorageUrl({ MASTRA_DATABASE_URL: bad }), null, bad);
+});
+
+test('readiness runs its two checks at once, so it answers within one timeout', async () => {
+  const slow = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const started = Date.now();
+  const result = await assistantReadiness(HISTORY_ENV, {
+    timeoutMs: 1000,
+    fetch: async () => { await slow(300); return new Response(null, { status: 405 }); },
+    checkHistory: async () => { await slow(300); },
+  });
+  assert.equal(result.status, 'ready');
+  assert.ok(Date.now() - started < 550, `took ${Date.now() - started} ms`);
 });
