@@ -26,6 +26,7 @@ let B: User; // another customer
 let U: User; // agent with no link to A's ticket
 let admin: User;
 let ticketId: number;
+let ticketNumber: string;
 const TITLE = "Assistant isolation qwertyunique";
 
 async function mcp(token: string | null, method: string, params: object = {}, headers: Record<string, string> = {}) {
@@ -74,9 +75,28 @@ beforeEach(async () => {
     createdBy: A.id,
   } as never);
   ticketId = t.id;
+  ticketNumber = t.ticketNumber;
 });
 
 describe("assistant internal MCP", () => {
+  it("accepts a ticket number where the tools take an id, only among the user's own tickets", async () => {
+    const a = runs.start(A.id, "support-assistant");
+    for (const ref of [ticketNumber, ticketNumber.toLowerCase()]) {
+      const own = await callTool(a.mcpToken, "get_ticket", { id: ref });
+      expect(own.isError).toBe(false);
+      expect(own.text).toContain(TITLE);
+    }
+    expect((await callTool(a.mcpToken, "get_ticket_history", { id: ticketNumber })).isError).toBe(false);
+
+    // Someone else's ticket and a ticket that does not exist give the same answer.
+    const notFound = JSON.stringify({ code: "NOT_FOUND", message: "Ticket not found" });
+    const b = runs.start(B.id, "support-assistant");
+    expect(await callTool(b.mcpToken, "get_ticket", { id: ticketNumber })).toEqual({ isError: true, text: notFound });
+    expect(await callTool(b.mcpToken, "get_ticket", { id: "TKT-1999-0001" })).toEqual({ isError: true, text: notFound });
+    const u = runs.start(U.id, "ticket-assistant");
+    expect(await callTool(u.mcpToken, "get_ticket_history", { id: ticketNumber })).toEqual({ isError: true, text: notFound });
+  });
+
   it("a customer's run sees their own ticket, and another customer's run does not", async () => {
     const a = runs.start(A.id, "support-assistant");
     const own = await callTool(a.mcpToken, "list_tickets");

@@ -21,8 +21,9 @@ not sending: say clearly that nothing was posted. Base a draft only on a real ma
 the ticket says; when nothing matches, say so and suggest the next step instead.
 For workload or queue questions, use the ticket list, statistics and activity, and say what the
 numbers cover. Name the owning team only from the teams and departments the tools return.
-Answer only from what the tools returned for this user; if they cannot see a ticket, say it was
-not found for them, never that it does not exist.`;
+Answer only from what the tools returned for this user. If a ticket is not found for them, say
+only that it was not found for them (it may exist outside their access, so never say it does not
+exist) and draft nothing about it: no reply, no summary, no guess at its contents.`;
 
 export const ticketAssistant = new Agent({
   id: 'ticket-assistant',

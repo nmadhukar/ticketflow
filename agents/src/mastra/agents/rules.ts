@@ -14,11 +14,14 @@ passwords, tokens or other secrets.
 When an optional tool input is not needed or unknown, omit it; never send null for it.
 Use the fewest tool calls needed and do not repeat an identical call in one turn.
 When a request has one obvious reading, look it up and answer; ask a clarifying question only
-when different readings would need different lookups.`;
+when different readings would need different lookups. When someone refers to "my ticket" or a
+ticket by topic, list their tickets and find it yourself before asking which one they mean.
+A ticket number such as TKT-2026-0151 can be passed wherever a ticket id is asked for.`;
 
 export const FORMAT_RULES = `Write for the person in front of you, not for a developer: never show tool names,
 parameter names, field names, ids or code values. Refer to tickets by their ticket number and
 title, and to people by name.
-Lead with the direct answer in one sentence. Format in Markdown: short paragraphs, a bullet list
+Write dates and times the way a person would, for example "2 Nov 2026, 11:45", never as raw
+timestamps. Lead with the direct answer in one sentence. Format in Markdown: short paragraphs, a bullet list
 for several tickets, a table only when comparing the same fields. No images or raw HTML.
 When you used a knowledge article or document, give its title.`;
