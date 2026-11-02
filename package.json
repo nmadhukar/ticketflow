@@ -30,13 +30,18 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@ag-ui/mastra": "2.0.1",
     "@aws-sdk/client-s3": "^3.926.0",
     "@aws-sdk/client-ses": "^3.848.0",
     "@aws-sdk/s3-request-presigner": "^3.926.0",
     "@azure/msal-node": "^3.6.3",
+    "@copilotkit/react-core": "1.79.1",
+    "@copilotkit/runtime": "1.79.1",
     "@faker-js/faker": "^9.9.0",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
+    "@mastra/client-js": "1.55.0",
+    "@mastra/core": "1.78.0",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "@modelcontextprotocol/sdk": "1.31.0",
     "@neondatabase/serverless": "^0.10.4",
@@ -162,5 +167,11 @@
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8"
+  },
+  "overrides": {
+    "@ag-ui/client": "1.0.2",
+    "@ag-ui/core": "1.0.2",
+    "@ag-ui/encoder": "1.0.2",
+    "@ag-ui/proto": "1.0.2"
   }
 }

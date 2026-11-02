@@ -46,6 +46,7 @@ import { ThemeProvider } from "next-themes";
 import { useAuth } from "@/hooks/useAuth";
 import { Layout } from "@/components/layout";
 import { AiChatBot } from "@/components/AiChatBot";
+import { AssistantShell } from "@/components/assistant/AssistantShell";
 import { ProtectedRoute } from "@/components/protected-route";
 import { ForcedPasswordChange } from "@/components/forced-password-change";
 import NotFound from "@/pages/not-found";
@@ -179,6 +180,8 @@ function Router() {
       </Switch>
       {/* Show AI Chat Bot for authenticated users */}
       {!isLoading && isAuthenticated && <AiChatBot />}
+      {/* The in-app assistant: renders nothing unless the server says this user has one */}
+      {!isLoading && isAuthenticated && <AssistantShell />}
     </>
   );
 }
