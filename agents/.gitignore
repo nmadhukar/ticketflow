@@ -1,0 +1,4 @@
+node_modules
+.mastra
+.env
+*.log

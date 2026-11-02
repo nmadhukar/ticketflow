@@ -137,9 +137,56 @@ services:
       # Debugging (optional)
       DEBUG: ${DEBUG:-}
       LOG_LEVEL: ${LOG_LEVEL:-}
+
+      # In-app assistant (agents service below). Off unless exactly "true"; when on, the server
+      # refuses to start without both secrets (see .env.example). ASSISTANT_SESSION_SECRET is
+      # app-only and is never passed to the agents service.
+      ASSISTANT_ENABLED: ${ASSISTANT_ENABLED:-false}
+      ASSISTANT_SESSION_SECRET: ${ASSISTANT_SESSION_SECRET:-}
+      ASSISTANT_SESSION_SECRET_PREVIOUS: ${ASSISTANT_SESSION_SECRET_PREVIOUS:-}
+      ASSISTANT_AGENT_SECRET: ${ASSISTANT_AGENT_SECRET:-}
+      ASSISTANT_AGENT_SECRET_PREVIOUS: ${ASSISTANT_AGENT_SECRET_PREVIOUS:-}
+      ASSISTANT_RUN_MAX_SECONDS: ${ASSISTANT_RUN_MAX_SECONDS:-}
+      # Internal listener for the agents service only: not published, not proxied by nginx.
+      ASSISTANT_INTERNAL_PORT: 5100
+      ASSISTANT_AGENT_URL: http://agents:4111
     restart: unless-stopped
     networks:
       - ticketflow-network
+      - assistant
+
+  # In-app assistant: the Mastra sidecar (agents/). Standby (health check only) unless
+  # ASSISTANT_ENABLED=true. No published port: only the app reaches it, over the internal
+  # `assistant` network; `agents-egress` is its route to the model provider. It is not on
+  # ticketflow-network, so containers attached there (DSH) cannot reach it.
+  agents:
+    build:
+      context: ./agents
+      target: production
+    init: true
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      ASSISTANT_ENABLED: ${ASSISTANT_ENABLED:-false}
+      ASSISTANT_AGENT_SECRET: ${ASSISTANT_AGENT_SECRET:-}
+      ASSISTANT_AGENT_SECRET_PREVIOUS: ${ASSISTANT_AGENT_SECRET_PREVIOUS:-}
+      ASSISTANT_MCP_URL: http://app:5100/internal/mcp
+      ASSISTANT_MODEL_PROVIDER: ${ASSISTANT_MODEL_PROVIDER:-openrouter}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-openai/gpt-5-mini}
+      ASSISTANT_SUPPORT_MODEL: ${ASSISTANT_SUPPORT_MODEL:-}
+      ASSISTANT_STAFF_MODEL: ${ASSISTANT_STAFF_MODEL:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    mem_limit: 1g
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4111/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    networks:
+      - assistant
+      - agents-egress
 
   nginx:
     image: nginx:1.27-alpine
@@ -163,4 +210,11 @@ volumes:
 
 networks:
   ticketflow-network:
+    driver: bridge
+  # app <-> agents only. internal: no route in or out of this network.
+  assistant:
+    driver: bridge
+    internal: true
+  # The agents service's route to the model provider; nothing else joins it.
+  agents-egress:
     driver: bridge

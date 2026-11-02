@@ -18,6 +18,8 @@ export interface ShutdownDeps {
     closeIdleConnections?(): void;
   };
   closeRealtime(): Promise<void>;
+  /** The assistant's internal listener (assistant/internalServer.ts), when it was started. */
+  closeAssistant?(): Promise<void>;
   closeAuth(): Promise<void>;
   closePool(): Promise<void>;
   exit(code: number): void;
@@ -53,6 +55,7 @@ export function createShutdown(deps: ShutdownDeps): (signal: string) => Promise<
           deps.server.closeIdleConnections?.();
         })
       );
+      if (deps.closeAssistant) await step("assistant listener", () => deps.closeAssistant!());
       await step("session stores", () => deps.closeAuth());
       await step("database pool", () => deps.closePool());
 

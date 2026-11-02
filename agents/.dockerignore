@@ -1,0 +1,7 @@
+node_modules
+.mastra
+.env
+.env.*
+*.log
+tests
+**/node_modules

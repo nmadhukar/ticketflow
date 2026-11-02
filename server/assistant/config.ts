@@ -71,6 +71,17 @@ export function assistantConfigProblems(env: NodeJS.ProcessEnv = process.env): s
     }
   }
 
+  const internalPort = env.ASSISTANT_INTERNAL_PORT?.trim();
+  if (internalPort) {
+    const n = Number(internalPort);
+    const publicPort = Number(env.PORT?.trim() || "5000");
+    if (!/^\d+$/.test(internalPort) || n < 1 || n > 65535) {
+      problems.push("ASSISTANT_INTERNAL_PORT must be an integer from 1 to 65535.");
+    } else if (n === publicPort) {
+      problems.push("ASSISTANT_INTERNAL_PORT must differ from PORT: the internal listener is never public.");
+    }
+  }
+
   const runMax = env.ASSISTANT_RUN_MAX_SECONDS?.trim();
   if (runMax) {
     const n = Number(runMax);

@@ -105,9 +105,13 @@ app.use(requestLogger(log));
     const { pool } = await import("./storage/db");
     const { closeRealtime } = await import("./realtime/ws");
     const { closeAuth } = await import("./services/auth");
+    // The assistant's internal listener (nginx never proxies it); null unless ASSISTANT_ENABLED=true.
+    const { startInternalServer, closeServer } = await import("./assistant/internalServer");
+    const assistantServer = startInternalServer({ log });
     const shutdown = createShutdown({
       server,
       closeRealtime,
+      closeAssistant: assistantServer ? () => closeServer(assistantServer) : undefined,
       closeAuth,
       closePool: () => pool.end(),
       exit: (code) => process.exit(code),

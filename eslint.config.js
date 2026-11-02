@@ -14,12 +14,14 @@ export default tseslint.config(
       "test-results/**",
       // Scratch folders tests create and remove; one left by a killed run must not fail lint.
       ".tmp-*/**",
+      // The assistant sidecar's `mastra build` output.
+      "agents/.mastra/**",
     ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ["server/**/*.{ts,js,mjs}", "shared/**/*.ts", "scripts/**/*.{js,mjs,ts}", "docs/**/*.mjs", "*.{js,mjs,ts}"],
+    files: ["server/**/*.{ts,js,mjs}", "shared/**/*.ts", "scripts/**/*.{js,mjs,ts}", "docs/**/*.mjs", "agents/**/*.{ts,mjs}", "*.{js,mjs,ts}"],
     languageOptions: { globals: globals.node },
   },
   {
