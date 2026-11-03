@@ -1,11 +1,26 @@
 import { db } from "../storage/db";
 import { storage } from "../storage";
 import { tasks, users, departments } from "@shared/schema";
-import { eq, inArray, desc } from "drizzle-orm";
+import { eq, inArray, desc, like } from "drizzle-orm";
+
+// Every demo ticket this seeder writes carries this description; finding one means it already ran.
+const DEMO_DESCRIPTION_PREFIX = "Ticket randomly assigned to department: ";
 
 export async function seedTickets() {
   try {
     console.log("Seeding tickets...");
+
+    // Once only: the seeders run on every start while SEED_DEMO_DATA=true, and without this each
+    // restart added another 15-20 "Department ticket #N" copies.
+    const [seeded] = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(like(tasks.description, `${DEMO_DESCRIPTION_PREFIX}%`))
+      .limit(1);
+    if (seeded) {
+      console.log("Demo tickets already seeded; skipping.");
+      return;
+    }
 
     // Look up creator pools by role
     const [admin] = await db
@@ -85,7 +100,7 @@ export async function seedTickets() {
       await db.insert(tasks).values({
         ticketNumber: lastTicketNo,
         title: `Department ticket #${i + 1}`,
-        description: `Ticket randomly assigned to department: ${randomDept.name}`,
+        description: `${DEMO_DESCRIPTION_PREFIX}${randomDept.name}`,
         category: randomCategory,
         priority: randomPriority,
         status: randomStatus,
