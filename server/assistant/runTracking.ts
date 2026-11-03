@@ -1,4 +1,4 @@
-import { finalize, tap, type Observable } from "rxjs";
+import { filter, finalize, map, tap, type Observable } from "rxjs";
 
 /**
  * Ends each assistant run when its AGENT run ends, not when the browser's request does, and
@@ -90,6 +90,25 @@ export function observe(summary: RunSummary, event: unknown): void {
   }
 }
 
+/**
+ * The model's reasoning is not shown to users: it is working notes, not an answer, and can quote
+ * tool results the answer itself leaves out. Its events (and any reasoning message in a snapshot,
+ * as a reconnect replays) never leave the server. The agent keeps its own copy where it needs one.
+ */
+export function withoutReasoning(events: Observable<unknown>): Observable<unknown> {
+  return events.pipe(
+    filter((event) => {
+      const type = (event as { type?: unknown } | null)?.type;
+      return !(typeof type === "string" && (type.startsWith("REASONING_") || type.startsWith("THINKING_")));
+    }),
+    map((event) => {
+      const e = event as { type?: unknown; messages?: unknown };
+      if (e?.type !== "MESSAGES_SNAPSHOT" || !Array.isArray(e.messages)) return event;
+      return { ...e, messages: e.messages.filter((m) => (m as { role?: unknown } | null)?.role !== "reasoning") };
+    }),
+  );
+}
+
 /** The part of CopilotKit's AgentRunner this wraps (kept structural: the runtime is ESM-only). */
 export interface RunnerLike {
   run(request: { threadId: string; input: { threadId?: string; runId?: string } }): Observable<unknown>;
@@ -98,7 +117,10 @@ export interface RunnerLike {
   stop(request: unknown): Promise<boolean | undefined>;
 }
 
-/** One user's runner: CopilotKit's, plus the finish (end and report) of that user's runs. */
+/**
+ * One user's runner: CopilotKit's, plus the finish (end and report) of that user's runs, with the
+ * model's reasoning taken out of what the browser receives.
+ */
 export class TrackedRunner implements RunnerLike {
   constructor(
     private readonly delegate: RunnerLike,
@@ -111,7 +133,7 @@ export class TrackedRunner implements RunnerLike {
     const key = RunEndings.key(this.userId, request.input?.threadId ?? request.threadId, request.input?.runId);
     const finish = key ? this.endings.take(key) : undefined;
     const events = this.delegate.run(request);
-    if (!finish) return events;
+    if (!finish) return withoutReasoning(events);
     const started = this.now();
     const summary = emptySummary();
     return events.pipe(
@@ -123,11 +145,13 @@ export class TrackedRunner implements RunnerLike {
         },
       }),
       finalize(() => finish({ ...summary, durationMs: this.now() - started })),
+      // After the tap: the summary still sees every event (RUN_FINISHED usage included).
+      withoutReasoning,
     );
   }
 
   connect(request: unknown) {
-    return this.delegate.connect(request);
+    return withoutReasoning(this.delegate.connect(request));
   }
 
   isRunning(request: unknown) {

@@ -53,4 +53,13 @@ describe("AssistantShell", () => {
     expect(dialog).toHaveClass("flex");
     expect(mounts).toBe(1);
   });
+
+  it("closes on Escape, keeping the conversation", async () => {
+    renderShell({ enabled: true, agentId: "ticket-assistant" });
+    fireEvent.click(screen.getByRole("button", { name: /Ticket assistant/ }));
+    await screen.findByText("chat panel");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByRole("dialog", { hidden: true })).toHaveClass("hidden");
+    expect(screen.getByText("chat panel")).toBeInTheDocument();
+  });
 });

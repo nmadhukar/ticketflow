@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Bot, History, MessageSquare, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,15 @@ export function AssistantShell() {
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState<"chat" | "history">("chat");
   const { data } = useQuery<Availability>({ queryKey: ["/api/assistant/availability"], refetchOnWindowFocus: true, staleTime: 60_000 });
+  // Escape closes the panel (it covers the whole screen on a phone).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
   if (!data?.enabled || !data.agentId) return null;
   const title = data.agentId === "support-assistant" ? "Support assistant" : "Ticket assistant";
   const showHistory = data.history === true && view === "history";
@@ -40,7 +49,7 @@ export function AssistantShell() {
           aria-label={title}
           aria-hidden={!open}
           // A class, not the `hidden` attribute: Tailwind's `flex` would override the attribute.
-          className={`${open ? "flex" : "hidden"} fixed inset-0 z-50 flex-col bg-background sm:inset-auto sm:bottom-6 sm:left-6 sm:h-[600px] sm:max-h-[calc(100vh-3rem)] sm:w-[400px] sm:rounded-xl sm:border sm:shadow-xl`}
+          className={`${open ? "flex" : "hidden"} fixed inset-0 z-50 flex-col bg-background pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] sm:inset-auto sm:p-0 sm:bottom-6 sm:left-6 sm:h-[600px] sm:max-h-[calc(100vh-3rem)] sm:w-[400px] sm:rounded-xl sm:border sm:shadow-xl`}
         >
           <div className="flex items-center justify-between border-b px-4 py-2">
             <span className="font-medium">{showHistory ? "Saved conversations" : title}</span>
@@ -75,14 +84,16 @@ export function AssistantShell() {
       )}
       {!open && (
         <Button
-          className="fixed bottom-4 left-4 z-40 h-12 gap-2 rounded-full px-4 shadow-lg sm:bottom-6 sm:left-6"
+          // Icon only on a phone, so it covers as little of the page as possible.
+          aria-label={title}
+          className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-4 z-40 h-12 w-12 gap-2 rounded-full p-0 shadow-lg sm:bottom-6 sm:left-6 sm:w-auto sm:px-4"
           onClick={() => {
             setLoaded(true);
             setOpen(true);
           }}
         >
           <Bot className="h-5 w-5" />
-          {title}
+          <span className="hidden sm:inline">{title}</span>
         </Button>
       )}
     </>

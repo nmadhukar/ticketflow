@@ -1,5 +1,5 @@
-import { Subject } from "rxjs";
-import { LruMap, observe, RunEndings, TrackedRunner, type RunnerLike, type RunSummary } from "../../../assistant/runTracking";
+import { of, Subject } from "rxjs";
+import { LruMap, observe, RunEndings, TrackedRunner, withoutReasoning, type RunnerLike, type RunSummary } from "../../../assistant/runTracking";
 
 function fakeRunner() {
   const streams: Subject<unknown>[] = [];
@@ -132,6 +132,27 @@ describe("run endings", () => {
     const s: RunSummary = { status: "stopped", errorCategory: null, toolNames: [], proposalCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0 };
     observe(s, { type: "RUN_FINISHED", usage: [{ inputTokens: 1, outputTokens: 1, provider: "openrouter", model: "openai/gpt-5-mini" }] });
     expect(s).toMatchObject({ provider: "openrouter", model: "openai/gpt-5-mini" });
+  });
+});
+
+describe("reasoning", () => {
+  it("never reaches the browser, from a run or a replay, while the summary still counts the run", () => {
+    const { finished, streams, tracker } = tracked();
+    const seen: unknown[] = [];
+    tracker.run(request("t1", "r1")).subscribe((e) => seen.push((e as { type: string }).type));
+    for (const type of ["RUN_STARTED", "REASONING_START", "REASONING_MESSAGE_CONTENT", "REASONING_ENCRYPTED_VALUE", "REASONING_END", "THINKING_START", "TEXT_MESSAGE_CONTENT"]) {
+      streams[0].next({ type });
+    }
+    streams[0].next({ type: "RUN_FINISHED", usage: [{ inputTokens: 5, outputTokens: 1 }] });
+    streams[0].complete();
+    expect(seen).toEqual(["RUN_STARTED", "TEXT_MESSAGE_CONTENT", "RUN_FINISHED"]);
+    expect(finished[0]).toMatchObject({ status: "completed", inputTokens: 5 });
+
+    const replay: unknown[] = [];
+    withoutReasoning(
+      of({ type: "MESSAGES_SNAPSHOT", messages: [{ role: "user", content: "hi" }, { role: "reasoning", content: "notes" }, { role: "assistant", content: "hello" }] }),
+    ).subscribe((e) => replay.push(e));
+    expect(replay).toEqual([{ type: "MESSAGES_SNAPSHOT", messages: [{ role: "user", content: "hi" }, { role: "assistant", content: "hello" }] }]);
   });
 });
 
