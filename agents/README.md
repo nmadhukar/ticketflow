@@ -39,7 +39,21 @@ npm run check   # typecheck
 npm test        # node --test
 npm run dev     # local Studio (needs .env, see .env.example)
 npm run build   # what the Docker image runs
+npm run eval    # answer-quality evals against a running TicketFlow (see below)
 ```
+
+## Evals
+
+`evals/` asks fixed questions as real users of a running TicketFlow (app, this service and the
+model), and checks each answer by rule. Each question is a real model call.
+
+- What the cases check: `evals/cases.mjs`.
+- The data they ask about: `evals/fixtures.mjs`, created through the app's API.
+- `tests/evals-grade.test.mjs` proves the grader fails bad answers.
+
+Never run evals against production. How to run them, and what they cost:
+`docs/deployment/ASSISTANT_ROLLOUT.md`. Re-run them after changing a model or the instructions in
+`src/mastra/agents/`.
 
 Versions are pinned exactly. `@mastra/server` and `@mastra/deployer` are pinned through
 `overrides` to match `@mastra/core`: the CLI would otherwise bundle a newer server than the core it

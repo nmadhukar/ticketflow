@@ -10,7 +10,8 @@
     "dev": "mastra dev",
     "build": "mastra build",
     "check": "tsc --noEmit",
-    "test": "node --experimental-strip-types --no-warnings --test tests/*.test.mjs"
+    "test": "node --experimental-strip-types --no-warnings --test tests/*.test.mjs",
+    "eval": "node evals/run.mjs"
   },
   "dependencies": {
     "@mastra/core": "1.78.0",
