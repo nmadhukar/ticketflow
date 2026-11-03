@@ -23,12 +23,19 @@ BEGIN
       duration_ms integer NOT NULL,
       status varchar(16) NOT NULL,
       error_category varchar(40),
-      step_count integer DEFAULT 0 NOT NULL,
+      tool_call_count integer DEFAULT 0 NOT NULL,
       tool_names text[] NOT NULL,
       proposal_count integer DEFAULT 0 NOT NULL,
       CONSTRAINT assistant_usage_events_run_id_unique UNIQUE (run_id),
       CONSTRAINT assistant_usage_status_check CHECK (status IN ('completed', 'failed', 'stopped', 'refused'))
     );
+    -- An early build of this file named the column step_count; rename it where that ran.
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+                 AND table_name = 'assistant_usage_events' AND column_name = 'step_count')
+       AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+                 AND table_name = 'assistant_usage_events' AND column_name = 'tool_call_count') THEN
+      ALTER TABLE assistant_usage_events RENAME COLUMN step_count TO tool_call_count;
+    END IF;
     CREATE INDEX IF NOT EXISTS idx_assistant_usage_started_at ON assistant_usage_events (started_at);
     CREATE INDEX IF NOT EXISTS idx_assistant_usage_agent_started ON assistant_usage_events (agent_id, started_at);
     CREATE INDEX IF NOT EXISTS idx_assistant_usage_user_id ON assistant_usage_events (user_id);

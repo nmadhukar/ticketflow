@@ -128,12 +128,11 @@ app.use(requestLogger(log));
       log,
       onError: () => void shutdown("assistant listener error", { failed: true }),
     });
-    // With the assistant on: expiry and retention of proposed writes (hourly), and retention of
-    // its usage and audit records (daily). Both unref'd.
-    if (assistantServer) {
-      (await import("./assistant/proposals")).startProposalCleanup(log);
-      (await import("./assistant/retention")).startAssistantRecordCleanup(log);
-    }
+    // Expiry and retention of proposed writes (hourly), and retention of the assistant's usage and
+    // audit records (daily), whether or not the assistant is on now: records kept while it was on
+    // must still age out after it is switched off. Both unref'd.
+    (await import("./assistant/proposals")).startProposalCleanup(log);
+    (await import("./assistant/retention")).startAssistantRecordCleanup(log);
   }
 
   server

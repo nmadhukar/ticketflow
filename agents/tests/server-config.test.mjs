@@ -122,6 +122,9 @@ test('readiness checks the conversation store when staff history is on', async (
   const down = await assistantReadiness(HISTORY_ENV, { fetch: answered, checkHistory: async () => { throw new Error('ECONNREFUSED'); } });
   assert.equal(down.status, 'not_ready');
   assert.equal(down.checks.history, 'unreachable');
+  // Not ready, but configured: the models are still reported, so a run under way is costed right.
+  assert.equal(down.provider, 'openrouter');
+  assert.equal(down.models['ticket-assistant'], 'openai/gpt-5-mini');
   const hung = await assistantReadiness(HISTORY_ENV, { fetch: answered, timeoutMs: 50, checkHistory: () => new Promise(() => {}) });
   assert.equal(hung.checks.history, 'unreachable');
 });

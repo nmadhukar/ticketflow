@@ -1,5 +1,6 @@
 import type { AssistantAgentId } from "@shared/assistant";
 import type { RunSummary } from "./runTracking";
+import { estimateCostUsd } from "../services/ai/openRouterPricing";
 
 /**
  * The record of each assistant run (assistant_usage_events, migration 0033) and its cost.
@@ -31,7 +32,7 @@ export interface UsageDeps {
     durationMs: number;
     status: "completed" | "failed" | "stopped" | "refused";
     errorCategory: string | null;
-    stepCount: number;
+    toolCallCount: number;
     toolNames: string[];
     proposalCount: number;
   }) => Promise<void>;
@@ -64,20 +65,24 @@ export async function recordRun(
 ): Promise<void> {
   const full: Omit<RunSummary, "status"> & { status: RunSummary["status"] | "refused" } =
     summary.status === "refused"
-      ? { status: "refused", errorCategory: summary.errorCategory, toolNames: [], proposalCount: 0, stepCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0 }
+      ? { status: "refused", errorCategory: summary.errorCategory, toolNames: [], proposalCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0 }
       : summary;
+  // The model the run itself reported wins over the one the sidecar advertised.
+  const reported: { provider?: string; model?: string } = summary.status === "refused" ? {} : summary;
+  const provider = reported.provider ?? run.provider;
+  const model = reported.model ?? run.model;
   try {
     await deps.insertUsageEvent({
       runId: run.runId,
       agentId: run.agentId,
       userId: run.userId,
-      provider: run.provider,
-      model: run.model,
+      provider,
+      model,
       startedAt: run.startedAt,
       durationMs: Math.max(0, Math.round(full.durationMs)),
       status: full.status,
       errorCategory: full.errorCategory,
-      stepCount: full.stepCount,
+      toolCallCount: full.toolNames.length,
       toolNames: full.toolNames.slice(0, MAX_TOOLS),
       proposalCount: full.proposalCount,
     });
@@ -87,12 +92,11 @@ export async function recordRun(
 
   if (full.inputTokens + full.outputTokens === 0) return;
   try {
-    const model = run.model ?? "unknown";
     // A model OpenRouter has no price for is recorded at 0 rather than not at all: the tokens show.
-    const price = run.provider === "openrouter" && run.model ? await deps.price(run.model).catch(() => null) : null;
-    const estimatedCost = price ? full.inputTokens * price.promptUsdPerToken + full.outputTokens * price.completionUsdPerToken : 0;
+    const price = provider === "openrouter" && model ? await deps.price(model).catch(() => null) : null;
+    const estimatedCost = price ? estimateCostUsd(full.inputTokens, full.outputTokens, price) : 0;
     await deps.recordCost({
-      modelId: model,
+      modelId: model ?? "unknown",
       inputTokens: full.inputTokens,
       outputTokens: full.outputTokens,
       operation: ASSISTANT_OPERATION[run.agentId],
@@ -107,19 +111,17 @@ export async function recordRun(
 
 /** The production dependencies, loaded on first use (they reach the database). */
 export async function defaultUsageDeps(): Promise<UsageDeps> {
-  const [{ db }, { assistantUsageEvents }, { recordUsage }, { createOpenRouterPricing }] = await Promise.all([
+  const [{ db }, { assistantUsageEvents }, { recordUsage, getModelPrice }] = await Promise.all([
     import("../storage/db"),
     import("@shared/schema"),
     import("../services/ai/costMonitoring"),
-    import("../services/ai/openRouterPricing"),
   ]);
-  const pricing = createOpenRouterPricing();
   return {
     insertUsageEvent: async (row) => {
       await db.insert(assistantUsageEvents).values(row).onConflictDoNothing({ target: assistantUsageEvents.runId });
     },
     recordCost: (usage) => recordUsage(usage),
-    price: (model) => pricing.getModelPrice(model),
+    price: (model) => getModelPrice(model),
   };
 }
 
@@ -128,9 +130,9 @@ export async function defaultUsageDeps(): Promise<UsageDeps> {
  * assistant's own spend counts towards them through ai_usage. Checked before each run.
  */
 export async function budgetExhausted(): Promise<string | null> {
-  const { loadCostLimits, getDailyUsage, getMonthlyUsage } = await import("../services/ai/costMonitoring");
-  const [limits, daily, monthly] = await Promise.all([loadCostLimits(), getDailyUsage(), getMonthlyUsage()]);
-  if (daily.totalCost >= limits.dailyLimitUSD) return "daily_budget";
-  if (monthly.totalCost >= limits.monthlyLimitUSD) return "monthly_budget";
+  const { loadCostLimits, getBudgetSpend } = await import("../services/ai/costMonitoring");
+  const [limits, spend] = await Promise.all([loadCostLimits(), getBudgetSpend()]);
+  if (spend.dailyUsd >= limits.dailyLimitUSD) return "daily_budget";
+  if (spend.monthlyUsd >= limits.monthlyLimitUSD) return "monthly_budget";
   return null;
 }

@@ -384,6 +384,11 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
 
       const proceed = async () => {
         if (classified.route === "run") {
+          // A run is followed by its thread and run ids (its usage, cost and token lifetime depend on
+          // it), so a run without them is refused rather than run untracked.
+          if (!RunEndings.key(found.user.id, req.body?.threadId, req.body?.runId)) {
+            return deny(res, 400, "validation_failed", "A run needs a threadId and a runId.");
+          }
           const status = await historyStatus();
           const context = (runId: string): RunContext => ({
             runId,
@@ -402,7 +407,9 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
           if (blocked) {
             const refusedRun = randomUUID();
             logAssistantSecurityEvent({ event: "run_refused", reason: blocked, userId: found.user.id, agentId: found.agentId, runId: refusedRun, ip: req.ip });
-            void usage().then((d) => recordRun(d, context(refusedRun), { status: "refused", errorCategory: blocked }));
+            void usage()
+              .then((d) => recordRun(d, context(refusedRun), { status: "refused", errorCategory: blocked }))
+              .catch(() => undefined); // recordRun logs its own failures; a failed load must not crash the app
             return deny(res, 429, "assistant_budget_reached", "The assistant has reached its spending limit for now. Please try again later.");
           }
 
@@ -419,18 +426,11 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
             runs.end(run.runId);
             void usage().then((d) => recordRun(d, runContext, summary)).catch(() => undefined);
           };
-          const endingKey = RunEndings.key(found.user.id, req.body?.threadId, req.body?.runId);
-          if (endingKey) {
-            // The run's tokens end when its agent run ends (TrackedRunner), which may outlive this
-            // request; if the runner never takes the run over, they end with the request.
-            endings.expect(endingKey, finish);
-            res.on("close", () => endings.release(endingKey));
-          } else {
-            // No thread or run id to follow the agent run by: finished with the request.
-            res.on("close", () =>
-              finish({ status: "stopped", errorCategory: "untracked", toolNames: [], proposalCount: 0, stepCount: 0, inputTokens: 0, outputTokens: 0, durationMs: Date.now() - runContext.startedAt.getTime() }),
-            );
-          }
+          // Checked above. The run's tokens end when its agent run ends (TrackedRunner), which may
+          // outlive this request; if the runner never takes the run over, they end with the request.
+          const endingKey = RunEndings.key(found.user.id, req.body?.threadId, req.body?.runId)!;
+          endings.expect(endingKey, finish);
+          res.on("close", () => endings.release(endingKey));
         }
         const key = `${found.user.id}:${found.agentId}`;
         let handler = handlers.get(key);

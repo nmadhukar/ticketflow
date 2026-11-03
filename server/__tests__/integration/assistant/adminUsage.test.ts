@@ -2,6 +2,7 @@ import request from "supertest";
 import { aiUsage, assistantAuditEvents, assistantUsageEvents, type User } from "@shared/schema";
 import { db } from "../../../storage/db";
 import { cleanUpAssistantRecords } from "../../../assistant/retention";
+import { getBudgetSpend, getDailyUsage, getMonthlyUsage } from "../../../services/ai/costMonitoring";
 import { createTestApp } from "../helpers/testApp";
 import { resetDb } from "../helpers/testDb";
 import { createUser, loginAs } from "../helpers/fixtures";
@@ -28,7 +29,7 @@ beforeEach(async () => {
   agent = await createUser({ role: "agent" });
   const now = Date.now();
   await db.insert(assistantUsageEvents).values([
-    { runId: RUN_A, agentId: "ticket-assistant", userId: agent.id, provider: "openrouter", model: "openai/gpt-5-mini", startedAt: new Date(now - 60_000), durationMs: 4000, status: "completed", stepCount: 2, toolNames: ["get_ticket"], proposalCount: 1 },
+    { runId: RUN_A, agentId: "ticket-assistant", userId: agent.id, provider: "openrouter", model: "openai/gpt-5-mini", startedAt: new Date(now - 60_000), durationMs: 4000, status: "completed", toolCallCount: 1, toolNames: ["get_ticket"], proposalCount: 1 },
     { runId: RUN_B, agentId: "support-assistant", userId: agent.id, startedAt: new Date(now - 30_000), durationMs: 0, status: "refused", errorCategory: "daily_budget", toolNames: [] },
   ]);
   await db.insert(aiUsage).values([
@@ -82,6 +83,26 @@ describe("assistant admin views", () => {
     expect(page2.body.nextBefore).toBeNull();
     expect((await s.get("/api/admin/assistant/audit?event=drop_table")).status).toBe(400);
     expect((await s.get("/api/admin/assistant/audit?limit=500")).status).toBe(400);
+  });
+
+  it("the budget check counts spend exactly as the daily and monthly usage summaries do", async () => {
+    await db.delete(aiUsage);
+    const row = (at: string, estimatedCost: string, verified?: string) => ({
+      modelId: "openai/gpt-5-mini", inputTokens: 1, outputTokens: 1, operation: "assistant.staff", timestamp: new Date(at), estimatedCost,
+      ...(verified ? { billingStatus: "verified", verifiedCostUsd: verified } : {}),
+    });
+    await db.insert(aiUsage).values([
+      row("2026-06-15T10:00:00Z", "1.000000"),
+      row("2026-06-15T11:00:00Z", "3.000000", "0.500000"), // verified wins over the estimate
+      row("2026-06-03T09:00:00Z", "2.000000"), // this month, not today
+      row("2026-06-30T23:59:59Z", "8.000000"), // this month, not today
+      row("2026-05-31T23:59:59Z", "4.000000"), // last month
+      row("2026-07-01T00:00:00Z", "16.000000"), // next month
+    ]);
+    const spend = await getBudgetSpend(new Date("2026-06-15T12:00:00Z"));
+    expect(spend).toEqual({ dailyUsd: 1.5, monthlyUsd: 11.5 });
+    expect(spend.dailyUsd).toBeCloseTo((await getDailyUsage("2026-06-15")).totalCost, 6);
+    expect(spend.monthlyUsd).toBeCloseTo((await getMonthlyUsage(2026, 6)).totalCost, 6);
   });
 
   it("retention: usage after 90 days, audit after 365, each on its own clock", async () => {

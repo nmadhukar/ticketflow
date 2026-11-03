@@ -19,11 +19,12 @@ export interface RunSummary {
   /** Tool names in call order (repeats kept), as the model called them. */
   toolNames: string[];
   proposalCount: number;
-  /** Model steps: one per usage entry the run reported. */
-  stepCount: number;
   inputTokens: number;
   outputTokens: number;
   durationMs: number;
+  /** The model and provider the run reported in its usage, when it did (a local agent does). */
+  model?: string;
+  provider?: string;
 }
 
 export type RunFinish = (summary: RunSummary) => void;
@@ -53,10 +54,10 @@ export class RunEndings {
 }
 
 function emptySummary(): RunSummary {
-  return { status: "stopped", errorCategory: null, toolNames: [], proposalCount: 0, stepCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0 };
+  return { status: "stopped", errorCategory: null, toolNames: [], proposalCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0 };
 }
 
-type AgUiEvent = { type?: string; toolCallName?: unknown; code?: unknown; usage?: unknown };
+type AgUiEvent = { type?: string; toolCallName?: unknown; code?: unknown; usage?: unknown; outcome?: { type?: unknown } };
 
 /** Folds one AG-UI event into the summary. Content is never read: only names, codes and counts. */
 export function observe(summary: RunSummary, event: unknown): void {
@@ -69,12 +70,22 @@ export function observe(summary: RunSummary, event: unknown): void {
     summary.status = "failed";
     summary.errorCategory = typeof e.code === "string" && /^[a-z0-9_.-]{1,40}$/i.test(e.code) ? e.code : "run_error";
   } else if (e.type === "RUN_FINISHED") {
-    if (summary.status !== "failed") summary.status = "completed";
-    const steps = Array.isArray(e.usage) ? e.usage : e.usage && typeof e.usage === "object" ? [e.usage] : [];
-    for (const step of steps as Array<{ inputTokens?: unknown; outputTokens?: unknown }>) {
-      summary.stepCount += 1;
-      summary.inputTokens += Number.isFinite(step?.inputTokens) ? Number(step.inputTokens) : 0;
-      summary.outputTokens += Number.isFinite(step?.outputTokens) ? Number(step.outputTokens) : 0;
+    // RUN_FINISHED also ends a cancelled (Stop) or interrupted run: its outcome says which.
+    const outcome = e.outcome?.type;
+    if (summary.status !== "failed") {
+      if (outcome === "cancelled" || outcome === "interrupt") {
+        summary.status = "stopped";
+        summary.errorCategory = outcome === "cancelled" ? "cancelled" : "interrupted";
+      } else {
+        summary.status = "completed";
+      }
+    }
+    const entries = Array.isArray(e.usage) ? e.usage : e.usage && typeof e.usage === "object" ? [e.usage] : [];
+    for (const entry of entries as Array<{ inputTokens?: unknown; outputTokens?: unknown; model?: unknown; provider?: unknown }>) {
+      summary.inputTokens += Number.isFinite(entry?.inputTokens) ? Number(entry.inputTokens) : 0;
+      summary.outputTokens += Number.isFinite(entry?.outputTokens) ? Number(entry.outputTokens) : 0;
+      if (typeof entry?.model === "string" && entry.model) summary.model = entry.model;
+      if (typeof entry?.provider === "string" && entry.provider) summary.provider = entry.provider;
     }
   }
 }

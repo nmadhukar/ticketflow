@@ -15,7 +15,6 @@ const summary = (over: Partial<RunSummary> = {}): RunSummary => ({
   errorCategory: null,
   toolNames: ["get_ticket"],
   proposalCount: 0,
-  stepCount: 2,
   inputTokens: 1000,
   outputTokens: 200,
   durationMs: 4200.4,
@@ -39,11 +38,28 @@ describe("assistant run usage", () => {
     const { deps, usage, cost } = fakeDeps();
     await recordRun(deps, run, summary());
     expect(usage).toEqual([
-      expect.objectContaining({ runId: run.runId, agentId: "ticket-assistant", userId: "staff-1", model: "openai/gpt-5-mini", status: "completed", durationMs: 4200, stepCount: 2, toolNames: ["get_ticket"] }),
+      expect.objectContaining({ runId: run.runId, agentId: "ticket-assistant", userId: "staff-1", model: "openai/gpt-5-mini", status: "completed", durationMs: 4200, toolCallCount: 1, toolNames: ["get_ticket"] }),
     ]);
     expect(cost).toEqual([
       { modelId: "openai/gpt-5-mini", inputTokens: 1000, outputTokens: 200, operation: "assistant.staff", estimatedCost: 1000 * 0.25e-6 + 200 * 2e-6, userId: "staff-1", assistantRunId: run.runId },
     ]);
+  });
+
+  it("prices and records the model the run reported over the one the sidecar advertised", async () => {
+    const priced: string[] = [];
+    const { deps, usage, cost } = fakeDeps({ price: async (m) => (priced.push(m), { promptUsdPerToken: 1e-6, completionUsdPerToken: 1e-6 }) });
+    await recordRun(deps, { ...run, model: null, provider: null }, summary({ provider: "openrouter", model: "openai/gpt-5-nano" }));
+    expect(priced).toEqual(["openai/gpt-5-nano"]);
+    expect(usage[0]).toMatchObject({ provider: "openrouter", model: "openai/gpt-5-nano" });
+    expect(cost[0]).toMatchObject({ modelId: "openai/gpt-5-nano" });
+    expect((cost[0] as { estimatedCost: number }).estimatedCost).toBeCloseTo(1200e-6, 12);
+  });
+
+  it("counts every tool call, though only the first 50 names are kept", async () => {
+    const { deps, usage } = fakeDeps();
+    await recordRun(deps, run, summary({ toolNames: Array.from({ length: 60 }, () => "get_ticket") }));
+    expect(usage[0]).toMatchObject({ toolCallCount: 60 });
+    expect((usage[0] as { toolNames: string[] }).toolNames).toHaveLength(50);
   });
 
   it("writes no cost row for a run that used no tokens, and records refusals", async () => {

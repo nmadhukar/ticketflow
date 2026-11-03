@@ -1,7 +1,6 @@
-import type { Express, Request, Response } from "express";
+import type { Express, RequestHandler } from "express";
 import { and, desc, eq, gte, isNotNull, lt, sql } from "drizzle-orm";
-import { ASSISTANT_AUDIT_EVENT_TYPES, aiUsage, assistantAuditEvents, assistantUsageEvents, type User } from "@shared/schema";
-import { normalizeRole } from "../permissions/roles";
+import { ASSISTANT_AUDIT_EVENT_TYPES, aiUsage, assistantAuditEvents, assistantUsageEvents } from "@shared/schema";
 
 /**
  * Admin-only views of the assistant: usage (runs, outcomes, tokens and cost) and the audit trail.
@@ -12,19 +11,6 @@ import { normalizeRole } from "../permissions/roles";
  *   GET /api/admin/assistant/audit?limit=50&before=<id>&event=<type>&user=<id>
  */
 
-function admin(req: Request, res: Response): User | null {
-  const user = req.isAuthenticated?.() ? (req.user as User | undefined) : undefined;
-  if (!user) {
-    res.status(401).json({ error: "unauthorized", message: "Sign in first." });
-    return null;
-  }
-  if (normalizeRole(user.role) !== "admin") {
-    res.status(403).json({ error: "forbidden", message: "Administrators only." });
-    return null;
-  }
-  return user;
-}
-
 function intParam(value: unknown, fallback: number, min: number, max: number): number | null {
   if (value === undefined || value === "") return fallback;
   if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
@@ -32,9 +18,14 @@ function intParam(value: unknown, fallback: number, min: number, max: number): n
   return n >= min && n <= max ? n : null;
 }
 
+// The app's own admin check (middleware/admin.middleware.ts), as every other admin route uses.
+// Loaded on first use, like the database: importing it reaches storage.
+const isAdmin: RequestHandler = (req, res, next) => {
+  import("../middleware/admin.middleware").then(({ isAdmin: check }) => check(req, res, next), next);
+};
+
 export function registerAssistantAdminRoutes(app: Express): void {
-  app.get("/api/admin/assistant/usage", async (req, res, next) => {
-    if (!admin(req, res)) return;
+  app.get("/api/admin/assistant/usage", isAdmin, async (req, res, next) => {
     const days = intParam(req.query.days, 30, 1, 90);
     if (days === null) return res.status(400).json({ error: "validation_failed", message: "days must be an integer from 1 to 90." });
     try {
@@ -85,8 +76,7 @@ export function registerAssistantAdminRoutes(app: Express): void {
     }
   });
 
-  app.get("/api/admin/assistant/audit", async (req, res, next) => {
-    if (!admin(req, res)) return;
+  app.get("/api/admin/assistant/audit", isAdmin, async (req, res, next) => {
     const limit = intParam(req.query.limit, 50, 1, 200);
     const before = intParam(req.query.before, 0, 1, Number.MAX_SAFE_INTEGER);
     const event = req.query.event;

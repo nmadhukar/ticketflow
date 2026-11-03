@@ -18,7 +18,12 @@ export type AssistantReadiness =
       provider: string;
       models: Record<string, string>;
     }
-  | { status: 'not_ready'; checks: { configuration: 'ok'; mcp: 'reachable' | 'unreachable'; history: 'ok' | 'off' | 'unreachable' } }
+  | {
+      status: 'not_ready';
+      checks: { configuration: 'ok'; mcp: 'reachable' | 'unreachable'; history: 'ok' | 'off' | 'unreachable' };
+      provider: string;
+      models: Record<string, string>;
+    }
   | { status: 'not_ready'; checks: { configuration: 'invalid' }; settings: string[] };
 
 interface ReadinessOptions {
@@ -64,15 +69,16 @@ export async function assistantReadiness(
       ]).catch(() => 'unreachable' as const)
     : Promise.resolve('off' as const);
   const [mcp, history] = await Promise.all([mcpCheck, historyCheck]);
+  // Which model each agent uses (no secrets): the app records usage and cost against it, so it is
+  // reported whenever the configuration is valid, ready or not (a run can still be under way).
+  const models = { provider: readProvider(env), models: Object.fromEntries(AGENT_IDS.map((id) => [id, readModel(id, env)])) };
   if (mcp === 'reachable' && history !== 'unreachable') {
     return {
       status: 'ready',
       checks: { configuration: 'ok', mcp, history },
       ...(history === 'ok' ? { historyRetentionDays: readRetentionDays(env) } : {}),
-      // Which model each agent uses (no secrets): the app records usage and cost against it.
-      provider: readProvider(env),
-      models: Object.fromEntries(AGENT_IDS.map((id) => [id, readModel(id, env)])),
+      ...models,
     };
   }
-  return { status: 'not_ready', checks: { configuration: 'ok', mcp, history } };
+  return { status: 'not_ready', checks: { configuration: 'ok', mcp, history }, ...models };
 }

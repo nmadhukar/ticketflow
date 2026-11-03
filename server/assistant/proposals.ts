@@ -214,13 +214,6 @@ export async function confirmProposal(user: User, id: string, edits: unknown = u
     await prepareTicketCreate(user, finalPayload);
   }
 
-  // The user's decision is on the record before anything is written: if it cannot be recorded,
-  // nothing is (AuditUnavailableError, a 503).
-  await recordAssistantAudit(
-    { event: "write_confirmed", reason: action, userId: user.id, runId: row.runId, agentId: row.agentId, proposalId: row.id, ticketId: row.ticketId },
-    { required: true },
-  );
-
   // Claim, so a second confirm (double click, retry) finds nothing to claim.
   const [claimed] = await db
     .update(assistantWriteProposals)
@@ -229,6 +222,19 @@ export async function confirmProposal(user: User, id: string, edits: unknown = u
     .returning();
   if (!claimed) return explain(user, id);
   const audit = { userId: user.id, runId: claimed.runId, agentId: claimed.agentId, proposalId: claimed.id, ticketId: claimed.ticketId };
+
+  // The user's decision is on the record before anything is written: if it cannot be recorded,
+  // nothing is (AuditUnavailableError, a 503), and the proposal goes back to pending to confirm
+  // again. Recorded after the claim, so only the one confirm that won it is on the record.
+  try {
+    await recordAssistantAudit({ event: "write_confirmed", reason: action, ...audit }, { required: true });
+  } catch (error) {
+    await db
+      .update(assistantWriteProposals)
+      .set({ status: "pending", decidedAt: null })
+      .where(and(eq(assistantWriteProposals.id, claimed.id), eq(assistantWriteProposals.status, "executing")));
+    throw error;
+  }
 
   let result: DecisionResult;
   let resultRef: string;

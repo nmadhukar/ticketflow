@@ -45,7 +45,6 @@ describe("run endings", () => {
         errorCategory: null,
         toolNames: ["get_ticket", "propose_comment"],
         proposalCount: 1,
-        stepCount: 2,
         inputTokens: 400,
         outputTokens: 25,
         durationMs: 3500,
@@ -102,11 +101,37 @@ describe("run endings", () => {
   });
 
   it("reads only names, codes and counts: odd codes are not stored", () => {
-    const s: RunSummary = { status: "stopped", errorCategory: null, toolNames: [], proposalCount: 0, stepCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0 };
+    const s: RunSummary = { status: "stopped", errorCategory: null, toolNames: [], proposalCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0 };
     observe(s, { type: "RUN_ERROR", code: "has spaces and <html>" });
     expect(s.errorCategory).toBe("run_error");
     observe(s, { type: "RUN_FINISHED", usage: { inputTokens: "x", outputTokens: 7 } });
-    expect(s).toMatchObject({ status: "failed", stepCount: 1, inputTokens: 0, outputTokens: 7 });
+    expect(s).toMatchObject({ status: "failed", inputTokens: 0, outputTokens: 7 });
+  });
+
+  it("a RUN_FINISHED that was cancelled or interrupted is a stopped run, not a completed one", () => {
+    const cancelled = tracked();
+    cancelled.tracker.run(request("t1", "r1")).subscribe();
+    cancelled.streams[0].next({ type: "RUN_FINISHED", outcome: { type: "cancelled" } });
+    cancelled.streams[0].complete();
+    expect(cancelled.finished[0]).toMatchObject({ status: "stopped", errorCategory: "cancelled" });
+
+    const interrupted = tracked();
+    interrupted.tracker.run(request("t1", "r1")).subscribe();
+    interrupted.streams[0].next({ type: "RUN_FINISHED", outcome: { type: "interrupt" } });
+    interrupted.streams[0].complete();
+    expect(interrupted.finished[0]).toMatchObject({ status: "stopped", errorCategory: "interrupted" });
+
+    const success = tracked();
+    success.tracker.run(request("t1", "r1")).subscribe();
+    success.streams[0].next({ type: "RUN_FINISHED", outcome: { type: "success" } });
+    success.streams[0].complete();
+    expect(success.finished[0]).toMatchObject({ status: "completed", errorCategory: null });
+  });
+
+  it("keeps the model and provider the run reported in its usage", () => {
+    const s: RunSummary = { status: "stopped", errorCategory: null, toolNames: [], proposalCount: 0, inputTokens: 0, outputTokens: 0, durationMs: 0 };
+    observe(s, { type: "RUN_FINISHED", usage: [{ inputTokens: 1, outputTokens: 1, provider: "openrouter", model: "openai/gpt-5-mini" }] });
+    expect(s).toMatchObject({ provider: "openrouter", model: "openai/gpt-5-mini" });
   });
 });
 

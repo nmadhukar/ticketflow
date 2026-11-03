@@ -1344,7 +1344,8 @@ export const assistantUsageEvents = pgTable(
     durationMs: integer("duration_ms").notNull(),
     status: varchar("status", { length: 16 }).notNull(),
     errorCategory: varchar("error_category", { length: 40 }),
-    stepCount: integer("step_count").notNull().default(0),
+    /** Every tool call, including any beyond the 50 names kept in tool_names. */
+    toolCallCount: integer("tool_call_count").notNull().default(0),
     // No default: drizzle-kit cannot compare an array default and would re-apply it on every push.
     toolNames: text("tool_names").array().notNull(),
     proposalCount: integer("proposal_count").notNull().default(0),
