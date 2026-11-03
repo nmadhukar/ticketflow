@@ -55,7 +55,7 @@ import { issueApiKey } from "../../../services/auth/apiKeys";
 import { verifyAssistantToken } from "../../../assistant/sessionToken";
 import { assistantRuns } from "../../../assistant/runs";
 import { db } from "../../../storage/db";
-import { aiUsage, assistantAuditEvents, assistantUsageEvents } from "@shared/schema";
+import { aiUsage, assistantAuditEvents, assistantUsageEvents, users } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
 const ENV: Record<string, string> = {
@@ -115,6 +115,41 @@ describe("assistant bridge", () => {
     expect((await s.get("/api/assistant/availability")).body).toEqual({ enabled: true, agentId: "ticket-assistant", history: false });
     expect((await request(ctx.app).get("/api/assistant/availability")).status).toBe(401);
     expect((await request(ctx.app).get("/api/copilotkit/info")).status).toBe(401);
+  });
+
+  it("every role gets its own agent: customers the support one; agents, managers and admins the staff one", async () => {
+    for (const role of ["customer", "agent", "manager", "admin"] as const) {
+      const user = await createUser({ role });
+      const session = await loginAs(ctx.app, user);
+      const expected = role === "customer" ? "support-assistant" : "ticket-assistant";
+      const other = role === "customer" ? "ticket-assistant" : "support-assistant";
+      expect((await session.get("/api/assistant/availability")).body.agentId).toBe(expected);
+      expect((await session.post(`/api/copilotkit/agent/${other}/run`).set("Origin", ORIGIN).send(runBody)).status).toBe(404);
+    }
+    expect(recorded.clients).toEqual([]);
+  });
+
+  it("ASSISTANT_AUDIENCE=staff: customers have no assistant (no launcher, no run, no draft decision); staff keep theirs", async () => {
+    process.env.ASSISTANT_AUDIENCE = "staff";
+    try {
+      const c = await loginAs(ctx.app, customer);
+      expect((await c.get("/api/assistant/availability")).body).toEqual({ enabled: false, agentId: null, history: false });
+      expect((await c.post("/api/copilotkit/agent/support-assistant/run").set("Origin", ORIGIN).send(runBody)).status).toBe(403);
+      const s = await loginAs(ctx.app, staff);
+      expect((await s.get("/api/assistant/availability")).body).toMatchObject({ enabled: true, agentId: "ticket-assistant" });
+      expect(recorded.clients).toEqual([]);
+    } finally {
+      delete process.env.ASSISTANT_AUDIENCE;
+    }
+  });
+
+  it("a deactivated account loses the assistant at its next request, its open session included", async () => {
+    const c = await loginAs(ctx.app, customer);
+    expect((await c.get("/api/assistant/availability")).status).toBe(200);
+    await db.update(users).set({ isActive: false }).where(eq(users.id, customer.id));
+    expect((await c.get("/api/assistant/availability")).status).toBe(401);
+    expect((await c.post("/api/copilotkit/agent/support-assistant/run").set("Origin", ORIGIN).send(runBody)).status).toBe(401);
+    expect(recorded.clients).toEqual([]);
   });
 
   it("refuses an API key on the bridge: it is session-only", async () => {

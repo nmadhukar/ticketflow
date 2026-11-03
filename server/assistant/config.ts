@@ -37,6 +37,18 @@ export function isStaffHistoryEnabled(env: NodeJS.ProcessEnv = process.env): boo
   return env.ASSISTANT_STAFF_HISTORY === "true";
 }
 
+/**
+ * Who has the assistant: "all" (default) or "staff" (agents, managers and admins), for a rollout
+ * that starts with staff. Anything else is a configuration problem, and reads as the narrower
+ * "staff" until fixed.
+ */
+export type AssistantAudience = "staff" | "all";
+
+export function readAssistantAudience(env: NodeJS.ProcessEnv = process.env): AssistantAudience {
+  const value = env.ASSISTANT_AUDIENCE?.trim().toLowerCase();
+  return !value || value === "all" ? "all" : "staff";
+}
+
 function read(env: NodeJS.ProcessEnv, name: string): string | undefined {
   const value = env[name]?.trim();
   return value ? value : undefined;
@@ -94,6 +106,11 @@ export function assistantConfigProblems(env: NodeJS.ProcessEnv = process.env): s
     if (raw && (!/^\d+$/.test(raw) || Number(raw) < range.min || Number(raw) > range.max)) {
       problems.push(`${name} must be an integer from ${range.min} to ${range.max}.`);
     }
+  }
+
+  const audience = env.ASSISTANT_AUDIENCE?.trim().toLowerCase();
+  if (audience && audience !== "all" && audience !== "staff") {
+    problems.push("ASSISTANT_AUDIENCE must be \"staff\" or \"all\".");
   }
 
   const runMax = env.ASSISTANT_RUN_MAX_SECONDS?.trim();

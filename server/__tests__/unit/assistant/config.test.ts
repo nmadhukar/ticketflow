@@ -2,6 +2,7 @@ import {
   assistantConfigProblems,
   DEFAULT_RUN_MAX_SECONDS,
   isAssistantEnabled,
+  readAssistantAudience,
   readAssistantSecrets,
   readRetentionDays,
   readRunMaxSeconds,
@@ -116,5 +117,14 @@ describe("assistant config", () => {
     expect(assistantConfigProblems({ ...GOOD, ASSISTANT_AUDIT_RETENTION_DAYS: "29" })).toEqual(["ASSISTANT_AUDIT_RETENTION_DAYS must be an integer from 30 to 3650."]);
     expect(assistantConfigProblems({ ...GOOD, ASSISTANT_USAGE_RETENTION_DAYS: "0" })).toEqual(["ASSISTANT_USAGE_RETENTION_DAYS must be an integer from 1 to 365."]);
     expect(assistantConfigProblems({ ...GOOD, ASSISTANT_USAGE_RETENTION_DAYS: "abc" })).toHaveLength(1);
+  });
+
+  it("ASSISTANT_AUDIENCE: everyone by default, staff when asked, and a typo is refused and read narrowly", () => {
+    expect(readAssistantAudience({})).toBe("all");
+    expect(readAssistantAudience({ ASSISTANT_AUDIENCE: " All " })).toBe("all");
+    expect(readAssistantAudience({ ASSISTANT_AUDIENCE: "staff" })).toBe("staff");
+    expect(readAssistantAudience({ ASSISTANT_AUDIENCE: "staf" })).toBe("staff");
+    expect(assistantConfigProblems({ ...GOOD, ASSISTANT_AUDIENCE: "staff" })).toEqual([]);
+    expect(assistantConfigProblems({ ...GOOD, ASSISTANT_AUDIENCE: "customers" })).toEqual(['ASSISTANT_AUDIENCE must be "staff" or "all".']);
   });
 });

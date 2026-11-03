@@ -1,6 +1,6 @@
 import request from "supertest";
 import { eq } from "drizzle-orm";
-import { assistantAuditEvents, assistantWriteProposals, taskComments, tasks, type User } from "@shared/schema";
+import { assistantAuditEvents, assistantWriteProposals, taskComments, tasks, users, type User } from "@shared/schema";
 import { db } from "../../../storage/db";
 import { storage } from "../../../storage";
 import { keyOwnerBlockReason } from "../../../services/auth/apiKeys";
@@ -199,6 +199,15 @@ describe("assistant proposals", () => {
     expect((await a.post(`/api/assistant/proposals/${id}/reject`).set("Origin", ORIGIN).send({})).body).toEqual({ status: "rejected" });
     expect((await a.post(`/api/assistant/proposals/${id}/confirm`).set("Origin", ORIGIN).send({})).status).toBe(409);
     expect(await comments()).toEqual([]);
+  });
+
+  it("a draft left by an account that is then deactivated can never be confirmed", async () => {
+    const id = await proposeAsA();
+    const a = await loginAs(ctx.app, A);
+    await db.update(users).set({ isActive: false }).where(eq(users.id, A.id));
+    expect((await a.post(`/api/assistant/proposals/${id}/confirm`).set("Origin", ORIGIN).send({})).status).toBe(401);
+    expect(await comments()).toEqual([]);
+    expect(await proposal(id)).toMatchObject({ status: "pending" });
   });
 
   it("access is checked again at Confirm: lost access means no write", async () => {

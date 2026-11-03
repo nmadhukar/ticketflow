@@ -4,7 +4,7 @@ import { agentForRole, ASSISTANT_AGENT_IDS, type AssistantAgentId } from "@share
 import { normalizeRole } from "../permissions/roles";
 import { configuredBaseUrl } from "../utils/appBaseUrl";
 import { createCustomRateLimit, rateLimitingEnabled } from "../security/rateLimiting";
-import { isAssistantEnabled, isStaffHistoryEnabled } from "./config";
+import { isAssistantEnabled, isStaffHistoryEnabled, readAssistantAudience } from "./config";
 import { AuditUnavailableError, logAssistantSecurityEvent } from "./securityLog";
 import { assistantWritesEnabled } from "./toolPolicy";
 import { ticketErrorToHttp } from "../services/tickets/ticketError";
@@ -18,6 +18,12 @@ import { map, type Observable } from "rxjs";
 import { deleteHistory, getHistory, HistoryError, isThreadId, listHistory, mastraThreadId, newestTurn, STAFF_AGENT } from "./history";
 
 /** Per-user CopilotKit handlers kept in memory; the least recently used beyond this is dropped. */
+// CopilotKit's runtime sends usage telemetry to telemetry.copilotkit.ai unless this is set, and
+// it reads the setting once, when its module is first imported. So it is set here, when the app
+// loads this file and before any import of CopilotKit, and forced: nothing about TicketFlow's
+// users or traffic leaves for a third party. (The sidecar sets MASTRA_TELEMETRY_DISABLED=1.)
+process.env.COPILOTKIT_TELEMETRY_DISABLED = "true";
+
 const MAX_CACHED_HANDLERS = 500;
 
 /**
@@ -65,12 +71,16 @@ export function classifyCopilotRequest(req: Pick<Request, "method" | "originalUr
   return { route: match[2], agentId: /^\/agent\/([^/]+)\//.exec(path)?.[1] ?? null };
 }
 
-/** The signed-in user's agent, or null: no session, an unknown role, or no assistant for it. */
-export function assistantFor(req: Request): { user: User; agentId: AssistantAgentId } | null {
+/**
+ * The signed-in user's agent, or null: no session, an unknown role, no assistant for it, or a
+ * customer while ASSISTANT_AUDIENCE=staff.
+ */
+export function assistantFor(req: Request, env: NodeJS.ProcessEnv = process.env): { user: User; agentId: AssistantAgentId } | null {
   const user = req.isAuthenticated?.() ? (req.user as User | undefined) : undefined;
   if (!user) return null;
   const agentId = agentForRole(normalizeRole(user.role));
-  return agentId ? { user, agentId } : null;
+  if (!agentId || (agentId !== STAFF_AGENT && readAssistantAudience(env) === "staff")) return null;
+  return { user, agentId };
 }
 
 /**
@@ -169,7 +179,6 @@ const createHandler: CopilotHandlerFactory = async (userId, agentId, env, ending
     import("@ag-ui/mastra"),
     import("@mastra/client-js"),
   ]);
-  process.env.COPILOTKIT_TELEMETRY_DISABLED ??= "true";
   // One runner per user, so threads of different users never share a store; small, because one is
   // held per active user (at most MAX_CACHED_HANDLERS). TrackedRunner ends each assistant run when
   // its agent run ends (runTracking.ts).
@@ -185,7 +194,9 @@ const createHandler: CopilotHandlerFactory = async (userId, agentId, env, ending
       const mcpToken = request.headers.get(INTERNAL_MCP_TOKEN);
       // Tokens exist only on a run request (set below); anything else reaching Mastra is refused there.
       const headers: Record<string, string> = agentToken && mcpToken ? { Authorization: `Bearer ${agentToken}`, "X-TicketFlow-MCP-Session": mcpToken } : {};
-      const client = new MastraClient({ baseUrl: agentUrl(env), headers });
+      // One retry, not the default three: with the sidecar down, each attempt can wait out a DNS
+      // or connect timeout, and four of them kept the user waiting about 20 s for the error.
+      const client = new MastraClient({ baseUrl: agentUrl(env), headers, retries: 1 });
       // Staff threads are always prefixed; only the newest turn goes when the sidecar has memory.
       const AgentClass = agentId === STAFF_AGENT ? staffAgentClass(MastraAgent, userId, await staffMemory()) : MastraAgent;
       const agent = new AgentClass({
@@ -223,7 +234,7 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
 
   app.get("/api/assistant/availability", async (req, res, next) => {
     try {
-      const found = assistantFor(req);
+      const found = assistantFor(req, env);
       if (!req.isAuthenticated?.() || !req.user) return deny(res, 401, "unauthorized", "Sign in to use the assistant.");
       // Offered to staff only; the sidecar is asked only for them, once per request.
       const status = found?.agentId === STAFF_AGENT ? await historyStatus() : null;
@@ -251,7 +262,7 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
       if (decision !== "confirm" && decision !== "reject") return deny(res, 404, "not_found", "Not found.");
       if (!req.isAuthenticated?.() || !req.user) return deny(res, 401, "unauthorized", "Sign in to use the assistant.");
       if (!isAssistantEnabled(env) || !assistantWritesEnabled(env)) return deny(res, 503, "assistant_writes_disabled", "Assistant changes are switched off.");
-      const found = assistantFor(req);
+      const found = assistantFor(req, env);
       if (!found) return deny(res, 403, "assistant_unavailable", "The assistant is not available for your account.");
       if (!sameOrigin(req, env)) {
         logAssistantSecurityEvent({ event: "write_refused", reason: "cross_origin", userId: found.user.id, agentId: found.agentId, ip: req.ip });
@@ -291,7 +302,7 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
   const historyGuard: RequestHandler = async (req, res, next) => {
     try {
       if (!req.isAuthenticated?.() || !req.user) return deny(res, 401, "unauthorized", "Sign in to use the assistant.");
-      const found = assistantFor(req);
+      const found = assistantFor(req, env);
       if (!found || found.agentId !== STAFF_AGENT) return deny(res, 403, "forbidden", "Saved conversations are for staff.");
       if (req.method !== "GET" && !sameOrigin(req, env)) return deny(res, 403, "forbidden", "Cross-site request refused.");
       if (!historyShown(await historyStatus())) return deny(res, 503, "history_disabled", "Saved conversations are switched off.");
@@ -347,7 +358,7 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
   });
 
   const runLimit: RequestHandler = rateLimitingEnabled()
-    ? createCustomRateLimit({ windowMs: 15 * 60 * 1000, max: (req) => (assistantFor(req)?.agentId === "support-assistant" ? 30 : 60), message: "Too many assistant requests. Please wait a few minutes." })
+    ? createCustomRateLimit({ windowMs: 15 * 60 * 1000, max: (req) => (assistantFor(req, env)?.agentId === "support-assistant" ? 30 : 60), message: "Too many assistant requests. Please wait a few minutes." })
     : (_req, _res, next) => next();
 
   // Least recently used goes first, so an active conversation is never the one dropped.
@@ -370,7 +381,7 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
 
       if (!req.isAuthenticated?.() || !req.user) return deny(res, 401, "unauthorized", "Sign in to use the assistant.");
       if (!isAssistantEnabled(env)) return deny(res, 503, "assistant_disabled", "The assistant is not enabled.");
-      const found = assistantFor(req);
+      const found = assistantFor(req, env);
       if (!found) return deny(res, 403, "assistant_unavailable", "The assistant is not available for your account.");
 
       const classified = classifyCopilotRequest(req);

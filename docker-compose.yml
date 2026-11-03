@@ -146,6 +146,8 @@ services:
       # refuses to start without both secrets (see .env.example). ASSISTANT_SESSION_SECRET is
       # app-only and is never passed to the agents service.
       ASSISTANT_ENABLED: ${ASSISTANT_ENABLED:-false}
+      # "staff" for a rollout that starts with agents, managers and admins; "all" adds customers.
+      ASSISTANT_AUDIENCE: ${ASSISTANT_AUDIENCE:-all}
       ASSISTANT_SESSION_SECRET: ${ASSISTANT_SESSION_SECRET:-}
       ASSISTANT_SESSION_SECRET_PREVIOUS: ${ASSISTANT_SESSION_SECRET_PREVIOUS:-}
       ASSISTANT_AGENT_SECRET: ${ASSISTANT_AGENT_SECRET:-}
