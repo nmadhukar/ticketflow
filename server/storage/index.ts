@@ -726,7 +726,10 @@ export class DatabaseStorage implements IStorage {
       filters.push(
         or(
           ilike(tasks.title, containsPattern(search)),
-          ilike(tasks.description, containsPattern(search))
+          ilike(tasks.description, containsPattern(search)),
+          // "TKT-2026-0012", or part of it ("0012"): the number people quote. Still inside the
+          // visibility filter above, so it finds only tickets the caller may see.
+          ilike(tasks.ticketNumber, containsPattern(search))
         )!
       );
     // Like the rule, assignee_id counts only on user tickets and

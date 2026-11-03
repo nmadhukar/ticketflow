@@ -63,6 +63,19 @@ if (isLocal || (!isExplicitNeon && !isNeonHost)) {
   console.log("Database driver: neon-serverless (WebSocket)");
 }
 
+/**
+ * An idle pooled connection can be closed by the server (a PostgreSQL restart, a failover, an
+ * idle timeout): the pool then emits "error", and with no listener Node treats it as uncaught and
+ * the whole app exits. The pool has already dropped that connection and opens a new one on the
+ * next query, so this only records it (the code alone: never the error text or its connection).
+ */
+export function onIdleConnectionError(error: unknown): void {
+  const code = (error as { code?: unknown } | null)?.code;
+  const label = typeof code === "string" ? code : error instanceof Error ? error.name : "error";
+  console.error(`Database: an idle pooled connection was lost [${label}]; the next query opens a new one`);
+}
+(pool as PgPool).on("error", onIdleConnectionError);
+
 export { pool };
 
 /**
