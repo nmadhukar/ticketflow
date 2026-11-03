@@ -35,6 +35,8 @@ const renderToolCalls = ["ticketflow_propose_ticket", "ticketflow_propose_commen
   render: ProposalRender as never,
 }));
 
+const NoAddMenu = () => null;
+
 /** Calls onStart when the agent starts a run: a message was actually sent. */
 function OnRunStart({ agentId, onStart }: { agentId: AssistantAgentId; onStart: () => void }) {
   const { agent } = useAgent({ agentId });
@@ -67,7 +69,13 @@ export default function AssistantPanel({ agentId }: { agentId: AssistantAgentId 
       <div className="flex h-full flex-col">
         {problem && <AssistantErrorBanner problem={problem} onDismiss={clearProblem} />}
         <div className="min-h-0 flex-1">
-          <CopilotChat agentId={agentId} labels={{ chatInputPlaceholder: "Ask the assistant…", welcomeMessageText: INTRO[agentId] }} />
+          <CopilotChat
+            agentId={agentId}
+            labels={{ chatInputPlaceholder: "Ask the assistant…", welcomeMessageText: INTRO[agentId] }}
+            // No "+" menu: attachments are off and there are no browser tools, so it would only
+            // ever be a disabled button.
+            input={{ addMenuButton: NoAddMenu }}
+          />
         </div>
       </div>
     </CopilotKitProvider>
