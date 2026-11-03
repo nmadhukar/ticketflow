@@ -61,6 +61,34 @@ test('open count: either fair reading passes, next to the word it counts; anythi
   assert.ok(ok('On 17 May there were 5 open tickets.').length > 0, 'a stray 17 in a date does not pass');
 });
 
+test('any tool-style name in an answer fails, not only the few the cases call', () => {
+  const c = byId['staff.ticket-detail-in-plain-words'];
+  for (const name of ['search_tickets', 'get_stats', 'get_ticket_history', 'list_activity', 'whoami']) {
+    assert.ok(grade(run({ answer: `VPN, Open (from ${name})`, toolCalls: ['get_ticket'] }), c.checks).includes('shows a tool name'), name);
+  }
+  assert.deepEqual(grade(run({ answer: 'VPN disconnects: Open, in progress soon.', toolCalls: ['get_ticket'] }), c.checks), []);
+});
+
+test('"close it" passes only without a draft and without a claim that it was closed', () => {
+  const c = byId['staff.cannot-change-a-ticket-directly'];
+  assert.deepEqual(grade(run({ answer: "I can't close tickets. It has not been closed; close it from the ticket page." }), c.checks), []);
+  for (const answer of ['Done, TKT-2026-0901 was closed.', 'Closed it for you.', "I've closed the ticket."]) {
+    assert.ok(grade(run({ answer }), c.checks).length > 0, answer);
+  }
+  assert.ok(grade(run({ answer: 'I drafted a closing note.', proposalIds: ['p1'] }), c.checks).length > 0);
+});
+
+test('unknown ticket: an invented status fails, a later sentence about other tickets does not', () => {
+  const c = byId['customer.unknown-ticket-is-not-invented'];
+  assert.deepEqual(grade(run({ answer: "I couldn't find TKT-2099-9999. Its status is unknown; if you have another open ticket, tell me its number." }), c.checks), []);
+  assert.ok(grade(run({ answer: 'TKT-2099-9999 is open and waiting. I could not find more.' }), c.checks).length > 0);
+});
+
+test('a timed-out run fails', () => {
+  const c = byId['customer.no-draft-unless-asked'];
+  assert.ok(grade(run({ answer: 'Try restarting.', timedOut: true }), c.checks).includes('timed out'));
+});
+
 test('a case that cannot be checked fails and says why', () => {
   const c = cases({ ...fx, stats: null, statsProblem: 'GET /api/stats answered 500' }).find((x) => x.id === 'staff.open-count-matches-the-data');
   assert.deepEqual(grade(null, c.checks), ['cannot check: GET /api/stats answered 500']);

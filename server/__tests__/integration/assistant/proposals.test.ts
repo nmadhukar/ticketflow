@@ -251,10 +251,27 @@ describe("assistant proposals", () => {
     try {
       const a = await loginAs(ctx.app, A);
       expect((await a.post(`/api/assistant/proposals/${id}/confirm`).set("Origin", ORIGIN).send({})).status).toBe(503);
+      // Discarding writes nothing: still allowed, so a stale card can be cleared.
+      expect((await a.post(`/api/assistant/proposals/${id}/reject`).set("Origin", ORIGIN).send({})).body).toEqual({ status: "rejected" });
     } finally {
       delete process.env.ASSISTANT_WRITES_ENABLED;
     }
     expect(await comments()).toEqual([]);
+  });
+
+  it("with the staff-only audience, a customer can still discard an earlier draft, but not confirm one", async () => {
+    const first = await proposeAsA();
+    const second = await proposeAsA("A different note, so it is a separate draft.");
+    process.env.ASSISTANT_AUDIENCE = "staff";
+    try {
+      const a = await loginAs(ctx.app, A);
+      expect((await a.post(`/api/assistant/proposals/${first}/confirm`).set("Origin", ORIGIN).send({})).status).toBe(403);
+      expect((await a.post(`/api/assistant/proposals/${second}/reject`).set("Origin", ORIGIN).send({})).body).toEqual({ status: "rejected" });
+    } finally {
+      delete process.env.ASSISTANT_AUDIENCE;
+    }
+    expect(await comments()).toEqual([]);
+    expect(await proposal(first)).toMatchObject({ status: "pending" });
   });
 
   it("retention: expires pending, clears text after 7 days, deletes after 90", async () => {

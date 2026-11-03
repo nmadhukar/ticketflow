@@ -6,12 +6,22 @@
 export class Session {
   constructor(baseUrl) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
-    this.cookie = '';
+    this.cookies = new Map();
   }
 
   headers(extra = {}) {
     // Origin: the app refuses cross-site writes, and evals are same-site by construction.
-    return { Origin: this.baseUrl, ...(this.cookie ? { Cookie: this.cookie } : {}), ...extra };
+    const cookie = [...this.cookies].map(([name, value]) => `${name}=${value}`).join('; ');
+    return { Origin: this.baseUrl, ...(cookie ? { Cookie: cookie } : {}), ...extra };
+  }
+
+  /** Like a browser: each Set-Cookie sets or replaces one cookie, and leaves the others alone. */
+  keepCookies(res) {
+    for (const line of res.headers.getSetCookie?.() ?? []) {
+      const pair = line.split(';')[0];
+      const eq = pair.indexOf('=');
+      if (eq > 0) this.cookies.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+    }
   }
 
   async request(method, path, body) {
@@ -20,8 +30,7 @@ export class Session {
       headers: this.headers(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    const cookies = res.headers.getSetCookie?.() ?? [];
-    if (cookies.length) this.cookie = cookies.map((c) => c.split(';')[0]).join('; ');
+    this.keepCookies(res);
     const text = await res.text();
     let json = null;
     try {
@@ -38,10 +47,15 @@ export class Session {
     return this;
   }
 
-  /** One assistant run on a fresh thread. Returns the events, the answer text and the tool calls. */
+  /**
+   * One assistant run on a fresh thread. Returns the events, the answer text and the tool calls.
+   * The stream is read as it arrives, so a run cut off by the timeout still returns what it did,
+   * drafts included (they must be rejected), with timedOut set.
+   */
   async ask(agentId, prompt, { timeoutMs = 180_000 } = {}) {
     const id = `eval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const started = Date.now();
+    const signal = AbortSignal.timeout(timeoutMs);
     const res = await fetch(`${this.baseUrl}/api/copilotkit/agent/${agentId}/run`, {
       method: 'POST',
       headers: this.headers({ 'Content-Type': 'application/json', Accept: 'text/event-stream' }),
@@ -54,20 +68,33 @@ export class Session {
         state: {},
         forwardedProps: {},
       }),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal,
     });
-    const raw = await res.text();
-    const events = raw
-      .split('\n')
-      .filter((line) => line.startsWith('data:'))
-      .map((line) => {
-        try {
-          return JSON.parse(line.slice(5));
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean);
+    this.keepCookies(res);
+    const events = [];
+    let buffered = '';
+    let timedOut = false;
+    const take = (line) => {
+      if (!line.startsWith('data:')) return;
+      try {
+        events.push(JSON.parse(line.slice(5)));
+      } catch {
+        // A partial or non-JSON line: not an event.
+      }
+    };
+    try {
+      const decoder = new TextDecoder();
+      for await (const chunk of res.body ?? []) {
+        buffered += decoder.decode(chunk, { stream: true });
+        const lines = buffered.split('\n');
+        buffered = lines.pop() ?? '';
+        lines.forEach(take);
+      }
+      take(buffered);
+    } catch (error) {
+      if (!signal.aborted) throw error;
+      timedOut = true;
+    }
     const toolCalls = events
       .filter((e) => e.type === 'TOOL_CALL_START')
       .map((e) => String(e.toolCallName).replace(/^ticketflow_/, ''));
@@ -80,6 +107,7 @@ export class Session {
       proposalIds: results.flatMap(proposalIdsIn),
       finished: events.some((e) => e.type === 'RUN_FINISHED'),
       error: events.find((e) => e.type === 'RUN_ERROR') ?? null,
+      timedOut,
       durationMs: Date.now() - started,
     };
   }

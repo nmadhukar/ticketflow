@@ -164,8 +164,8 @@ npm run eval -- --repeat 3        # answers vary: repeat for a pass rate
 ```
 
 **Never run evals against production.** They register two `@assistant.eval` customers and create
-three `[eval]` tickets. The tool refuses an `https://` address unless `EVAL_ALLOW_REMOTE=1` is set
-for a staging site. Re-run the evals after changing the model or the assistants' instructions
+three `[eval]` tickets. The tool runs only against `localhost`. It refuses any other address,
+`http://` or `https://`, unless `EVAL_ALLOW_REMOTE=1` is set for a staging site. Re-run the evals after changing the model or the assistants' instructions
 (`agents/src/mastra/agents/`).
 
 ## Troubleshooting

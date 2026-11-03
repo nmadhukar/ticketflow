@@ -261,8 +261,13 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
       const decision = req.params.decision;
       if (decision !== "confirm" && decision !== "reject") return deny(res, 404, "not_found", "Not found.");
       if (!req.isAuthenticated?.() || !req.user) return deny(res, 401, "unauthorized", "Sign in to use the assistant.");
-      if (!isAssistantEnabled(env) || !assistantWritesEnabled(env)) return deny(res, 503, "assistant_writes_disabled", "Assistant changes are switched off.");
-      const found = assistantFor(req, env);
+      // Discard writes nothing, so neither the writes switch nor the staff-only audience stops it:
+      // a draft card made before either switch can still be cleared. Confirm needs both.
+      const confirming = decision === "confirm";
+      if (!isAssistantEnabled(env) || (confirming && !assistantWritesEnabled(env))) {
+        return deny(res, 503, "assistant_writes_disabled", "Assistant changes are switched off.");
+      }
+      const found = assistantFor(req, confirming ? env : { ...env, ASSISTANT_AUDIENCE: "all" });
       if (!found) return deny(res, 403, "assistant_unavailable", "The assistant is not available for your account.");
       if (!sameOrigin(req, env)) {
         logAssistantSecurityEvent({ event: "write_refused", reason: "cross_origin", userId: found.user.id, agentId: found.agentId, ip: req.ip });
@@ -273,7 +278,7 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
       const proposals = await import("./proposals");
       try {
         const result =
-          decision === "confirm"
+          confirming
             ? await proposals.confirmProposal(found.user, req.params.proposal, req.body?.edits)
             : await proposals.rejectProposal(found.user, req.params.proposal);
         res.json(result);
