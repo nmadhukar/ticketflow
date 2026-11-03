@@ -7,7 +7,8 @@ import { HistoryPanel } from "./HistoryPanel";
 /**
  * The in-app assistant's launcher. It asks the server whether this user has an assistant (and
  * which one) and loads the CopilotKit bundle only then, so users without one never download it.
- * Sits bottom-left: the help chatbot (AiChatBot) owns bottom-right. Staff may also see their saved
+ * Sits bottom-left (on wide screens just right of the 16rem sidebar, which it would otherwise
+ * cover): the help chatbot (AiChatBot) owns bottom-right. Staff may also see their saved
  * conversations, when those are switched on.
  */
 export type AssistantAgentId = "support-assistant" | "ticket-assistant";
@@ -53,7 +54,7 @@ export function AssistantShell() {
           aria-hidden={!open}
           onKeyDown={onPanelKeyDown}
           // A class, not the `hidden` attribute: Tailwind's `flex` would override the attribute.
-          className={`${open ? "flex" : "hidden"} fixed inset-0 z-50 flex-col bg-background sm:inset-auto sm:bottom-6 sm:left-6 sm:h-[600px] sm:max-h-[calc(100vh-3rem)] sm:w-[400px] sm:rounded-xl sm:border sm:shadow-xl`}
+          className={`${open ? "flex" : "hidden"} fixed inset-0 z-50 flex-col bg-background sm:inset-auto sm:bottom-6 sm:left-6 lg:left-[17.5rem] sm:h-[600px] sm:max-h-[calc(100vh-3rem)] sm:w-[400px] sm:rounded-xl sm:border sm:shadow-xl`}
         >
           <div className="flex items-center justify-between border-b px-4 py-2">
             <span className="font-medium">{showHistory ? "Saved conversations" : title}</span>
@@ -91,7 +92,7 @@ export function AssistantShell() {
           // Icon only on a phone, so it covers as little of the page as possible.
           ref={launcher}
           aria-label={title}
-          className="fixed bottom-4 left-4 z-40 h-12 w-12 gap-2 rounded-full p-0 shadow-lg sm:bottom-6 sm:left-6 sm:w-auto sm:px-4"
+          className="fixed bottom-4 left-4 z-40 h-12 w-12 gap-2 rounded-full p-0 shadow-lg sm:bottom-6 sm:left-6 sm:w-auto sm:px-4 lg:left-[17.5rem]"
           onClick={() => {
             setLoaded(true);
             setOpen(true);
