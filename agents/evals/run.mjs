@@ -29,14 +29,28 @@ const evalPassword = process.env.EVAL_USER_PASSWORD ?? 'Eval-Assistant-Pass-1!';
 const repeat = Math.max(1, Number(arg('repeat', '1')) || 1);
 const only = arg('only', '');
 const jsonOut = arg('json', '');
-const minPass = Number(arg('min-pass', '1'));
+const minPassArg = arg('min-pass', '1');
+const minPass = Number(minPassArg);
 
+if (!/^\d*\.?\d+$/.test(minPassArg) || minPass < 0 || minPass > 1) {
+  console.error(`--min-pass must be a fraction from 0 to 1 (for example 0.9), not "${minPassArg}".`);
+  process.exit(2);
+}
 if (!adminEmail || !adminPassword) {
   console.error('Set EVAL_ADMIN_EMAIL and EVAL_ADMIN_PASSWORD (an admin of the TicketFlow under test).');
   process.exit(2);
 }
-if (/^https:\/\//.test(baseUrl) && !process.env.EVAL_ALLOW_REMOTE) {
-  console.error(`Refusing ${baseUrl}: evals create users and tickets. Set EVAL_ALLOW_REMOTE=1 for a staging site.`);
+// Only this machine unless told otherwise: evals create users and tickets, and http:// says
+// nothing about whether a site is live (TLS often ends at a proxy in front of it).
+let host;
+try {
+  host = new URL(baseUrl).hostname;
+} catch {
+  console.error(`EVAL_BASE_URL is not a URL: ${baseUrl}`);
+  process.exit(2);
+}
+if (!['localhost', '127.0.0.1', '[::1]'].includes(host) && !process.env.EVAL_ALLOW_REMOTE) {
+  console.error(`Refusing ${baseUrl}: evals create users and tickets. Set EVAL_ALLOW_REMOTE=1 for a staging site, never production.`);
   process.exit(2);
 }
 
@@ -53,14 +67,19 @@ for (const c of selected) {
     let run;
     let failures;
     try {
-      run = await session.ask(agentOf[c.who], c.prompt);
+      // A case that cannot be checked is not asked: no model call for nothing.
+      run = c.checks.unavailable ? null : await session.ask(agentOf[c.who], c.prompt);
       failures = grade(run, c.checks);
     } catch (error) {
       run = null;
       failures = [`request failed: ${error?.name ?? 'error'}`];
     }
-    // Nothing an eval drafts is ever posted.
-    for (const id of run?.proposalIds ?? []) await session.request('POST', `/api/assistant/proposals/${id}/reject`, {});
+    // Nothing an eval drafts is ever posted: each draft is rejected, and a draft left pending (the
+    // reject refused or failed) fails the case, so it cannot pile up unnoticed.
+    for (const id of run?.proposalIds ?? []) {
+      const rejected = await session.request('POST', `/api/assistant/proposals/${id}/reject`, {}).catch(() => ({ status: 0 }));
+      if (rejected.status !== 200) failures.push(`draft ${id} left pending: reject answered ${rejected.status || 'nothing'}`);
+    }
     results.push({ id: c.id, attempt: i + 1, passed: failures.length === 0, failures, answer: run?.answer ?? '', toolCalls: run?.toolCalls ?? [], durationMs: run?.durationMs ?? 0 });
     const mark = failures.length === 0 ? 'PASS' : 'FAIL';
     console.log(`${mark}  ${c.id}${repeat > 1 ? ` #${i + 1}` : ''}  (${((run?.durationMs ?? 0) / 1000).toFixed(1)} s)`);

@@ -24,6 +24,17 @@ const NOT_FOUND = /(not find|couldn['’]t find|could not find|can['’]t find|c
 // has been posted yet", which is what a draft should say.
 const CLAIMS_WRITE = /\bI(?:['’]ve| have) (created|submitted|opened|posted|added|sent|closed|updated)\b|\b(?:your|the|a|this) (ticket|comment)(?: [\w-]+){0,3} (?:has been|was|is now) (created|submitted|opened|posted|added|sent|closed|updated)\b/i;
 
+/**
+ * "How many are open?" has two fair readings: status Open only, or everything not yet resolved
+ * (open, in progress, on hold). Either count passes, but only next to a word that says what it
+ * counts, so a stray matching number elsewhere (a date, a ticket number) does not.
+ */
+function openCountPattern(stats) {
+  const counts = [...new Set([stats.open, stats.open + stats.inProgress + stats.onHold])].join('|');
+  const word = '(open|unresolved|active|outstanding|not (yet )?(resolved|closed))';
+  return new RegExp(`\\b(${counts})\\b[^.\\n\\d]{0,40}\\b${word}\\b|\\b${word}\\b[^.\\n\\d]{0,40}\\b(${counts})\\b`, 'i');
+}
+
 export function cases(fx) {
   const { tickets, stats } = fx;
   return [
@@ -88,7 +99,9 @@ export function cases(fx) {
       id: 'staff.open-count-matches-the-data',
       who: 'staff',
       prompt: 'How many tickets are open right now? One line, please.',
-      checks: { must: [new RegExp(`\\b${stats.open}\\b`)], calls: ['get_stats', 'list_tickets'], proposals: 0 },
+      checks: stats
+        ? { must: [openCountPattern(stats)], calls: ['get_stats', 'list_tickets'], proposals: 0 }
+        : { unavailable: fx.statsProblem ?? 'no ticket counts to compare with' },
     },
     {
       id: 'staff.ticket-detail-in-plain-words',
@@ -120,6 +133,8 @@ export function cases(fx) {
 /** Grades one run against its case. Returns the failed checks (empty: passed). */
 export function grade(run, checks) {
   const failures = [];
+  // A case that cannot be checked fails, saying why; it never passes by default.
+  if (checks.unavailable) return [`cannot check: ${checks.unavailable}`];
   if (run.status !== 200) failures.push(`HTTP ${run.status}`);
   if (run.error) failures.push(`run error: ${run.error.code ?? run.error.message ?? 'unknown'}`);
   if (!run.finished) failures.push('run did not finish');

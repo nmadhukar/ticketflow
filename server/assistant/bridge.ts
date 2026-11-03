@@ -17,13 +17,13 @@ import { createSidecarHistoryStatus, type SidecarHistory } from "./sidecarStatus
 import { map, type Observable } from "rxjs";
 import { deleteHistory, getHistory, HistoryError, isThreadId, listHistory, mastraThreadId, newestTurn, STAFF_AGENT } from "./history";
 
-/** Per-user CopilotKit handlers kept in memory; the least recently used beyond this is dropped. */
 // CopilotKit's runtime sends usage telemetry to telemetry.copilotkit.ai unless this is set, and
 // it reads the setting once, when its module is first imported. So it is set here, when the app
 // loads this file and before any import of CopilotKit, and forced: nothing about TicketFlow's
 // users or traffic leaves for a third party. (The sidecar sets MASTRA_TELEMETRY_DISABLED=1.)
 process.env.COPILOTKIT_TELEMETRY_DISABLED = "true";
 
+/** Per-user CopilotKit handlers kept in memory; the least recently used beyond this is dropped. */
 const MAX_CACHED_HANDLERS = 500;
 
 /**

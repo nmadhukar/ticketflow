@@ -44,9 +44,16 @@ export function isStaffHistoryEnabled(env: NodeJS.ProcessEnv = process.env): boo
  */
 export type AssistantAudience = "staff" | "all";
 
-export function readAssistantAudience(env: NodeJS.ProcessEnv = process.env): AssistantAudience {
+/** The one reading of ASSISTANT_AUDIENCE, for both the startup check and the gate. */
+function parseAudience(env: NodeJS.ProcessEnv): AssistantAudience | "invalid" {
   const value = env.ASSISTANT_AUDIENCE?.trim().toLowerCase();
-  return !value || value === "all" ? "all" : "staff";
+  if (!value || value === "all") return "all";
+  return value === "staff" ? "staff" : "invalid";
+}
+
+export function readAssistantAudience(env: NodeJS.ProcessEnv = process.env): AssistantAudience {
+  const audience = parseAudience(env);
+  return audience === "invalid" ? "staff" : audience;
 }
 
 function read(env: NodeJS.ProcessEnv, name: string): string | undefined {
@@ -108,8 +115,7 @@ export function assistantConfigProblems(env: NodeJS.ProcessEnv = process.env): s
     }
   }
 
-  const audience = env.ASSISTANT_AUDIENCE?.trim().toLowerCase();
-  if (audience && audience !== "all" && audience !== "staff") {
+  if (parseAudience(env) === "invalid") {
     problems.push("ASSISTANT_AUDIENCE must be \"staff\" or \"all\".");
   }
 

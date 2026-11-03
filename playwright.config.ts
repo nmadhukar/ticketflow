@@ -61,8 +61,11 @@ const BLANKED_ENV = Object.fromEntries(
     "OPENROUTER_API_KEY",
     // The in-app assistant: off in e2e whatever a developer's .env says (it would reach a sidecar).
     "ASSISTANT_ENABLED",
+    "ASSISTANT_AUDIENCE",
     "ASSISTANT_SESSION_SECRET",
+    "ASSISTANT_SESSION_SECRET_PREVIOUS",
     "ASSISTANT_AGENT_SECRET",
+    "ASSISTANT_AGENT_SECRET_PREVIOUS",
     "ASSISTANT_AGENT_URL",
     "ASSISTANT_STAFF_HISTORY",
     "MASTRA_DATABASE_URL",

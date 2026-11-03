@@ -42,7 +42,11 @@ const TICKETS = {
 async function ensureCustomer(baseUrl, admin, email, password, firstName) {
   const anon = new Session(baseUrl);
   const reg = await anon.request('POST', '/api/auth/register', { email, password, firstName, lastName: 'Eval' });
-  if (reg.status !== 201 && reg.status !== 400) throw new Error(`register ${email}: HTTP ${reg.status}`);
+  // Only "already registered" means it exists; any other refusal (a weak password) is the error.
+  const exists = reg.status === 400 && reg.json?.error === 'email_registered';
+  if (reg.status !== 201 && !exists) {
+    throw new Error(`register ${email}: HTTP ${reg.status} ${reg.json?.message ?? reg.json?.error ?? ''}`.trim());
+  }
   const users = await admin.request('GET', '/api/admin/users');
   const user = users.json?.find?.((u) => u.email === email);
   if (!user) throw new Error(`eval user ${email} not found after registering`);
@@ -76,6 +80,8 @@ export async function setUpFixtures({ baseUrl, adminEmail, adminPassword, evalPa
     const t = await ensureTicket(customers[spec.owner], spec);
     tickets[key] = { id: t.id, number: t.ticketNumber, title: t.title };
   }
+  // A failed stats call fails only the case that needs it, not the whole run.
   const stats = await admin.request('GET', '/api/stats');
-  return { admin, customers, tickets, stats: stats.json };
+  const usable = stats.status === 200 && Number.isInteger(stats.json?.open);
+  return { admin, customers, tickets, stats: usable ? stats.json : null, statsProblem: usable ? null : `GET /api/stats answered ${stats.status}` };
 }
