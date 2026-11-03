@@ -22,10 +22,24 @@ describe("assistant errors in words", () => {
   });
 
   it("never shows the raw error text, and says nothing for a run the user stopped", () => {
-    const view = describeAssistantError({ error: new Error("Traceback: secret internals"), code: "something_new" });
+    const view = describeAssistantError({ error: new Error("Traceback: secret internals"), code: "agent_run_failed" });
     expect(view?.message).not.toMatch(/Traceback|secret/);
     const abort = Object.assign(new Error("aborted"), { name: "AbortError" });
     expect(describeAssistantError({ error: abort, code: "agent_run_failed" })).toBeNull();
+    // As CopilotKit counts aborts: any object so named, and its known abort messages.
+    expect(describeAssistantError({ error: { name: "AbortError" }, code: "agent_run_failed" })).toBeNull();
+    expect(describeAssistantError({ error: new Error("component unmounted"), code: "agent_run_failed" })).toBeNull();
+  });
+
+  it("stays quiet about problems that did not stop the answer", () => {
+    for (const code of ["subscriber_callback_failed", "tool_not_found", "tool_handler_failed", "transcription_failed"]) {
+      expect(describeAssistantError({ error: new Error("x"), code })).toBeNull();
+    }
+  });
+
+  it("a dropped connection during a run, and a busy thread, are named as such", () => {
+    expect(describeAssistantError({ error: new TypeError("Failed to fetch"), code: "agent_run_failed" })?.message).toMatch(/Cannot reach/);
+    expect(describeAssistantError({ error: httpError(409, { error: "thread_busy" }), code: "agent_run_failed" })?.message).toMatch(/still working/);
   });
 
   it("the banner offers sign-in only when the session ended, and can be dismissed", () => {

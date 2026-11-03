@@ -54,12 +54,20 @@ describe("AssistantShell", () => {
     expect(mounts).toBe(1);
   });
 
-  it("closes on Escape, keeping the conversation", async () => {
+  it("closes on an Escape pressed in it, keeping the conversation and returning focus to the launcher", async () => {
     renderShell({ enabled: true, agentId: "ticket-assistant" });
     fireEvent.click(screen.getByRole("button", { name: /Ticket assistant/ }));
     await screen.findByText("chat panel");
+    const dialog = screen.getByRole("dialog");
+
+    // Not an Escape meant for something else: elsewhere on the page, or an input method composing.
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(screen.getByRole("dialog", { hidden: true })).toHaveClass("hidden");
+    fireEvent.keyDown(screen.getByText("chat panel"), { key: "Escape", isComposing: true });
+    expect(dialog).toHaveClass("flex");
+
+    fireEvent.keyDown(screen.getByText("chat panel"), { key: "Escape" });
+    expect(dialog).toHaveClass("hidden");
     expect(screen.getByText("chat panel")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ticket assistant/ })).toHaveFocus();
   });
 });

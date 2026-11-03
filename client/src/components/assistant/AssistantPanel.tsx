@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { CopilotChat, CopilotKitProvider, ToolCallStatus } from "@copilotkit/react-core/v2";
+import { useCallback, useEffect, useState } from "react";
+import { CopilotChat, CopilotKitProvider, ToolCallStatus, useAgent } from "@copilotkit/react-core/v2";
 import type { AssistantAgentId } from "./AssistantShell";
 import { AssistantErrorBanner } from "./AssistantErrorBanner";
 import { describeAssistantError, type AssistantErrorView } from "./assistantErrors";
@@ -13,7 +13,7 @@ import { parseProposal, ProposalCard } from "./ProposalCard";
  *
  * A proposed ticket or comment is shown as a card the user confirms (ProposalCard); nothing is
  * written until they do. A problem (session ended, spending limit, provider failure) shows as one
- * readable line above the conversation, until dismissed or the next message is sent. The model's
+ * readable line above the conversation, until dismissed or the next run starts. The model's
  * reasoning is never sent to the browser (runTracking.ts withoutReasoning).
  */
 const INTRO: Record<AssistantAgentId, string> = {
@@ -35,14 +35,25 @@ const renderToolCalls = ["ticketflow_propose_ticket", "ticketflow_propose_commen
   render: ProposalRender as never,
 }));
 
+/** Calls onStart when the agent starts a run: a message was actually sent. */
+function OnRunStart({ agentId, onStart }: { agentId: AssistantAgentId; onStart: () => void }) {
+  const { agent } = useAgent({ agentId });
+  useEffect(() => {
+    if (!agent) return;
+    const subscription = agent.subscribe({ onRunInitialized: () => void onStart() });
+    return () => subscription.unsubscribe();
+  }, [agent, onStart]);
+  return null;
+}
+
 export default function AssistantPanel({ agentId }: { agentId: AssistantAgentId }) {
   const [problem, setProblem] = useState<AssistantErrorView | null>(null);
   const onError = useCallback((event: { error: unknown; code: unknown }) => {
     const view = describeAssistantError(event);
     if (view) setProblem(view);
   }, []);
-  // Sending a message (Enter, or the send button's form submit) clears an old problem.
-  const clearOnSend = () => setProblem(null);
+  // A new run clears an old problem; if this one fails too, its own error follows.
+  const clearProblem = useCallback(() => setProblem(null), []);
   return (
     <CopilotKitProvider
       runtimeUrl="/api/copilotkit"
@@ -52,15 +63,10 @@ export default function AssistantPanel({ agentId }: { agentId: AssistantAgentId 
       renderToolCalls={renderToolCalls}
       onError={onError}
     >
+      <OnRunStart agentId={agentId} onStart={clearProblem} />
       <div className="flex h-full flex-col">
-        {problem && <AssistantErrorBanner problem={problem} onDismiss={() => setProblem(null)} />}
-        <div
-          className="min-h-0 flex-1"
-          onSubmitCapture={clearOnSend}
-          onKeyDownCapture={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && e.target instanceof HTMLTextAreaElement) clearOnSend();
-          }}
-        >
+        {problem && <AssistantErrorBanner problem={problem} onDismiss={clearProblem} />}
+        <div className="min-h-0 flex-1">
           <CopilotChat agentId={agentId} labels={{ chatInputPlaceholder: "Ask the assistant…", welcomeMessageText: INTRO[agentId] }} />
         </div>
       </div>

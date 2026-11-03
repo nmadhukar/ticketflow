@@ -94,6 +94,10 @@ export function observe(summary: RunSummary, event: unknown): void {
  * The model's reasoning is not shown to users: it is working notes, not an answer, and can quote
  * tool results the answer itself leaves out. Its events (and any reasoning message in a snapshot,
  * as a reconnect replays) never leave the server. The agent keeps its own copy where it needs one.
+ *
+ * This matches how @ag-ui/mastra 2.0.1 sends reasoning (REASONING_* events; checked against a live
+ * gpt-5-mini stream). An adapter upgrade that carries it another way (in assistant content parts,
+ * say) needs this filter, and its test, extended.
  */
 export function withoutReasoning(events: Observable<unknown>): Observable<unknown> {
   return events.pipe(
@@ -132,8 +136,11 @@ export class TrackedRunner implements RunnerLike {
   run(request: Parameters<RunnerLike["run"]>[0]): Observable<unknown> {
     const key = RunEndings.key(this.userId, request.input?.threadId ?? request.threadId, request.input?.runId);
     const finish = key ? this.endings.take(key) : undefined;
-    const events = this.delegate.run(request);
-    if (!finish) return withoutReasoning(events);
+    // The summary (tracked) sees every event, RUN_FINISHED usage included; the browser does not.
+    return withoutReasoning(finish ? this.tracked(this.delegate.run(request), finish) : this.delegate.run(request));
+  }
+
+  private tracked(events: Observable<unknown>, finish: RunFinish): Observable<unknown> {
     const started = this.now();
     const summary = emptySummary();
     return events.pipe(
@@ -145,8 +152,6 @@ export class TrackedRunner implements RunnerLike {
         },
       }),
       finalize(() => finish({ ...summary, durationMs: this.now() - started })),
-      // After the tap: the summary still sees every event (RUN_FINISHED usage included).
-      withoutReasoning,
     );
   }
 

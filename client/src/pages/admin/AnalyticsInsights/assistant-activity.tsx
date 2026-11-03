@@ -40,6 +40,8 @@ interface AuditEvent {
 }
 
 const AGENT_LABEL: Record<string, string> = { "support-assistant": "Support", "ticket-assistant": "Staff" };
+// ai_usage operations for assistant runs (server/assistant/usage.ts ASSISTANT_OPERATION).
+const OPERATION_LABEL: Record<string, string> = { "assistant.support": "Support", "assistant.staff": "Staff" };
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   completed: "default",
   stopped: "secondary",
@@ -68,11 +70,8 @@ function Stat({ label, value, note }: { label: string; value: string; note?: str
 
 function UsageSection() {
   const [days, setDays] = useState("30");
-  const { data, isLoading, isError } = useQuery<UsageResponse>({
-    queryKey: [`/api/admin/assistant/usage?days=${days}`],
-    queryFn: () => getJson(`/api/admin/assistant/usage?days=${days}`),
-    staleTime: 60_000,
-  });
+  // The app's default query function fetches the URL in the key.
+  const { data, isLoading, isError } = useQuery<UsageResponse>({ queryKey: [`/api/admin/assistant/usage?days=${days}`], staleTime: 60_000 });
   const t = data?.totals;
 
   return (
@@ -137,6 +136,42 @@ function UsageSection() {
                         <TableCell className="text-right tabular-nums">{count(r.runs)}</TableCell>
                         <TableCell className="text-right tabular-nums">{count(r.proposals)}</TableCell>
                         <TableCell className="text-right tabular-nums">{(r.avgDurationMs / 1000).toFixed(1)} s</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Cost by day and model</CardTitle>
+              <CardDescription>From the AI usage record; verified cost where OpenRouter has confirmed it, otherwise the estimate.</CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              {data.cost.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No assistant spend in this period.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Day</TableHead>
+                      <TableHead>Assistant</TableHead>
+                      <TableHead>Model</TableHead>
+                      <TableHead className="text-right">Tokens in</TableHead>
+                      <TableHead className="text-right">Tokens out</TableHead>
+                      <TableHead className="text-right">Cost</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {[...data.cost].reverse().map((c) => (
+                      <TableRow key={`${c.day}-${c.operation}-${c.model}`}>
+                        <TableCell className="whitespace-nowrap">{c.day}</TableCell>
+                        <TableCell>{OPERATION_LABEL[c.operation] ?? c.operation}</TableCell>
+                        <TableCell className="font-mono text-xs">{c.model}</TableCell>
+                        <TableCell className="text-right tabular-nums">{count(c.inputTokens)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{count(c.outputTokens)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{usd(c.costUsd)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
