@@ -40,6 +40,20 @@ describe("graceful shutdown", () => {
     expect(f.logs.join("\n")).toContain("SIGTERM");
   });
 
+  it("closes the assistant's internal listener after the HTTP server, when there is one", async () => {
+    const f = fakes();
+    await createShutdown({ ...f.deps, closeAssistant: async () => void f.order.push("closeAssistant"), timeoutMs: 50 })("SIGTERM");
+    expect(f.order).toEqual(["closeRealtime", "server.close", "closeIdleConnections", "closeAssistant", "closeAuth", "closePool"]);
+    expect(f.exits).toEqual([0]);
+  });
+
+  it("a shutdown caused by a fault runs the same steps and exits 1", async () => {
+    const f = fakes();
+    await createShutdown({ ...f.deps, timeoutMs: 50 })("assistant listener error", { failed: true });
+    expect(f.order).toEqual(["closeRealtime", "server.close", "closeIdleConnections", "closeAuth", "closePool"]);
+    expect(f.exits).toEqual([1]);
+  });
+
   it("runs once: a second signal while shutting down does nothing", async () => {
     const f = fakes();
     const shutdown = createShutdown({ ...f.deps, timeoutMs: 50 });

@@ -2,7 +2,7 @@
 import { db } from "../storage/db";
 import { storage } from "../storage";
 import { tasks, taskComments, taskHistory, users } from "@shared/schema";
-import { eq, desc, inArray } from "drizzle-orm";
+import { and, eq, desc, inArray } from "drizzle-orm";
 
 export async function seedKnowledgeLearning() {
   try {
@@ -134,6 +134,18 @@ export async function seedKnowledgeLearning() {
     ];
 
     const allTickets = [...supportTickets, ...incidentTickets];
+
+    // Once only: the seeders run on every start while SEED_DEMO_DATA=true, and without this each
+    // restart added another five copies of these tickets, with their comments and history.
+    const [seeded] = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(and(inArray(tasks.title, allTickets.map((t) => t.title)), eq(tasks.createdBy, seedUserId)))
+      .limit(1);
+    if (seeded) {
+      console.log("Knowledge learning test tickets already seeded; skipping.");
+      return;
+    }
 
     // Insert tasks with proper ticket numbers and createdBy
     const insertedTasks = [];

@@ -1,5 +1,7 @@
 # Dependencies
 node_modules
+# The assistant sidecar is its own image (agents/Dockerfile, build context ./agents).
+agents/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

@@ -300,4 +300,20 @@ describe("ticket workflow, meta route and search", () => {
     const filtered = await storage.getVisibleTasksForUser({ userId: admin.id, role: "admin", search: "PRINTER" });
     expect(filtered.map((x: any) => x.id)).toEqual([t.id]);
   });
+
+  it("search finds a ticket by its number, whole or in part, only for those who may see it", async () => {
+    const { customerA, otherA } = await actors();
+    const mine = (await createTicketAs(customerA, { title: "laptop battery" })).body;
+    await createTicketAs(customerA, { title: "unrelated" });
+    const ids = async (session: typeof customerA, search: string) => {
+      const res = await session.get("/api/tasks").query({ search });
+      expect(res.status).toBe(200);
+      return (Array.isArray(res.body) ? res.body : (res.body.tasks ?? [])).map((x: any) => x.id);
+    };
+    expect(await ids(customerA, mine.ticketNumber)).toEqual([mine.id]);
+    expect(await ids(customerA, mine.ticketNumber.toLowerCase())).toEqual([mine.id]);
+    expect(await ids(customerA, mine.ticketNumber.slice(-4))).toContain(mine.id);
+    // Another customer quoting the number finds nothing: visibility still applies.
+    expect(await ids(otherA, mine.ticketNumber)).toEqual([]);
+  });
 });

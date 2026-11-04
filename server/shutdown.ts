@@ -12,12 +12,24 @@ import { describeError } from "./http/errors";
  * `timeoutMs` (10 s by default) if any step hangs, and is unref'd so it never keeps the process
  * alive by itself. Runs once: a second signal while it is running does nothing.
  */
+export interface ClosableServer {
+  close(callback: (error?: Error) => void): unknown;
+  closeIdleConnections?(): void;
+}
+
+/** Stops accepting connections, drops idle keep-alive ones, and resolves once the server has closed. */
+export function closeHttpServer(server: ClosableServer): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+    server.closeIdleConnections?.();
+  });
+}
+
 export interface ShutdownDeps {
-  server: {
-    close(callback: (error?: Error) => void): unknown;
-    closeIdleConnections?(): void;
-  };
+  server: ClosableServer;
   closeRealtime(): Promise<void>;
+  /** The assistant's internal listener (assistant/internalServer.ts), when it was started. */
+  closeAssistant?(): Promise<void>;
   closeAuth(): Promise<void>;
   closePool(): Promise<void>;
   exit(code: number): void;
@@ -25,9 +37,13 @@ export interface ShutdownDeps {
   timeoutMs?: number;
 }
 
-export function createShutdown(deps: ShutdownDeps): (signal: string) => Promise<void> {
+/**
+ * `opts.failed` is for a shutdown caused by a fault (a listener that could not start): the same
+ * orderly close, then exit 1 even when every step succeeds.
+ */
+export function createShutdown(deps: ShutdownDeps): (signal: string, opts?: { failed?: boolean }) => Promise<void> {
   let running: Promise<void> | undefined;
-  return (signal: string) => {
+  return (signal: string, opts: { failed?: boolean } = {}) => {
     if (running) return running;
     running = (async () => {
       deps.log(`${signal} received: shutting down`);
@@ -37,7 +53,7 @@ export function createShutdown(deps: ShutdownDeps): (signal: string) => Promise<
       }, deps.timeoutMs ?? 10_000);
       timer.unref();
 
-      let failed = false;
+      let failed = opts.failed === true;
       const step = async (name: string, run: () => Promise<unknown>) => {
         try {
           await run();
@@ -47,12 +63,8 @@ export function createShutdown(deps: ShutdownDeps): (signal: string) => Promise<
         }
       };
       await step("realtime", () => deps.closeRealtime());
-      await step("http server", () =>
-        new Promise<void>((resolve, reject) => {
-          deps.server.close((error) => (error ? reject(error) : resolve()));
-          deps.server.closeIdleConnections?.();
-        })
-      );
+      await step("http server", () => closeHttpServer(deps.server));
+      if (deps.closeAssistant) await step("assistant listener", () => deps.closeAssistant!());
       await step("session stores", () => deps.closeAuth());
       await step("database pool", () => deps.closePool());
 

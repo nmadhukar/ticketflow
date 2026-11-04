@@ -11,9 +11,34 @@ import { estimatePromptTokensForBudget } from "./promptBudget";
 import type { AISettings } from "@shared/interfaces";
 import { db } from "../../storage/db";
 import { aiUsage } from "@shared/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gte, lte, sql } from "drizzle-orm";
 
 const pricing = createOpenRouterPricing();
+
+/** The OpenRouter price of a model (cached; one pricing instance for the whole app). */
+export function getModelPrice(modelId: string): Promise<ModelPrice | null> {
+  return pricing.getModelPrice(modelId);
+}
+
+/**
+ * Today's and this month's spend (UTC), counted as getDailyUsage and getMonthlyUsage count it
+ * (verified cost when verified, otherwise the estimate), in one aggregate query.
+ */
+export async function getBudgetSpend(now: Date = new Date()): Promise<{ dailyUsd: number; monthlyUsd: number }> {
+  const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+  const cost = sql`case when ${aiUsage.billingStatus} = 'verified' and ${aiUsage.verifiedCostUsd} is not null then ${aiUsage.verifiedCostUsd} else ${aiUsage.estimatedCost} end`;
+  const [row] = await db
+    .select({
+      dailyUsd: sql<string>`coalesce(sum(case when ${and(gte(aiUsage.timestamp, dayStart), lte(aiUsage.timestamp, dayEnd))} then ${cost} end), 0)::text`,
+      monthlyUsd: sql<string>`coalesce(sum(${cost}), 0)::text`,
+    })
+    .from(aiUsage)
+    .where(and(gte(aiUsage.timestamp, monthStart), lte(aiUsage.timestamp, monthEnd)));
+  return { dailyUsd: Number(row?.dailyUsd ?? 0), monthlyUsd: Number(row?.monthlyUsd ?? 0) };
+}
 
 export interface UsageRecord {
   timestamp: string;
@@ -184,6 +209,8 @@ export async function recordUsage(
     requestedModelId?: string; generationId?: string; estimatedCost: number;
     verifiedCostUsd?: number; billingStatus?: "estimated" | "verified";
     userId?: string; ticketId?: string;
+    /** An in-app assistant run (migration 0033); every other AI feature leaves it out. */
+    assistantRunId?: string;
   }
 ): Promise<void> {
   const cost = usage.estimatedCost;
@@ -207,6 +234,7 @@ export async function recordUsage(
       operation: usage.operation,
       userId: validUserId,
       ticketId: usage.ticketId ? parseInt(usage.ticketId) : null,
+      assistantRunId: usage.assistantRunId ?? null,
     };
     try {
       await storage.recordAIUsage(row);

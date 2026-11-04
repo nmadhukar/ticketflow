@@ -101,13 +101,22 @@ app.use(requestLogger(log));
   // session stores and the pool, then exit. node is PID 1 (`exec node`, R66), where a signal with
   // no handler is ignored. See ./shutdown.
   {
-    const { createShutdown } = await import("./shutdown");
+    const { createShutdown, closeHttpServer } = await import("./shutdown");
     const { pool } = await import("./storage/db");
     const { closeRealtime } = await import("./realtime/ws");
     const { closeAuth } = await import("./services/auth");
+    const { isAssistantEnabled } = await import("./assistant/config");
+    const { startInternalServer } = await import("./assistant/internalServer");
+    // The assistant's internal listener (nginx never proxies it); null unless ASSISTANT_ENABLED=true.
+    // `shutdown` exists before the listener starts, so its listen error (a taken port) always has
+    // the orderly shutdown to go to.
+    let assistantServer: import("http").Server | null = null;
     const shutdown = createShutdown({
       server,
       closeRealtime,
+      closeAssistant: isAssistantEnabled()
+        ? () => (assistantServer?.listening ? closeHttpServer(assistantServer) : Promise.resolve())
+        : undefined,
       closeAuth,
       closePool: () => pool.end(),
       exit: (code) => process.exit(code),
@@ -115,6 +124,15 @@ app.use(requestLogger(log));
     });
     process.once("SIGTERM", () => void shutdown("SIGTERM"));
     process.once("SIGINT", () => void shutdown("SIGINT"));
+    assistantServer = startInternalServer({
+      log,
+      onError: () => void shutdown("assistant listener error", { failed: true }),
+    });
+    // Expiry and retention of proposed writes (hourly), and retention of the assistant's usage and
+    // audit records (daily), whether or not the assistant is on now: records kept while it was on
+    // must still age out after it is switched off. Both unref'd.
+    (await import("./assistant/proposals")).startProposalCleanup(log);
+    (await import("./assistant/retention")).startAssistantRecordCleanup(log);
   }
 
   server

@@ -141,6 +141,7 @@ import {
 import { TicketError, ticketErrorToHttp } from "../services/tickets/ticketError";
 import { notifyCommentAdded } from "../services/tickets/notifier";
 import { createMcpRouter } from "../mcp/router";
+import { registerAssistantRoutes } from "../assistant/bridge";
 import {
   runTicketCreatedHooks,
   setTicketCreatedBroadcaster,
@@ -5370,6 +5371,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // MCP (Streamable HTTP, stateless): after every REST route, before the /api 404 handler
   // the caller installs. Bearer auth ran in setupAuth; the router requires an mcp:tickets key.
   app.use("/api/mcp", createMcpRouter());
+
+  // In-app assistant (session only; bearer credentials are refused on these paths in setupAuth):
+  // availability, and the CopilotKit bridge to the Mastra sidecar. 503 while ASSISTANT_ENABLED is off.
+  registerAssistantRoutes(app);
 
   return httpServer;
 }

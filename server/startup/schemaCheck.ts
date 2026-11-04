@@ -82,6 +82,36 @@ export const REQUIRED_TABLES: RequiredTable[] = [
       "generation_id",
       "verified_cost_usd",
       "billing_status",
+      // 0033: the assistant run an assistant model call belongs to.
+      "assistant_run_id",
+    ],
+  },
+  // 0033 assistant usage (one row per run) and the link from ai_usage, where its cost lives.
+  {
+    table: "assistant_usage_events",
+    columns: [
+      "run_id",
+      "status",
+      "started_at",
+    ],
+  },
+  // 0034 assistant audit: the durable security record of the assistant.
+  {
+    table: "assistant_audit_events",
+    columns: [
+      "event_type",
+      "occurred_at",
+      "actor_user_id",
+    ],
+  },
+  // 0035 assistant write proposals: every assistant-proposed ticket or comment, and its decision.
+  {
+    table: "assistant_write_proposals",
+    columns: [
+      "payload_sha256",
+      "status",
+      "expires_at",
+      "result_ref",
     ],
   },
 ];

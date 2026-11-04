@@ -33,6 +33,7 @@ import AiAnalytics from "@/pages/admin/AnalyticsInsights/ai-analytics";
 import AISettings from "@/pages/admin/Configuration/ai-settings";
 import StorageSettings from "@/pages/admin/Configuration/storage-settings";
 import LearningAnalytics from "@/pages/admin/AnalyticsInsights/learning-analytics";
+import AssistantActivity from "@/pages/admin/AnalyticsInsights/assistant-activity";
 import { useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
 import { Link } from "wouter";
@@ -59,6 +60,7 @@ const sections: Record<string, JSX.Element> = {
   "storage-settings": <StorageSettings />,
   "ai-analytics": <AiAnalytics />,
   "learning-queue": <LearningAnalytics />,
+  "assistant-activity": <AssistantActivity />,
   guidelines: <AdminGuides />,
 };
 
