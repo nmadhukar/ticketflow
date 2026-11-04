@@ -44,10 +44,13 @@ test("on a phone the assistant fills the screen, explains a refused chat, and Es
   expect(csp.violations).toEqual([]);
 });
 
-test("on a desktop the assistant opens beside the sidebar, not over it", async ({ page }) => {
+test("on a desktop the assistant replaces Ask AI, bottom-right, clear of the sidebar", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await pretendAssistantIsOn(page);
   await loginViaUi(page, "admin");
+  // One assistant: with the in-app one available, the old help chatbot is not offered.
+  await expect(page.getByRole("button", { name: "Ticket assistant", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open help assistant" })).toHaveCount(0);
   await page.getByRole("button", { name: "Ticket assistant", exact: true }).click();
 
   const panel = page.getByRole("dialog", { name: "Ticket assistant" });
@@ -56,5 +59,13 @@ test("on a desktop the assistant opens beside the sidebar, not over it", async (
   const sidebar = (await page.getByRole("navigation", { name: "Main navigation" }).boundingBox())!;
   expect(box.width).toBe(400);
   expect(box.x).toBeGreaterThanOrEqual(sidebar.x + sidebar.width);
+  expect(box.x + box.width).toBeLessThanOrEqual(1440);
+  expect(box.x).toBeGreaterThan(1440 / 2); // the right-hand side, where Ask AI was
   expect(box.y + box.height).toBeLessThanOrEqual(1000);
+});
+
+test("without the in-app assistant, users keep Ask AI", async ({ page }) => {
+  await loginViaUi(page, "admin"); // the e2e server runs with the assistant switched off
+  await expect(page.getByRole("button", { name: "Open help assistant" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ticket assistant", exact: true })).toHaveCount(0);
 });

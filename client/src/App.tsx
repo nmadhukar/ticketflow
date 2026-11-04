@@ -45,8 +45,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "next-themes";
 import { useAuth } from "@/hooks/useAuth";
 import { Layout } from "@/components/layout";
-import { AiChatBot } from "@/components/AiChatBot";
-import { AssistantShell } from "@/components/assistant/AssistantShell";
+import { AppAssistant } from "@/components/assistant/AppAssistant";
 import { ProtectedRoute } from "@/components/protected-route";
 import { ForcedPasswordChange } from "@/components/forced-password-change";
 import NotFound from "@/pages/not-found";
@@ -178,10 +177,9 @@ function Router() {
           </WebSocketProvider>
         )}
       </Switch>
-      {/* Show AI Chat Bot for authenticated users */}
-      {!isLoading && isAuthenticated && <AiChatBot />}
-      {/* The in-app assistant: renders nothing unless the server says this user has one */}
-      {!isLoading && isAuthenticated && <AssistantShell />}
+      {/* One assistant per signed-in user: the in-app assistant where the server offers it,
+          otherwise the help chatbot (Ask AI). See components/assistant/AppAssistant.tsx. */}
+      {!isLoading && isAuthenticated && <AppAssistant />}
     </>
   );
 }

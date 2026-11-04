@@ -54,6 +54,18 @@ describe("AssistantShell", () => {
     expect(mounts).toBe(1);
   });
 
+  it("New chat starts a fresh conversation: the chat is mounted anew", async () => {
+    renderShell({ enabled: true, agentId: "ticket-assistant" });
+    fireEvent.click(screen.getByRole("button", { name: /Ticket assistant/ }));
+    await screen.findByText("chat panel");
+    expect(mounts).toBe(1);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    });
+    expect(await screen.findByText("chat panel")).toBeInTheDocument();
+    expect(mounts).toBe(2);
+  });
+
   it("closes on an Escape pressed in it, keeping the conversation and returning focus to the launcher", async () => {
     renderShell({ enabled: true, agentId: "ticket-assistant" });
     fireEvent.click(screen.getByRole("button", { name: /Ticket assistant/ }));
