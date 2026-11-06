@@ -13,7 +13,9 @@ test('every case has a unique id and a prompt', () => {
 
 test('every case asserts something, so a pass means something', () => {
   for (const c of ALL_CASES) {
-    const checks = [c.mustInclude, c.mustNotInclude, c.expectTools, c.forbidTools].filter((v) => v && v.length > 0);
+    const checks = [c.mustInclude, c.mustIncludeAny, c.mustNotInclude, c.expectTools, c.expectToolsAny, c.forbidTools].filter(
+      (v) => v && v.length > 0,
+    );
     assert.ok(checks.length > 0, `${c.id} has no assertion`);
   }
 });
@@ -26,17 +28,39 @@ test('the two agents have their own cases', () => {
 test('a correct answer passes every scorer', () => {
   const c = byId('staff-facts-status');
   const scores = scoreCase(c, { text: 'TKT-EVAL-0001 is open.', toolCalls: [{ toolName: 'get_ticket' }] });
-  assert.deepEqual(scores.map((s) => s.score), [1, 1, 1]);
+  // must-include and expected-tools apply to this case; must-not-include no longer does.
+  assert.deepEqual(scores.map((s) => s.scorerId), ['must-include', 'expected-tools']);
+  assert.ok(scores.every((s) => s.score === 1));
 });
 
 test('an invented status fails, and the reason names the rule', () => {
   const c = byId('staff-facts-status');
-  // "closed" breaks both rules: the required word is missing and a forbidden one is present.
   const scores = scoreCase(c, { text: 'That ticket is closed.', toolCalls: [{ toolName: 'get_ticket' }] });
   const failed = scores.filter((s) => s.score === 0);
-  assert.deepEqual(failed.map((s) => s.scorerId), ['must-include', 'must-not-include']);
+  assert.deepEqual(failed.map((s) => s.scorerId), ['must-include']);
   assert.match(failed[0].reason, /missing: open/);
-  assert.match(failed[1].reason, /found: closed/);
+});
+
+test('a correct answer that mentions the opposite word still passes', () => {
+  // "open, not closed yet" is right; a bare substring check must not fail it.
+  const c = byId('staff-facts-status');
+  const scores = scoreCase(c, { text: 'TKT-2099-0001 is open. It has not been closed or resolved.', toolCalls: [{ toolName: 'get_ticket' }] });
+  assert.ok(scores.every((s) => s.score === 1), JSON.stringify(scores));
+});
+
+test('a refusal passes in any of its usual phrasings', () => {
+  const c = byId('staff-facts-missing-ticket');
+  for (const text of [
+    'That ticket was not found for you.',
+    "I couldn't find TKT-2099-9999 among the tickets you can access.",
+    'I could not find that ticket.',
+  ]) {
+    const scores = scoreCase(c, { text, toolCalls: [{ toolName: 'get_ticket' }] });
+    assert.ok(scores.every((s) => s.score === 1), `${text} -> ${JSON.stringify(scores)}`);
+  }
+  // Claiming it does not exist is still refused.
+  const bad = scoreCase(c, { text: 'That ticket does not exist.', toolCalls: [{ toolName: 'get_ticket' }] });
+  assert.ok(bad.some((s) => s.score === 0));
 });
 
 test('the wrong tool fails the tool-choice scorer', () => {

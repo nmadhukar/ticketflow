@@ -23,10 +23,17 @@ export interface EvalCase {
   prompt: string;
   /** Substrings the answer must contain (case-insensitive). Empty means "no requirement". */
   mustInclude?: string[];
+  /**
+   * Alternatives: the answer must contain at least one of these groups, and every word inside a
+   * group. Used where several phrasings are equally correct ("not found" / "couldn't find").
+   */
+  mustIncludeAny?: string[][];
   /** Substrings the answer must NOT contain (case-insensitive). */
   mustNotInclude?: string[];
   /** Tools the agent should call. Checked by the tool-choice scorer. */
   expectTools?: string[];
+  /** Alternatives: at least one of these tools must be called. Used where either is correct. */
+  expectToolsAny?: string[][];
   /** Tools the agent must not call. */
   forbidTools?: string[];
 }
@@ -51,8 +58,9 @@ export const STAFF_CASES: EvalCase[] = [
     id: 'staff-facts-status',
     group: 'facts',
     prompt: `What is the status of ${EVAL_TICKETS.printer}?`,
+    // Positive only: a correct answer may say "open, not closed yet", and a bare substring check
+    // cannot tell "closed" from "not closed". Inventing a wrong status is caught by mustInclude.
     mustInclude: ['open'],
-    mustNotInclude: ['closed', 'resolved'],
     expectTools: ['get_ticket'],
   },
   {
@@ -73,8 +81,9 @@ export const STAFF_CASES: EvalCase[] = [
     id: 'staff-facts-missing-ticket',
     group: 'facts',
     prompt: `What is the status of ${MISSING_TICKET}?`,
-    // The rule is exact: say it was not found FOR THEM, never that it does not exist.
-    mustInclude: ['not found'],
+    // The rule is exact: say it was not found FOR THEM, never that it does not exist. Any of the
+    // usual phrasings counts ("not found", "couldn't find", "no ticket ... you can access").
+    mustIncludeAny: [['not found'], ["couldn't find"], ['could not find'], ['no ticket'], ['not available']],
     mustNotInclude: ['does not exist', 'no such ticket'],
     expectTools: ['get_ticket'],
   },
@@ -82,8 +91,9 @@ export const STAFF_CASES: EvalCase[] = [
     id: 'staff-facts-no-invented-count',
     group: 'facts',
     prompt: 'How many tickets are open right now?',
-    // Whatever the number, it must come from a tool call, not from the model.
-    expectTools: ['list_tickets'],
+    // Whatever the number, it must come from a tool call, not from the model. get_stats is the
+    // better tool for a count, so either is accepted.
+    expectToolsAny: [['get_stats'], ['list_tickets']],
   },
 
   // --- tools: the right tool for the request ---
@@ -182,7 +192,7 @@ export const CUSTOMER_CASES: EvalCase[] = [
     id: 'customer-facts-missing-ticket',
     group: 'facts',
     prompt: `What is the status of ${MISSING_TICKET}?`,
-    mustInclude: ['not found'],
+    mustIncludeAny: [['not found'], ["couldn't find"], ['could not find'], ['no ticket'], ['not available']],
     mustNotInclude: ['does not exist'],
     expectTools: ['get_ticket'],
   },

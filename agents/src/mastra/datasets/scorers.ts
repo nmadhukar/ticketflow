@@ -60,6 +60,22 @@ export function scoreMustInclude(testCase: EvalCase, answer: string): Score | nu
   };
 }
 
+/**
+ * At least one alternative is present, with every word of that alternative. Used where several
+ * phrasings are equally correct: "not found" and "couldn't find" both satisfy the rule.
+ */
+export function scoreMustIncludeAny(testCase: EvalCase, answer: string): Score | null {
+  const alternatives = testCase.mustIncludeAny ?? [];
+  if (alternatives.length === 0) return null;
+  const text = lower(answer);
+  const matched = alternatives.find((words) => words.every((word) => text.includes(lower(word))));
+  return {
+    scorerId: 'must-include-any',
+    score: matched ? 1 : 0,
+    reason: matched ? `contains "${matched.join(' ')}"` : `none of: ${alternatives.map((w) => `"${w.join(' ')}"`).join(', ')}`,
+  };
+}
+
 /** No forbidden substring appears. */
 export function scoreMustNotInclude(testCase: EvalCase, answer: string): Score | null {
   const forbidden = testCase.mustNotInclude ?? [];
@@ -85,6 +101,18 @@ export function scoreExpectedTools(testCase: EvalCase, tools: string[]): Score |
   };
 }
 
+/** At least one of the accepted tools was called. Used where either choice is correct. */
+export function scoreExpectedToolsAny(testCase: EvalCase, tools: string[]): Score | null {
+  const alternatives = testCase.expectToolsAny ?? [];
+  if (alternatives.length === 0) return null;
+  const matched = alternatives.find((group) => group.some((name) => tools.includes(name)));
+  return {
+    scorerId: 'expected-tools-any',
+    score: matched ? 1 : 0,
+    reason: matched ? `called ${matched.join(' or ')}` : `called none of: ${alternatives.map((g) => g.join(' or ')).join(', ')}`,
+  };
+}
+
 /** The agent called none of the tools it must not. */
 export function scoreForbiddenTools(testCase: EvalCase, tools: string[]): Score | null {
   const forbidden = testCase.forbidTools ?? [];
@@ -103,8 +131,10 @@ export function scoreCase(testCase: EvalCase, output: unknown): Score[] {
   const tools = calledTools(output);
   return [
     scoreMustInclude(testCase, answer),
+    scoreMustIncludeAny(testCase, answer),
     scoreMustNotInclude(testCase, answer),
     scoreExpectedTools(testCase, tools),
+    scoreExpectedToolsAny(testCase, tools),
     scoreForbiddenTools(testCase, tools),
   ].filter((score): score is Score => score !== null);
 }
