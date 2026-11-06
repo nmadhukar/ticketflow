@@ -16,6 +16,7 @@ import { registerAssistantAdminRoutes } from "./admin";
 import { registerEvalRunRoutes } from "./evalRuns";
 import { createSidecarHistoryStatus, type SidecarHistory } from "./sidecarStatus";
 import { map, type Observable } from "rxjs";
+import type { AgentsFactory } from "@copilotkit/runtime/v2";
 import { deleteHistory, getHistory, HistoryError, isThreadId, listHistory, mastraThreadId, newestTurn, STAFF_AGENT } from "./history";
 
 /** Per-user CopilotKit handlers kept in memory; the least recently used beyond this is dropped. */
@@ -179,16 +180,23 @@ const createHandler: CopilotHandlerFactory = async (userId, agentId, env, ending
     endings,
     userId,
   );
+  // Resolved once, before the runtime: the agents factory below must be synchronous.
+  const memoryOn = await staffMemory();
   const runtime = new CopilotRuntime({
     runner: runner as unknown as InstanceType<typeof InMemoryAgentRunner>,
-    agents: async ({ request }: { request: globalThis.Request }) => {
+    // CopilotKit's factory context carries no `request` (AgentFactoryContext: input, abortSignal,
+    // abortController, interrupt). The run's tokens therefore travel in `input.forwardedProps`,
+    // which the runtime passes through untouched; the route below puts them there.
+    // Typed as AgentsFactory explicitly: AgentsConfig is a union (static record | factory), and
+    // without the annotation TypeScript checks the function against the record branch.
+    agents: (({ request }) => {
       const agentToken = request.headers.get(INTERNAL_AGENT_TOKEN);
       const mcpToken = request.headers.get(INTERNAL_MCP_TOKEN);
       // Tokens exist only on a run request (set below); anything else reaching Mastra is refused there.
       const headers: Record<string, string> = agentToken && mcpToken ? { Authorization: `Bearer ${agentToken}`, "X-TicketFlow-MCP-Session": mcpToken } : {};
       const client = new MastraClient({ baseUrl: agentUrl(env), headers });
       // Staff threads are always prefixed; only the newest turn goes when the sidecar has memory.
-      const AgentClass = agentId === STAFF_AGENT ? staffAgentClass(MastraAgent, userId, await staffMemory()) : MastraAgent;
+      const AgentClass = agentId === STAFF_AGENT ? staffAgentClass(MastraAgent, userId, memoryOn) : MastraAgent;
       const agent = new AgentClass({
         agentId,
         agent: client.getAgent(agentId),
@@ -197,10 +205,11 @@ const createHandler: CopilotHandlerFactory = async (userId, agentId, env, ending
         // Show each tool call as it starts. Safe while no tool suspends (no approvals yet).
         streamServerToolCalls: true,
       } as ConstructorParameters<typeof MastraAgent>[0]);
-      // Exactly one agent, the caller's. The cast only tells CopilotKit's NonEmptyRecord type
-      // what a computed key cannot: the record is not empty.
-      return { [agentId]: agent } as Record<AssistantAgentId, typeof agent>;
-    },
+      // Exactly one agent, the caller's. The cast tells CopilotKit two things a computed key
+      // cannot: the record is not empty, and MastraAgent is the AbstractAgent the runtime expects
+      // (the two come from separate copies of @ag-ui/client, so their private fields differ).
+      return { [agentId]: agent } as unknown as Record<string, never>;
+    }) as AgentsFactory,
     // Allowlist mode: no browser header but a request id reaches the sidecar, and never ours.
     forwardHeaders: { allow: ["x-request-id"], denyPrefixes: ["x-tf-internal-"] },
   });

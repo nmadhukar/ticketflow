@@ -51,7 +51,9 @@ export function registerEvalRunRoutes(app: Express, env: NodeJS.ProcessEnv = pro
       }
       res.json({ runId: run.runId, userId, agentId, mcpToken: run.mcpToken, agentToken: run.agentToken });
     } catch (error) {
-      res.status(500).json({ error: error instanceof Error ? error.message : "error" });
+      // Never the exception's text: it can carry a connection string or a token. The name only.
+      console.error(`Eval run failed [${error instanceof Error ? error.name : "error"}]`);
+      res.status(500).json({ error: "internal_error" });
     }
   });
 
