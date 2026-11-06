@@ -105,6 +105,16 @@ test('staff history needs the assistant role URL, and a sane retention', () => {
   // storage.ts warns that retention is not running instead.
   assert.deepEqual(settings({ ...VALID_ENV, MASTRA_DATABASE_URL: 'nonsense' }), []);
   assert.deepEqual(settings({ ...VALID_ENV, MASTRA_DATABASE_URL: HISTORY_ENV.MASTRA_DATABASE_URL }), []);
+});
+
+test('the store is used with history off too, so datasets survive a restart', async () => {
+  // Mastra keeps datasets and experiments in the store whatever the history switch says.
+  const { storage, staffMemory } = await import('../src/mastra/storage.ts');
+  assert.equal(storage, undefined, 'no URL in this test process: Mastra falls back to memory');
+  assert.equal(staffMemory, undefined, 'history is off: no conversation is saved');
+  // With a usable URL the store is built even though history is off; memory still is not.
+  const { createStaffMemory } = await import('../src/mastra/storage.ts');
+  assert.equal(createStaffMemory(undefined), undefined);
   for (const bad of ['0', '366', 'x']) assert.deepEqual(settings({ ...VALID_ENV, ASSISTANT_HISTORY_RETENTION_DAYS: bad }), ['ASSISTANT_HISTORY_RETENTION_DAYS'], bad);
 });
 

@@ -7,10 +7,14 @@ import { readStorageUrl, staffHistoryEnabled, STORAGE_SCHEMA } from './config.ts
  * `mastra` schema (provisioned by scripts/db/provision-assistant-db.mjs): the role owns that schema
  * and can read no TicketFlow table.
  *
- * Only the ticket assistant (staff) has memory, and only while ASSISTANT_STAFF_HISTORY=true. Only
- * then is the store given to Mastra itself, so nothing else (customer runs included) can write to
- * the schema while the feature is off. Threads are scoped to the user twice: the resource is
- * user:<id> (auth.ts, mapUserToResourceId) and the app prefixes every thread id with the user's id.
+ * Only the ticket assistant (staff) has memory, and only while ASSISTANT_STAFF_HISTORY=true.
+ * Threads are scoped to the user twice: the resource is user:<id> (auth.ts,
+ * mapUserToResourceId) and the app prefixes every thread id with the user's id.
+ *
+ * The store itself is given to Mastra whenever MASTRA_DATABASE_URL is usable, whatever the history
+ * switch says: Mastra keeps its own state there (datasets and their experiments, used to evaluate
+ * the agents), and that must survive a restart even while no conversation is being saved. Memory
+ * stays gated on the switch, so nothing writes conversations to the schema while it is off.
  *
  * Mastra stores tool results with the messages, so a saved conversation holds what the tools
  * returned to that staff member. It is kept ASSISTANT_HISTORY_RETENTION_DAYS (30) days
@@ -58,10 +62,13 @@ if (!historyOn && readStorageUrl() && !url) {
   console.warn('[ticketflow-agents] MASTRA_DATABASE_URL is not a usable postgres:// URL: saved conversations are not being deleted.');
 }
 
-/** Mastra's own store: only while staff history is on. */
-export const storage = historyOn && url ? createStore(url, STORAGE_POOL_MAX) : undefined;
-/** The agent's memory: only while staff history is on. */
-export const staffMemory = createStaffMemory(storage);
+/**
+ * Mastra's own store: whenever the URL is usable, so datasets and experiments survive a restart
+ * even with staff history off. Without a usable URL Mastra falls back to memory and says so.
+ */
+export const storage = url ? createStore(url, STORAGE_POOL_MAX) : undefined;
+/** The agent's memory: only while staff history is on, so no conversation is saved while it is off. */
+export const staffMemory = historyOn ? createStaffMemory(storage) : undefined;
 /**
  * Every saved conversation, for retention: the agent's memory while history is on, otherwise a
  * small store of retention's own (one connection) whenever the URL is usable.

@@ -13,6 +13,7 @@ import { LruMap, RunEndings, TrackedRunner, type RunFinish, type RunnerLike } fr
 import { budgetExhausted, defaultUsageDeps, recordRun, type RunContext, type UsageDeps } from "./usage";
 import { randomUUID } from "crypto";
 import { registerAssistantAdminRoutes } from "./admin";
+import { registerEvalRunRoutes } from "./evalRuns";
 import { createSidecarHistoryStatus, type SidecarHistory } from "./sidecarStatus";
 import { map, type Observable } from "rxjs";
 import { deleteHistory, getHistory, HistoryError, isThreadId, listHistory, mastraThreadId, newestTurn, STAFF_AGENT } from "./history";
@@ -211,6 +212,10 @@ export function registerAssistantRoutes(app: Express, deps: BridgeDeps = default
 
   // Admin views of usage and the audit trail: available whether or not the assistant is on.
   registerAssistantAdminRoutes(app);
+
+  // Dev-only: lets the dataset evaluations open a run in this process's registry. Off unless
+  // EVAL_RUNS_ENABLED=true outside production, and only for the seeded eval accounts.
+  registerEvalRunRoutes(app, env);
 
   // Saved conversations are SHOWN only when the app's switch is on AND the sidecar reports them
   // working now. How staff runs are BUILT follows whether the sidecar's agent has memory: its last

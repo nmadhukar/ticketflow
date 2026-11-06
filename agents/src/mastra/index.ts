@@ -7,6 +7,7 @@ import { ticketAssistant } from './agents/ticket-assistant.ts';
 import { startRetentionSweep } from './retention.ts';
 import { createServerConfig } from './server-config.ts';
 import { retentionStore, storage } from './storage.ts';
+import { staffHistoryEnabled } from './config.ts';
 
 if (startupConfigChecked !== true) throw new Error('[ticketflow-agents] Agents configuration was not checked.');
 
@@ -22,7 +23,10 @@ export const mastra = new Mastra({
 // Whenever saved conversations may exist, including after staff history was switched off: the
 // 30-day deletion must not depend on the feature still being on. A store not given to Mastra is
 // initialised here (Mastra initialises its own).
-if (retentionStore) {
+//
+// Only while staff history is on: with it off no conversation is ever saved, so there is nothing
+// to delete, and the memory tables may not exist yet (the store is now created for datasets too).
+if (retentionStore && staffHistoryEnabled()) {
   const { memory, store } = retentionStore;
   const ready = storage ? Promise.resolve() : store.init();
   ready
