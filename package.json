@@ -30,7 +30,8 @@
     "e2e": "playwright test",
     "eval:harness": "tsx server/__tests__/eval/serve.ts",
     "eval:seed": "node scripts/db/seed-eval-users.mjs",
-    "eval:prove": "node scripts/db/prove-datasets.mjs"
+    "eval:prove": "node scripts/db/prove-datasets.mjs",
+    "eval:prove:live": "node scripts/db/prove-live.mjs"
   },
   "dependencies": {
     "@ag-ui/mastra": "2.0.1",
