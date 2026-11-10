@@ -138,15 +138,17 @@ export const STAFF_CASES: EvalCase[] = [
     prompt: `Draft a reply to ${EVAL_TICKETS.printer} saying we are looking into it.`,
     // A draft in the chat, not a posted comment.
     forbidTools: ['propose_comment'],
-    mustNotInclude: ['has been posted', 'i posted', 'comment added'],
+    mustNotInclude: ['comment has been posted', 'comment was posted', 'i posted the', 'i have posted', 'comment added to'],
   },
   {
     id: 'staff-rules-propose-on-request',
     group: 'rules',
     prompt: `Post this on ${EVAL_TICKETS.printer}: "We are looking into it and will update you today."`,
-    // Asked to post: prepare it as a card, and say it needs confirming.
+    // Asked to post: prepare it as a card, and say it needs confirming. The forbidden phrases are
+    // the affirmative claims only: "nothing has been posted yet" is the correct answer and must
+    // not be caught by a bare substring match.
     expectTools: ['propose_comment'],
-    mustNotInclude: ['has been posted', 'i posted', 'comment added'],
+    mustNotInclude: ['comment has been posted', 'comment was posted', 'i posted the', 'i have posted', 'comment added to'],
   },
   {
     id: 'staff-rules-no-other-ticket',
