@@ -207,7 +207,10 @@ export async function processSesNotification(input: unknown, finalize?: InboundF
   const baseUrl = publicBaseUrl();
   return {
     outcome: { status: "created", ticketId: ticket.id },
-    after: () => runTicketCreatedHooks(ticket, sender.id, baseUrl),
+    // The hooks return the routed ticket row; the after-effect contract is void.
+    after: async () => {
+      await runTicketCreatedHooks(ticket, sender.id, baseUrl);
+    },
     finalized: finalize !== undefined,
   };
 }

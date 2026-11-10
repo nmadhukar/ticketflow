@@ -141,6 +141,35 @@ describe("AI routes honour settings, access and authorship", () => {
       expect(listed.body[0].user.password).toBeUndefined();
     });
 
+    it("no match anywhere: no comment is posted, the ticket is not auto-answered", async () => {
+      // Nothing in the knowledge base and nothing similar already resolved. The score alone used
+      // to be enough; now a reply needs a real match, so the agent stays quiet (and routes).
+      // With no match the score is 0, and a zero score stores no draft row at all (the same rule
+      // the unit suite pins for confidence 0), so the row count is 0 here, not 1.
+      await setSettings({ threshold: "0.70" });
+      const { id } = await customerTicket({ title: "Quantum widget calibration drift", description: "The framistat reads 42 noon" });
+      expect(aiModelMock.totalCalls()).toBeGreaterThan(0);
+      expect(await commentsOf(id)).toHaveLength(0);
+      expect(await rowsOf(id)).toHaveLength(0);
+    });
+
+    it("a similar resolved ticket is a real match: the reply is posted with no knowledge article", async () => {
+      await setSettings({ threshold: "0.70" });
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      // One resolved ticket about the exact same problem, and no knowledge base article.
+      const prior = await createTicketAs(adminA, {
+        title: "Printerjam broken",
+        description: "Paper stuck in tray two",
+      });
+      await db.update(tasks).set({ status: "resolved", resolvedAt: new Date() }).where(eq(tasks.id, prior.body.id));
+      const customer = await createUser({ role: "customer" });
+      const customerA = await loginAs(ctx.app, customer);
+      const res = await createTicketAs(customerA, { title: "Printerjam again", description: "Paper stuck in tray two" });
+      expect(res.status).toBe(201);
+      expect(await commentsOf(res.body.id as number)).toHaveLength(1);
+      expect((await rowsOf(res.body.id as number))[0].wasApplied).toBe(true);
+    });
+
     it("the posted comment is cut to maxResponseLength", async () => {
       await setSettings({ maxResponseLength: 100 });
       await seedMatchingArticle();
@@ -380,6 +409,7 @@ describe("AI routes honour settings, access and authorship", () => {
         factors: { keywords: 0, urgency: 0, technical: 0, historical: 0, sentiment: 0 },
         shouldEscalate: true,
         shouldAutoRespond: false,
+        hasMatch: false,
       });
       const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
       const res = await adminA.post(`/api/tasks/${id}/auto-response/generate`);
@@ -390,12 +420,30 @@ describe("AI routes honour settings, access and authorship", () => {
   });
 
   describe("GET and apply: customers never see unapplied drafts", () => {
+    /**
+     * A ticket with a stored draft that is NOT applied.
+     *
+     * Built deterministically: AI is OFF while the ticket is created (so nothing is posted at
+     * create time), the settings are switched on afterwards, and a staff member generates the
+     * draft on demand at the REAL confidence (0.85, whose status band is in_progress, which also
+     * switches the create-time routing off). One row, not applied, no comment.
+     */
     async function ticketWithDraft() {
+      // The ticket has to MATCH something or the score is gated to 0 and no draft is stored, and
+      // the model's 0.85 has to stay below the threshold or the draft is applied at create time.
+      // The old "Printerjam" tie no longer works ("broken" is dropped as a stop word, so the
+      // title shares no term with the article); this ticket shares "printer" with it.
       await setSettings({ enabled: false });
-      const t = await customerTicket();
-      await setSettings({ enabled: true });
+      await seedMatchingArticle();
+      const t = await customerTicket({ title: "Printer keeps jamming on the second tray" });
+      await setSettings({ enabled: true, threshold: "0.90" });
       const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
       expect((await adminA.post(`/api/tasks/${t.id}/auto-response/generate`)).status).toBe(200);
+      const rows = await rowsOf(t.id);
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0].wasApplied).toBe(false);
+      expect(await commentsOf(t.id)).toHaveLength(0);
       return { ...t, adminA };
     }
 
@@ -475,6 +523,24 @@ describe("AI routes honour settings, access and authorship", () => {
       expect((await rowsOf(id))[0].wasApplied).toBe(false);
       expect((await adminA.post(`/api/tasks/${id}/auto-response/apply`)).status).toBe(200);
       expect(await commentsOf(id)).toHaveLength(1);
+    });
+  });
+
+  describe("on-demand generate with no match at all", () => {
+    it("stores no draft, so apply answers 404 (a zero score is not a draft)", async () => {
+      await setSettings({ enabled: false });
+      const t = await customerTicket({ title: "Quantum widget calibration drift", description: "The framistat reads 42 noon" });
+      // The model stays confident; with nothing to answer from the score is still gated to 0.
+      const base = aiModelMock.handler;
+      aiModelMock.handler = (p) =>
+        p.includes("helpful IT support assistant")
+          ? JSON.stringify({ response: "DRAFT-ONLY-REPLY", confidence: 0.95, knowledgeBaseArticles: [] })
+          : base(p);
+      await setSettings({ enabled: true });
+      const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
+      expect((await adminA.post(`/api/tasks/${t.id}/auto-response/generate`)).status).toBe(200);
+      expect(await rowsOf(t.id)).toHaveLength(0);
+      expect((await adminA.post(`/api/tasks/${t.id}/auto-response/apply`)).status).toBe(404);
     });
   });
 
@@ -731,9 +797,17 @@ describe("AI routes honour settings, access and authorship", () => {
       const { id } = await customerTicket();
       expect((await rowsOf(id))[0].aiResponse).toHaveLength(100);
 
+      // A ticket created with AI off has no draft yet: generate one on demand. The ticket must
+      // MATCH something, or the model's confidence is gated to 0 and no draft is stored at all.
+      // The handler above answers 0.9 for any ticket, and the seeded "Printerjam" article matches
+      // every ticket's title here (customerTicket's default is "Printerjam broken").
       await setSettings({ enabled: false, maxResponseLength: 100 });
       const t2 = await customerTicket();
       await setSettings({ enabled: true, maxResponseLength: 100 });
+      aiModelMock.handler = (p) =>
+        p.includes("helpful IT support assistant")
+          ? JSON.stringify({ response: "y".repeat(400), confidence: 0.9, knowledgeBaseArticles: [] })
+          : base(p);
       const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
       await adminA.post(`/api/tasks/${t2.id}/auto-response/generate`);
       expect((await rowsOf(t2.id))[0].aiResponse).toHaveLength(100);
@@ -745,6 +819,14 @@ describe("AI routes honour settings, access and authorship", () => {
     it("if releasing the claim fails too, both failures are logged and the ORIGINAL error is what the client gets", async () => {
       await setSettings({ enabled: false });
       const { id } = await customerTicket();
+      // Seed a match and a confident answer, so the on-demand generate really stores a draft.
+      // Without a match the score is 0, no row is stored, and apply would 404 instead.
+      await seedMatchingArticle();
+      const base = aiModelMock.handler;
+      aiModelMock.handler = (p) =>
+        p.includes("helpful IT support assistant")
+          ? JSON.stringify({ response: "Try restarting the service.", confidence: 0.9, knowledgeBaseArticles: [] })
+          : base(p);
       await setSettings({ enabled: true });
       const adminA = await loginAs(ctx.app, await createUser({ role: "admin" }));
       await adminA.post(`/api/tasks/${id}/auto-response/generate`);

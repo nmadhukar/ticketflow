@@ -11,6 +11,7 @@ export interface AISettings {
   complexityThreshold: number; // 0..100
   escalationEnabled: boolean;
   escalationTeamId?: number;
+  autoRoutingEnabled: boolean;
 
   modelId: string;
   isActive: boolean;

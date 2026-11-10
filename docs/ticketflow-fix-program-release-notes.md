@@ -199,6 +199,10 @@ New and optional:
 | `ALLOW_MANAGER_DELETE` | `false` | `true` lets managers delete tickets. Admins can always delete. |
 | `SEED_DEMO_DATA` | `false` | `true` seeds demo accounts and tickets. Development only. |
 | `CORS_ORIGIN` | `*` | Also the extra origins the WebSocket accepts (a `*` is ignored for the socket). |
+| `HINDSIGHT_ENABLED` | off | Section 11. `true` turns on the Hindsight agent memory. Must be exactly `true`. |
+| `HINDSIGHT_URL` | `http://localhost:8888` | Section 11. Where the Hindsight service runs. |
+| `HINDSIGHT_BANK_ID` | `ticketflow` | Section 11. The memory bank this workspace uses. |
+| `HINDSIGHT_API_KEY` | unset | Section 11. Optional bearer token for the service. |
 
 Unchanged and still used: `PORT`, `DB_DRIVER`, `AWS_*` and `AWS_S3_BUCKET_NAME`/`AWS_S3_REGION`,
 `MAILTRAP_TOKEN`, `MICROSOFT_*`, `COOKIE_SECURE`, `CORS_*`, `INPUT_VALIDATION_ENABLED`,
@@ -1146,3 +1150,165 @@ the AI switch), M7 (`quota_exceeded` is 429 on one test route and 400 on the oth
 gaps in AI settings), M9 (`responseTimeout` is stored but unused), M10 (the help chat answers 429
 when the budget is spent), M12 (`env.example` still lacks `OPENROUTER_API_KEY`, and
 `docs/integrations/dsh-ticketflow-mcp.md` is stale), M13 (test gaps) and M14 (two pricing caches).
+
+## 10. Content-based ticket routing (2026-10-16)
+
+New tickets already got an AI reply when the analysis matched a resolved ticket or knowledge
+article. When it found nothing, the ticket was left unassigned, and the escalation settings
+(`escalationEnabled`, `escalationTeamId`, `complexityThreshold`) were stored but read by no code.
+This round adds the other half: a ticket that finds no solution is classified onto the team that
+owns its problem area and assigned to it.
+
+- **Migration 0031** (`0031_ai_routing.sql`) adds `auto_routing_enabled` to `ai_settings`
+  (and mirrors it to `bedrock_settings`, as 0023 does). Idempotent (`ADD COLUMN IF NOT EXISTS`),
+  it never aborts a deploy (a missing table is a NOTICE), and the column is in the startup schema
+  check. The default is off.
+- **Opt-in on purpose.** Reassigning a customer's ticket is a routing decision, so it happens only
+  when an admin turns on "Route unmatched tickets" in Admin > AI settings. With it off (the
+  default) ticket creation is byte-for-byte what it was: no model call, no assignment.
+- **One new prompt, one new operation.** `buildTicketRoutingPrompt` lists the teams in active
+  departments with their ids and asks the model to name one; `classifyTicketForRouting` calls it
+  under the new `ticketRouting` operation (output cap 400, temperature 0) and returns
+  `{ teamId, departmentId, confidence, reason }`. The description goes through the same
+  `fitDescriptionToBudget` truncation as the other ticket prompts, so a long ticket cannot push
+  the request over `maxTokensPerRequest`.
+- **`server/services/ai/ticketRouting.ts` (`routeTicket`)** fetches the routable teams (a team in
+  an active department), re-validates the model's team id against that live list, and writes the
+  assignment with the AI system user as the actor, so the ticket history shows why it moved.
+  Guards: it runs only when routing is on, AI is active and `OPENROUTER_API_KEY` is set; it never
+  throws (a failure is logged by type, never the ticket text or model output); a ticket a person
+  already owns (a user assignee, or a team other than the catch-all triage queue) is left alone;
+  an unusable model answer falls back to `escalationTeamId`, then to the default triage team, then
+  to no assignment.
+- **Where it runs.** `runCreateTimeAutoResponse` calls it on the branch where the analysis did not
+  auto-respond, and also when auto-response is switched off (routing is its own setting). The
+  auto-response path itself is unchanged.
+
+### Deploy checks
+
+1. The log shows `applied 0031_ai_routing.sql` and no `Startup refused`.
+2. With the switch off, a new ticket is unassigned exactly as before (the default).
+3. Turn the switch on, create a ticket as a customer, and confirm the assigned team and the
+   "AI Assistant" history entry. `escalationTeamId` is now used only as the routing fallback.
+
+## 11. Hindsight agent memory (2026-10-19)
+
+The create-time agent found similar resolved tickets and knowledge articles with keyword search.
+This round adds an optional memory layer: an external Hindsight service the agent recalls from
+before writing a reply and writes to when a ticket is resolved, so a resolution is remembered
+even when no knowledge article was produced.
+
+- **Environment only, no migration.** Hindsight is deployment configuration, so it is switched on
+  with `HINDSIGHT_ENABLED=true` (exactly "true", the same shape as `TEAMS_WEBHOOKS_ENABLED`,
+  R84) plus `HINDSIGHT_URL` (default `http://localhost:8888`), `HINDSIGHT_BANK_ID` (default
+  `ticketflow`) and an optional `HINDSIGHT_API_KEY` sent as a bearer token. There is no new
+  column, admin toggle or migration; with the flag off (the default) the create and resolve paths
+  are byte-for-byte what they were and no request is made.
+- **Recall before a reply.** `aiAutoResponse.analyzeTicket` recalls memories for the ticket
+  (`POST /v1/default/banks/{bank}/memories/recall`) and adds the recalled text to the reply
+  prompt. It is an aid to wording only: the confidence score still counts only the real
+  knowledge-base articles, so memory cannot by itself make a ticket auto-respond.
+- **Retain on resolve.** When a ticket moves to resolved, `notifier.afterTicketUpdated` stores
+  one memory built from the ticket and its last resolution comments
+  (`POST /v1/default/banks/{bank}/memories`), beside the existing knowledge-base learning.
+- **One client, best-effort.** `server/services/ai/hindsight.ts` is the only place that talks to
+  the service. Neither call ever throws (a memory service that is down must not fail a ticket
+  write) and failures are logged by type only, never the ticket text or a memory. The service is
+  reached from the server only, never the browser.
+
+### Deploy checks
+
+1. With nothing set, a new ticket creates exactly as before (no memory request).
+2. Set `HINDSIGHT_ENABLED=true` and `HINDSIGHT_URL` for a running Hindsight instance, create a
+   ticket and confirm a recall request in the service's log.
+3. Resolve a ticket with a resolution comment and confirm the retain request and the stored memory.
+
+## 12. DeepSeek Harness wiring kit (2026-10-19)
+
+TicketFlow's MCP endpoint was already contract-documented, but the harness side lived only in prose:
+a profile entry in the developer guide and a handoff note that said no connection existed. This round
+adds the missing, reviewable pieces so an operator can wire a DeepSeek Harness to the endpoint.
+
+- **Checked-in kit under `docs/integrations/dsh/`.** `cordis.patch.yml` registers
+  `@deepseek-ai/dsh-mcp-client` over streamable HTTP for `http://app:5000/api/mcp` (the host form,
+  `http://host.docker.internal:5000/api/mcp`, is noted in a comment); `attach-dsh-network.sh` joins a
+  running harness container to `ticketflow-main_ticketflow-network` with `docker network connect`,
+  idempotently and without recreating either container; `README.md` is the runbook.
+- **No key value, and no new credential path.** The bearer is `TICKETFLOW_MCP_KEY` in the harness
+  container's environment. An admin issues it through the existing API-key flow (Admin > Integrations >
+  Developer resources, or `POST /api/api-keys`); every key is already scoped to `mcp:tickets` and acts
+  as its owner, so MCP visibility and permissions match that user's REST answers. Nothing in the kit
+  stores a key, and `.gitattributes` keeps the shell script on LF.
+- **The handoff note is current.** `docs/integrations/dsh-ticketflow-mcp.md` now points at the kit
+  instead of stating that no configuration exists, and `DEVELOPER_DOCUMENTATION.md`'s example uses the
+  real port and links the kit.
+- **No product code changed.** The endpoint, the API-key scope and the tool registrations are
+  untouched; the new files are documentation, one operator script and one unit suite.
+
+### Deploy checks
+
+1. `bash scripts/ai/dsh/attach-dsh-network.sh` reports the harness attached (rerun: "Already attached").
+2. In the harness, set `TICKETFLOW_MCP_KEY`, start with `--patch`, and confirm `tools/list` returns the
+   TicketFlow tools and a read-only `list_tickets` call matches the same user's REST answer.
+
+## 13. Matched-reply reliability (2026-10-19)
+
+A live demo created a ticket, the agent posted `I'm unable to generate an automated response at this
+time...`, and no answer appeared. Two faults were reproduced end to end:
+
+- **Reasoning output ate the reply budget.** The default model, `deepseek/deepseek-v4-pro`, is a
+  reasoning model: the hidden reasoning is drawn from `max_tokens`, so the 800-token
+  `generateResponse` cap was spent before any answer was written. The provider stopped with
+  `finish_reason: "length"` and returned a truncated JSON object, which failed to parse. The same
+  risk was already documented for the 50-token connection test.
+- **A failed generation was posted as a confident reply.** `generateResponse` returns a holding
+  message (and confidence 0) when it cannot answer, but `analyzeTicket` could not tell that apart
+  from a real answer, so with a knowledge-base match present (confidence 0.8) it auto-responded with
+  the holding text.
+
+Fixes, all in the AI client/integration and both halves covered by new tests:
+
+- **The JSON operations turn reasoning off.** `invokeBedrockModel` takes a `reasoning` argument that
+  `OpenRouterClient` forwards as `reasoning: { enabled: false }`. Every structured call
+  (analyse, reply, routing, knowledge, the connection test) passes `false`; the free-text help chat
+  leaves it unset. This is what stops the reasoning from consuming the output budget.
+- **A reply cut off at the cap is rejected, not parsed.** The client now treats
+  `finish_reason: "length"` as `invalid_output`, so a fragment never reaches the JSON parser.
+- **A failed generation is never a match.** `generateResponse` marks the holding message
+  `degraded: true`; `analyzeTicket` refuses to auto-respond on a degraded result and routes the
+  ticket instead, so `shouldAutoRespond` is false and no holding-message comment is posted.
+- **Citations no longer discard a good reply.** The reply prompt listed knowledge-base articles by
+  title only, so the model returned titles in `knowledgeBaseArticles` while `analyzeTicket`'s schema
+  required numeric ids; one title threw the schema and the whole analysis was lost (a new ticket got
+  neither a reply nor routing, though the model had answered). The prompt now shows each article's
+  `[id N]`, and `generateResponse` resolves whatever the model returns back to ids (a bare number,
+  `"id 7"`, or a title, matched against the articles shown; unresolvable entries are dropped). The
+  caller's schema also coerces, so a stray citation can never discard an otherwise good reply.
+
+- **One shared common word is not a knowledge match.** The keyword search ORed every word of four
+  or more characters against article titles, bodies and tags, so an unmatched ticket "matched"
+  unrelated articles on a single body word ("request", "install", "team"). Each match added to the
+  reply confidence, so a hardware request passed the auto-respond threshold and got a reply instead
+  of being classified and routed. The search now scores a title/tag hit above a body hit and keeps
+  only articles that clear a small relevance floor, so a lone shared body word no longer counts.
+
+- **A reply is no longer cut off mid-sentence.** `maxResponseLength` (a character budget, default
+  1000) was applied with a plain `slice`, while the prompt asked the model for up to 500 *words*
+  (roughly 3x the budget), so replies were routinely severed mid-word ("... - Work w") — visibly
+  incomplete to the customer. The prompt now states the character budget and asks for a complete
+  answer, and the store step cuts on a sentence boundary where one fits, else a whole word with a
+  trailing ellipsis, so a partial word can never reach a ticket.
+- **Generic project vocabulary no longer looks like a knowledge match.** Common words ("user",
+  "admin", "request", "licenses", "account") appear throughout unrelated articles, so a body match
+  on one or two of them counted as knowledge and pushed a ticket over the reply threshold. The
+  search now drops a stop-word list before matching, and an article counts only when it hits the
+  title or tags, or shares several distinct terms with its body.
+
+### Deploy checks
+
+1. Admin > AI settings: **Enable AI model calls** on, **Auto-response** on, **Test connection** passes.
+2. Resolve a ticket with a resolution comment, then create a similar customer ticket: the AI
+   Assistant posts a real answer (not the holding message), and a new `ticket_auto_responses` row
+   is stored and marked applied.
+3. Create an unmatched ticket with **Route unmatched tickets** on: it is classified and assigned,
+   with an "AI Assistant" history entry.

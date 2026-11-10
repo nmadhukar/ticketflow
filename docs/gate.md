@@ -22,6 +22,11 @@ CLI; nothing is installed on the host. A product defect fails the gate: fix the 
 4. **Frozen install, lint, type check.** `npm ci`, `npm run lint`, `npm run check`.
 5. **Jest.** Applies the schema to a throwaway database, then runs `jest --runInBand` over every project
    (unit, AI, integration against PostgreSQL, client). The counts come from Jest's own JSON report.
+   One `--runInBand` process runs them all, so its heap grows across the run; it starts with
+   `NODE_OPTIONS=--max-old-space-size=4096` because Node's default old-space cap (about 2 GB) is
+   below what the full run needs and aborts with "Reached heap limit" partway through, which leaves
+   no report behind. Lower it if the machine running Docker has little memory, but not without
+   checking a full run still completes.
 6. **Playwright.** In `mcr.microsoft.com/playwright:v1.63.0-noble`, against its own throwaway database, runs
    `npm run e2e` (the production bundle, strict CSP). Keep the image tag equal to `@playwright/test` in
    `package.json`.

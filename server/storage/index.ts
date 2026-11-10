@@ -670,6 +670,16 @@ export class DatabaseStorage implements IStorage {
     return task;
   }
 
+  /**
+   * The same row shape as getTask, by the number the UI shows (TKT-2026-0610).
+   * ticket_number is unique, so at most one row matches. Used to resolve a ticket
+   * named by its number rather than its database id.
+   */
+  async getTaskByNumber(ticketNumber: string): Promise<any | undefined> {
+    const [task] = await this.taskDetailQuery().where(eq(tasks.ticketNumber, ticketNumber));
+    return task;
+  }
+
   /** One page of getTask-shaped rows for `where`, newest first (id breaks createdAt ties). One query. */
   async getTaskPage(where: SQL | undefined, limit: number, offset: number): Promise<any[]> {
     return this.taskDetailQuery()
@@ -1926,6 +1936,7 @@ export class DatabaseStorage implements IStorage {
       complexityThreshold: patch.complexityThreshold,
       escalationEnabled: patch.escalationEnabled,
       escalationTeamId: patch.escalationTeamId,
+      autoRoutingEnabled: patch.autoRoutingEnabled,
       temperature: patch.temperature,
       maxTokens: patch.maxTokens,
       dailyLimitUsd: patch.dailyLimitUsd,

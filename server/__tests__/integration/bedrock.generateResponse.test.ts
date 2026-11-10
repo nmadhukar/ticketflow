@@ -69,8 +69,8 @@ describe("bedrockIntegration.generateResponse", () => {
     expect(out.confidence).toBe(0.91);
     expect(out.suggestedArticles).toEqual([9]);
     expect(aiModelMock.totalCalls()).toBe(1);
-    expect(aiModelMock.seen()).toContain("- Clear a jam: Open tray two");
-    expect(aiModelMock.seen()).toContain("- Toner: Swap the toner");
+    expect(aiModelMock.seen()).toContain("[id 7] Clear a jam: Open tray two");
+    expect(aiModelMock.seen()).toContain("[id 9] Toner: Swap the toner");
   });
 
   it("unwraps a markdown-fenced reply", async () => {
@@ -101,5 +101,45 @@ describe("bedrockIntegration.generateResponse", () => {
     aiModelMock.handler = () => new Error("ThrottlingException");
     const out = await generateResponse(ticket, articles);
     expect(out).toMatchObject({ response: FALLBACK, confidence: 0 });
+  });
+
+  it("marks the holding message from the error path as degraded", async () => {
+    aiModelMock.handler = () => new Error("ThrottlingException");
+    const out = await generateResponse(ticket, articles);
+    expect(out.degraded).toBe(true);
+  });
+
+  it("marks a JSON reply with no response field as degraded instead of a real answer", async () => {
+    aiModelMock.handler = () => JSON.stringify({ confidence: 0.9, knowledgeBaseArticles: [7] });
+    const out = await generateResponse(ticket, articles);
+    expect(out).toMatchObject({ response: FALLBACK, degraded: true });
+  });
+
+  it("resolves article citations the model gave as titles, not ids", async () => {
+    aiModelMock.handler = () =>
+      JSON.stringify({ response: "See the guide.", confidence: 0.9, knowledgeBaseArticles: ["Toner"] });
+    const out = await generateResponse(ticket, articles);
+    expect(out.suggestedArticles).toEqual([9]);
+  });
+
+  it("resolves a bare id and mixed citations, dropping what matches nothing", async () => {
+    aiModelMock.handler = () =>
+      JSON.stringify({ response: "See the guides.", confidence: 0.9, knowledgeBaseArticles: [7, "id 9", "not an article"] });
+    const out = await generateResponse(ticket, articles);
+    expect(out.suggestedArticles).toEqual([7, 9]);
+  });
+
+  it("shows the model each article id so it can cite by id", async () => {
+    aiModelMock.handler = () => JSON.stringify({ response: "ok", confidence: 0.9 });
+    await generateResponse(ticket, articles);
+    expect(aiModelMock.seen()).toContain("[id 7] Clear a jam");
+    expect(aiModelMock.seen()).toContain("[id 9] Toner");
+  });
+
+  it("does not mark a real reply as degraded", async () => {
+    aiModelMock.handler = () => JSON.stringify({ response: "Open tray two.", confidence: 0.9 });
+    const out = await generateResponse(ticket, articles);
+    expect(out.response).toBe("Open tray two.");
+    expect(out.degraded).toBeUndefined();
   });
 });

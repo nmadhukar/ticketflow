@@ -1,7 +1,7 @@
 /** AI workflow compatibility helpers. */
 import { Task } from "@shared/schema";
 import { estimatePromptTokensForBudget, recordUsage, assertBudgetAvailable, getDailyUsage, getMonthlyUsage, reconcileGenerationCost, CostEstimate } from "../../services/ai/costMonitoring";
-import { PROMPT_TEMPLATES } from "./prompts";
+import { PROMPT_TEMPLATES, buildTicketRoutingPrompt } from "./prompts";
 import { getAISettings } from "server/admin/aiSettings";
 import { extractJSON } from "./jsonUtils";
 import { AiModelError, describeAIError } from "./aiErrors";
@@ -11,12 +11,42 @@ import { fitDescriptionToBudget } from "./promptBudget";
 import type { AISettings } from "@shared/interfaces";
 
 /** The most output each prompt that carries a ticket description asks for (before settings.maxTokens). */
+/**
+ * Operations whose visible text must be complete JSON: a provider that stopped at the token cap
+ * returned a fragment, and parsing it would silently produce garbage. Free-text calls (the help
+ * chat, the connection test) are deliberately absent: a short answer that reaches the cap is
+ * truncated but still usable, so it must not be reported as a broken key.
+ */
+const STRUCTURED_OUTPUT_OPERATIONS = new Set([
+  "analyzeTicket",
+  "generateResponse",
+  "updateKnowledgeBase",
+  "ticketAnalysis",
+  "autoResponse",
+  "ticketRouting",
+  "knowledge_analyzeResolvedTickets",
+  "knowledge_generateArticle",
+  "knowledge_searchRanking",
+  "knowledge_improveArticle",
+]);
+
+/**
+ * Extra output tokens allowed on the one retry that drops a rejected reasoning field. A model that
+ * refuses the reasoning switch reasons by default, and those hidden tokens are drawn from
+ * max_tokens: a small structured cap (analyzeTicket asks for 500) could be spent thinking before
+ * any visible text. The retry may ask up to this much more, but never past the per-request token
+ * ceiling, so prompt plus retry still fits maxTokensPerRequest. The budget preflight below checks
+ * that ceiling, so the larger retry is covered by the cost limits too.
+ */
+const REASONING_RETRY_HEADROOM_TOKENS = 1000;
+
 const OPERATION_OUTPUT_CAP = {
   analyzeTicket: 500,
   generateResponse: 800,
   updateKnowledgeBase: 600,
   ticketAnalysis: 1000,
   autoResponse: 1500,
+  ticketRouting: 400,
 } as const;
 type DescriptionOperation = keyof typeof OPERATION_OUTPUT_CAP;
 
@@ -66,7 +96,13 @@ async function invokeBedrockModel(
   maxTokens: number = 1000,
   temperature: number = 0.3,
   userId?: string,
-  ticketId?: string
+  ticketId?: string,
+  /**
+   * Passed to the provider when set. The JSON operations pass false: on a reasoning model the
+   * hidden reasoning is drawn from maxTokens, so a tight structured-output cap can be spent
+   * before any visible text is produced. Left undefined for free-text calls (the help chat).
+   */
+  reasoning?: boolean
 ): Promise<{ response: string; costEstimate: CostEstimate; actualTokens: { input: number; output: number } }> {
   const settings = await getAISettings();
   if (!settings.isActive || !settings.openRouterKeyConfigured) throw new AiModelError("not_configured");
@@ -74,10 +110,22 @@ async function invokeBedrockModel(
   const [daily, monthly] = await Promise.all([getDailyUsage(), getMonthlyUsage()]);
   const promptTokens = estimatePromptTokensForBudget(prompt);
   const allowedOutputTokens = Math.min(maxTokens, settings.maxTokensPerRequest - promptTokens);
-  assertBudgetAvailable({ promptTokens, maxOutputTokens: allowedOutputTokens, price, settings, todayUsd: daily.totalCost, monthUsd: monthly.totalCost });
+  // The retry that drops a rejected reasoning field may raise the visible allowance toward this
+  // ceiling, clamped by the per-request cap: prompt plus ceiling still fits maxTokensPerRequest, so
+  // the retry cannot exceed the request limit. Only a call that sends the reasoning field can retry
+  // at all, so only it carries the headroom; a call without one spends at most its own allowance.
+  // The preflight checks this ceiling, not the first attempt's smaller allowance, so a cost limit
+  // the retry could cross still applies.
+  const ceilingOutputTokens = reasoning === undefined
+    ? allowedOutputTokens
+    : Math.min(allowedOutputTokens + REASONING_RETRY_HEADROOM_TOKENS, settings.maxTokensPerRequest - promptTokens);
+  assertBudgetAvailable({ promptTokens, maxOutputTokens: ceilingOutputTokens, price, settings, todayUsd: daily.totalCost, monthUsd: monthly.totalCost });
   const result = await modelClient.generate({
     operation, messages: [{ role: "user", content: prompt }],
     maxOutputTokens: allowedOutputTokens, temperature,
+    maxOutputTokensCeiling: ceilingOutputTokens,
+    ...(reasoning === undefined ? {} : { reasoning }),
+    ...(STRUCTURED_OUTPUT_OPERATIONS.has(operation) ? { requireCompleteOutput: true } : {}),
     context: { userId, ticketId: ticketId ? Number(ticketId) : undefined },
   });
   await recordUsage({
@@ -124,7 +172,8 @@ export async function analyzeTicket(
       cap,
       temperature,
       userId,
-      ticket.id?.toString()
+      ticket.id?.toString(),
+      false
     );
 
     // Check if response is empty
@@ -277,16 +326,32 @@ export async function generateResponse(
   confidence: number;
   suggestedArticles: number[];
   costEstimate?: CostEstimate;
+  /**
+   * True when no real answer was produced (the model call failed, or it returned JSON with no
+   * response field) and `response` is the holding message. Callers must not treat this as a
+   * matched solution: it means "no answer", the same as an empty reply.
+   */
+  degraded?: boolean;
 }> {
   try {
-    // Format knowledge base content
+    // Format knowledge base content. The id is shown so the model can cite an article by
+    // id; a model that cites it by title instead is resolved back to its id below.
+    // A recalled memory is prompt context, not a citable article: it has no id, so it is shown
+    // by title alone rather than as the literal "[id undefined]" the old template produced.
     const knowledgeBase = knowledgeBaseArticles
-      .map((article) => `- ${article.title}: ${article.summary}`)
+      .map((article) => {
+        const id = Number(article.id);
+        const label = Number.isInteger(id) && id > 0 ? `[id ${id}] ` : "";
+        return `- ${label}${article.title}: ${article.summary}`;
+      })
       .join("\n");
 
     const settings = await getAISettings();
+    // Tell the model the character budget the reply will be held to, so it finishes inside it
+    // rather than being cut off mid-sentence by the store step.
+    const maxCharacters = Math.max(100, Math.min(5000, Number(settings.maxResponseLength) || 1000));
     const prompt = promptWithinBudget(settings, "generateResponse", ticket.description, (description) =>
-      PROMPT_TEMPLATES.generateResponse({ ...ticket, description: description ?? null }, knowledgeBase)
+      PROMPT_TEMPLATES.generateResponse({ ...ticket, description: description ?? null }, knowledgeBase, maxCharacters)
     );
     const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.generateResponse);
     const temperature = settings.temperature;
@@ -296,7 +361,8 @@ export async function generateResponse(
       cap,
       temperature,
       userId,
-      ticket.id?.toString()
+      ticket.id?.toString(),
+      false
     );
 
     // Check if response is empty
@@ -348,10 +414,9 @@ export async function generateResponse(
 
     // Extract the response field from the parsed JSON
     // The AI should return a JSON object with a "response" field containing the actual text
-    const responseText =
-      parsedResponse.response ||
-      parsedResponse.autoResponse ||
+    const holdingMessage =
       "I'm unable to generate an automated response at this time. A support agent will assist you shortly.";
+    const responseText = parsedResponse.response || parsedResponse.autoResponse || holdingMessage;
 
     // Extract confidence from parsed response, or calculate based on knowledge base
     const confidence =
@@ -361,18 +426,22 @@ export async function generateResponse(
         ? 0.8
         : 0.5;
 
-    // Extract suggested articles from parsed response, or use knowledge base articles
-    const suggestedArticles =
-      Array.isArray(parsedResponse.knowledgeBaseArticles) &&
-      parsedResponse.knowledgeBaseArticles.length > 0
-        ? parsedResponse.knowledgeBaseArticles
-        : knowledgeBaseArticles.map((a) => a.id);
+    // Cite back the articles the model referenced, as ids. Models often return the article
+    // titles (or `"id 7"`) rather than bare numbers, so anything that is not already a number
+    // is matched against the articles the model was shown; unresolvable entries are dropped
+    // and, when nothing resolves, the articles we passed are used instead.
+    const suggestedArticles = resolveCitedArticles(
+      parsedResponse.knowledgeBaseArticles,
+      knowledgeBaseArticles
+    );
 
     return {
       response: responseText, // Clean response text only, no markdown or code
       confidence,
       suggestedArticles,
       costEstimate: result.costEstimate,
+      // JSON without a response field is not an answer: mark it so the caller routes the ticket.
+      ...(responseText === holdingMessage ? { degraded: true } : {}),
     };
   } catch (error) {
     console.error("Error generating response:", describeAIError(error));
@@ -387,6 +456,7 @@ export async function generateResponse(
         "I'm unable to generate an automated response at this time. A support agent will assist you shortly.",
       confidence: 0,
       suggestedArticles: [],
+      degraded: true,
     };
   }
 }
@@ -420,7 +490,8 @@ export async function updateKnowledgeBase(
       cap,
       temperature,
       userId,
-      ticket.id?.toString()
+      ticket.id?.toString(),
+      false
     );
 
     // Parse JSON response (extract from markdown if needed)
@@ -453,62 +524,55 @@ export async function updateKnowledgeBase(
 }
 
 /**
- * Calculate confidence score for AI response
+ * The confidence of an AI answer, as the MODEL reported it.
+ *
+ * This used to be a score built from the ticket itself (0.5 base + category + complexity + how
+ * many articles matched), which measured the TICKET, not the answer: a simple support ticket
+ * scored 0.7 with nothing to answer from at all, and a 90% answer landed on 0.8999999999999999.
+ * The model already states how sure it is of the reply it just wrote (generateResponse), so that
+ * is the score now, and it is the only one the status bands and the threshold see.
+ *
+ * A real match is still required, and it is a hard gate rather than a bonus: two booked
+ * probabilities multiplied together is not a confidence anyone can read. A score without a match
+ * is no answer, so it is forced to 0, which lands the ticket in the open band.
+ *
+ * `ticketComplexity` and the article counts are kept for the reasoning line and for callers that
+ * log them; they no longer move the number.
  */
 export async function calculateConfidence(
   ticket: Task,
   knowledgeBaseMatches: number,
-  ticketComplexity: number
+  ticketComplexity: number,
+  resolvedTicketMatches = 0,
+  /** What the model said when it wrote the reply, 0-1. Absent means "no opinion": score 0. */
+  modelConfidence?: number
 ): Promise<{
   confidenceScore: number;
   shouldAutoRespond: boolean;
   reasoning: string;
 }> {
-  // Base confidence calculation
-  let confidence = 0.5;
+  const hasRealMatch = knowledgeBaseMatches > 0 || resolvedTicketMatches > 0;
+  const reported = typeof modelConfidence === "number" && Number.isFinite(modelConfidence)
+    ? Math.max(0, Math.min(1, modelConfidence))
+    : 0;
+  const confidence = hasRealMatch ? reported : 0;
 
-  // Adjust based on knowledge base matches
-  if (knowledgeBaseMatches > 5) {
-    confidence += 0.3;
-  } else if (knowledgeBaseMatches > 2) {
-    confidence += 0.2;
-  } else if (knowledgeBaseMatches > 0) {
-    confidence += 0.1;
-  }
-
-  // Adjust based on complexity
-  if (ticketComplexity < 30) {
-    confidence += 0.1;
-  } else if (ticketComplexity > 70) {
-    confidence -= 0.2;
-  }
-
-  // Adjust based on category
-  const highConfidenceCategories = ["support", "feature"];
-  const lowConfidenceCategories = ["bug", "incident"];
-
-  if (highConfidenceCategories.includes(ticket.category || "")) {
-    confidence += 0.1;
-  } else if (lowConfidenceCategories.includes(ticket.category || "")) {
-    confidence -= 0.1;
-  }
-
-  // Ensure confidence is between 0 and 1
-  confidence = Math.max(0, Math.min(1, confidence));
-
-  // Auto-respond only when the admin has it on and the score reaches the configured threshold
-  // (read now, so a settings change applies to the next ticket).
+  // Auto-respond only when the admin has it on, at least one real match was found, and the model's
+  // own confidence for this answer reaches the configured threshold (read now, so a settings
+  // change applies to the next ticket).
   const settings = await getAISettings();
   const threshold = Math.max(0, Math.min(1, Number(settings.confidenceThreshold)));
-  const shouldAutoRespond = settings.autoResponseEnabled && confidence >= threshold;
+  const shouldAutoRespond = settings.autoResponseEnabled && hasRealMatch && confidence >= threshold;
 
   // Generate reasoning
-  let reasoning = `Confidence: ${(confidence * 100).toFixed(1)}%. `;
-  reasoning += `Based on ${knowledgeBaseMatches} knowledge base matches, `;
+  let reasoning = `Confidence: ${(confidence * 100).toFixed(1)}% (model-reported). `;
+  reasoning += `Based on ${knowledgeBaseMatches} knowledge base matches and ${resolvedTicketMatches} similar resolved tickets, `;
   reasoning += `complexity score of ${ticketComplexity}, `;
   reasoning += `and category '${ticket.category}'.`;
 
-  if (shouldAutoRespond) {
+  if (!hasRealMatch) {
+    reasoning += " No matching solution found, recommending human review.";
+  } else if (shouldAutoRespond) {
     reasoning += " Recommending automated response.";
   } else {
     reasoning += " Recommending human review.";
@@ -542,7 +606,9 @@ export async function testBedrockConnection(): Promise<{
       "testConnection",
       50, // Very small response for testing
       undefined,
-      "system"
+      "system",
+      undefined,
+      false
     );
 
     return {
@@ -633,14 +699,14 @@ export async function runTicketAnalysisPrompt(prompt: string) {
   const settings = await getAISettings();
   const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.ticketAnalysis);
   const temperature = settings.temperature;
-  return invokeBedrockModel(prompt, "ticketAnalysis", cap, temperature);
+  return invokeBedrockModel(prompt, "ticketAnalysis", cap, temperature, undefined, undefined, false);
 }
 
 export async function runAutoResponseForTicketPrompt(prompt: string) {
   const settings = await getAISettings();
   const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.autoResponse);
   const temperature = settings.temperature;
-  return invokeBedrockModel(prompt, "autoResponse", cap, temperature);
+  return invokeBedrockModel(prompt, "autoResponse", cap, temperature, undefined, undefined, false);
 }
 
 export async function runKnowledgePatternPrompt(prompt: string) {
@@ -651,7 +717,10 @@ export async function runKnowledgePatternPrompt(prompt: string) {
     prompt,
     "knowledge_analyzeResolvedTickets",
     cap,
-    temperature
+    temperature,
+    undefined,
+    undefined,
+    false
   );
 }
 
@@ -663,7 +732,10 @@ export async function runKnowledgeArticleGenerationPrompt(prompt: string) {
     prompt,
     "knowledge_generateArticle",
     cap,
-    temperature
+    temperature,
+    undefined,
+    undefined,
+    false
   );
 }
 
@@ -675,7 +747,10 @@ export async function runKnowledgePatternAnalysisPrompt(prompt: string) {
     prompt,
     "knowledge_analyzeResolvedTickets",
     cap,
-    temperature
+    temperature,
+    undefined,
+    undefined,
+    false
   );
 }
 
@@ -687,7 +762,10 @@ export async function runKnowledgeSearchPrompt(prompt: string) {
     prompt,
     "knowledge_searchRanking",
     cap,
-    temperature
+    temperature,
+    undefined,
+    undefined,
+    false
   );
 }
 
@@ -699,7 +777,10 @@ export async function runKnowledgeImproveArticlePrompt(prompt: string) {
     prompt,
     "knowledge_improveArticle",
     cap,
-    temperature
+    temperature,
+    undefined,
+    undefined,
+    false
   );
 }
 
@@ -715,6 +796,91 @@ export async function runChatPrompt(
   return invokeBedrockModel(prompt, "chat", cap, temperature, userId);
 }
 
+/**
+ * 0031: classify a ticket that found no matching solution onto one of the existing teams.
+ * The prompt is budget-fit around the description (fitDescriptionToBudget), then the model's
+ * team id is returned for the caller to re-validate against the live team list before assigning.
+ */
+export async function classifyTicketForRouting(
+  ticket: Pick<Task, "title" | "description" | "category" | "priority" | "id">,
+  departments: Array<{ id: number; name: string }>,
+  teams: Array<{ id: number; name: string; departmentId: number | null }>,
+  userId?: string
+): Promise<{ teamId: number | null; departmentId: number | null; confidence: number; reason: string }> {
+  const settings = await getAISettings();
+  const prompt = promptWithinBudget(settings, "ticketRouting", ticket.description, (description) =>
+    buildTicketRoutingPrompt({
+      title: ticket.title,
+      description: description ?? null,
+      category: ticket.category,
+      priority: ticket.priority,
+      departments,
+      teams,
+    })
+  );
+  const cap = Math.min(settings.maxTokens, OPERATION_OUTPUT_CAP.ticketRouting);
+  const result = await invokeBedrockModel(
+    prompt,
+    "ticketRouting",
+    cap,
+    // Routing is a classification, not creative writing: ask for the most deterministic answer.
+    0,
+    userId,
+    ticket.id?.toString(),
+    false
+  );
+
+  const cleaned = extractJSON(result.response) || result.response;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new Error("The routing response was not valid JSON");
+  }
+
+  const rawTeamId = Number(parsed.teamId);
+  const teamId = Number.isInteger(rawTeamId) && rawTeamId > 0 ? rawTeamId : null;
+  const rawDepartmentId = Number(parsed.departmentId);
+  const departmentId = Number.isInteger(rawDepartmentId) && rawDepartmentId > 0 ? rawDepartmentId : null;
+  const rawConfidence = Number(parsed.confidence);
+  const confidence = Number.isFinite(rawConfidence) ? Math.max(0, Math.min(1, rawConfidence)) : 0;
+  const reason = typeof parsed.reason === "string" ? parsed.reason.slice(0, 500) : "";
+
+  return { teamId, departmentId, confidence, reason };
+}
+
+/**
+ * The articles the model cited, as ids. A model asked for `knowledgeBaseArticles` ids may still
+ * answer with the titles it was shown (or `"id 7"`), and a single non-numeric entry used to fail the
+ * caller's schema and discard the whole reply. Each entry is accepted when it is already an id of an
+ * article we passed, and otherwise matched by title (or a leading "id N"). Entries that match
+ * nothing are dropped; when none resolve, the articles we passed stand in.
+ */
+function resolveCitedArticles(cited: unknown, articles: any[]): number[] {
+  // Only articles with a real id can be cited. A recalled Hindsight memory is passed in as prompt
+  // context and has no id: Number(undefined) is NaN, which failed the caller's
+  // "positive integer" schema and threw the whole analysis away, so enabling memory silently
+  // disabled auto-replies. Such entries are simply not citable.
+  const known = articles
+    .map((article) => ({ id: Number(article.id), title: String(article.title ?? "") }))
+    .filter((article) => Number.isInteger(article.id) && article.id > 0);
+  if (!Array.isArray(cited) || cited.length === 0) return known.map((article) => article.id);
+
+  const resolved: number[] = [];
+  for (const entry of cited) {
+    const direct = typeof entry === "number" ? entry : Number(String(entry).replace(/^\s*id\s*/i, "").trim());
+    if (Number.isInteger(direct) && known.some((article) => article.id === direct)) {
+      if (!resolved.includes(direct)) resolved.push(direct);
+      continue;
+    }
+    const needle = String(entry).trim().toLowerCase();
+    if (!needle) continue;
+    const byTitle = known.find((article) => article.title.toLowerCase() === needle)
+      ?? known.find((article) => needle.includes(article.title.toLowerCase()) || article.title.toLowerCase().includes(needle));
+    if (byTitle && !resolved.includes(byTitle.id)) resolved.push(byTitle.id);
+  }
+  return resolved.length > 0 ? resolved : known.map((article) => article.id);
+}
 // Export initialization function
 export const bedrockIntegration = {
   getBedrockClient,
@@ -730,6 +896,7 @@ export const bedrockIntegration = {
   exportUsageData,
   runTicketAnalysisPrompt,
   runAutoResponseForTicketPrompt,
+  classifyTicketForRouting,
   runKnowledgePatternPrompt,
   runKnowledgeArticleGenerationPrompt,
   runKnowledgePatternAnalysisPrompt,

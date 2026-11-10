@@ -107,6 +107,7 @@ app.use(requestLogger(log));
     const { closeAuth } = await import("./services/auth");
     const { isAssistantEnabled } = await import("./assistant/config");
     const { startInternalServer } = await import("./assistant/internalServer");
+    const { disposeCopilotKit } = await import("./copilot/runtime");
     // The assistant's internal listener (nginx never proxies it); null unless ASSISTANT_ENABLED=true.
     // `shutdown` exists before the listener starts, so its listen error (a taken port) always has
     // the orderly shutdown to go to.
@@ -119,6 +120,8 @@ app.use(requestLogger(log));
         : undefined,
       closeAuth,
       closePool: () => pool.end(),
+      // Releases the copilot's MCP connection when it was ever built (a no-op otherwise).
+      closeCopilot: disposeCopilotKit,
       exit: (code) => process.exit(code),
       log: (line) => console.log(line),
     });

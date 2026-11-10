@@ -8,6 +8,10 @@ import { storage } from "../../storage";
 const migrationPath = path.resolve(__dirname, "../../../migrations/0023_ai_settings.sql");
 const root = path.resolve(__dirname, "../../..");
 const migrationSql = () => readFileSync(migrationPath, "utf8");
+// 0031 adds ai_settings.auto_routing_enabled. A real deploy applies every hand-written file
+// before push, so this pre-push simulation applies it beside 0023.
+const routingMigrationPath = path.resolve(__dirname, "../../../migrations/0031_ai_routing.sql");
+const routingMigrationSql = () => readFileSync(routingMigrationPath, "utf8");
 
 async function withStorageFixture(run: (legacyId: number, userId: string) => Promise<void>) {
   await pool.query(migrationSql());
@@ -376,6 +380,7 @@ describe("migration 0023 (provider-neutral AI settings)", () => {
       await scratch.query("DROP TABLE ai_settings");
       await scratch.query("ALTER TABLE ai_usage DROP COLUMN requested_model_id, DROP COLUMN generation_id CASCADE, DROP COLUMN verified_cost_usd, DROP COLUMN billing_status CASCADE");
       await scratch.query(migrationSql());
+      await scratch.query(routingMigrationSql());
       const result = spawnSync("npx", ["drizzle-kit", "push", "--verbose", "--force"], { cwd: root, env, shell: true, encoding: "utf8", timeout: 120000 });
       const output = `${result.stdout}${result.stderr}`;
       expect(result.status).toBe(0);

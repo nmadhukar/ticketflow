@@ -2,7 +2,8 @@ import type { Task } from "@shared/schema";
 import { storage } from "../../storage";
 import { notifyTicket, ticketRecipients } from "../../realtime/ws";
 import { notifyTicketWebhooks } from "../teamsNotifications";
-import { logRouteError } from "../../http/errors";
+import { logRouteError, describeError } from "../../http/errors";
+import { isHindsightEnabled } from "../ai/hindsight";
 
 /**
  * Everything that follows a ticket write besides the write itself: realtime
@@ -46,6 +47,18 @@ export async function afterTicketUpdated(args: {
       console.log(`Knowledge base learning triggered for resolved ticket ${updatedTask.ticketNumber}`);
     } catch (error) {
       logRouteError("Error in knowledge base learning", error);
+    }
+
+    // Hindsight memory: a resolved ticket is learned so a future ticket can recall it.
+    // Imported only when the feature is on, so with it off the resolve path is unchanged; the
+    // call is itself best-effort and never throws.
+    if (isHindsightEnabled()) {
+      try {
+        const { retainResolvedTicketMemory } = await import("../ai/hindsight");
+        await retainResolvedTicketMemory(updatedTask);
+      } catch (error) {
+        console.error("Error storing resolved ticket in Hindsight memory:", describeError(error));
+      }
     }
   }
 

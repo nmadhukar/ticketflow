@@ -47,6 +47,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Layout } from "@/components/layout";
 import { AiChatBot } from "@/components/AiChatBot";
 import { AssistantShell } from "@/components/assistant/AssistantShell";
+import { CopilotAssistant } from "@/components/CopilotAssistant";
 import { ProtectedRoute } from "@/components/protected-route";
 import { ForcedPasswordChange } from "@/components/forced-password-change";
 import NotFound from "@/pages/not-found";
@@ -178,10 +179,14 @@ function Router() {
           </WebSocketProvider>
         )}
       </Switch>
-      {/* Show AI Chat Bot for authenticated users */}
+      {/* Show the assistant launcher for authenticated users.
+          When the copilot is enabled, CopilotAssistant (below) is the only assistant button:
+          it publishes that state on its config query, and the help chatbot yields the corner
+          to it instead of stacking a second "Ask AI" button underneath. */}
       {!isLoading && isAuthenticated && <AiChatBot />}
       {/* The in-app assistant: renders nothing unless the server says this user has one */}
       {!isLoading && isAuthenticated && <AssistantShell />}
+      <CopilotAssistant />
     </>
   );
 }

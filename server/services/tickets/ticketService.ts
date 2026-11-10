@@ -7,6 +7,7 @@ import { storage } from "../../storage";
 import { assertTaskAccess, assignedToUserSql, ticketVisibilityWhere } from "../../permissions/ticketAccess";
 import { canDeleteTicket, canUpdateTicket, normalizeAssigneeUpdate } from "../../permissions/tickets";
 import { containsPattern } from "../../utils/like";
+import { looksLikeTicketNumber } from "../../utils/ticketRef";
 import { projectUserForViewer } from "../../utils/publicUser";
 import { assertAgentMayAssign, assertAssigneesExist } from "./assignees";
 import { commentBodySchema } from "./commentSchema";
@@ -86,6 +87,7 @@ function badRequest(message: string): HttpError {
  * Mutates and returns `fields`.
  */
 async function applyCustomerRouting(fields: Record<string, unknown>): Promise<Record<string, unknown>> {
+
   const { assigneeType, assigneeId } = fields;
   const teamId = (fields.teamId as number | null | undefined) ?? undefined;
   const departmentId = (fields.departmentId as number | null | undefined) ?? undefined;
@@ -173,11 +175,76 @@ export async function createTicket(
   opts: { runHooks?: boolean; actionBaseUrl?: string | null; prepared?: Record<string, unknown> } = {}
 ): Promise<TicketDTO> {
   const fields = opts.prepared ?? (await prepareTicketCreate(user, input));
-  const task = await guard(() => createTicketRecord(fields, user.id));
+  // R3 (copilot): a customer's suggested owner is a SUGGESTION, not a decision. Routing must
+  // still be able to confirm or correct it, so when a customer named a team the ticket starts in
+  // the triage queue anyway (createTicketRecord kept the choice as suggestedTeamId). Otherwise
+  // hasDeliberateAssignment would see a team and skip routing, and the "no match -> assign to the
+  // right team" step would never run for a copilot ticket.
+  const isSuggestion = user.role === "customer" && suggestedTeamOf(fields);
+
+  const createFields = isSuggestion ? await toTriageFields(fields) : fields;
+  const task = await guard(() => createTicketRecord(createFields, user.id));
   if (opts.runHooks !== false) {
     await runTicketCreatedHooks(task, user.id, opts.actionBaseUrl ?? null);
   }
   return toTicketDTO(task);
+}
+
+/**
+ * True when the caller named a team as a SUGGESTION rather than choosing an assignment.
+ *
+ * The two are different requests and R36 keeps them apart: a customer who explicitly picks
+ * `assigneeType: "team"` owns that decision and it is respected; the copilot's routeId only
+ * says "this team looks right", which routing may still correct. Only the explicit
+ * `suggestedTeamId` marker counts, so an ordinary customer choice is never re-routed.
+ */
+function suggestedTeamOf(fields: Record<string, unknown>): boolean {
+  const suggested = fields.suggestedTeamId;
+  return typeof suggested === "number" && Number.isInteger(suggested) && suggested > 0;
+}
+
+/**
+ * A customer's create-time fields with the suggested owner moved out of the assignment and into
+ * the triage queue, so routing can still run. `suggestedTeamId` is kept: createTicketRecord
+ * reads it onto the row, which is what tells routing the customer's preference.
+ *
+ * The triage queue is set explicitly rather than left empty: a ticket with no user and no team
+ * assignee is visible only to admins (R36), and a copilot ticket must be visible to its own
+ * customer. With no triage team configured, the suggestion is kept as the assignment instead.
+ */
+async function toTriageFields(fields: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const triage = await defaultTriageAssignment();
+  if (!triage) return fields;
+  return {
+    ...fields,
+    assigneeType: "team" as const,
+    assigneeTeamId: triage.assigneeTeamId,
+    assigneeId: null,
+    suggestedTeamId: fields.suggestedTeamId ?? fields.teamId,
+  };
+}
+
+/**
+ * Resolve the ticket reference a caller sent: a database id, or the number the UI
+ * shows (TKT-2026-0610). Returns the numeric id, so every rule below
+ * (assertId, assertTaskAccess) answers it exactly as before. A value shaped like a
+ * ticket number is looked up; an unknown number is NOT_FOUND. Any other value is
+ * passed through untouched and refused by assertId with a coded VALIDATION, which
+ * keeps "abc" and the like refused the same way as today.
+ */
+export async function resolveTicketId(ref: unknown): Promise<number> {
+  if (looksLikeTicketNumber(ref)) {
+    const task = await storage.getTaskByNumber(ref);
+    if (!task) throw new TicketError("NOT_FOUND", "Ticket not found");
+    return task.id;
+  }
+  // R47: a model often sends the id as a string. A string of plain digits (no sign,
+  // space, leading zero or decimal point) up to int4 is that number; anything else is
+  // left as-is for assertId, which answers the coded VALIDATION.
+  if (typeof ref === "string" && /^[1-9][0-9]{0,9}$/.test(ref) && Number(ref) <= MAX_TICKET_ID) {
+    return Number(ref);
+  }
+  return ref as number;
 }
 
 export async function getTicket(

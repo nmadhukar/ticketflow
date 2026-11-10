@@ -69,6 +69,12 @@ export const createTicketSchema = z
     assigneeTeamId: numericId,
     departmentId: numericId,
     teamId: numericId,
+    /**
+     * The team is a SUGGESTION (the copilot's routeId), not the customer's own choice of owner.
+     * Kept on the ticket as suggestedTeamId and routed by the AI agent, rather than respected as
+     * an assignment. Server-owned: only the server's own create path sets it.
+     */
+    suggestedTeamId: numericId,
     dueDate,
     tags,
     estimatedHours: hours,

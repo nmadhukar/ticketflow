@@ -70,6 +70,7 @@ describe("POST /api/mcp authentication", () => {
       "list_departments",
       "list_guideline_categories",
       "list_notifications",
+      "list_routing_options",
       "list_teams",
       "list_tickets",
       "list_users",
