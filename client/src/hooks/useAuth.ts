@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, getQueryFn } from "@/lib/queryClient";
 
 /**
  * Ends the server session and forgets what was cached for the signed-in user. Throws when
@@ -27,6 +27,11 @@ export function useAuth() {
 
   const { data: user, isLoading } = useQuery({
     queryKey: ["/api/auth/user"],
+    // 401 here is the normal "not signed in" answer, not a failure: the client default throws on
+    // it (queryClient.ts), which left the query with no data and no error shown while the router
+    // sat on "Loading your workspace…". Returning null makes isLoading false and sends the
+    // visitor to the login page.
+    queryFn: getQueryFn({ on401: "returnNull" }),
     retry: false,
   });
 

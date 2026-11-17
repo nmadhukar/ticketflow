@@ -13,6 +13,10 @@ COPY package.json package-lock.json ./
 RUN npm ci --include=dev --no-audit --no-fund
 COPY tsconfig.json ./
 COPY src ./src
+# The workspace SKILL.md files: src/mastra/workspace.ts opens `skills/` at the package root, so
+# without this copy the folder is absent in the image and Studio's Workspaces page lists no
+# skills (it worked on the host, where the file is on disk).
+COPY skills ./skills
 
 FROM deps AS build
 # --no-install: use the lockfile's CLI or fail, never fetch the newest one.
@@ -29,6 +33,8 @@ CMD ["npm", "run", "dev"]
 FROM node:24-bookworm-slim AS production
 WORKDIR /app
 COPY --from=build --chown=node:node /app/.mastra/output ./
+# Same reason as the dev stage: the built server opens `skills/` at the package root at runtime.
+COPY --from=build --chown=node:node /app/skills ./skills
 COPY --chown=node:node runtime/start.mjs ./start.mjs
 # Fails the build when the bundled server imports a name the installed @mastra packages lack,
 # so a bad image never replaces a running one. Run here, not in the build stage, where Node

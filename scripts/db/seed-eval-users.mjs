@@ -54,7 +54,9 @@ export const TICKETS = [
 
 const ALLOWED_DB = /(eval|test)/i;
 /** A database on this machine is a development one; a remote host is not. */
-const LOCAL_HOST = /^(localhost|127\.0\.0\.1|::1)$/i;
+// `postgres` is the docker-compose service name: the database is on this machine, reached over
+// the compose network, so it is as local as 127.0.0.1.
+const LOCAL_HOST = /^(localhost|127\.0\.0\.1|::1|postgres)$/i;
 
 export function readOptions(env = process.env) {
   const problems = [];

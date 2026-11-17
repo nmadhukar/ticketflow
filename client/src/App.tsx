@@ -187,6 +187,7 @@ function Router() {
       {/* The in-app assistant: renders nothing unless the server says this user has one */}
       {!isLoading && isAuthenticated && <AssistantShell />}
       <CopilotAssistant />
+      {!isLoading && isAuthenticated && <CopilotAssistant />}
     </>
   );
 }

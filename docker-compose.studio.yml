@@ -1,0 +1,76 @@
+# Mastra Studio (local development only).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.studio.yml up -d --build agents-studio
+#
+# Opens http://localhost:4111. Log in with the value of MASTRA_STUDIO_TOKEN from .env.
+# This file is additive: it does not change docker-compose.yml or any app/agents code.
+#
+# Two settings matter and are the usual reasons "localhost:4111 does not open":
+#   MASTRA_HOST=0.0.0.0  - the Dockerfile's dev stage only sets it on the production stage, so
+#                          without it `mastra dev` binds 127.0.0.1 *inside* the container and
+#                          nothing is reachable from Windows.
+#   MASTRA_DEV=true      - build once, then keep the dev server; without it the CLI stays a
+#                          file watcher and the API never finishes starting.
+#
+# ONE OR THE OTHER: run the app in Docker (this file) *or* on the host (`npm run dev`), never both.
+# The ports below take 5000/5100 on Windows, so a host `npm run dev` then fails with EADDRINUSE on
+# the assistant's internal listener. Docker app is on http://localhost (nginx); the host app is on
+# http://localhost:5000.
+services:
+  # Studio, when it runs in Docker, reaches the app over the `assistant` network at app:5100.
+  # These mappings exist only so a Studio on the *host* can reach the same endpoints. Remove them
+  # (or stop this app) before starting the app with `npm run dev`.
+  app:
+    ports:
+      - "5000:5000"
+      - "5100:5100"
+    environment:
+      # Stays production: this container runs the built bundle, which is what the Dockerfile
+      # produces. NODE_ENV=development would start Vite instead of serving dist/public, and would
+      # also drop the production secret/APP_BASE_URL checks. The eval-run route Studio needs
+      # (server/assistant/evalRuns.ts) is unlocked by its own switch, MASTRA_STUDIO_RUNS, not by
+      # NODE_ENV.
+      NODE_ENV: production
+      APP_BASE_URL: http://localhost:5000
+      RATE_LIMITING_ENABLED: "false"
+      # Local Studio only: unlocks POST /api/assistant/eval/run so Studio's chat can open a run
+      # as the seeded eval user. Off unless exactly "true", and refused when NODE_ENV=production
+      # outside this file (the same guard MASTRA_STUDIO_NO_AUTH uses).
+      MASTRA_STUDIO_RUNS: "true"
+      EVAL_RUNS_ENABLED: "true"
+
+  agents-studio:
+    build:
+      context: ./agents
+      target: dev
+    ports:
+      - "4111:4111"
+    environment:
+      NODE_ENV: development
+      ASSISTANT_ENABLED: "false"
+      ASSISTANT_AGENT_SECRET: ${ASSISTANT_AGENT_SECRET}
+      ASSISTANT_MCP_URL: http://app:5100/internal/mcp
+      ASSISTANT_MODEL_PROVIDER: ${ASSISTANT_MODEL_PROVIDER:-openai}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-gpt-5-mini}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # The assistant DB role's URL (assistant's own role + `mastra` schema), same as the app's
+      # MASTRA_DATABASE_URL. Never the app's DATABASE_URL.
+      # Inside the network the port is 5432 and the host is the service name; .env carries
+      # localhost:5433 for host runs, so it is overridden here rather than duplicated.
+      MASTRA_DATABASE_URL: postgres://ticketflow_mastra:EvalMastraRole2026xKq7Wm3Zp9Tb4Nv@postgres:5432/ticketflow
+      MASTRA_STUDIO_TOKEN: ${MASTRA_STUDIO_TOKEN}
+      # Local Studio only: no auth, so the Studio UI can read agents, tools, datasets and traces.
+      # Refused when NODE_ENV=production, and this port is never published by docker-compose.yml.
+      MASTRA_STUDIO_NO_AUTH: "true"
+      # Where the Studio run is opened (the app's dev-only eval route).
+      STUDIO_APP_URL: http://app:5000
+      MASTRA_HOST: 0.0.0.0
+      MASTRA_DEV: "true"
+      MASTRA_TELEMETRY_DISABLED: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - assistant
+      - agents-egress

@@ -2,18 +2,35 @@
 // with its own reason. Imported by name, and read below, so the production bundle cannot drop it.
 import { startupConfigChecked } from './startup-check.ts';
 import { Mastra } from '@mastra/core';
+import { ConsoleLogger } from '@mastra/core/logger';
 import { supportAssistant } from './agents/support-assistant.ts';
 import { ticketAssistant } from './agents/ticket-assistant.ts';
 import { startRetentionSweep } from './retention.ts';
 import { createServerConfig } from './server-config.ts';
 import { retentionStore, storage } from './storage.ts';
 import { staffHistoryEnabled } from './config.ts';
+import { scorers } from './evaluation/scorers.ts';
+import { workspace } from './workspace.ts';
+import { helpdeskWorkflow } from './workflows/helpdesk-workflow.ts';
+import { observability } from './observability.ts';
 
 if (startupConfigChecked !== true) throw new Error('[ticketflow-agents] Agents configuration was not checked.');
 
 // Registered under their ids, which are also what the auth route allowlist and the app use.
 export const mastra = new Mastra({
   agents: { 'support-assistant': supportAssistant, 'ticket-assistant': ticketAssistant },
+  // Studio's Scorers and Experiments pages. Deterministic rules, no model call to grade.
+  scorers,
+  // Studio's Workflows page: the helpdesk process, step by step.
+  workflows: { 'helpdesk-resolution': helpdeskWorkflow },
+  // Studio's Workspaces page: the skills and reference notes the agent works from.
+  workspace,
+  // Studio's Traces / Logs / Metrics pages. Stored in the same schema as datasets.
+  observability,
+  // ConsoleLogger, not PinoLogger: it is the one that attaches to Observability, so log lines
+  // are stored next to the trace and appear on Studio's Logs page. PinoLogger writes to stdout
+  // only, which leaves that page empty.
+  logger: new ConsoleLogger({ name: 'ticketflow-agents', level: 'info' }),
   // PostgreSQL (the `mastra` schema) only while staff history is on; otherwise Mastra keeps its
   // working state in memory and nothing is saved.
   ...(storage ? { storage } : {}),

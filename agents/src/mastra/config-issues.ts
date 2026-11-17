@@ -47,6 +47,11 @@ function secretIssues(env: NodeJS.ProcessEnv): AgentsConfigIssue[] {
     if (studio.length < MIN_SECRET_LENGTH) add('MASTRA_STUDIO_TOKEN', `MASTRA_STUDIO_TOKEN must be at least ${MIN_SECRET_LENGTH} characters.`);
     else if (studio === current || studio === previous) add('MASTRA_STUDIO_TOKEN', 'MASTRA_STUDIO_TOKEN must differ from ASSISTANT_AGENT_SECRET.');
   }
+  // Local Studio only: no auth at all. Refused in production, where the app's tokens are the
+  // only way in.
+  if (env.MASTRA_STUDIO_NO_AUTH === 'true' && env.NODE_ENV === 'production') {
+    add('MASTRA_STUDIO_NO_AUTH', 'MASTRA_STUDIO_NO_AUTH must not be set in production; Studio is for local development only.');
+  }
   return issues;
 }
 

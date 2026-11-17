@@ -48,7 +48,9 @@ services:
       PORT: ${PORT:-5000}
       # Use local postgres if DATABASE_URL not provided, otherwise use external
       # Default to local postgres service connection string
-      DATABASE_URL: ${DATABASE_URL:-postgresql://ticketflow_user:ticketflow_password@postgres:5432/ticketflow}
+      # Always the compose service name and port: .env carries localhost:5433 for host runs, which
+      # the container cannot use. Docker never needs the published port.
+      DATABASE_URL: postgresql://ticketflow_user:ticketflow_password@postgres:5432/ticketflow
       DB_DRIVER: ${DB_DRIVER:-pg}
       # PostgreSQL connection details (used if DATABASE_URL not set)
       POSTGRES_USER: ${POSTGRES_USER:-ticketflow_user}
@@ -158,6 +160,9 @@ services:
       # Saved staff conversations; also set on the agents service (same value). Provision the
       # database role first: docs/deployment/ASSISTANT_DB.md.
       ASSISTANT_STAFF_HISTORY: ${ASSISTANT_STAFF_HISTORY:-false}
+      # Dev-only: opens a run for the eval harness and for local Studio chat
+      # (server/assistant/evalRuns.ts). The app refuses it in production.
+      EVAL_RUNS_ENABLED: ${EVAL_RUNS_ENABLED:-false}
     restart: unless-stopped
     networks:
       - ticketflow-network
@@ -187,7 +192,11 @@ services:
       # Saved staff conversations (off unless "true", the app's value): the assistant role's URL,
       # never the app's DATABASE_URL. See docs/deployment/ASSISTANT_DB.md.
       ASSISTANT_STAFF_HISTORY: ${ASSISTANT_STAFF_HISTORY:-false}
-      MASTRA_DATABASE_URL: ${MASTRA_DATABASE_URL:-}
+      # Always the compose service name and port, like the app's DATABASE_URL above: .env carries
+      # localhost:5433 for host runs (assistant/.env), and a container cannot reach the host on
+      # `localhost` (it is the container itself) - the sidecar then crashed on boot with
+      # ECONNREFUSED 127.0.0.1:5433 and restart-looped. Docker never needs the published port.
+      MASTRA_DATABASE_URL: postgres://ticketflow_mastra:EvalMastraRole2026xKq7Wm3Zp9Tb4Nv@postgres:5432/ticketflow
       ASSISTANT_HISTORY_RETENTION_DAYS: ${ASSISTANT_HISTORY_RETENTION_DAYS:-}
     depends_on:
       postgres:

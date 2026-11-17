@@ -1,4 +1,5 @@
 import { Agent } from '@mastra/core/agent';
+import { TokenLimiter } from '@mastra/core/processors';
 import { modelRouterId } from '../config.ts';
 import { loadRunTools } from '../mcp.ts';
 import { FORMAT_RULES, SAFETY_RULES } from './rules.ts';
@@ -41,4 +42,7 @@ export const supportAssistant = new Agent({
   tools: loadRunTools,
   instructions: SUPPORT_INSTRUCTIONS,
   defaultOptions: { maxSteps: 6 },
+  // Studio's Processors page lists these (ticket-assistant.ts explains why).
+  inputProcessors: [new TokenLimiter(30000)],
+  outputProcessors: [new TokenLimiter(8000)],
 });

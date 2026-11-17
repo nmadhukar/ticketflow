@@ -10,7 +10,11 @@ export function createServerConfig(env: NodeJS.ProcessEnv = process.env) {
     studioHost: 'localhost',
     studioProtocol: 'http' as const,
     port: 4111,
-    auth: createAssistantAuth(env),
+    // Local Studio only: MASTRA_STUDIO_NO_AUTH=true turns the server's auth off so the Studio UI
+    // can read agents, tools, datasets and traces. It is refused in production (config-issues.ts)
+    // and the port is never published outside the studio compose file, so this cannot reach a
+    // deployed service. Without it, the app's own tokens are the only way in.
+    ...(env.MASTRA_STUDIO_NO_AUTH === 'true' ? {} : { auth: createAssistantAuth(env) }),
     // The app calls this service server to server and Studio is served from its own origin, so
     // no cross-origin browser request is answered. With auth and no cors option Mastra would
     // reflect any Origin with credentials.

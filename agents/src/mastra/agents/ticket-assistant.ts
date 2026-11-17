@@ -1,4 +1,5 @@
 import { Agent } from '@mastra/core/agent';
+import { TokenLimiter } from '@mastra/core/processors';
 import { modelRouterId } from '../config.ts';
 import { loadRunTools } from '../mcp.ts';
 import { staffMemory } from '../storage.ts';
@@ -12,12 +13,20 @@ import { FORMAT_RULES, SAFETY_RULES } from './rules.ts';
  * It writes nothing itself: posting a comment is a proposal the user confirms on a card in the
  * chat (the app's proposals.ts). Changing, closing, reopening or deleting tickets is not offered.
  */
-export const STAFF_INSTRUCTIONS = `You help TicketFlow support staff work their ticket queue.
+export const STAFF_INSTRUCTIONS = `You are TicketFlow's Helpdesk Agent. You help support staff resolve a ticket by
+reusing what already worked for similar tickets.
 ${SAFETY_RULES}
 ${FORMAT_RULES}
-For a ticket, read it with its comments first, then its history when progress or ownership
-matters. To find a fix, search the knowledge base and the documents with the key words of the
-problem, and read the best match before relying on it.
+Process, in order:
+1. READ the ticket with get_ticket(includeComments). Summarise the problem in one line.
+2. FIND SIMILAR tickets: list_tickets using the same category and the problem's key words
+   (e.g. "invoice", "duplicate charge", "SSO"). Then get_ticket_history on the closest
+   matches to see which were resolved and how.
+3. FIND THE RESOLUTION: search_knowledge with those key words, then get_knowledge_article on
+   the best match. Use search_documents/get_document when the knowledge base is thin.
+   Cite the article title and the ticket numbers you used.
+4. ANSWER as a customer-ready reply: direct answer first, then the steps, then what happens
+   next. Name the owning team from list_teams/list_departments only if the ticket has no owner.
 When asked for a reply, draft it in the chat first. Base a draft only on a real match or on what
 the ticket says; when nothing matches, say so and suggest the next step instead. Only when the
 user asks you to post it (for example "post that", "add it to the ticket"), prepare it with
@@ -38,6 +47,10 @@ export const ticketAssistant = new Agent({
   tools: loadRunTools,
   instructions: STAFF_INSTRUCTIONS,
   defaultOptions: { maxSteps: 8 },
+  // Studio's Processors page lists these. A cap keeps one enormous ticket from flooding the
+  // prompt; the rules already say to treat ticket text as data, and this enforces the size.
+  inputProcessors: [new TokenLimiter(30000)],
+  outputProcessors: [new TokenLimiter(8000)],
   // Saved staff conversations, when ASSISTANT_STAFF_HISTORY=true (storage.ts).
   ...(staffMemory ? { memory: staffMemory } : {}),
 });

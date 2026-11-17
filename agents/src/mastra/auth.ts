@@ -42,6 +42,11 @@ export function isTicketFlowUser(user: unknown): user is Extract<AssistantUser, 
   return !!user && typeof user === 'object' && (user as { kind?: unknown }).kind === 'ticketflow';
 }
 
+/** The local Studio user, signed in with MASTRA_STUDIO_TOKEN. Never present in production. */
+export function isStudioUser(user: unknown): user is Extract<AssistantUser, { kind: 'studio' }> {
+  return !!user && typeof user === 'object' && (user as { kind?: unknown }).kind === 'studio';
+}
+
 function rawRequest(request: unknown): Request | undefined {
   if (request instanceof Request) return request;
   const raw = (request as { raw?: unknown } | null)?.raw;
@@ -126,6 +131,22 @@ export class TicketFlowSessionAuth extends MastraAuthProvider<AssistantUser> {
   }
 }
 
+/**
+ * CompositeAuth takes no options, so a composite is subclassed to allow the Studio user.
+ *
+ * Its own authorizeUser delegates to the provider that authenticated the user, and SimpleAuth's
+ * default refuses every route: with a correct MASTRA_STUDIO_TOKEN, local Studio still got 401 on
+ * every page. A Studio user exists only when that token is configured, it is never configured in
+ * production (config-issues.ts refuses it), and it is still scoped to its own memory resource
+ * (mapUserToResourceId above), so allowing it here grants exactly the local Studio it was made for.
+ */
+class AssistantAuth extends CompositeAuth {
+  override async authorizeUser(user: unknown, request: Parameters<IMastraAuthProvider['authorizeUser']>[1]): Promise<boolean> {
+    if (isStudioUser(user)) return true;
+    return super.authorizeUser(user, request);
+  }
+}
+
 export function createAssistantAuth(env: NodeJS.ProcessEnv = process.env): CompositeAuth {
   const providers: IMastraAuthProvider[] = [new TicketFlowSessionAuth(readAgentSecrets(env))];
   const studioToken = env.MASTRA_STUDIO_TOKEN?.trim();
@@ -140,5 +161,5 @@ export function createAssistantAuth(env: NodeJS.ProcessEnv = process.env): Compo
       }),
     );
   }
-  return new CompositeAuth(providers);
+  return new AssistantAuth(providers);
 }

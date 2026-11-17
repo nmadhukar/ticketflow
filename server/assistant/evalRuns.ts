@@ -10,8 +10,9 @@ import { isAssistantEnabled } from "./config";
  * process, so it cannot open a run itself. These routes let it ask the app to.
  *
  * Off unless BOTH hold:
- *   - NODE_ENV is not "production"
  *   - EVAL_RUNS_ENABLED=true
+ *   - MASTRA_STUDIO_RUNS=true (only docker-compose.studio.yml sets it), or NODE_ENV is
+ *     "development" / "test"
  *
  * And even then only the two seeded evaluation accounts may be used (scripts/db/seed-eval-users.mjs),
  * so this can never open a run for a real user. The MCP-hop secret stays in this process: the
@@ -24,8 +25,24 @@ import { isAssistantEnabled } from "./config";
 const EVAL_USER_IDS = new Set(["eval-customer", "eval-staff"]);
 const AGENT_IDS = new Set<AssistantAgentId>(["support-assistant", "ticket-assistant"]);
 
+/**
+ * Local development only, decided by an explicit switch rather than by NODE_ENV.
+ *
+ * The app container that serves local Studio runs the BUILT bundle (Dockerfile: `npm run build`,
+ * then `node dist/index.js`), so it is correctly NODE_ENV=production: that is what serves
+ * dist/public and enforces the production secret and APP_BASE_URL checks. A NODE_ENV test here
+ * therefore left the route unregistered in that container and Studio could never open a run
+ * ("No assistant run on this request").
+ *
+ * MASTRA_STUDIO_RUNS is set only by docker-compose.studio.yml, and the same guard that protects
+ * MASTRA_STUDIO_NO_AUTH (agents/src/mastra/config-issues.ts) refuses it when the sidecar runs in
+ * production outside that file. Development and test keep working without the switch, so
+ * `npm run dev` and the test suite are unchanged.
+ */
 export function evalRunsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.NODE_ENV !== "production" && env.EVAL_RUNS_ENABLED === "true" && isAssistantEnabled(env);
+  const local =
+    env.NODE_ENV === "development" || env.NODE_ENV === "test" || env.MASTRA_STUDIO_RUNS === "true";
+  return local && env.EVAL_RUNS_ENABLED === "true" && isAssistantEnabled(env);
 }
 
 export function registerEvalRunRoutes(app: Express, env: NodeJS.ProcessEnv = process.env): void {

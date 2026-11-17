@@ -77,7 +77,8 @@ export async function ensureFreshToken(
 /** Attaches the run's MCP token to every request, renewing it first when needed. */
 export function sessionFetch(fetchImpl: typeof fetch = fetch) {
   return async (url: string | URL, init?: RequestInit, requestContext?: RequestContext | null) => {
-    const user = userFrom(requestContext) ?? discoveryUser.getStore();
+    // Studio has no request context on tool execution, so the run opened for it is the fallback.
+    const user = userFrom(requestContext) ?? discoveryUser.getStore() ?? (await studioRunUser());
     if (!user) throw new Error('No assistant run on this request; refusing to call TicketFlow without one.');
     await ensureFreshToken(user, { fetchImpl });
     const headers = new Headers(init?.headers);
@@ -158,12 +159,52 @@ export function isPermittedTool(definition: { name: string; annotations?: { read
 }
 
 /**
+ * Local Studio only: a run opened on demand so Studio's chat can load TicketFlow tools.
+ *
+ * Studio has no signed-in TicketFlow user, so `loadRunTools` would refuse every chat. When
+ * MASTRA_STUDIO_NO_AUTH=true (local Studio only; refused in production by config-issues.ts) this
+ * asks the app's dev-only eval route for a run as the seeded eval user, and caches it until it
+ * expires. The app still authorises every tool call as that user, so nothing is widened: the
+ * Studio chat sees exactly what the eval user sees.
+ */
+const STUDIO_RUN_USER = 'eval-staff';
+let studioRun: { user: TicketFlowUser; expiresAt: number } | undefined;
+
+async function studioRunUser(): Promise<TicketFlowUser | undefined> {
+  if (process.env.MASTRA_STUDIO_NO_AUTH !== 'true') return undefined;
+  if (studioRun && studioRun.expiresAt > Date.now()) return studioRun.user;
+  const appUrl = process.env.STUDIO_APP_URL?.trim() || 'http://app:5000';
+  try {
+    const response = await fetch(`${appUrl}/api/assistant/eval/run`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: STUDIO_RUN_USER, agentId: 'ticket-assistant' }),
+    });
+    if (!response.ok) return undefined;
+    const body = (await response.json()) as { runId: string; userId: string; mcpToken: string };
+    const user: TicketFlowUser = {
+      kind: 'ticketflow',
+      id: `user:${body.userId}`,
+      userId: body.userId,
+      agentId: 'ticket-assistant',
+      runId: body.runId,
+      mcp: { token: body.mcpToken },
+    };
+    // The app's run lasts five minutes; renew a little early.
+    studioRun = { user, expiresAt: Date.now() + 4 * 60 * 1000 };
+    return user;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * The run's tools, discovered AS the run's user: TicketFlow lists only what that user's agent may
  * call. Anything that is neither read-only nor a proposal is dropped here as well, so a direct
  * write can only ever reach a model through a deliberate change on both sides.
  */
 export async function loadRunTools({ requestContext }: { requestContext?: RequestContext } = {}) {
-  const user = userFrom(requestContext);
+  const user = userFrom(requestContext) ?? (await studioRunUser());
   if (!user) throw new Error('No assistant run on this request; refusing to load TicketFlow tools without one.');
   client ??= createTicketFlowClient();
   const { definitions, errors } = await discoveryUser.run(user, () => client!.listToolDefinitionsWithErrors());
