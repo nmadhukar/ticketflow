@@ -1,4 +1,5 @@
 import { readOpenRouterApiKey } from "../../env";
+import { providerForModel } from "./modelProvider";
 
 export type ModelPrice = { promptUsdPerToken: number; completionUsdPerToken: number };
 export type GenerationCost = { generationId: string; totalCostUsd: number; actualModel?: string };
@@ -9,6 +10,35 @@ const CACHE_TTL_MS = 15 * 60 * 1000;
 
 export function estimateCostUsd(input: number, output: number, price: ModelPrice): number {
   return input * price.promptUsdPerToken + output * price.completionUsdPerToken;
+}
+
+/**
+ * List prices for a model served by OpenAI, which has no public price endpoint. Not needed for a
+ * call to go through: a price is only used for the cost limit and the usage log. A model that is
+ * missing simply gets no preflight ceiling, rather than the "price_unavailable" refusal that made
+ * a valid OpenAI key look broken.
+ */
+const OPENAI_PRICES: Record<string, ModelPrice> = {
+  "gpt-4o-mini": { promptUsdPerToken: 0.15e-6, completionUsdPerToken: 0.6e-6 },
+  "gpt-4o": { promptUsdPerToken: 2.5e-6, completionUsdPerToken: 10e-6 },
+  "gpt-4.1-mini": { promptUsdPerToken: 0.4e-6, completionUsdPerToken: 1.6e-6 },
+  "gpt-4.1": { promptUsdPerToken: 2e-6, completionUsdPerToken: 8e-6 },
+  "gpt-5-mini": { promptUsdPerToken: 0.25e-6, completionUsdPerToken: 2e-6 },
+  "gpt-5": { promptUsdPerToken: 1.25e-6, completionUsdPerToken: 10e-6 },
+};
+
+/** A price for any provider: the table for OpenAI, the fetched catalog for OpenRouter. */
+export function priceForModel(modelId: string): ModelPrice {
+  if (providerForModel(modelId) === "openai") {
+    const known = OPENAI_PRICES[modelId.trim()];
+    if (known) return known;
+    // An unknown OpenAI model is priced like the family it belongs to (the mini tier for the
+    // cheap ones), so the limit is a sane estimate instead of a refusal.
+    return /mini/i.test(modelId)
+      ? OPENAI_PRICES["gpt-4o-mini"]
+      : OPENAI_PRICES["gpt-4o"];
+  }
+  return { promptUsdPerToken: 0, completionUsdPerToken: 0 };
 }
 
 function nonnegativeFinite(value: unknown): number | null {

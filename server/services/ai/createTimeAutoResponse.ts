@@ -7,6 +7,7 @@ import { routeTicket } from "./ticketRouting";
 import { statusForConfidence } from "./aiAutoResponse";
 import { ensureAiSystemUser } from "../../utils/aiSystemUser";
 import { afterTicketUpdated, recipientsNow } from "../tickets/notifier";
+import { isModelProviderConfigured } from "../../env";
 
 /**
  * Runs after a ticket exists. Never throws: a failure here must not fail the
@@ -43,10 +44,14 @@ export async function runCreateTimeAutoResponse(
     const settings = await getAISettings();
     // Say WHY the agent did nothing. A silent return here used to look exactly like "the AI ran
     // and found nothing", which is impossible to tell apart from the ticket staying open.
-    if (!settings.isActive || !process.env.OPENROUTER_API_KEY) {
+    // The key belongs to the configured model's provider (modelProvider.ts): an OpenAI id is
+    // answered with OPENAI_API_KEY. Checking only OPENROUTER_API_KEY skipped every reply when the
+    // deployment held an OpenAI key, which read as "the AI never answers a new ticket".
+    const keyConfigured = isModelProviderConfigured(settings.modelId);
+    if (!settings.isActive || !keyConfigured) {
       logSkipped(task, settings, {
         isActive: settings.isActive,
-        openRouterKey: !!process.env.OPENROUTER_API_KEY,
+        keyConfigured,
       });
       return;
     }
@@ -123,10 +128,11 @@ export async function runCreateTimeAutoResponse(
     // while still in the triage queue.
     await routeIfNoReply(task, actionBaseUrl);
 
-    // The reply is on the ticket: record the status the confidence earns (90%+ resolved) after
-    // the comment exists, so a customer never sees a resolved ticket without its answer. A
-    // degraded reply never gets here (it is not auto-responded).
-    await applyStatusForConfidence(task, analysis, actionBaseUrl);
+    // The reply is on the ticket: record the status the confidence earns (50-89% in_progress,
+    // 90%+ resolved) after the comment exists, so a customer never sees a moved ticket without
+    // its answer. A degraded reply never gets here (it is not auto-responded). `hasMatch` is true
+    // here by definition: reaching this line needs a real match.
+    await applyStatusForConfidence(task, { ...analysis, hasMatch: true }, actionBaseUrl);
   } catch (error) {
     console.error(`AI auto-response for new ticket ${task.id} failed:`, describeAIError(error));
   }
@@ -177,6 +183,12 @@ async function applyStatusForConfidence(
     const recipientsBefore = await recipientsNow(task.id);
     const updatedTask = await storage.updateTask(task.id, updates, actor, { expectedStatus: "open" });
     console.log(`AI ticket status for new ticket ${task.id}: open -> ${target} (confidence ${(analysis.confidence * 100).toFixed(1)}%)`);
+    // A resolved ticket closes on the CUSTOMER's confirmation, not on a timer: they see "did this
+    // solve it?" on the ticket and their yes (or a thank-you reply) closes it. See
+    // server/services/tickets/customerConfirmation.ts.
+    if (target === "resolved") {
+      console.log(`AI ticket for new ticket ${task.id}: resolved, awaiting the customer's confirmation to close`);
+    }
     await afterTicketUpdated({
       ticketId: task.id,
       before: current,

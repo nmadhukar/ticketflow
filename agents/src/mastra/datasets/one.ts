@@ -39,3 +39,24 @@ try {
     `\n__RESULT__${JSON.stringify({ id: caseId, group: 'facts', answer: '', scores: [{ scorerId: 'run', score: 0, reason }], passed: false })}\n`,
   );
 }
+
+/**
+ * Bounded by the parent: run.ts kills the child at EVAL_CASE_TIMEOUT_MS. This timer is the
+ * in-process backstop for a script that runs one.ts directly.
+ */
+const timeout = setTimeout(
+  () => {
+    process.stdout.write(
+      `\n__RESULT__${JSON.stringify({
+        id: caseId,
+        group: 'facts',
+        answer: '',
+        scores: [{ scorerId: 'run', score: 0, reason: 'timed out' }],
+        passed: false,
+      })}\n`,
+    );
+    process.exit(0);
+  },
+  Number(process.env.EVAL_CASE_TIMEOUT_MS ?? 90_000),
+);
+timeout.unref();

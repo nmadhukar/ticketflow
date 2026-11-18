@@ -8,6 +8,7 @@ import { describeAIError } from "./aiErrors";
 import { ensureAiSystemUser, isAiSystemUserId } from "../../utils/aiSystemUser";
 import { defaultTriageAssignment } from "../tickets/triage";
 import { afterTicketUpdated, recipientsNow } from "../tickets/notifier";
+import { isModelProviderConfigured } from "../../env";
 
 /**
  * 0031 content-based routing: the "no matching solution" half of the create-time agent.
@@ -97,7 +98,9 @@ async function hasDeliberateAssignment(task: Task): Promise<boolean> {
 export async function routeTicket(task: Task, actionBaseUrl: string | null = null): Promise<RoutingDecision | null> {
   try {
     const settings = await getAISettings();
-    if (settings.autoRoutingEnabled === false || !settings.isActive || !process.env.OPENROUTER_API_KEY) return null;
+    if (settings.autoRoutingEnabled === false || !settings.isActive || !isModelProviderConfigured(settings.modelId)) {
+      return null;
+    }
     if (await hasDeliberateAssignment(task)) return null;
 
     const [teamList, departmentList] = await Promise.all([routableTeams(), routableDepartments()]);

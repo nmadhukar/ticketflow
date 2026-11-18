@@ -14,8 +14,16 @@
 #
 # ONE OR THE OTHER: run the app in Docker (this file) *or* on the host (`npm run dev`), never both.
 # The ports below take 5000/5100 on Windows, so a host `npm run dev` then fails with EADDRINUSE on
-# the assistant's internal listener. Docker app is on http://localhost (nginx); the host app is on
-# http://localhost:5000.
+# the assistant's internal listener. The app is on http://localhost:5000 (and through nginx on :80).
+#
+# Ports, all of them, so nothing is guessed:
+#   5000  app         the app itself (API + UI); nginx proxies to it on :80
+#   5100  app         the assistant's internal listener (app <-> agents), loopback-only by default
+#   4111  agents-studio  Mastra Studio
+#   (4112 inside the compose network: the plain `agents` service, never published)
+#   5433  postgres    host mapping (5432 inside the network)
+# Only ONE container may own 4111. The plain `agents` service no longer listens there, so
+# `localhost:4111` always means Studio.
 services:
   # Studio, when it runs in Docker, reaches the app over the `assistant` network at app:5100.
   # These mappings exist only so a Studio on the *host* can reach the same endpoints. Remove them
@@ -47,6 +55,8 @@ services:
       - "4111:4111"
     environment:
       NODE_ENV: development
+      # 4111 on the host belongs to this service, so it also listens on 4111 inside the container.
+      MASTRA_PORT: "4111"
       ASSISTANT_ENABLED: "false"
       ASSISTANT_AGENT_SECRET: ${ASSISTANT_AGENT_SECRET}
       ASSISTANT_MCP_URL: http://app:5100/internal/mcp

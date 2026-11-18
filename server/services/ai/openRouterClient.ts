@@ -1,10 +1,9 @@
-import { readOpenRouterApiKey } from "../../env";
 import { AiModelError, mapOpenRouterStatus } from "./aiErrors";
 import type { AiModelClient, GenerateRequest, GenerateResult } from "./aiModelClient";
-import { createOpenRouterPricing, estimateCostUsd, type ModelPrice } from "./openRouterPricing";
+import { createOpenRouterPricing, estimateCostUsd, priceForModel, type ModelPrice } from "./openRouterPricing";
+import { apiKeyFor, providerForModel, providerRequest } from "./modelProvider";
 
 export const DEFAULT_OPENROUTER_MODEL = "deepseek/deepseek-v4-pro";
-const CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -45,19 +44,28 @@ function reasoningRetryTokens(maxOutputTokens: number, ceiling: number | undefin
 
 export function createOpenRouterClient(options: {
   getModelId?: () => string | undefined | Promise<string | undefined>;
+  /** An explicit key (tests). Unset: the key of the provider the model id belongs to. */
   getApiKey?: () => string | undefined;
   fetchImpl?: typeof fetch;
   getModelPrice?: (modelId: string) => Promise<ModelPrice | null>;
 } = {}): AiModelClient {
-  const getApiKey = options.getApiKey ?? readOpenRouterApiKey;
   const fetchImpl: typeof fetch = options.fetchImpl ?? ((...args) => globalThis.fetch(...args));
-  const getModelPrice = options.getModelPrice ?? createOpenRouterPricing({ getApiKey, fetchImpl }).getModelPrice;
+  const openRouterPricing = createOpenRouterPricing({ fetchImpl });
+  const getModelPrice = options.getModelPrice ?? ((modelId: string) =>
+    providerForModel(modelId) === "openrouter"
+      ? openRouterPricing.getModelPrice(modelId)
+      : Promise.resolve(priceForModel(modelId)));
+  // The MODEL decides the provider and its key (modelProvider.ts). Read per call, so a key
+  // replaced in the environment applies to the next request.
+  const getApiKey = options.getApiKey ?? (() => undefined);
 
   return {
     async generate(request: GenerateRequest): Promise<GenerateResult> {
-      const apiKey = getApiKey();
-      if (!apiKey) throw new AiModelError("not_configured");
       const requestedModel = (await options.getModelId?.())?.trim() || DEFAULT_OPENROUTER_MODEL;
+      const provider = providerForModel(requestedModel);
+      const apiKey = getApiKey() || apiKeyFor(provider);
+      if (!apiKey) throw new AiModelError("not_configured");
+      const endpoint = providerRequest(provider, apiKey);
       const price = await getModelPrice(requestedModel);
       if (!price) throw new AiModelError("price_unavailable");
       if (!request.operation.trim() || !request.messages.length || !Number.isSafeInteger(request.maxOutputTokens) || request.maxOutputTokens <= 0 || !Number.isFinite(request.temperature) || request.temperature < 0 || request.temperature > 2) {
@@ -81,9 +89,9 @@ export function createOpenRouterClient(options: {
 
       const send = async (includeReasoning: boolean, maxTokens: number): Promise<Response> => {
         try {
-          return await fetchImpl(CHAT_URL, {
+          return await fetchImpl(endpoint.url, {
             method: "POST",
-            headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+            headers: endpoint.headers,
             body: requestBody(includeReasoning, maxTokens),
             signal: AbortSignal.timeout(30_000),
           });

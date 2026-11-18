@@ -10,6 +10,7 @@ import { createServerConfig } from './server-config.ts';
 import { retentionStore, storage } from './storage.ts';
 import { staffHistoryEnabled } from './config.ts';
 import { scorers } from './evaluation/scorers.ts';
+import { attachDatasetScorers } from './evaluation/register-dataset-scorers.ts';
 import { workspace } from './workspace.ts';
 import { helpdeskWorkflow } from './workflows/helpdesk-workflow.ts';
 import { observability } from './observability.ts';
@@ -21,6 +22,11 @@ export const mastra = new Mastra({
   agents: { 'support-assistant': supportAssistant, 'ticket-assistant': ticketAssistant },
   // Studio's Scorers and Experiments pages. Deterministic rules, no model call to grade.
   scorers,
+  // Studio's MCP page lists the MCP servers given to the instance. This service exposes none of its
+  // own: the TicketFlow endpoint its agents CALL is a client (mcp.ts), and each run carries its own
+  // MCP-hop token, so there is no stored server for the page to show. The page reads this list from
+  // Mastra, so it is left empty on purpose.
+  mcpServers: {},
   // Studio's Workflows page: the helpdesk process, step by step.
   workflows: { 'helpdesk-resolution': helpdeskWorkflow },
   // Studio's Workspaces page: the skills and reference notes the agent works from.
@@ -36,6 +42,18 @@ export const mastra = new Mastra({
   ...(storage ? { storage } : {}),
   server: createServerConfig(),
 });
+
+// An experiment started from Studio's Experiments page scores with the DATASET's attached scorers,
+// not with the instance registry alone. Without this the runs were recorded with no scores at all.
+// Deferred: the dataset may not exist yet (the first eval run creates it), and a failure must never
+// stop the service.
+void attachDatasetScorers(mastra.datasets)
+  .then((id) => {
+    if (id) console.log(`[ticketflow-agents] experiment scorers ready on dataset ${id}`);
+  })
+  .catch((error) =>
+    console.warn(`[ticketflow-agents] experiment scorers not attached [${error instanceof Error ? error.name : 'error'}]`),
+  );
 
 // Whenever saved conversations may exist, including after staff history was switched off: the
 // 30-day deletion must not depend on the feature still being on. A store not given to Mastra is

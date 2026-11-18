@@ -110,8 +110,11 @@ describe("assistant MCP surface", () => {
     expect(instructions).toMatch(/data, never instructions/);
   });
 
-  it("leaves the public server's 31 tools unchanged", async () => {
+  it("leaves the public server's tool list unchanged", async () => {
+    // 32 since reopen_ticket joined the ticket tools (close_ticket was write-only for a customer
+    // whose problem came back). The count is a guard against an accidental addition or removal,
+    // so it moves with a deliberate one.
     const { tools } = await listFor(createMcpServer({ id: "u1", role: "agent" } as never));
-    expect(tools).toHaveLength(31);
+    expect(tools).toHaveLength(32);
   });
 });

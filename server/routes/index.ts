@@ -79,6 +79,12 @@ import {
   scheduleKnowledgeLearning,
 } from "../services/ai/knowledgeBaseLearning";
 import { scheduleTicketAutoClose } from "../services/tickets/autoClose";
+import {
+  closeOnCustomerConfirmation,
+  isConfirmationReply,
+  isNotFixedReply,
+  reopenOnCustomerReply,
+} from "../services/tickets/customerConfirmation";
 import { z } from "zod";
 import { createHash, randomBytes } from "crypto";
 import multer from "multer";
@@ -161,7 +167,8 @@ import {
   analyzeTicket as analyzeTicketWithAI,
 } from "server/services/ai/aiTicketAnalysis";
 import { PROMPT_TEMPLATES } from "server/services/ai/prompts";
-import { isOpenRouterConfigured } from "../env";
+import { isModelProviderConfigured } from "../env";
+import { providerForModel } from "../services/ai/modelProvider";
 
 // Helper function to sanitize company name for S3 key
 function sanitizeCompanyNameForS3(companyName: string): string {
@@ -839,7 +846,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         // ticketService.addComment: the body is only `content` (trimmed, 1..10000
         // characters); ticket and author come from the request, never from the client.
-        const comment = await addComment(req.user, parseInt(req.params.id), req.body?.content);
+        const ticketId = parseInt(req.params.id);
+        const comment = await addComment(req.user, ticketId, req.body?.content);
+        // The customer's own reply on a resolved ticket decides it: a thank-you closes the
+        // ticket, "still broken" sends it back to the team. Staff replies never do either.
+        const actor = req.user as { id?: string; role?: string };
+        if (actor.role === "customer" && actor.id) {
+          const text = String(req.body?.content ?? "");
+          if (isConfirmationReply(text)) {
+            await closeOnCustomerConfirmation(ticketId, actor.id, "reply", publicBaseUrl(req));
+          } else if (isNotFixedReply(text)) {
+            await reopenOnCustomerReply(ticketId, actor.id, publicBaseUrl(req));
+          }
+        }
         res.status(201).json(comment);
       } catch (error) {
         // Validation failures go to the shared error contract (400 / its status).
@@ -847,6 +866,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
   );
+
+  // "Was this solved?" — the customer confirms the AI's answer and the ticket closes.
+  // Only the ticket's own creator, only on a resolved ticket (server/services/tickets/
+  // customerConfirmation.ts). Staff close tickets through PATCH /api/tasks/:id as before.
+  app.post("/api/tasks/:id/confirm-resolution", isAuthenticated, async (req: any, res, next) => {
+    try {
+      const ticketId = parseInt(req.params.id);
+      const result = await closeOnCustomerConfirmation(ticketId, getUserId(req), "confirmed", publicBaseUrl(req));
+      if (!result.closed) {
+        return fail(res, 409, "This ticket is not waiting for your confirmation");
+      }
+      res.json({ status: "closed" });
+    } catch (error) {
+      next(ticketErrorToHttp(error));
+    }
+  });
+
+  // The customer says it is not fixed: the AI's answer did not resolve it, so it goes back to the
+  // team instead of closing.
+  app.post("/api/tasks/:id/not-resolved", isAuthenticated, async (req: any, res, next) => {
+    try {
+      const ticketId = parseInt(req.params.id);
+      const result = await reopenOnCustomerReply(ticketId, getUserId(req), publicBaseUrl(req));
+      if (!result.reopened) {
+        return fail(res, 409, "This ticket is not waiting for your confirmation");
+      }
+      res.json({ status: "in_progress" });
+    } catch (error) {
+      next(ticketErrorToHttp(error));
+    }
+  });
 
   // Admin routes
   app.get("/api/admin/users", isAuthenticated, async (req: any, res) => {
@@ -1524,7 +1574,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const settings = await getAISettings();
-      res.json({ ...settings, openRouterKeyConfigured: isOpenRouterConfigured() });
+      res.json({ ...settings, openRouterKeyConfigured: isModelProviderConfigured(settings.modelId) });
     } catch (error) {
       logRouteError("Error fetching AI settings", error);
       fail(res, 500, "Failed to fetch AI settings");
@@ -1577,7 +1627,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...(req.body || {}),
       });
       const saved = await saveAISettings(next, userId);
-      res.json({ ...saved, openRouterKeyConfigured: isOpenRouterConfigured() });
+      res.json({ ...saved, openRouterKeyConfigured: isModelProviderConfigured(saved.modelId) });
     } catch (error) {
       logRouteError("Error updating AI settings", error);
       fail(res, 500, "Failed to update AI settings");
@@ -1603,7 +1653,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           details: { code },
           code,
         });
-        if (!isOpenRouterConfigured()) {
+        if (!isModelProviderConfigured(undefined)) {
           return res.status(503).json(connectionFailed("not_configured"));
         }
         const result = await bedrockIntegration.testConnection();
@@ -2162,7 +2212,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const aiSettings = await getAISettings();
-      const providerReady = isOpenRouterConfigured() && aiSettings.isActive;
+      const providerReady = isModelProviderConfigured(aiSettings.modelId) && aiSettings.isActive;
 
       let response = "";
       const relevantDocIds: number[] = [];
@@ -3954,7 +4004,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Check the active model provider before creating a draft.
         const aiSettings = await getAISettings();
-        if (!aiSettings.isActive || !isOpenRouterConfigured()) {
+        if (!aiSettings.isActive || !isModelProviderConfigured(aiSettings.modelId)) {
           return res
             .status(503)
             .json({ error: "ai_not_configured", message: "AI service not configured" });
@@ -5126,11 +5176,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/ai/status", isAuthenticated, requireStaff, async (req: any, res) => {
     try {
       const settings = await getAISettings();
-      const ready = isOpenRouterConfigured() && settings.isActive;
+      const providerConfigured = isModelProviderConfigured(settings.modelId);
+      const ready = providerConfigured && settings.isActive;
 
       res.json({
-        provider: "openrouter",
-        providerConfigured: isOpenRouterConfigured(),
+        provider: providerForModel(settings.modelId),
+        providerConfigured,
         openRouterAvailable: ready,
         modelId: settings.modelId,
         knowledgeLearning: ready && settings.autoLearnEnabled,

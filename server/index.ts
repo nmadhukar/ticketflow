@@ -142,12 +142,27 @@ app.use(requestLogger(log));
   server
     .listen(listenOptions, () => {
       log(`serving on port ${port}`);
+      // The failure this line exists for: the container runs fine but the port is not PUBLISHED
+      // (docker-compose.yml `app` had no `ports:` mapping for a while), so every browser request
+      // hung and the UI sat on "Loading your workspace…" while the logs looked healthy. Compose
+      // gives a container its published ports as HOST_PORT and the app its PORT; when they differ
+      // the mapping points somewhere nothing listens, and that is worth one line at boot.
+      // Docker sets HOST_PORT; a bare `node dist/index.js` on the host does not, so this is quiet
+      // there. It never refuses to start: a dev run may legitimately listen on any port.
+      const published = process.env.HOST_PORT?.trim();
+      if (published && published !== String(port)) {
+        console.warn(
+          `Published port ${published} does not forward to PORT ${port}: the browser will hang. ` +
+            "Set PORT and the compose `ports:` mapping to the same value (docker-compose.yml, app.ports).",
+        );
+      }
       // R90 backfill, after listen and not awaited (review I1): text for documents uploaded before
       // extraction existed. Every parse runs in a separate, memory-limited extractor process and each
       // row is claimed before its parse, so a hostile file can kill only that process, once.
       import("./services/documents/backfillText")
         .then(({ startDocumentTextBackfill }) => startDocumentTextBackfill())
         .catch((error) => console.error(`Document text backfill failed [${describeError(error)}]`));
+
     })
     .on("error", (error) => {
       console.error("Server startup error:", error);

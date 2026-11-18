@@ -122,6 +122,35 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
     },
   });
 
+  // "Was this solved?" — the customer's answer decides a resolved ticket. Confirming closes it;
+  // saying it is not fixed sends it back to the team (server/services/tickets/customerConfirmation.ts).
+  const confirmResolution = useMutation({
+    mutationFn: async (solved: boolean) => {
+      const res = await apiRequest(
+        "POST",
+        `/api/tasks/${ticketId}/${solved ? "confirm-resolution" : "not-resolved"}`
+      );
+      return res.json();
+    },
+    onSuccess: (_, solved) => {
+      void refetchTicket();
+      void refetchComments();
+      toast({
+        title: solved ? "Ticket closed" : "Sent back to the team",
+        description: solved
+          ? "Thanks for confirming. This ticket is now closed."
+          : "We let the team know it is not fixed yet.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Could not update the ticket",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   // Apply AI response
   const applyAIResponse = useMutation({
     mutationFn: async () => {
@@ -585,6 +614,76 @@ export default function TicketDetail({ ticketId, onClose }: TicketDetailProps) {
           </CardContent>
         </Card>
       </div>
+
+      {/* Customer confirmation: a resolved ticket waits for its creator's answer before closing */}
+      {role === "customer" &&
+        ticket?.status === "resolved" &&
+        ticket?.createdBy === user?.id && (
+          <Card className="border-primary/30 bg-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CheckCircle className="h-5 w-5 text-primary" />
+                Did this solve your problem?
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                The assistant posted a suggested answer on this ticket. Confirming closes it;
+                if it is still broken, the team picks it up again.
+              </p>
+              <div className="flex gap-3">
+                <Button
+                  onClick={() => confirmResolution.mutate(true)}
+                  disabled={confirmResolution.isPending}
+                >
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                  Yes, it is solved — close
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => confirmResolution.mutate(false)}
+                  disabled={confirmResolution.isPending}
+                >
+                  No, still broken
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+      {/* The customer's view of the AI answer, with the confidence it was given */}
+      {aiResponse && role === "customer" && aiResponse.aiResponse && (
+        <Card className="border-primary/20 bg-card">
+          <CardHeader>
+            <div className="flex items-center justify-between gap-4">
+              <CardTitle className="flex items-center gap-2">
+                <Brain className="h-5 w-5 text-primary" />
+                Assistant's answer
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">Confidence:</span>
+                <span
+                  className={cn(
+                    "font-medium",
+                    getConfidenceLevel(Number(aiResponse?.confidenceScore ?? 0)).color
+                  )}
+                >
+                  {(Number(aiResponse?.confidenceScore ?? 0) * 100).toFixed(0)}%
+                </span>
+                <Progress
+                  value={Number(aiResponse?.confidenceScore ?? 0) * 100}
+                  className="w-24"
+                />
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="p-4 bg-muted rounded-lg">
+              <p className="whitespace-pre-wrap">{aiResponse.aiResponse}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* AI Response Section */}
       {aiResponse && !aiResponse.wasApplied && role && role !== "customer" && (

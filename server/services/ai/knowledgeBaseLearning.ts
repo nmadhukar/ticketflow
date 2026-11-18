@@ -33,6 +33,10 @@ import { loadCostLimits, estimateTokens } from "./costMonitoring";
 import { extractJSON } from "./jsonUtils";
 import { describeAIError, isQuotaBlocked } from "./aiErrors";
 import { ensureAiSystemUser } from "../../utils/aiSystemUser";
+import { isModelProviderConfigured } from "../../env";
+
+/** A key for the configured model's provider (OpenAI or OpenRouter), read when the job runs. */
+const aiKeyConfigured = () => isModelProviderConfigured(undefined);
 
 const resolutionPatternSchema = z.object({
   problemType: z.string().trim().min(1),
@@ -121,7 +125,7 @@ export const analyzeResolvedTickets = async (
     comments: Array<{ content: string; userId: string; createdAt: Date }>;
   }>
 ): Promise<ResolutionPattern[]> => {
-  if (ticketBatch.length === 0 || !process.env.OPENROUTER_API_KEY) return [];
+  if (ticketBatch.length === 0 || !aiKeyConfigured()) return [];
 
   try {
     const ticketSummaries = ticketBatch
@@ -181,7 +185,7 @@ export const generateKnowledgeArticle = async (
   pattern: ResolutionPattern,
   relatedTickets: number[]
 ): Promise<KnowledgeArticle | null> => {
-  if (!process.env.OPENROUTER_API_KEY) return null;
+  if (!aiKeyConfigured()) return null;
 
   try {
     const prompt = buildKnowledgeArticlePrompt(pattern);
@@ -598,7 +602,7 @@ export const intelligentKnowledgeSearch = async (
     matchedContent: string;
   }>
 > => {
-  if (!process.env.OPENROUTER_API_KEY) {
+  if (!aiKeyConfigured()) {
     // Fallback to basic search
     return await basicKnowledgeSearch(query, category, maxResults);
   }
@@ -709,7 +713,7 @@ export const improveKnowledgeArticle = async (
     success: boolean;
   }
 ): Promise<boolean> => {
-  if (!process.env.OPENROUTER_API_KEY) return false;
+  if (!aiKeyConfigured()) return false;
 
   try {
     const article = await storage.getKnowledgeArticle(articleId);

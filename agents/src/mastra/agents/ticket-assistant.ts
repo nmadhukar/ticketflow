@@ -3,6 +3,7 @@ import { TokenLimiter } from '@mastra/core/processors';
 import { modelRouterId } from '../config.ts';
 import { loadRunTools } from '../mcp.ts';
 import { staffMemory } from '../storage.ts';
+import { studioMemory } from '../studio-memory.ts';
 import { FORMAT_RULES, SAFETY_RULES } from './rules.ts';
 
 /**
@@ -51,6 +52,8 @@ export const ticketAssistant = new Agent({
   // prompt; the rules already say to treat ticket text as data, and this enforces the size.
   inputProcessors: [new TokenLimiter(30000)],
   outputProcessors: [new TokenLimiter(8000)],
-  // Saved staff conversations, when ASSISTANT_STAFF_HISTORY=true (storage.ts).
-  ...(staffMemory ? { memory: staffMemory } : {}),
+  // Saved staff conversations, when ASSISTANT_STAFF_HISTORY=true (storage.ts). A local Studio adds
+  // its own demo memory when that switch is off, so the chat there still keeps its history
+  // (studio-memory.ts); production is unchanged either way.
+  memory: staffMemory ?? studioMemory,
 });

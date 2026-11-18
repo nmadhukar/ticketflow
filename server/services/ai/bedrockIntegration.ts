@@ -6,7 +6,8 @@ import { getAISettings } from "server/admin/aiSettings";
 import { extractJSON } from "./jsonUtils";
 import { AiModelError, describeAIError } from "./aiErrors";
 import { createOpenRouterClient } from "./openRouterClient";
-import { createOpenRouterPricing } from "./openRouterPricing";
+import { createOpenRouterPricing, priceForModel } from "./openRouterPricing";
+import { providerForModel } from "./modelProvider";
 import { fitDescriptionToBudget } from "./promptBudget";
 import type { AISettings } from "@shared/interfaces";
 
@@ -83,7 +84,15 @@ export async function buildPromptWithinBudget(
 }
 
 const pricing = createOpenRouterPricing();
-const modelClient = createOpenRouterClient({ getModelId: async () => (await getAISettings()).modelId, getModelPrice: pricing.getModelPrice });
+/** The model's price: the OpenRouter catalog for a vendor route, the built-in table for OpenAI. */
+const getPrice = (modelId: string) =>
+  providerForModel(modelId) === "openrouter"
+    ? pricing.getModelPrice(modelId).then((price) => price ?? priceForModel(modelId))
+    : Promise.resolve(priceForModel(modelId));
+const modelClient = createOpenRouterClient({
+  getModelId: async () => (await getAISettings()).modelId,
+  getModelPrice: getPrice,
+});
 
 export async function getBedrockClient() {
   const settings = await getAISettings();
@@ -106,7 +115,7 @@ async function invokeBedrockModel(
 ): Promise<{ response: string; costEstimate: CostEstimate; actualTokens: { input: number; output: number } }> {
   const settings = await getAISettings();
   if (!settings.isActive || !settings.openRouterKeyConfigured) throw new AiModelError("not_configured");
-  const price = await pricing.getModelPrice(settings.modelId);
+  const price = await getPrice(settings.modelId);
   const [daily, monthly] = await Promise.all([getDailyUsage(), getMonthlyUsage()]);
   const promptTokens = estimatePromptTokensForBudget(prompt);
   const allowedOutputTokens = Math.min(maxTokens, settings.maxTokensPerRequest - promptTokens);

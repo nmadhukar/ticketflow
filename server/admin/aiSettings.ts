@@ -1,7 +1,7 @@
 import { AISettings } from "@shared/interfaces";
 import { storage } from "../storage";
 import { logRouteError } from "../http/errors";
-import { readOpenRouterApiKey } from "../env";
+import { isModelProviderConfigured } from "../env";
 import { DEFAULT_OPENROUTER_MODEL } from "../services/ai/openRouterClient";
 
 const DEFAULT_SETTINGS: AISettings = {
@@ -35,7 +35,11 @@ export async function getAISettings(): Promise<AISettings> {
   try {
     const settings = await storage.getAISettings();
     if (!settings) {
-      return { ...DEFAULT_SETTINGS, isActive: false, openRouterKeyConfigured: !!readOpenRouterApiKey() };
+      return {
+        ...DEFAULT_SETTINGS,
+        isActive: false,
+        openRouterKeyConfigured: isModelProviderConfigured(DEFAULT_SETTINGS.modelId),
+      };
     }
 
     return {
@@ -55,13 +59,19 @@ export async function getAISettings(): Promise<AISettings> {
       dailyLimitUsd: Number(settings.dailyLimitUsd ?? 50),
       monthlyLimitUsd: Number(settings.monthlyLimitUsd ?? 100),
       maxTokensPerRequest: settings.maxTokensPerRequest ?? 3000,
-      openRouterKeyConfigured: !!readOpenRouterApiKey(),
+      // The model decides the provider (server/services/ai/modelProvider.ts): an OpenAI id is
+      // powered by OPENAI_API_KEY, a vendor route by OPENROUTER_API_KEY.
+      openRouterKeyConfigured: isModelProviderConfigured(settings.modelId || DEFAULT_OPENROUTER_MODEL),
       temperature: Number(settings.temperature ?? 0.3),
       maxTokens: settings.maxTokens ?? 2000,
     };
   } catch (error) {
     logRouteError("Error loading AI settings", error);
-    return { ...DEFAULT_SETTINGS, isActive: false, openRouterKeyConfigured: !!readOpenRouterApiKey() };
+    return {
+      ...DEFAULT_SETTINGS,
+      isActive: false,
+      openRouterKeyConfigured: isModelProviderConfigured(DEFAULT_SETTINGS.modelId),
+    };
   }
 }
 
@@ -128,7 +138,7 @@ export function validateAISettings(input: AISettings): AISettings {
     dailyLimitUsd: clamp(Number(input.dailyLimitUsd), 0, 1000000),
     monthlyLimitUsd: clamp(Number(input.monthlyLimitUsd), 0, 1000000),
     maxTokensPerRequest: clamp(Number(input.maxTokensPerRequest), 1, 1000000),
-    openRouterKeyConfigured: !!readOpenRouterApiKey(),
+    openRouterKeyConfigured: isModelProviderConfigured(input.modelId || DEFAULT_OPENROUTER_MODEL),
     temperature: clamp(Number(input.temperature), 0, 1),
     maxTokens: clamp(Number(input.maxTokens), 100, 4000),
   };

@@ -1,3 +1,5 @@
+import { apiKeyFor, providerForModel } from "./services/ai/modelProvider";
+
 /**
  * The one definition of "development". It is Express's own rule
  * (`app.get("env")` is `process.env.NODE_ENV || "development"`), so the server
@@ -14,9 +16,24 @@ export function readOpenRouterApiKey(env: NodeJS.ProcessEnv = process.env): stri
   return env.OPENROUTER_API_KEY?.trim() || undefined;
 }
 
+/**
+ * Is there a key for the configured model's provider? OPENROUTER_API_KEY for a vendor route,
+ * OPENAI_API_KEY for an OpenAI id (server/services/ai/modelProvider.ts). Either variable may hold
+ * the single key a deployment has, so this is true when EITHER is set; the model decides which one
+ * is actually used.
+ */
+export function isModelProviderConfigured(
+  modelId: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return apiKeyFor(providerForModel(modelId), env) !== undefined;
+}
+
 export function isOpenRouterConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
   return readOpenRouterApiKey(env) !== undefined;
 }
+
+
 
 /**
  * Hindsight agent memory. The service's own coordinates are deployment configuration,

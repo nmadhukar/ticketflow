@@ -18,6 +18,7 @@ import {
 } from "./bedrockIntegration";
 import { extractJSON } from "./jsonUtils";
 import { describeAIError } from "./aiErrors";
+import { isModelProviderConfigured } from "../../env";
 
 const generatedArticleSchema = z.object({
   title: z.string().trim().min(1).max(255),
@@ -193,7 +194,7 @@ export class KnowledgeBaseService {
     resolution: any,
     requireApproval: boolean = true
   ): Promise<void> {
-    if (!process.env.OPENROUTER_API_KEY) {
+    if (!isModelProviderConfigured(undefined)) {
       await this.saveKnowledgeArticle(
         ticket,
         resolution,
