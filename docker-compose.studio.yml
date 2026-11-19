@@ -61,7 +61,8 @@ services:
       ASSISTANT_AGENT_SECRET: ${ASSISTANT_AGENT_SECRET}
       ASSISTANT_MCP_URL: http://app:5100/internal/mcp
       ASSISTANT_MODEL_PROVIDER: ${ASSISTANT_MODEL_PROVIDER:-openai}
-      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-gpt-5-mini}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-gpt-4o-mini}
+      ASSISTANT_MODEL_FALLBACK: ${ASSISTANT_MODEL_FALLBACK:-gpt-4.1-mini}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       # The assistant DB role's URL (assistant's own role + `mastra` schema), same as the app's

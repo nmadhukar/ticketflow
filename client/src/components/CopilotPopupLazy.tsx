@@ -12,19 +12,64 @@ import copilotStyles from "@copilotkit/react-core/v2/styles.css?raw";
 
 const STYLE_ELEMENT_ID = "copilotkit-styles";
 
-/** Adds CopilotKit's stylesheet once. */
+/** Adds CopilotKit's stylesheet once, plus the launcher rules this app always had. */
 function ensureCopilotStyles(): void {
   if (typeof document === "undefined") return;
   if (document.getElementById(STYLE_ELEMENT_ID)) return;
   const style = document.createElement("style");
   style.id = STYLE_ELEMENT_ID;
-  style.textContent = copilotStyles;
+  // CopilotKit's own launcher is a dark circle. The product's button has always been the blue
+  // "Ask AI" pill, so it is restyled here rather than left as a second, unfamiliar icon.
+  style.textContent = `${copilotStyles}
+[data-copilotkit] button.copilotKitButton,
+.copilotKitButton {
+  background-color: rgb(37 99 235) !important;
+  color: #fff !important;
+  border-radius: 1.5rem !important;
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1) !important;
+}
+[data-copilotkit] button.copilotKitButton:hover,
+.copilotKitButton:hover {
+  background-color: rgb(29 78 216) !important;
+}
+`;
   document.head.appendChild(style);
 }
 
 ensureCopilotStyles();
 
+/** Marks that this page load already cleared the stored thread id. */
+let threadResetDone = false;
+
+/**
+ * Drops CopilotKit's remembered thread id for THIS page load, so a refresh starts a new chat.
+ *
+ * CopilotKit persists its thread (`copilotkit-thread-id` and per-agent keys). Leaving it means the
+ * next load reattaches to the old conversation, which is wrong for a support popup: a refresh is a
+ * new session, and a new customer at the same browser must never see the previous person's chat.
+ * Only keys that name a thread are touched; nothing else is removed.
+ */
+function resetCopilotThreadOnce(): void {
+  if (threadResetDone || typeof window === "undefined") return;
+  threadResetDone = true;
+  try {
+    for (const store of [window.sessionStorage, window.localStorage]) {
+      const keys: string[] = [];
+      for (let i = 0; i < store.length; i += 1) {
+        const key = store.key(i);
+        if (key && /copilotkit.*thread|thread.*copilotkit/i.test(key)) keys.push(key);
+      }
+      for (const key of keys) store.removeItem(key);
+    }
+  } catch {
+    // A blocked storage (private mode, quota) simply means there is nothing to clear.
+  }
+}
+
 export function CopilotPopupLazy({ runtimeUrl, role }: { runtimeUrl: string; role?: string }) {
+  // A fresh conversation for every page load (see resetCopilotThreadOnce).
+  resetCopilotThreadOnce();
+
   // A customer is greeted about their own problem and the ticket it will raise; staff are
   // greeted about working the queue. The server tells us which (GET .../config).
   // Keep both to two short lines: the welcome is the first thing anyone reads in the popup.
@@ -48,7 +93,9 @@ export function CopilotPopupLazy({ runtimeUrl, role }: { runtimeUrl: string; rol
         // picker works with no upload endpoint behind it.
         attachments={{ enabled: true }}
         labels={{
-          modalHeaderTitle: role === "customer" ? "TicketFlow Support" : "TicketFlow Copilot",
+          // One assistant, one name. The customer and staff both open "Ask AI"; the person inside is
+          // the TicketFlow assistant, never a second product with its own title.
+          modalHeaderTitle: "Ask AI",
           welcomeMessageText,
         }}
       />

@@ -21,6 +21,8 @@ const SHARED_READS = [
   "get_knowledge_article",
   "search_documents",
   "get_document",
+  "check_citation",
+  "list_routing_options",
 ] as const;
 
 /**
@@ -52,5 +54,6 @@ export const ASSISTANT_READ_TOOLS: Record<AssistantAgentId, readonly string[]> =
     "list_users",
     "get_stats",
     "list_activity",
+    "list_notifications",
   ],
 };

@@ -78,7 +78,8 @@ export async function ensureFreshToken(
 export function sessionFetch(fetchImpl: typeof fetch = fetch) {
   return async (url: string | URL, init?: RequestInit, requestContext?: RequestContext | null) => {
     // Studio has no request context on tool execution, so the run opened for it is the fallback.
-    const user = userFrom(requestContext) ?? discoveryUser.getStore() ?? (await studioRunUser());
+    // discoveryUser carries the Studio run for the duration of a tool listing/call (loadRunTools).
+    const user = userFrom(requestContext) ?? discoveryUser.getStore() ?? (await studioRunUser(pendingAgent));
     if (!user) throw new Error('No assistant run on this request; refusing to call TicketFlow without one.');
     await ensureFreshToken(user, { fetchImpl });
     const headers = new Headers(init?.headers);
@@ -168,17 +169,24 @@ export function isPermittedTool(definition: { name: string; annotations?: { read
  * Studio chat sees exactly what the eval user sees.
  */
 const STUDIO_RUN_USER = 'eval-staff';
-let studioRun: { user: TicketFlowUser; expiresAt: number } | undefined;
+const STUDIO_CUSTOMER_USER = 'eval-customer';
+/** One run per seeded account: the staff tools and the customer tools are different runs. */
+const studioRuns = new Map<string, { user: TicketFlowUser; expiresAt: number }>();
 
-async function studioRunUser(): Promise<TicketFlowUser | undefined> {
+async function studioRunUser(agentId: 'ticket-assistant' | 'support-assistant' | undefined): Promise<TicketFlowUser | undefined> {
   if (process.env.MASTRA_STUDIO_NO_AUTH !== 'true') return undefined;
-  if (studioRun && studioRun.expiresAt > Date.now()) return studioRun.user;
+  const account =
+    agentId === 'support-assistant'
+      ? { userId: STUDIO_CUSTOMER_USER, agentId: 'support-assistant' as const }
+      : { userId: STUDIO_RUN_USER, agentId: 'ticket-assistant' as const };
+  const cached = studioRuns.get(account.userId);
+  if (cached && cached.expiresAt > Date.now()) return cached.user;
   const appUrl = process.env.STUDIO_APP_URL?.trim() || 'http://app:5000';
   try {
     const response = await fetch(`${appUrl}/api/assistant/eval/run`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ userId: STUDIO_RUN_USER, agentId: 'ticket-assistant' }),
+      body: JSON.stringify(account),
     });
     if (!response.ok) return undefined;
     const body = (await response.json()) as { runId: string; userId: string; mcpToken: string };
@@ -186,16 +194,35 @@ async function studioRunUser(): Promise<TicketFlowUser | undefined> {
       kind: 'ticketflow',
       id: `user:${body.userId}`,
       userId: body.userId,
-      agentId: 'ticket-assistant',
+      agentId: account.agentId,
       runId: body.runId,
       mcp: { token: body.mcpToken },
     };
     // The app's run lasts five minutes; renew a little early.
-    studioRun = { user, expiresAt: Date.now() + 4 * 60 * 1000 };
+    studioRuns.set(account.userId, { user, expiresAt: Date.now() + 4 * 60 * 1000 });
     return user;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The agent whose tools are being loaded right now, while Studio lists them.
+ *
+ * `loadRunTools` is handed to each Agent as its tool SOURCE, so Mastra calls it with NO request and
+ * NO agent argument (the stack trace: formatAgentList -> Agent.loadRunTools). The Studio fallback
+ * therefore has to know who is asking; this marks it for the duration of the call, and `pendingAgent`
+ * falls back to the staff account for any call that arrives outside it (a real run always carries
+ * its own RequestContext, so this never applies to production).
+ */
+let pendingAgent: 'ticket-assistant' | 'support-assistant' | undefined;
+
+/** Wraps a loadRunTools result so the Studio account matches the agent being listed. */
+export function toolsForAgent<T>(agentId: 'ticket-assistant' | 'support-assistant', load: () => Promise<T>): Promise<T> {
+  pendingAgent = agentId;
+  return load().finally(() => {
+    pendingAgent = undefined;
+  });
 }
 
 /**
@@ -204,7 +231,9 @@ async function studioRunUser(): Promise<TicketFlowUser | undefined> {
  * write can only ever reach a model through a deliberate change on both sides.
  */
 export async function loadRunTools({ requestContext }: { requestContext?: RequestContext } = {}) {
-  const user = userFrom(requestContext) ?? (await studioRunUser());
+  // A real run always carries its context; only Studio's tool listing arrives without one, and it
+  // names the agent through toolsForAgent.
+  const user = userFrom(requestContext) ?? (await studioRunUser(pendingAgent));
   if (!user) throw new Error('No assistant run on this request; refusing to load TicketFlow tools without one.');
   client ??= createTicketFlowClient();
   const { definitions, errors } = await discoveryUser.run(user, () => client!.listToolDefinitionsWithErrors());

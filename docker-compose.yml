@@ -175,6 +175,22 @@ services:
       # Dev-only: opens a run for the eval harness and for local Studio chat
       # (server/assistant/evalRuns.ts). The app refuses it in production.
       EVAL_RUNS_ENABLED: ${EVAL_RUNS_ENABLED:-false}
+      # The in-app copilot builds its agent IN THIS PROCESS (server/copilot/runtime.ts), and that
+      # agent needs the same MCP coordinates the standalone sidecar uses. Without these it discovers
+      # no tools, so propose_ticket is never offered and the chat can only talk: no card, no
+      # ticket, which looked like "the copilot does not create tickets".
+      MASTRA_AGENT_ENABLED: ${MASTRA_AGENT_ENABLED:-true}
+      TICKETFLOW_MCP_KEY: ${TICKETFLOW_MCP_KEY:-}
+      MASTRA_MODEL_ID: ${MASTRA_MODEL_ID:-gpt-4o-mini}
+      # The copilot's agent is built in THIS process and reads the same model settings as the
+      # sidecar. Without them it fell back to the old openrouter/gpt-5-mini default, and every run
+      # failed with "API key expired" while the OpenAI key was fine.
+      ASSISTANT_MODEL_PROVIDER: ${ASSISTANT_MODEL_PROVIDER:-openai}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-gpt-4o-mini}
+      ASSISTANT_MODEL_FALLBACK: ${ASSISTANT_MODEL_FALLBACK:-gpt-4.1-mini}
+      # The popup itself. Without this the config route answers 404 and the browser never mounts
+      # CopilotKit: .env carried it, but compose did not pass it, so the whole chat was off in Docker.
+      COPILOTKIT_ENABLED: ${COPILOTKIT_ENABLED:-true}
     restart: unless-stopped
     networks:
       - ticketflow-network
@@ -195,8 +211,11 @@ services:
       ASSISTANT_AGENT_SECRET: ${ASSISTANT_AGENT_SECRET:-}
       ASSISTANT_AGENT_SECRET_PREVIOUS: ${ASSISTANT_AGENT_SECRET_PREVIOUS:-}
       ASSISTANT_MCP_URL: http://app:5100/internal/mcp
-      ASSISTANT_MODEL_PROVIDER: ${ASSISTANT_MODEL_PROVIDER:-openrouter}
-      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-openai/gpt-5-mini}
+      ASSISTANT_MODEL_PROVIDER: ${ASSISTANT_MODEL_PROVIDER:-openai}
+      # Must stay a model this account can actually call. gpt-5-mini was the old default and is not
+      # served on this key ("API key expired" from the provider), which failed every copilot run.
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-gpt-4o-mini}
+      ASSISTANT_MODEL_FALLBACK: ${ASSISTANT_MODEL_FALLBACK:-gpt-4.1-mini}
       ASSISTANT_SUPPORT_MODEL: ${ASSISTANT_SUPPORT_MODEL:-}
       ASSISTANT_STAFF_MODEL: ${ASSISTANT_STAFF_MODEL:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}

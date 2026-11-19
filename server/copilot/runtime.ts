@@ -29,6 +29,20 @@ interface BuiltCopilotKit {
 const perUser = new Map<string, Promise<BuiltCopilotKit>>();
 
 /**
+ * What the cached agent was built with. An entry is dropped when the model settings change, because
+ * the built agent holds the model id it was created with: after switching from a model the key
+ * cannot serve (the old openrouter/gpt-5-mini) the cached agent kept failing with
+ * "AI API error: API key expired" until the container restarted. Keyed by user id, one value each.
+ */
+const builtWith = new Map<string, string>();
+
+/** The model + provider a built agent depends on; one string, only used for comparison. */
+function modelSignature(): string {
+  const parts = [process.env.ASSISTANT_MODEL_PROVIDER, process.env.ASSISTANT_MODEL, process.env.MASTRA_MODEL_ID];
+  return parts.map((p) => (p ?? "").trim()).join("|");
+}
+
+/**
  * Builds the runtime handler once. Subsequent callers share the first promise, so
  * concurrent first requests start one agent, not several.
  *
@@ -42,7 +56,13 @@ function buildOnce(
   actor: CopilotActor,
 ): Promise<BuiltCopilotKit> {
   // The agent is per-user: sharing one build across users would give every later visitor the
-  // first visitor's identity. Cached per user, so a returning user does not rebuild the agent.
+  // first visitor's identity. Cached per user, so a returning user does not rebuild the agent,
+  // but rebuilt when the model settings change (modelSignature).
+  const signature = modelSignature();
+  if (builtWith.get(actor.id) !== signature) {
+    perUser.delete(actor.id);
+    builtWith.delete(actor.id);
+  }
   const cached = perUser.get(actor.id);
   if (cached) return cached;
 
@@ -98,6 +118,7 @@ function buildOnce(
     throw error;
   });
   perUser.set(actor.id, building);
+  builtWith.set(actor.id, signature);
   return building;
 }
 

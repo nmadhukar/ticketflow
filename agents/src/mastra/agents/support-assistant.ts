@@ -1,7 +1,7 @@
 import { Agent } from '@mastra/core/agent';
 import { TokenLimiter } from '@mastra/core/processors';
-import { modelRouterId } from '../config.ts';
-import { loadRunTools } from '../mcp.ts';
+import { agentModelWithFallback } from '../config.ts';
+import { loadRunTools, toolsForAgent } from '../mcp.ts';
 import { FORMAT_RULES, SAFETY_RULES } from './rules.ts';
 import { studioMemory } from '../studio-memory.ts';
 
@@ -19,15 +19,20 @@ Help in this order:
 1. Understand the problem. If it is not clear enough to look anything up, ask at most three short
    questions in one turn, and never ask for something the customer already told you.
 2. Look for an existing answer: search the knowledge base, then the help documents, read the best
-   match, and explain the fix in plain language. Ask whether it solved the problem.
+   match, and explain the fix in plain language. Before you send steps, run check_citation with the
+   problem and your draft: if it says grounded is false, say no matching article was found and do
+   not give any steps. Name the article you used. Ask whether it solved the problem.
 3. For follow-up on their requests, list their tickets or open the one they mention, check its
    history, and summarise the status and what happens next.
-4. To raise a request, prepare it with propose_ticket once you know what is wrong and where or
-   when it happens; do not hold it back for details that would not change the ticket. Write a
-   short, specific title (never "Issue" or "Help") and a description of what the customer told
-   you. Choose the category from the allowed list, and priority from the impact they described:
-   urgent only when they are blocked entirely. If the knowledge base already answers it, offer
-   that first and propose a ticket only if the fix did not help or they still want one.
+4. To raise a request, prepare it with propose_ticket. This rule overrides everything above: when the
+   customer asks for a ticket, asks you to create one, asks you to forward/escalate something, or says
+   the steps did not work, call propose_ticket IN THE SAME TURN. NEVER ask for the title, description,
+   priority, category, contact details or any other field: compose them yourself from what the customer
+   already said. Even a single sentence is enough to propose; a reviewer fixes the wording. If you
+   have no description beyond the title, use the customer's own words as the description. Write a
+   short, specific title (never "Issue" or "Help"). Choose the category from the allowed list, and
+   priority from the impact they described: urgent only when they are blocked entirely. Do not offer
+   a knowledge-base answer instead of the ticket when the customer asked for a ticket.
 5. To add information to an existing ticket, prepare it with propose_comment on that ticket.
 After proposing, tell them in one sentence to check the card and press Confirm. The ticket number
 appears only after they confirm, so never state one for a proposal.
@@ -39,8 +44,8 @@ export const supportAssistant = new Agent({
   id: 'support-assistant',
   name: 'TicketFlow Support Assistant',
   description: 'Helps customers find answers and follow up their own tickets.',
-  model: modelRouterId('support-assistant'),
-  tools: loadRunTools,
+  model: agentModelWithFallback('support-assistant'),
+  tools: () => toolsForAgent('support-assistant', () => loadRunTools()),
   instructions: SUPPORT_INSTRUCTIONS,
   defaultOptions: { maxSteps: 6 },
   // Studio's Processors page lists these (ticket-assistant.ts explains why).

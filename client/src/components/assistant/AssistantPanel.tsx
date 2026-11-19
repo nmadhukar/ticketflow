@@ -22,7 +22,14 @@ function ProposalRender({ status, result }: ToolRender) {
   if (status !== ToolCallStatus.Complete) return <p className="my-2 text-sm text-muted-foreground">Preparing a draft…</p>;
   const proposal = parseProposal(result);
   // A refused proposal (no access, invalid input) has no card; the assistant explains it.
-  return proposal ? <ProposalCard proposal={proposal} /> : null;
+  if (proposal) return <ProposalCard proposal={proposal} />;
+  // A card was promised in the answer but the result could not be read (or the tool was refused):
+  // say so instead of rendering nothing, which is exactly how "no Confirm button appeared" felt.
+  return (
+    <p className="my-2 text-sm text-muted-foreground">
+      Nothing was prepared (the draft was refused or could not be read). Nothing was written.
+    </p>
+  );
 }
 
 const renderToolCalls = ["ticketflow_propose_ticket", "ticketflow_propose_comment"].map((name) => ({

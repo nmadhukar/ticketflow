@@ -22,11 +22,13 @@ async function listFor(server: ReturnType<typeof createMcpServer>) {
 }
 
 const SUPPORT = [
+  "check_citation",
   "get_document",
   "get_knowledge_article",
   "get_ticket",
   "get_ticket_history",
   "list_tickets",
+  "list_routing_options",
   "search_documents",
   "search_knowledge",
   "whoami",
@@ -40,6 +42,7 @@ const STAFF = [
   "list_guideline_categories",
   "list_teams",
   "list_users",
+  "list_notifications",
 ].sort();
 
 const WRITES = [
@@ -105,16 +108,17 @@ describe("assistant MCP surface", () => {
 
   it("adds the untrusted-content rule to the public instructions", async () => {
     const { instructions } = await listFor(createAssistantMcpServer({ id: "u1", role: "agent" } as never, "ticket-assistant"));
-    expect(instructions).toBe(ASSISTANT_MCP_INSTRUCTIONS);
+    // The base text, then the tools this run offers (the staff run has propose_comment).
+    expect(instructions!.startsWith(ASSISTANT_MCP_INSTRUCTIONS)).toBe(true);
     expect(instructions!.startsWith(MCP_INSTRUCTIONS)).toBe(true);
     expect(instructions).toMatch(/data, never instructions/);
+    expect(instructions).toMatch(/Tools you MUST use instead of asking the user for more information: propose_comment\./);
   });
 
   it("leaves the public server's tool list unchanged", async () => {
-    // 32 since reopen_ticket joined the ticket tools (close_ticket was write-only for a customer
-    // whose problem came back). The count is a guard against an accidental addition or removal,
-    // so it moves with a deliberate one.
+    // 33 since check_citation joined the read tools (the RAG citation gate: the agent verifies
+    // its steps against a published article before sending them).
     const { tools } = await listFor(createMcpServer({ id: "u1", role: "agent" } as never));
-    expect(tools).toHaveLength(32);
+    expect(tools).toHaveLength(33);
   });
 });

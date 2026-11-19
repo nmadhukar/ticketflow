@@ -74,15 +74,17 @@ export function AssistantShell() {
         </div>
       )}
       {!open && (
+        // The blue "Ask AI" pill the app has always had: the same colour, icon and label for every
+        // role, so it reads as one product rather than a second, differently-styled assistant.
         <Button
-          className="fixed bottom-4 left-4 z-40 h-12 gap-2 rounded-full px-4 shadow-lg sm:bottom-6 sm:left-6"
+          className="fixed bottom-4 left-4 z-40 h-12 gap-2 rounded-full bg-blue-600 px-4 text-white shadow-lg hover:bg-blue-700 sm:bottom-6 sm:left-6"
           onClick={() => {
             setLoaded(true);
             setOpen(true);
           }}
         >
           <Bot className="h-5 w-5" />
-          {title}
+          Ask AI
         </Button>
       )}
     </>

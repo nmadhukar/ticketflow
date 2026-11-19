@@ -3,6 +3,7 @@ import type { User } from "@shared/schema";
 import { registerTicketTools } from "./tools";
 import { registerAppTools } from "./appTools";
 import { registerDocumentTools } from "./documentTools";
+import { registerCitationTools } from "./citationTools";
 
 /**
  * R92: sent to the client on initialize. The model answers how-to, setup and policy questions
@@ -25,5 +26,6 @@ export function createMcpServer(user: User, ip?: string): McpServer {
   registerTicketTools(server, user, ip);
   registerAppTools(server, user);
   registerDocumentTools(server, user);
+  registerCitationTools(server, user);
   return server;
 }

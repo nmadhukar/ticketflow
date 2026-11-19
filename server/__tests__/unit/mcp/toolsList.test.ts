@@ -39,7 +39,7 @@ async function connect() {
 }
 
 describe("MCP tools/list", () => {
-  it("lists exactly the eight ticket tools, the thirteen app tools (MCP2, plus list_routing_options for the copilot) and the eleven document tools (MCP4), each with a description and an object input schema", async () => {
+  it("lists exactly the eight ticket tools, the fourteen app tools (MCP2, plus list_routing_options for the copilot) and the eleven document tools (MCP4), each with a description and an object input schema", async () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
@@ -67,6 +67,7 @@ describe("MCP tools/list", () => {
         "get_ticket_history",
         "search_documents",
         "get_document",
+        "check_citation",
         "list_guideline_categories",
         "create_help_document",
         "update_help_document",
@@ -78,7 +79,7 @@ describe("MCP tools/list", () => {
         "update_knowledge_article",
       ].sort()
     );
-    expect(tools).toHaveLength(32);
+    expect(tools).toHaveLength(33);
     for (const t of tools) {
       expect(typeof t.description).toBe("string");
       expect((t.description ?? "").length).toBeGreaterThan(10);

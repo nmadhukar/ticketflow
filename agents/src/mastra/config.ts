@@ -49,6 +49,32 @@ export function readMcpUrl(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
+ * The agent's model WITH its fallbacks, as Mastra accepts either way: one router id, or an object
+ * `{ id, fallback? }`. A list means a rate-limited or unavailable primary switches over instead of
+ * failing the run, which is what keeps a demo alive when the key's quota runs out.
+ *
+ * Sources, in order: the agent's own `ASSISTANT_<AGENT>_MODEL_FALLBACK` (comma separated), then
+ * `ASSISTANT_MODEL_FALLBACK`. A fallback equal to the primary is dropped by Mastra itself.
+ */
+export function agentModelWithFallback(
+  agentId: AgentId,
+  env: NodeJS.ProcessEnv = process.env,
+): `${string}/${string}` | { id: `${string}/${string}`; fallback: Array<`${string}/${string}`> } {
+  const primary = modelRouterId(agentId, env);
+  const override = AGENT_MODEL_SETTINGS[agentId];
+  const raw = trimmed(env, `${override}_FALLBACK`) || trimmed(env, 'ASSISTANT_MODEL_FALLBACK');
+  const fallback = raw
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean)
+    // A bare vendor model gets the configured provider; an explicit "provider/model" is kept.
+    .map((m) => (m.includes('/') ? m : `${readProvider(env)}/${m}`))
+    .filter((m, i, all) => m !== primary && all.indexOf(m) === i)
+    .map((m) => m as `${string}/${string}`);
+  return fallback.length > 0 ? { id: primary, fallback } : primary;
+}
+
+/**
  * Saved staff conversations: on only with ASSISTANT_STAFF_HISTORY=true, the same switch the app
  * reads (it then sends only each new message, as memory holds the rest). They are stored through
  * MASTRA_DATABASE_URL, the assistant's own role and `mastra` schema

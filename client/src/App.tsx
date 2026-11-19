@@ -46,7 +46,6 @@ import { ThemeProvider } from "next-themes";
 import { useAuth } from "@/hooks/useAuth";
 import { Layout } from "@/components/layout";
 import { AiChatBot } from "@/components/AiChatBot";
-import { AssistantShell } from "@/components/assistant/AssistantShell";
 import { CopilotAssistant } from "@/components/CopilotAssistant";
 import { ProtectedRoute } from "@/components/protected-route";
 import { ForcedPasswordChange } from "@/components/forced-password-change";
@@ -184,9 +183,9 @@ function Router() {
           it publishes that state on its config query, and the help chatbot yields the corner
           to it instead of stacking a second "Ask AI" button underneath. */}
       {!isLoading && isAuthenticated && <AiChatBot />}
-      {/* The in-app assistant: renders nothing unless the server says this user has one */}
-      {!isLoading && isAuthenticated && <AssistantShell />}
-      <CopilotAssistant />
+      {/* Exactly one assistant. The copilot popup is the product's only chat; the legacy
+          AssistantShell button duplicated it (two launchers, two chats) and is no longer rendered.
+          CopilotAssistant itself returns null unless the server says the copilot is on. */}
       {!isLoading && isAuthenticated && <CopilotAssistant />}
     </>
   );

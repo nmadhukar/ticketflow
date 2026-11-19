@@ -1,7 +1,7 @@
 import { Agent } from '@mastra/core/agent';
 import { TokenLimiter } from '@mastra/core/processors';
-import { modelRouterId } from '../config.ts';
-import { loadRunTools } from '../mcp.ts';
+import { agentModelWithFallback, modelRouterId } from '../config.ts';
+import { loadRunTools, toolsForAgent } from '../mcp.ts';
 import { staffMemory } from '../storage.ts';
 import { studioMemory } from '../studio-memory.ts';
 import { FORMAT_RULES, SAFETY_RULES } from './rules.ts';
@@ -25,6 +25,8 @@ Process, in order:
    matches to see which were resolved and how.
 3. FIND THE RESOLUTION: search_knowledge with those key words, then get_knowledge_article on
    the best match. Use search_documents/get_document when the knowledge base is thin.
+   Before any steps go into the reply, run check_citation with the problem and your draft: if it
+   says grounded is false, say no matching article was found and suggest the next step instead.
    Cite the article title and the ticket numbers you used.
 4. ANSWER as a customer-ready reply: direct answer first, then the steps, then what happens
    next. Name the owning team from list_teams/list_departments only if the ticket has no owner.
@@ -44,8 +46,8 @@ export const ticketAssistant = new Agent({
   id: 'ticket-assistant',
   name: 'TicketFlow Ticket Assistant',
   description: 'Helps support staff research tickets, find fixes and draft replies.',
-  model: modelRouterId('ticket-assistant'),
-  tools: loadRunTools,
+  model: agentModelWithFallback('ticket-assistant'),
+  tools: () => toolsForAgent('ticket-assistant', () => loadRunTools()),
   instructions: STAFF_INSTRUCTIONS,
   defaultOptions: { maxSteps: 8 },
   // Studio's Processors page lists these. A cap keeps one enormous ticket from flooding the

@@ -8,6 +8,7 @@ import { commentBodySchema } from "../services/tickets/commentSchema";
 import { TicketError } from "../services/tickets/ticketError";
 import { publicBaseUrl } from "../utils/appBaseUrl";
 import { logAssistantSecurityEvent, recordAssistantAudit } from "./securityLog";
+import { checkProposalPayload, guardRefusal } from "./contentGuard";
 
 /**
  * Assistant-proposed writes. The assistant never writes a ticket or a comment: its propose_* tools
@@ -50,6 +51,18 @@ const NOTE =
 
 function sha256(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+/**
+ * The content guard, as the model must hear it. A refused draft is a TicketError(VALIDATION), the
+ * same shape as any other refusal, so the assistant gets the reason back and rewrites instead of
+ * believing a card was shown. Never logs the matched text (it may be the abuse itself).
+ */
+function guardOrThrow(payload: Record<string, unknown>, action: ProposalAction, userId: string): void {
+  const verdict = checkProposalPayload(payload);
+  if (verdict.ok) return;
+  logAssistantSecurityEvent({ event: "write_refused", reason: `${action}:guard_${verdict.kind}`, userId });
+  throw new TicketError("VALIDATION", guardRefusal(verdict));
 }
 
 /** Same fields with the same values, whatever the key order. */
@@ -120,6 +133,9 @@ async function record(
 /** propose_ticket: a new ticket as this user, validated now and created only on Confirm. */
 export async function proposeTicket(user: User, run: RunContext, input: unknown): Promise<ProposalView> {
   const payload = pickTicketFields(input);
+  // Code, not a prompt: profanity/insults/threats and credentials are refused here, whatever the
+  // model was told. Runs before validation so an abusive draft never reaches a card.
+  guardOrThrow(payload, "create_ticket", user.id);
   // The same validation "New ticket" runs; nothing is created.
   await prepareTicketCreate(user, payload);
   return view(await record(user, run, "create_ticket", null, payload));
@@ -130,6 +146,7 @@ export async function proposeComment(user: User, run: RunContext, ticketId: numb
   const ticket = await getTicket(user, ticketId); // access check: NOT_FOUND / FORBIDDEN as REST
   const parsed = commentBodySchema.safeParse({ content });
   if (!parsed.success) throw new TicketError("VALIDATION", "A comment needs 1 to 10000 characters of text.");
+  guardOrThrow({ content: parsed.data.content }, "add_comment", user.id);
   const row = await record(user, run, "add_comment", ticket.id, { content: parsed.data.content });
   return view(row, { id: ticket.id, ticketNumber: ticket.ticketNumber, title: ticket.title });
 }
