@@ -31,7 +31,8 @@ const SHARED_READS = [
  * Switched off as a whole with ASSISTANT_WRITES_ENABLED=false.
  */
 export const ASSISTANT_PROPOSAL_TOOLS: Record<AssistantAgentId, readonly string[]> = {
-  "support-assistant": ["propose_ticket", "propose_comment"],
+  // The customer confirms their own ticket is sorted, then closes it from the card.
+  "support-assistant": ["propose_ticket", "propose_comment", "propose_close_ticket"],
   "ticket-assistant": ["propose_comment"],
 };
 
@@ -44,7 +45,9 @@ export function assistantWritesEnabled(env: NodeJS.ProcessEnv = process.env): bo
 }
 
 export const ASSISTANT_READ_TOOLS: Record<AssistantAgentId, readonly string[]> = {
+  // 10 read tools.
   "support-assistant": SHARED_READS,
+  // 18 read tools + 1 proposal (propose_comment) = 19, the count Mastra Studio shows per agent.
   "ticket-assistant": [
     ...SHARED_READS,
     "list_guideline_categories",
@@ -56,4 +59,19 @@ export const ASSISTANT_READ_TOOLS: Record<AssistantAgentId, readonly string[]> =
     "list_activity",
     "list_notifications",
   ],
+};
+
+/**
+ * Coverage rule (tests/unit/assistant/toolPolicy): every ticket tool the MCP server registers is
+ * either granted to an assistant or recorded here with the reason it is not. This is what keeps the
+ * Studio count honest - a new tool cannot silently go missing from both agents.
+ */
+export const UNGRANTED_TICKET_TOOLS: Record<string, string> = {
+  create_ticket: "staff assistant proposes a comment; tickets are created by the customer assistant",
+  add_comment: "writes on confirm, via propose_comment",
+  update_ticket: "staff write, not exposed to a chat",
+  close_ticket: "staff write, not exposed to a chat (the customer offers propose_close_ticket)",
+  reopen_ticket: "staff write, not exposed to a chat",
+  delete_ticket: "destructive",
+  mark_notifications_read: "inbox action, not a chat tool",
 };

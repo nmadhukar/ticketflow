@@ -100,3 +100,5 @@ shell
 COMMIT_MESSAGE.txt
 TicketFlow_API_Collection.postman_collection.json
 db-push-force.sql
+node_modules/
+dist

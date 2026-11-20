@@ -3,7 +3,7 @@ import { and, eq, gt, inArray, isNotNull, lt, or } from "drizzle-orm";
 import { assistantWriteProposals, type AssistantWriteProposal, type User } from "@shared/schema";
 import type { AssistantAgentId } from "@shared/assistant";
 import { db } from "../storage/db";
-import { addComment, createTicket, getTicket, prepareTicketCreate } from "../services/tickets/ticketService";
+import { addComment, closeTicket, createTicket, getTicket, prepareTicketCreate } from "../services/tickets/ticketService";
 import { commentBodySchema } from "../services/tickets/commentSchema";
 import { TicketError } from "../services/tickets/ticketError";
 import { publicBaseUrl } from "../utils/appBaseUrl";
@@ -24,7 +24,7 @@ import { checkProposalPayload, guardRefusal } from "./contentGuard";
  *     pending one instead of a second card, which also absorbs a model or network retry.
  */
 
-export type ProposalAction = "create_ticket" | "add_comment";
+export type ProposalAction = "create_ticket" | "add_comment" | "close_ticket";
 export const PROPOSAL_TTL_MINUTES = 15;
 const DEDUPE_MINUTES = 10;
 /** The only fields a proposed ticket may set: what a customer would type into "New ticket". */
@@ -77,14 +77,15 @@ function pickTicketFields(input: unknown): Record<string, unknown> {
 }
 
 function view(row: AssistantWriteProposal, ticket?: ProposalView["ticket"]): ProposalView {
+  const action = row.action as ProposalAction;
   return {
     proposalId: row.id,
-    action: row.action as ProposalAction,
+    action,
     status: "pending",
     expiresAt: row.expiresAt.toISOString(),
     ...(ticket ? { ticket } : {}),
     draft: (row.payload as Record<string, unknown>) ?? {},
-    note: NOTE,
+    note: PROPOSAL_NOTE[action] ?? NOTE,
   };
 }
 
@@ -151,9 +152,29 @@ export async function proposeComment(user: User, run: RunContext, ticketId: numb
   return view(row, { id: ticket.id, ticketNumber: ticket.ticketNumber, title: ticket.title });
 }
 
+/**
+ * propose_close_ticket: "is it sorted? shall I close it?" as a card. Nothing is closed until the
+ * user presses Confirm, and the close itself runs through closeTicket's own rules (a customer may not
+ * close, an illegal workflow move is refused), so the assistant can never close a ticket on its own.
+ */
+export async function proposeCloseTicket(user: User, run: RunContext, ticketId: number): Promise<ProposalView> {
+  const ticket = await getTicket(user, ticketId); // access check: NOT_FOUND / FORBIDDEN as REST
+  if (ticket.status === "closed") throw new TicketError("INVALID_STATE", "That ticket is already closed.");
+  const row = await record(user, run, "close_ticket", ticket.id, { status: "closed" });
+  return view(row, { id: ticket.id, ticketNumber: ticket.ticketNumber, title: ticket.title });
+}
+
 export type DecisionResult =
   | { status: "executed"; action: ProposalAction; ticketNumber?: string; commentId?: number }
   | { status: "rejected" };
+
+/** What each action's tool call looks like in the chat, for the copy the model must not spoof. */
+export const PROPOSAL_NOTE: Record<ProposalAction, string> = {
+  create_ticket: NOTE,
+  add_comment: NOTE,
+  close_ticket:
+    "Nothing has been closed. The user must decide on the card; until they do, say the ticket is still open and waiting for their confirmation.",
+};
 
 /** Why a decision cannot be made; mapped to HTTP by the route. */
 export class ProposalDecisionError extends Error {
@@ -219,7 +240,9 @@ export async function confirmProposal(user: User, id: string, edits: unknown = u
   const finalPayload: Record<string, unknown> =
     action === "add_comment"
       ? { content: typeof changed.content === "string" ? changed.content : original.content }
-      : { ...original, ...pickTicketFields(changed) };
+      : action === "close_ticket"
+        ? { ...original }
+        : { ...original, ...pickTicketFields(changed) };
 
   // Validate BEFORE claiming: a rejected edit leaves the proposal pending, so the user can fix the
   // text on the card and confirm again.
@@ -227,9 +250,11 @@ export async function confirmProposal(user: User, id: string, edits: unknown = u
     if (!commentBodySchema.safeParse({ content: finalPayload.content }).success) {
       throw new TicketError("VALIDATION", "A comment needs 1 to 10000 characters of text.");
     }
-  } else {
+  } else if (action === "create_ticket") {
     await prepareTicketCreate(user, finalPayload);
   }
+  // close_ticket needs no pre-check: closeTicket applies access and the workflow on execution, and a
+  // VALIDATION/INVALID_STATE refusal there leaves the proposal pending (the branch below).
 
   // The user's decision is on the record before anything is written: if it cannot be recorded,
   // nothing is (AuditUnavailableError, a 503).
@@ -254,6 +279,10 @@ export async function confirmProposal(user: User, id: string, edits: unknown = u
       const comment = await addComment(user, claimed.ticketId!, finalPayload.content);
       result = { status: "executed", action, commentId: comment.id };
       resultRef = `comment:${comment.id}`;
+    } else if (action === "close_ticket") {
+      const closed = await closeTicket(user, claimed.ticketId!);
+      result = { status: "executed", action, ticketNumber: closed.ticketNumber };
+      resultRef = `closed:${closed.ticketNumber}`;
     } else {
       const ticket = await createTicket(user, finalPayload, { actionBaseUrl: publicBaseUrl() });
       result = { status: "executed", action, ticketNumber: ticket.ticketNumber };

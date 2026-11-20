@@ -82,9 +82,16 @@ export default defineConfig({
       strict: true,
       deny: ["**/.*"],
     },
+    // In dev the app is served by Vite, so every API call (auth, the copilot runtime, health) has to
+    // reach the API server. Without this the copilot popup never mounts in dev and the help chat's
+    // launcher is the only assistant button left on screen. TF_API_URL overrides the target.
     proxy: {
+      "/api": {
+        target: process.env.TF_API_URL || "http://localhost:5000",
+        changeOrigin: true,
+      },
       "/ws": {
-        target: "http://localhost:5000",
+        target: process.env.TF_API_URL || "http://localhost:5000",
         ws: true,
         changeOrigin: true,
       },

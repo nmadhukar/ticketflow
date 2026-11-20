@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The TicketFlow triage agent.
  *
  * It is a second driver, not a second brain: every capability it has is an MCP tool that the
@@ -14,6 +14,44 @@
  */
 import { Agent } from "@mastra/core/agent";
 import { openRun } from "../../mcp/actAs";
+import { checkUserMessage } from "../../assistant/contentGuard";
+
+/**
+ * Guardrails on what the customer TYPES, as a Mastra input processor - the second, in-process layer
+ * beside the code-level check in server/copilot/guard.ts (and the model-backed OpenAI moderation at
+ * the copilot runtime). A message that is only abuse, a threat or a pasted credential is refused
+ * before any ticket tool runs, which is also what keeps an abusive run from spending tokens.
+ */
+function inputGuardrails() {
+  // The deterministic check needs no model and no network: it runs first and answers instantly.
+  const abuseCheck = {
+    id: "ticketflow-content-guard" as const,
+    processInput({ messages, abort }: { messages: unknown[]; abort: (reason?: string) => never }) {
+      const verdict = checkUserMessage(lastMessageText(messages));
+      if (!verdict.ok) abort("This message was blocked by the content guard. Ask the customer to rephrase politely and to share no credentials.");
+      return messages as never;
+    },
+  };
+  return [abuseCheck] as never[];
+}
+
+/**
+ * The text of the newest message, whatever shape Mastra's MessageList gives it: a string `content`, a
+ * content-parts array, or the nested `content.content` of a stored message.
+ */
+function lastMessageText(messages: unknown[]): string {
+  const latest = messages[messages.length - 1] as { content?: unknown } | undefined;
+  let content = latest && typeof latest === "object" ? latest.content : undefined;
+  if (content && typeof content === "object" && !Array.isArray(content)) {
+    content = (content as { content?: unknown }).content;
+  }
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((part) => !!part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string")
+    .map((part) => (part as { text: string }).text)
+    .join("\n");
+}
 
 export const TICKET_AGENT_INSTRUCTIONS = [
   "You help staff work a TicketFlow ticket queue. Every action goes through the TicketFlow tools.",
@@ -42,39 +80,54 @@ export const TICKET_AGENT_INSTRUCTIONS = [
  */
 export const CUSTOMER_INSTRUCTIONS = [
   "You are TicketFlow's support assistant, talking to a customer about their own problem.",
+  "A ticket number the customer mentioned (TKT-...) is a request about THAT ticket: look it up with",
+  "get_ticket, never with propose_ticket.",
+  "A REQUEST TO RAISE A TICKET IS ALWAYS ANSWERED WITH propose_ticket, in the same turn, before any",
+  "lookup. If the customer asks for a ticket or to record their problem, call propose_ticket first;",
+  "do not call get_ticket, search_knowledge or check_citation first, and do not end the turn",
+  "without proposing.",
   "First understand the issue. If the problem is not yet clear enough to act on, ask the few",
   "clarifying questions that actually matter (what they were doing, what they expected, what",
   "happened instead, any error message, and since when). Ask at most three questions in one turn,",
   "and never ask for information they already gave.",
   "Ask ONCE, and only when a fact you cannot infer is missing. If the customer has already said",
-  "what is wrong and where or when it happens, you have enough: create the ticket in that SAME",
+  "what is wrong and where or when it happens, you have enough: propose the ticket in that SAME",
   "turn, before asking anything. Do not ask a question whose answer would not change the title,",
   "the description, the category or the owning team (a likely cause, an invoice number, a date",
-  "range, or how they feel about it are all irrelevant to creating the ticket). A second round of",
+  "range, or how they feel about it are all irrelevant to proposing the ticket). A second round of",
   "questions is only for a detail you genuinely cannot infer, and you must never ask two rounds",
   "of questions in a row.",
-  "You may look for an existing answer before creating anything: call search_knowledge, then",
+  "You may look for an existing answer before proposing anything: call search_knowledge, then",
   "get_knowledge_article on the best match. If a clear fix exists, give it in plain language and",
-  "ask whether it solved the problem. Do not create a ticket the knowledge base already answers",
+  "ask whether it solved the problem. Do not propose a ticket the knowledge base already answers",
   "unless the customer says the fix did not work.",
-  "When you have enough detail, create the ticket with create_ticket. Write a short, specific",
-  "title (not 'Issue' or 'Help') and a description that records what the customer told you.",
-  "If you already have the problem and where or when it happens, call create_ticket NOW, in this",
-  "same turn, before writing any question or summary. A ticket with a slightly incomplete",
-  "description is always better than a conversation that never creates one: staff can ask for",
-  "more detail on the ticket itself.",
+  "CRITICAL: you cannot create tickets yourself. The ONLY way to raise one is propose_ticket, which",
+  "shows the customer a card they confirm. There is no create_ticket tool, so never say a ticket was",
+  "created and never state a ticket number for it.",
+  "When the customer asks to raise, create or open a ticket, call propose_ticket IMMEDIATELY, as the",
+  "first and only tool call of that turn. Do NOT call get_ticket, list_tickets, list_routing_options,",
+  "search_knowledge or check_citation first, and do not ask a follow-up question: compose the title,",
+  "description and category from what they already said and propose in that same turn. A draft they",
+  "can review on the card is always better than another question or another lookup.",
+  "When you have enough detail, call propose_ticket. Write a short, specific title (not 'Issue' or",
+  "'Help') and a description that records what the customer told you.",
+  "If you already have the problem and where or when it happens, call propose_ticket NOW, in this",
+  "same turn, before writing any question or summary. A slightly incomplete draft is always better",
+  "than a conversation that never proposes one: the customer reviews it on the card before anything",
+  "is created.",
   "Choose the category from the allowed list. Pick the priority from the impact they described:",
   "urgent only when they are blocked entirely.",
   "To choose the owning department and team, call list_routing_options and pick the closest",
-  "match, then pass it as routeId (the team id). If nothing fits, call create_ticket with no",
+  "match, then pass it as routeId (the team id). If nothing fits, call propose_ticket with no",
   "routeId and say the team will be assigned. It is a suggestion: TicketFlow confirms the",
   "assignment, so never promise a specific team as a fact.",
-  "After creating, tell the customer the ticket number and what happens next, in one short",
-  "paragraph. Never invent a ticket number: use the one create_ticket returned.",
+  "After calling propose_ticket, tell the customer in one sentence to check the card and press",
+  "Confirm. The ticket number appears only after they confirm, so never state one for a proposal.",
   "For follow-up, use list_tickets or get_ticket with the number they mention, and get_ticket_history",
   "for how far it has got. Summarise status and progress plainly. Never reveal other customers'",
   "tickets, internal notes, or anything about staff.",
-  "If they want to add information to an existing ticket, use add_comment on that ticket.",
+  "If they want to add information to an existing ticket, use propose_comment on that ticket; it is",
+  "posted only when they confirm the card. If they say it is sorted, offer propose_close_ticket.",
 ].join(" ");
 
 /** Who the agent is speaking for. Absent means the standalone service (staff, the key owner). */
@@ -106,6 +159,11 @@ export function createTicketAgent(
     instructions: instructionsFor(role),
     model: model as never,
     tools: (actor ? bindToolsToRun(tools, actor) : tools) as never,
+    // Abuse/threat filtering before the model sees the message.
+    inputProcessors: inputGuardrails() as never,
+    // A customer's first turn may look at the knowledge base, then propose; the default of a few
+    // steps ran out mid-flow and the turn ended with neither an answer nor a card.
+    defaultOptions: { maxSteps: 12 },
   });
   if (!actor) return agent;
 
@@ -185,3 +243,4 @@ function holdRunOpen(
   })();
   return result;
 }
+

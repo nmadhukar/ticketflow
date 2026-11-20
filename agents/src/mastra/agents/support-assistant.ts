@@ -4,6 +4,7 @@ import { agentModelWithFallback } from '../config.ts';
 import { loadRunTools, toolsForAgent } from '../mcp.ts';
 import { FORMAT_RULES, SAFETY_RULES } from './rules.ts';
 import { studioMemory } from '../studio-memory.ts';
+import { assistantContentFilter } from './content-guard.ts';
 
 /**
  * The customer's assistant. Customers see only their own tickets: the app runs every tool as the
@@ -49,7 +50,7 @@ export const supportAssistant = new Agent({
   instructions: SUPPORT_INSTRUCTIONS,
   defaultOptions: { maxSteps: 6 },
   // Studio's Processors page lists these (ticket-assistant.ts explains why).
-  inputProcessors: [new TokenLimiter(30000)],
+  inputProcessors: [assistantContentFilter() as never, new TokenLimiter(30000)],
   outputProcessors: [new TokenLimiter(8000)],
   // Never remembered in production: a customer's conversation is not saved. A local Studio demo is
   // the one exception, so the three walk-through scenarios can be shown one after another without

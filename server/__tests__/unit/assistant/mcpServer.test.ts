@@ -80,7 +80,8 @@ describe("assistant MCP surface", () => {
     const staff = await listFor(createAssistantMcpServer({ id: "s", role: "agent" } as never, "ticket-assistant", undefined, run, {}));
     const proposals = (tools: Array<{ name: string; annotations?: { readOnlyHint?: boolean } }>) =>
       tools.filter((t) => t.name.startsWith("propose_"));
-    expect(proposals(support.tools).map((t) => t.name).sort()).toEqual(["propose_comment", "propose_ticket"]);
+    // propose_close_ticket is the customer's "is it sorted? close it" card: a proposal, not a write.
+    expect(proposals(support.tools).map((t) => t.name).sort()).toEqual(["propose_close_ticket", "propose_comment", "propose_ticket"]);
     expect(proposals(staff.tools).map((t) => t.name)).toEqual(["propose_comment"]);
     for (const tool of [...proposals(support.tools), ...proposals(staff.tools)]) expect(tool.annotations?.readOnlyHint).toBe(false);
     // The real writes stay unregistered.

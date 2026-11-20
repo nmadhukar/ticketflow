@@ -72,14 +72,32 @@ form is still respected (R36); only the copilot's `routeId` is treated as a sugg
 | `COPILOTKIT_ENABLED=true` | the popup |
 | `MASTRA_AGENT_ENABLED=true` | the agent layer the copilot borrows |
 | `TICKETFLOW_MCP_KEY` | the key the agent calls MCP with (its owner is replaced per request) |
-| `OPENROUTER_API_KEY` | the Llama |
+| `MASTRA_MODEL_ID` + its provider key | the model. The id decides the provider: `gpt-*` -> `OPENAI_API_KEY` (api.openai.com), `vendor/model` -> `OPENROUTER_API_KEY`. Sending an OpenAI model id to OpenRouter is what produced the copilot's "API key expired" (OpenRouter answers 401 for a non-`sk-or-` key). |
 | `DEFAULT_TRIAGE_TEAM_ID` | where a suggested ticket waits while routing decides (recommended) |
 | `ai_settings.autoResponseEnabled` / `autoRoutingEnabled` | the reply and routing halves |
+
+## Guardrails and the propose cards
+
+- **Content guard (code, free).** Every copilot run's newest message is checked before the model is
+  called (`server/copilot/guard.ts` + `server/assistant/contentGuard.ts`): a message that is only
+  abuse or a threat, or that pastes a password / API key / card number, is refused with a short reply
+  and never reaches the model - so it spends no tokens - and the blocked attempt is recorded in
+  `assistant_audit_events` (`run_refused`, reason `content_guard:abuse|secret`, never the text).
+  A second, in-process check sits on the Mastra agent (`server/mastra/agents/ticket-agent.ts`) for
+  runs that bypass the HTTP middleware.
+- **Propose cards.** `propose_ticket`, `propose_comment` and `propose_close_ticket` render as a
+  one-click card in the copilot chat (`client/src/components/CopilotProposalCards.tsx`). Nothing is
+  written until the user presses Confirm; the close runs through `closeTicket`'s own access and
+  workflow rules, so the assistant can never close a ticket on its own.
 
 ## Tests
 
 - `server/__tests__/integration/copilotTicketCreation.test.ts` - creation through the real
   `create_ticket` tool, the suggestion not blocking routing, created-as-the-customer,
   visibility, and the unaffected no-suggestion path.
+- `server/__tests__/unit/copilotGuard.test.ts` - the content guard on user messages (categories,
+  the 422, payload extraction).
+- `server/__tests__/unit/mastraGateway.test.ts` - the model follows the provider in its id (gpt-*
+  -> OpenAI), so the "API key expired" call to OpenRouter cannot come back.
 - `server/__tests__/unit/mcpActAs.test.ts` - the trust boundary: ignored outside the
   copilot runtime, no cross-user claim, no admin escalation, concurrent users kept apart.

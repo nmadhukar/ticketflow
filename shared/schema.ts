@@ -1322,7 +1322,10 @@ export const assistantWriteProposals = pgTable(
     index("idx_assistant_proposals_dedupe").on(table.userId, table.action, table.payloadSha256, table.createdAt),
     index("idx_assistant_proposals_status_expires").on(table.status, table.expiresAt),
     index("idx_assistant_proposals_created_at").on(table.createdAt),
-    check("assistant_proposals_action_check", sql`${table.action} IN ('create_ticket', 'add_comment')`),
+    check(
+      "assistant_proposals_action_check",
+      sql`${table.action} IN ('create_ticket', 'add_comment', 'close_ticket')`,
+    ),
     check(
       "assistant_proposals_status_check",
       sql`${table.status} IN ('pending', 'executing', 'executed', 'rejected', 'expired', 'failed')`

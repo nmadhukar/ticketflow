@@ -41,6 +41,9 @@ function assistantInstructions(agentId?: AssistantAgentId): string {
     `Tools you MUST use instead of asking the user for more information: ${proposals.join(", ")}.`,
     "propose_ticket takes its fields from what the customer already told you; it does not need a title,",
     "a description or a category from them. Call it as soon as they ask for a ticket.",
+    ...(proposals.includes("propose_close_ticket")
+      ? ["When the customer says their issue is sorted, offer to close the ticket with propose_close_ticket; the Confirm button on the card does the closing, never you."]
+      : []),
   ].join(" ");
 }
 
@@ -118,6 +121,21 @@ function registerProposalTools(server: McpServer, user: User, agentId: Assistant
         annotations: { ...PROPOSAL_ANNOTATIONS, title: "Propose a comment" },
       },
       (args) => runTool(async () => (await proposals()).proposeComment(user, run, await ticketIdFrom(user, args.id), args.content)),
+    );
+  }
+
+  if (tools.has("propose_close_ticket")) {
+    server.registerTool(
+      "propose_close_ticket",
+      {
+        description:
+          "Offer to CLOSE a ticket the customer says is resolved. Nothing is closed: the user sees a card and closes it with Confirm. Use only after they confirm the problem is sorted.",
+        inputSchema: z.object({
+          id: anyValue().describe(ID_DESCRIPTION),
+        }),
+        annotations: { ...PROPOSAL_ANNOTATIONS, title: "Propose closing a ticket" },
+      },
+      (args) => runTool(async () => (await proposals()).proposeCloseTicket(user, run, await ticketIdFrom(user, args.id))),
     );
   }
 }

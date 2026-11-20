@@ -5,6 +5,8 @@ import {
   OpenRouterGateway,
   OPENROUTER_GATEWAY_ID,
   openRouterProviderConfig,
+  agentModel,
+  agentProviderFor,
 } from "../../mastra/gateway";
 
 /**
@@ -62,6 +64,37 @@ describe("OpenRouter gateway for the Mastra agent", () => {
   });
 });
 
+describe("the agent's model follows the provider in the id", () => {
+  /** The OpenAI deployment this repo actually runs: MASTRA_MODEL_ID=gpt-4o-mini, no OpenRouter key. */
+  const OPENAI_ENV = {
+    OPENAI_API_KEY: "sk-proj-test-openai-key",
+    OPENROUTER_API_KEY: "",
+  } as NodeJS.ProcessEnv;
+
+  it("sends gpt-* to OpenAI, not to OpenRouter carrying the OpenAI key", () => {
+    // The defect: every id was built as an OpenRouter call, so gpt-4o-mini went to openrouter.ai with
+    // OPENAI_API_KEY and OpenRouter refused it (401, shown to the user as "API key expired").
+    expect(agentProviderFor("gpt-4o-mini")).toBe("openai");
+    expect(agentProviderFor("meta-llama/llama-3.3-70b-instruct")).toBe("openrouter");
+    const model = agentModel(OPENAI_ENV, "gpt-4o-mini") as { provider: string; modelId: string; specificationVersion?: string };
+    expect(model.provider).toBe("openai.chat");
+    expect(model.modelId).toBe("gpt-4o-mini");
+  });
+
+  it("builds an OpenRouter model for a vendor-prefixed id", () => {
+    // An OpenRouter model answers through the same LanguageModelV3 shape the OpenAI one does; what
+    // makes it OpenRouter is its own provider, not OpenAI's.
+    const model = agentModel(BASE_ENV, "meta-llama/llama-3.3-70b-instruct") as { provider: string };
+    expect(model).toBeTruthy();
+    expect(model.provider).not.toBe("openai.chat");
+  });
+
+  it("refuses clearly when the key the provider needs is absent", () => {
+    expect(() => agentModel({} as NodeJS.ProcessEnv, "gpt-4o-mini")).toThrow(/OPENAI_API_KEY/);
+    expect(() => agentModel({} as NodeJS.ProcessEnv, "meta-llama/llama-3.3-70b-instruct")).toThrow(/OPENROUTER_API_KEY/);
+  });
+});
+
 describe("missingModelCredential", () => {
   it("reports a hosted model with no key", () => {
     const config = readMastraAgentConfig({ ...BASE_ENV, OPENROUTER_API_KEY: undefined })!;
@@ -72,6 +105,12 @@ describe("missingModelCredential", () => {
   it("is satisfied when the key is present", () => {
     const config = readMastraAgentConfig(BASE_ENV)!;
     expect(missingModelCredential(BASE_ENV, config.modelId)).toBeNull();
+  });
+
+  it("asks for OPENAI_API_KEY when the model id is an OpenAI one", () => {
+    expect(missingModelCredential({} as NodeJS.ProcessEnv, "gpt-4o-mini")).toContain("OPENAI_API_KEY");
+    // The working OpenAI key alone is enough, even with no OpenRouter key.
+    expect(missingModelCredential({ OPENAI_API_KEY: "sk-proj-x" } as NodeJS.ProcessEnv, "gpt-4o-mini")).toBeNull();
   });
 
   it("does not ask a local model for an OpenRouter key", () => {
@@ -86,5 +125,8 @@ describe("the Mastra instance registers the gateway", () => {
     const source = readFileSync(path.join(__dirname, "../../mastra/index.ts"), "utf8");
     expect(source).toContain("gateways:");
     expect(source).toContain("new OpenRouterGateway(");
+    // And the model must be built by provider, not hard-wired to OpenRouter.
+    expect(source).toContain("agentModel(env, scoped.modelId)");
+    expect(source).not.toContain("openRouterModel(env");
   });
 });

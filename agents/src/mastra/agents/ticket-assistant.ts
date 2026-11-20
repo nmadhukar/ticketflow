@@ -5,6 +5,7 @@ import { loadRunTools, toolsForAgent } from '../mcp.ts';
 import { staffMemory } from '../storage.ts';
 import { studioMemory } from '../studio-memory.ts';
 import { FORMAT_RULES, SAFETY_RULES } from './rules.ts';
+import { assistantContentFilter } from './content-guard.ts';
 
 /**
  * The staff assistant, for agents, managers and admins. Each sees exactly what their own role
@@ -52,7 +53,8 @@ export const ticketAssistant = new Agent({
   defaultOptions: { maxSteps: 8 },
   // Studio's Processors page lists these. A cap keeps one enormous ticket from flooding the
   // prompt; the rules already say to treat ticket text as data, and this enforces the size.
-  inputProcessors: [new TokenLimiter(30000)],
+  // AssistantContentFilter first: a blocked message is refused before the limiter runs.
+  inputProcessors: [assistantContentFilter() as never, new TokenLimiter(30000)],
   outputProcessors: [new TokenLimiter(8000)],
   // Saved staff conversations, when ASSISTANT_STAFF_HISTORY=true (storage.ts). A local Studio adds
   // its own demo memory when that switch is off, so the chat there still keeps its history

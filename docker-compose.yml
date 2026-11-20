@@ -37,11 +37,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # Schema before start (ruling R32): the hand-written idempotent migrations (0007+) first,
-    # so drizzle-kit push has nothing of theirs left to create (push silently applies nothing
-    # when it would have to ask a question); the server then refuses to boot if anything
-    # required is still missing. `exec` makes node PID 1, so it receives SIGTERM from `docker stop`.
-    command: sh -c "npm run db:migrate-sql && npm run db:push && exec node dist/index.js"
+    # Schema before start (ruling R32): the hand-written idempotent migrations (0007+) first. They
+    # create and evolve every object the code needs, and the server refuses to boot if anything is
+    # still missing (startup/schemaCheck). drizzle-kit push used to run next and is now skipped by
+    # default: with no TTY it waits forever on "Pulling schema from database" and, when the schema
+    # already matches, prints "No changes detected" and exits 1 - under `&&` either hangs or kills
+    # the start, and the app then restarts forever without serving a page. Set DB_PUSH=1 to run it
+    # (and then only a deliberate operator waits for it). `exec` makes node PID 1, so it receives
+    # SIGTERM from `docker stop`.
+    command: sh -c "npm run db:migrate-sql && if [ \"$DB_PUSH\" = \"1\" ]; then npm run db:push || true; fi && exec node dist/index.js"
     # Published so the browser can reach the app directly at http://localhost:5000, which the local
     # workflow uses (npm run dev on the host, Studio app url, eval harness). Without this mapping the
     # port answers nothing and every page sits on "Loading your workspace…" because the first
@@ -68,7 +72,7 @@ services:
       # Public origin of the site, e.g. https://tickets.example.com. REQUIRED in production:
       # emailed reset/invitation links, Teams card links and the SSO redirect are built from it
       # (never from the request's Host header), and the server refuses to boot without it (R34).
-      APP_BASE_URL: ${APP_BASE_URL}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:5000}
 
       # Optional (R36): id of the team that receives emailed tickets and customer tickets with
       # no user or team assignee. Blank: they stay admin-only until triaged. An id that names

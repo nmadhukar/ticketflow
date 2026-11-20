@@ -67,8 +67,14 @@ describe("the ticket agent", () => {
     expect(instructionsFor(undefined)).toBe(TICKET_AGENT_INSTRUCTIONS);
   });
 
-  it("tells the customer's agent to create the ticket in the same turn once it has the problem", () => {
-    expect(CUSTOMER_INSTRUCTIONS).toContain("create_ticket");
+  it("tells the customer's agent to PROPOSE the ticket in the same turn, never to create one", () => {
+    // The customer's copilot has no create_ticket tool (CUSTOMER_TOOL_ALLOWLIST): the prompt must
+    // name propose_ticket instead, or the model looks for a tool it was not given.
+    expect(CUSTOMER_INSTRUCTIONS).toContain("propose_ticket");
+    // Only the negation may name it: "there is no create_ticket tool". A prompt that lists it as an
+    // action would teach the model to look for a tool it was not given.
+    expect(CUSTOMER_INSTRUCTIONS).not.toMatch(/\b(use|call|with) create_ticket\b/i);
+    expect(CUSTOMER_INSTRUCTIONS).not.toMatch(/\badd_comment\b/);
     expect(CUSTOMER_INSTRUCTIONS.toLowerCase()).toContain("same turn");
     // The owning team is a suggestion the routing step confirms, never a promise.
     expect(CUSTOMER_INSTRUCTIONS).toContain("list_routing_options");

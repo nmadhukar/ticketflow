@@ -12,6 +12,11 @@
  *   secret  - passwords, API keys, tokens, card numbers, or a literal credential the user pasted.
  *             Quoting a customer's password into a public comment is a leak, not a reply.
  *
+ * The same two checks run on what the user TYPES (checkUserMessage / inspectUserMessage), before a
+ * copilot run starts: a message that is only abuse, or that pastes a credential, never reaches the
+ * model, and the blocked attempt is logged by category (server/copilot/guard.ts). That saves the
+ * tokens an irrelevant run would spend and leaves a record for an audit.
+ *
  * Deliberately narrow: a false positive blocks a real answer, so a term is listed only when it is
  * abusive in every sense (never a normal helpdesk word), and "negative" wording about the PRODUCT
  * ("still failing", "not working") is allowed — that is a fact, not an insult.
@@ -100,6 +105,40 @@ export function guardRefusal(verdict: GuardVerdict): string {
 }
 
 /** Every free-text field of a proposal payload, for one pass through the guard. */
+/**
+ * Checks a message a user typed. Same rules as checkAssistantText, so a message and the answer to it
+ * are held to one standard: a credential the user pasted is refused (the model must not receive a
+ * password or key - it would be quoted back, and it is logged to the model provider), and so is a
+ * message that is only abuse or a threat.
+ *
+ * Deliberately kept identical rather than looser: two slightly different lists would mean a message
+ * is refused at the door but its answer is allowed, which is the worst of both. A rude complaint that
+ * also describes a problem therefore goes to the model-backed moderation instead, which reads intent.
+ */
+export function checkUserMessage(text: unknown): GuardVerdict {
+  if (typeof text !== "string" || text.trim() === "") return { ok: true };
+
+  for (const [pattern, what] of SECRET_PATTERNS) {
+    if (pattern.test(text)) return { ok: false, kind: "secret", reason: `contains ${what}` };
+  }
+  if (words.test(text)) return { ok: false, kind: "abuse", reason: "contains abusive language" };
+  for (const pattern of INSULT_PATTERNS) {
+    if (pattern.test(text)) return { ok: false, kind: "abuse", reason: "contains an insult aimed at a person" };
+  }
+  for (const pattern of THREAT_PATTERNS) {
+    if (pattern.test(text)) return { ok: false, kind: "abuse", reason: "contains a threat" };
+  }
+  return { ok: true };
+}
+
+/** The refusal a blocked message gets. Never repeats the offending text (it may be the credential). */
+export function userMessageRefusal(verdict: GuardVerdict): string {
+  if (verdict.kind === "secret") {
+    return "I can't take passwords, keys or card numbers. Please remove it from the message and share the details through the secure form on the ticket instead.";
+  }
+  return "I can't help with messages like that. Please describe the problem you are facing and I'll take it from there.";
+}
+
 export function checkProposalPayload(payload: Record<string, unknown>): GuardVerdict {
   for (const value of Object.values(payload)) {
     const verdict = checkAssistantText(value);

@@ -18,6 +18,7 @@ import { describeError } from "../http/errors";
 import { readMastraAgentConfig, type MastraAgentConfig } from "../mastra/config";
 import type { CopilotActor } from "../mastra/agents/ticket-agent";
 import type { CopilotKitRuntimeConfig } from "./config";
+import { createContentGuardMiddleware } from "./guard";
 
 interface BuiltCopilotKit {
   handler: RequestHandler;
@@ -138,6 +139,11 @@ export function createCopilotKitMiddleware(
   config: CopilotKitRuntimeConfig,
   env: NodeJS.ProcessEnv = process.env,
 ): RequestHandler {
+  // Content guardrails, code-level and before the model: a run whose newest message is only abuse, a
+  // threat, or a pasted password/key/card number is refused here and logged by category
+  // (server/copilot/guard.ts). Registered inside this middleware so it only ever sees copilot paths.
+  const contentGuard = createContentGuardMiddleware();
+
   return (req, res, next) => {
     if (!isUnderBasePath(req.path, config.basePath)) return next();
 
@@ -168,23 +174,25 @@ export function createCopilotKitMiddleware(
 
     const actor: CopilotActor = { id: user.id, role: user.role };
 
-    buildOnce(config, mastraConfig, actor).then(
-      ({ handler }) => {
-        // The agent built for this user records each run's identity itself (see
-        // createTicketFlowAgentService and server/mcp/actAs.ts), so the agent's MCP calls act as
-        // this person rather than as the API key's owner.
-        handler(req, res, next);
-      },
-      (error) => {
-        console.error(`CopilotKit runtime failed to start [${describeError(error)}]`);
-        if (!res.headersSent) {
-          res.status(503).json({
-            error: "copilot_unavailable",
-            message: "The copilot runtime could not start. Check the server log.",
-          });
-        }
-      },
-    );
+    contentGuard(req, res, () => {
+      buildOnce(config, mastraConfig, actor).then(
+        ({ handler }) => {
+          // The agent built for this user records each run's identity itself (see
+          // createTicketFlowAgentService and server/mcp/actAs.ts), so the agent's MCP calls act as
+          // this person rather than as the API key's owner.
+          handler(req, res, next);
+        },
+        (error) => {
+          console.error(`CopilotKit runtime failed to start [${describeError(error)}]`);
+          if (!res.headersSent) {
+            res.status(503).json({
+              error: "copilot_unavailable",
+              message: "The copilot runtime could not start. Check the server log.",
+            });
+          }
+        },
+      );
+    });
   };
 }
 

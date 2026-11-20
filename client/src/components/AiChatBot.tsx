@@ -59,6 +59,9 @@ export function AiChatBot() {
     queryKey: ["/api/copilotkit", "config"],
   });
   const hidesLauncher = copilotConfig.data?.enabled === true;
+  // With the copilot in charge, the fallback chat does no work at all: nothing is fetched or polled
+  // for a panel nobody can open (the copilot is the one assistant button).
+
   const MAX_MESSAGE_LENGTH = 2000;
   const [sessionId, setSessionId] = useState(() => {
     const existing =
@@ -92,7 +95,7 @@ export function AiChatBot() {
       if (!response.ok) throw new Error("Failed to fetch chat history");
       return response.json();
     },
-    enabled: isOpen && !!sessionId,
+    enabled: isOpen && !hidesLauncher && !!sessionId,
     retry: 1,
   });
 

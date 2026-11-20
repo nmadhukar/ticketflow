@@ -11,7 +11,7 @@ import { PinoLogger } from "@mastra/loggers";
 import { readMastraAgentConfig, CUSTOMER_TOOL_ALLOWLIST, type MastraAgentConfig } from "./config";
 import { createTicketFlowMcpClient } from "./mcp";
 import { createTicketAgent, type CopilotActor } from "./agents/ticket-agent";
-import { OpenRouterGateway, OPENROUTER_GATEWAY_ID, openRouterModel } from "./gateway";
+import { OpenRouterGateway, OPENROUTER_GATEWAY_ID, agentModel } from "./gateway";
 
 export interface TicketFlowAgentService {
   mastra: Mastra;
@@ -79,7 +79,10 @@ export async function createTicketFlowAgentService(
     throw new Error("the agent discovered no TicketFlow tools (is the MCP endpoint reachable?)");
   }
   // A copilot agent records each run's identity, so its MCP calls act for that person.
-  const ticketAgent = createTicketAgent(tools, openRouterModel(env, scoped.modelId), actor?.role, actor) as Agent;
+  // agentModel picks the provider from the model id: gpt-* goes to OpenAI, vendor/model to
+  // OpenRouter. Building every id as an OpenRouter call sent the OpenAI key to openrouter.ai,
+  // which answers 401 (surfaced as "API key expired") even though the key itself was fine.
+  const ticketAgent = createTicketAgent(tools, agentModel(env, scoped.modelId), actor?.role, actor) as Agent;
 
   const mastra = new Mastra({
     agents: { ticketAgent },

@@ -152,7 +152,7 @@ let client: MCPClient | undefined;
  * Tools that only PROPOSE a write: TicketFlow records a draft and the user confirms it in the
  * chat. They are the only tools not marked read-only that this service passes to a model.
  */
-export const PROPOSAL_TOOL_NAMES = new Set(['propose_ticket', 'propose_comment']);
+export const PROPOSAL_TOOL_NAMES = new Set(['propose_ticket', 'propose_comment', 'propose_close_ticket']);
 
 /** Read-only tools, and the named proposal tools; never any other tool, whatever the server lists. */
 export function isPermittedTool(definition: { name: string; annotations?: { readOnlyHint?: boolean } }): boolean {
